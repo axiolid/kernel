@@ -14,6 +14,18 @@ caret rule for `0.x` versions.
 - The package now ships `LICENSE` and `LICENSE-COMMERCIAL` (symlinks to the
   repository root), so the licence texts travel with the archive (#358).
 
+- `surface_gap`: the distance between two meshes' surfaces with no
+  containment test, so a mesh in another's cavity is as far from it as the
+  surfaces are. `min_gap` delegates to it after its containment check
+  (#356, #357).
+
+### Fixed
+
+- `min_gap` and clearance reported a positive gap for meshes that cross with
+  no vertex inside the other (a bar through a box, a pipe through a wall).
+  An edge crossing a face is now a certified `orient3d` test and reads as
+  `Some(0.0)` (#390).
+
 ## [0.3.7] - 2026-10-28
 
 ### Changed

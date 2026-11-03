@@ -5,7 +5,9 @@
 //! non-convex point where a face-plane test gives the wrong answer.
 
 use axiolid_core::{Point3, Vec3};
-use axiolid_inspect::{contains, genus, min_gap, ray_cast, winding_number, GenusError};
+use axiolid_inspect::{
+    contains, genus, min_gap, ray_cast, surface_gap, winding_number, GenusError,
+};
 use axiolid_mesh::TriMesh;
 
 /// An axis-aligned box as a closed, outward-wound triangle mesh.
@@ -71,6 +73,75 @@ fn solids_beyond_the_search_length_report_nothing() {
         None,
         "nothing within the search radius"
     );
+}
+
+#[test]
+fn surface_gap_reports_the_gap_between_two_cubes() {
+    let a = box_mesh([0.0, 0.0, 0.0], [1.0, 1.0, 1.0]);
+    let b = box_mesh([1.5, 0.0, 0.0], [2.5, 1.0, 1.0]);
+
+    let gap = surface_gap(&a, &b, 1.0).expect("within the search length");
+    assert!((gap - 0.5).abs() < 1e-15, "got {gap}");
+}
+
+#[test]
+fn surface_gap_is_none_beyond_the_search_length() {
+    let a = box_mesh([0.0, 0.0, 0.0], [1.0, 1.0, 1.0]);
+    let b = box_mesh([1.5, 0.0, 0.0], [2.5, 1.0, 1.0]);
+
+    assert_eq!(surface_gap(&a, &b, 0.4), None);
+    assert_eq!(surface_gap(&a, &b, -1.0), None);
+    assert_eq!(surface_gap(&a, &b, f64::NAN), None);
+}
+
+#[test]
+fn surface_gap_zero_search_finds_only_touching() {
+    let a = box_mesh([0.0, 0.0, 0.0], [1.0, 1.0, 1.0]);
+    let touching = box_mesh([1.0, 0.0, 0.0], [2.0, 1.0, 1.0]);
+    let apart = box_mesh([1.0 + 1e-9, 0.0, 0.0], [2.0, 1.0, 1.0]);
+
+    assert_eq!(surface_gap(&a, &touching, 0.0), Some(0.0));
+    assert_eq!(surface_gap(&a, &apart, 0.0), None);
+}
+
+#[test]
+fn a_bar_through_a_box_crosses() {
+    // No vertex of either lies inside the other, and no edge pair or
+    // vertex-face pair is closer than the bar's half-width: only the bar's
+    // edges crossing the box's faces say these clash (#390).
+    let wall = box_mesh([0.0, 0.0, 0.0], [1.0, 1.0, 1.0]);
+    let bar = box_mesh([-1.0, 0.4, 0.4], [2.0, 0.6, 0.6]);
+
+    assert_eq!(min_gap(&wall, &bar, 1.0), Some(0.0));
+    assert_eq!(min_gap(&bar, &wall, 1.0), Some(0.0));
+    assert_eq!(surface_gap(&wall, &bar, 1.0), Some(0.0));
+}
+
+#[test]
+fn a_body_in_a_cavity_is_as_far_as_its_surface() {
+    // Outer cube plus an inward-wound void shell as one mesh, and a small
+    // cube 0.1 from the void: the winding number there is 0, so the island
+    // is not inside, and the surface distance is the answer.
+    let outer = box_mesh([0.0, 0.0, 0.0], [10.0, 10.0, 10.0]);
+    let void = box_mesh([2.0, 2.0, 2.0], [8.0, 8.0, 8.0]);
+    let mut positions = outer.positions.clone();
+    let offset = positions.len() as u32;
+    positions.extend(void.positions.iter().copied());
+    let mut indices = outer.indices.clone();
+    for triangle in void.indices.chunks(3) {
+        indices.extend([
+            triangle[0] + offset,
+            triangle[2] + offset,
+            triangle[1] + offset,
+        ]);
+    }
+    let hollow = TriMesh::new(positions, indices);
+    let island = box_mesh([2.1, 2.1, 2.1], [3.0, 3.0, 3.0]);
+
+    let gap = surface_gap(&hollow, &island, 1.0).expect("within the search length");
+    assert!((gap - 0.1).abs() < 1e-15, "got {gap}");
+    let measured = min_gap(&hollow, &island, 1.0).expect("within the search length");
+    assert!((measured - 0.1).abs() < 1e-15, "got {measured}");
 }
 
 /// An L-shaped prism as a closed triangle mesh.

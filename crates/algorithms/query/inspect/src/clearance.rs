@@ -11,7 +11,9 @@
 //! topology.
 
 use axiolid_core::{Aabb, Point3, Vec3};
+use axiolid_guarantees::Sign;
 use axiolid_mesh::TriMesh;
+use axiolid_predicates::orient3d;
 use axiolid_spatial::{Bvh, SpatialItem};
 
 /// Smallest distance between the surfaces of `a` and `b`.
@@ -36,7 +38,25 @@ pub fn min_gap(a: &TriMesh, b: &TriMesh, search_length: f64) -> Option<f64> {
     if any_vertex_inside(a, b) || any_vertex_inside(b, a) {
         return Some(0.0);
     }
+    surface_gap(a, b, search_length)
+}
 
+/// Smallest distance between the surfaces of `a` and `b`, when it is at most
+/// `search_length`.
+///
+/// Unlike [`min_gap`], containment is not tested: a mesh in another's cavity,
+/// or wholly inside it, is as far from it as the surfaces are.
+/// `Some(0.0)` when the surfaces touch or cross. `None` when nothing is within
+/// `search_length`, or `search_length` is negative or not finite (zero is
+/// allowed: only touching or crossing surfaces are found).
+///
+/// # Panics
+///
+/// Never. A malformed index buffer yields `None` rather than a panic.
+pub fn surface_gap(a: &TriMesh, b: &TriMesh, search_length: f64) -> Option<f64> {
+    if !search_length.is_finite() || search_length < 0.0 {
+        return None;
+    }
     let b_index = build_index(b, search_length);
     let mut best: Option<f64> = None;
     let mut candidates = Vec::new();
@@ -52,11 +72,6 @@ pub fn min_gap(a: &TriMesh, b: &TriMesh, search_length: f64) -> Option<f64> {
             let Some(b_triangle) = triangle_at(b, item.key as usize) else {
                 continue;
             };
-            // Interpenetration without a crossing edge is possible: a
-            // corner of one solid can sit inside the other while every
-            // triangle pair stays a positive distance apart. Surface
-            // distance alone would report that gap as clearance, which is
-            // exactly backwards for clash detection.
             let distance = triangle_distance(&a_triangle, &b_triangle);
             if best.is_none_or(|current| distance < current) {
                 best = Some(distance);
@@ -75,6 +90,12 @@ pub fn min_gap(a: &TriMesh, b: &TriMesh, search_length: f64) -> Option<f64> {
 /// checking all edge pairs and all vertex-to-face distances is exhaustive
 /// for triangles.
 fn triangle_distance(a: &[Point3; 3], b: &[Point3; 3]) -> f64 {
+    // An edge through the other's interior has no closest pair on the
+    // boundary features below: both sides of the crossing are positive
+    // distances away (#390).
+    if edge_crosses(a, b) || edge_crosses(b, a) {
+        return 0.0;
+    }
     let mut best = f64::INFINITY;
     for i in 0..3 {
         for j in 0..3 {
@@ -89,6 +110,49 @@ fn triangle_distance(a: &[Point3; 3], b: &[Point3; 3]) -> f64 {
         best = best.min(point_triangle_distance(*vertex, a));
     }
     best
+}
+
+/// Whether an edge of `edges` crosses or touches the triangle `face`.
+///
+/// Certified `orient3d` signs, as in `containment.rs`: the edge's ends lie on
+/// opposite sides of, or on, the face's plane, and the three tetrahedra the
+/// edge spans with the face's edges agree in sign, zeros allowed. An edge in
+/// the face's plane is left to the edge and vertex distances; a sign that
+/// cannot be certified is read as no crossing, for the same reason.
+fn edge_crosses(edges: &[Point3; 3], face: &[Point3; 3]) -> bool {
+    (0..3).any(|i| segment_crosses(edges[i], edges[(i + 1) % 3], face))
+}
+
+fn segment_crosses(p: Point3, q: Point3, face: &[Point3; 3]) -> bool {
+    let [a, b, c] = *face;
+    let sign = |value: Option<Sign>| match value {
+        Some(Sign::Positive) => Some(1),
+        Some(Sign::Negative) => Some(-1),
+        Some(Sign::Zero) => Some(0),
+        _ => None,
+    };
+    let (Some(sp), Some(sq)) = (
+        sign(orient3d(a, b, c, p).sign()),
+        sign(orient3d(a, b, c, q).sign()),
+    ) else {
+        return false;
+    };
+    if sp * sq > 0 || (sp == 0 && sq == 0) {
+        return false;
+    }
+    let mut seen = 0;
+    for (from, to) in [(a, b), (b, c), (c, a)] {
+        let Some(side) = sign(orient3d(p, q, from, to).sign()) else {
+            return false;
+        };
+        if side != 0 {
+            if seen != 0 && seen != side {
+                return false;
+            }
+            seen = side;
+        }
+    }
+    true
 }
 
 /// Distance between two segments, handling the parallel case.

@@ -16,7 +16,7 @@ pub mod sight;
 pub mod topology;
 
 pub use cast::{ray_cast, Hit};
-pub use clearance::min_gap;
+pub use clearance::{min_gap, surface_gap};
 pub use containment::{contains, winding_number};
 pub use genus::{genus, GenusError};
 pub use overlap::{
