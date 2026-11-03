@@ -12,7 +12,7 @@
 //! mesh result stands, or the mesh refusal with the referee's reason.
 
 use axiolid_contracts::{ExecutionOptions, GeomError};
-use axiolid_core::{BooleanOperator, Scalar, Tolerance, Transform3, Vec3};
+use axiolid_core::{BooleanOperator, Mat3, Scalar, Tolerance, Transform3, Vec3};
 use axiolid_heal::self_intersections;
 use axiolid_inspect::enclosed_volume;
 use axiolid_mesh::{component_count, TriMesh};
@@ -331,6 +331,7 @@ fn a_gap_of_twice_the_tolerance_stays_two_bodies() {
     assert_eq!(closure, MeshClosure::Solid);
     let report = report(&graph, root);
     assert!(detail_bound(&report, REFEREED_UNION).is_none());
+    assert!(detail_bound(&report, REFEREED_UNION_EXACT).is_none());
 }
 
 #[test]
@@ -392,8 +393,13 @@ fn an_edge_contact_stays_a_refusal() {
     let root = g.union(first, second, BooleanOperator::Union);
     let (graph, root) = g.finish(root);
     let error = compile(&graph, root).expect_err("an edge contact is refused");
-    assert!(is_pinch(&error) || is_unmerged(&error), "{error}");
-    assert!(names_the_referee(&error), "{error}");
+    assert!(is_pinch(&error), "{error}");
+    assert!(
+        error
+            .to_string()
+            .ends_with("the exact referee refused: the tessellated exact union touches itself"),
+        "{error}"
+    );
 }
 
 /// A dowel standing on a slab, the turn composed two ways: the union is
@@ -401,10 +407,13 @@ fn an_edge_contact_stays_a_refusal() {
 #[test]
 fn a_dowel_union_is_certified_against_its_closed_form() {
     let (radius, depth) = (0.3, 0.8);
-    let at =
-        Transform3::from_translation(Vec3::new(2.0, 3.0, 0.0)) * Transform3::from_rotation_z(0.9);
-    let half = Transform3::from_rotation_z(0.45);
-    let dowel_at = Transform3::from_translation(Vec3::new(2.0, 3.0, 1.0)) * half * half;
+    // An oblique turn, so no face of either is axis-aligned and the dowel's
+    // foot meets the slab's top in a plane no frame holds exactly.
+    let axis = Vec3::new(1.0, 2.0, 3.0).normalize();
+    let site = Transform3::from_translation(Vec3::new(2.0, 3.0, 0.0));
+    let at = site * Transform3::from_axis_angle(axis, 0.9);
+    let half = Transform3::from_axis_angle(axis, 0.45);
+    let dowel_at = site * half * half * Transform3::from_translation(Vec3::new(0.0, 0.0, 1.0));
     let mut g = Graph::new();
     let slab = g.prism([4.0, 4.0], 1.0);
     let slab = g.placed(slab, at);
@@ -418,6 +427,15 @@ fn a_dowel_union_is_certified_against_its_closed_form() {
     let report = report(&graph, root);
     let bound = report.bound.expect("a certified bound");
     assert!(bound <= 1e-3, "{bound}");
+    // The union's own bound is the tessellation's: positive for a round
+    // dowel, and what the report's overall bound is made of.
+    let own = detail_bound(&report, REFEREED_UNION)
+        .or_else(|| detail_bound(&report, REFEREED_UNION_EXACT))
+        .expect("a refereed union");
+    assert!(
+        matches!(own, DeviationBound::Certified(b) if b > 0.0 && b <= bound),
+        "{own:?}"
+    );
     assert!(report.meets_requested(), "{:?}", report.contributions);
     let expected = 16.0 + std::f64::consts::PI * radius * radius * depth;
     let wall = 2.0 * std::f64::consts::PI * radius * depth;
@@ -490,4 +508,69 @@ fn an_authored_mesh_operand_returns_the_mesh_result() {
         }
     }
     assert!(found > 0, "no turn fused as one body from the mesh cut");
+}
+
+/// Operands the snap lands on each other are settled, whatever the given
+/// pair looks like: the pair actually cut decides. The two linear parts
+/// differ (an exact quarter turn and none) and are exactly axis-aligned, so
+/// the world-frame snap closes the gap.
+#[test]
+fn a_union_the_snap_settles_is_not_refereed() {
+    let quarter = Mat3::from_cols(Vec3::Y, Vec3::NEG_X, Vec3::Z);
+    let gap = 0.5 * EPS;
+    let mut g = Graph::new();
+    let first = g.prism([1.0, 1.0], 1.0);
+    let first = g.placed(first, Transform3::IDENTITY);
+    let second = g.prism([1.0, 1.0], 1.0);
+    let second = g.placed(
+        second,
+        Transform3::from_mat3_translation(quarter, Vec3::new(0.0, 1.0 + gap, 0.0)),
+    );
+    let root = g.union(first, second, BooleanOperator::Union);
+    let (graph, root) = g.finish(root);
+    let (mesh, closure) = compile(&graph, root).expect("fused");
+    assert_eq!(component_count(&mesh), 1);
+    assert_eq!(closure, MeshClosure::Solid);
+    // The snap's: the tool's near face lands on the host's, gaining the gap.
+    assert!(
+        (volume(&mesh) - (2.0 + gap)).abs() < 1e-12,
+        "{}",
+        volume(&mesh)
+    );
+    let report = report(&graph, root);
+    assert!(detail_bound(&report, SNAPPED_OPERANDS).is_some());
+    assert!(detail_bound(&report, REFEREED_UNION).is_none());
+    assert!(detail_bound(&report, REFEREED_UNION_EXACT).is_none());
+}
+
+/// The framed sources carry the differently composed turns themselves
+/// (each wrapped in one shared translation), so the shared frame holds the
+/// same near-contact: it yields, and the referee replaces the cracked body.
+#[test]
+fn a_shared_frame_that_holds_unsettled_contact_yields_to_the_referee() {
+    let (face, k) = (3, 47);
+    let wrap = Transform3::from_translation(Vec3::new(10.0, 0.0, 0.0));
+    let mut g = Graph::new();
+    let column = g.prism([0.4, 0.5], 6.0);
+    let column = g.placed(column, Transform3::from_rotation_z(theta(k)));
+    let half = Transform3::from_rotation_z(theta(k) / 2.0);
+    let corbel = g.prism(FACES[face].1, 0.5);
+    let corbel = g.placed(
+        corbel,
+        half * half
+            * Transform3::from_translation(Vec3::new(FACES[face].0[0], FACES[face].0[1], 3.5)),
+    );
+    let column = g.placed(column, wrap);
+    let corbel = g.placed(corbel, wrap);
+    let root = g.union(column, corbel, BooleanOperator::Union);
+    let (graph, root) = g.finish(root);
+    let (mesh, closure) = compile(&graph, root).expect("fused");
+    assert_fused(&mesh, closure, VOLUME, "wrapped sources");
+    let report = report(&graph, root);
+    assert!(
+        detail_bound(&report, REFEREED_UNION).is_some()
+            || detail_bound(&report, REFEREED_UNION_EXACT).is_some(),
+        "{:?}",
+        report.contributions
+    );
 }

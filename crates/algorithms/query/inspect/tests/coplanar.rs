@@ -87,12 +87,13 @@ fn a_bad_linear_is_none() {
 
 #[test]
 fn a_degenerate_triangle_is_skipped() {
-    // The first triangle of `b` has collinear corners; the second is real.
+    // The first triangle of `b` has collinear corners, as far off the plane
+    // as the second, which is real.
     let b = TriMesh::new(
         vec![
-            p(0.0, 0.0, 0.0),
-            p(0.5, 0.0, 0.0),
-            p(1.0, 0.0, 0.0),
+            p(0.0, 0.0, 0.5 * EPS),
+            p(0.5, 0.0, 0.5 * EPS),
+            p(1.0, 0.0, 0.5 * EPS),
             p(0.25, 0.0, 0.5 * EPS),
             p(1.25, 0.0, 0.5 * EPS),
             p(0.25, 1.0, 0.5 * EPS),
@@ -146,4 +147,60 @@ fn a_malformed_index_is_none() {
         near_coplanar(&triangle([0.0, 0.0], 0.0), &broken, EPS),
         None
     );
+}
+
+#[test]
+fn a_tiny_tilted_triangle_on_the_plane_is_not_near() {
+    // Its corners lie within the residue band of the big triangle's plane,
+    // but its own plane stands at 45 degrees, so the big triangle's corners
+    // are far from it.
+    let tilted = TriMesh::new(
+        vec![
+            p(0.25, 0.25, 0.1 * EPS),
+            p(0.25 + 1e-7, 0.25, 0.1 * EPS),
+            p(0.25 + 1e-7, 0.25, 0.1 * EPS + 1e-7),
+        ],
+        vec![0, 1, 2],
+    );
+    let big = triangle([0.0, 0.0], 0.0);
+    assert_eq!(near_coplanar(&big, &tilted, EPS), None);
+    assert_eq!(near_coplanar(&tilted, &big, EPS), None);
+}
+
+#[test]
+fn triangles_far_apart_in_their_plane_are_not_near() {
+    // The boxes of the two overlap; the triangles are far apart.
+    let a = TriMesh::new(
+        vec![p(0.0, 0.0, 0.0), p(10.0, 0.0, 0.0), p(0.0, 10.0, 0.0)],
+        vec![0, 1, 2],
+    );
+    let b = TriMesh::new(
+        vec![
+            p(9.0, 9.0, 0.5 * EPS),
+            p(10.0, 9.0, 0.5 * EPS),
+            p(9.0, 10.0, 0.5 * EPS),
+        ],
+        vec![0, 1, 2],
+    );
+    assert_eq!(near_coplanar(&a, &b, EPS), None);
+    assert_eq!(near_coplanar(&b, &a, EPS), None);
+}
+
+#[test]
+fn the_lowest_second_triangle_is_reported() {
+    // One big triangle over two small ones: the lower index wins.
+    let a = triangle([0.0, 0.0], 0.0);
+    let small = |x: f64| {
+        [
+            p(x, 0.1, 0.5 * EPS),
+            p(x + 0.1, 0.1, 0.5 * EPS),
+            p(x, 0.2, 0.5 * EPS),
+        ]
+    };
+    let b = TriMesh::new(
+        [small(0.1), small(0.5)].into_iter().flatten().collect(),
+        vec![0, 1, 2, 3, 4, 5],
+    );
+    let found = near_coplanar(&a, &b, EPS).expect("near");
+    assert_eq!((found.first, found.second), (0, 0));
 }

@@ -388,3 +388,31 @@ fn a_pcurve_family_with_no_chord_bound_is_unbounded_by_name() {
         )]
     );
 }
+
+#[test]
+fn a_pcurve_ranks_by_its_handle_not_by_its_use() {
+    // The cylinder's pcurves are shared across loops, and a use's key is
+    // the rank of its handle among the distinct handles, in handle order.
+    let exact = extrude_profile_exact(&circle(1.0), Vec3::Z, 1.0, TOLERANCE).unwrap();
+    let view = from_exact(&exact).unwrap();
+    let handles: std::collections::BTreeSet<_> = exact
+        .topology()
+        .loops()
+        .iter()
+        .flat_map(|wire| wire.edges.iter())
+        .filter_map(|use_| use_.pcurve)
+        .collect();
+    assert!(handles.len() > 1, "the fixture must hold several pcurves");
+    let mut seen = 0;
+    for (wire, source) in view.loops().iter().zip(exact.topology().loops()) {
+        for (use_, original) in wire.edges.iter().zip(&source.edges) {
+            let (Some(pcurve), Some(handle)) = (use_.pcurve, original.pcurve) else {
+                continue;
+            };
+            let rank = handles.iter().position(|h| *h == handle).unwrap();
+            assert_eq!(pcurve.key as usize, rank);
+            seen += 1;
+        }
+    }
+    assert!(seen > 1);
+}

@@ -18,6 +18,7 @@ use axiolid_contracts::{ExecutionOptions, GeomError};
 use axiolid_core::{BooleanOperator, Scalar, Tolerance, Transform3, Vec3};
 use axiolid_mesh::{component_count, TriMesh};
 use axiolid_mesh_boolean_boolmesh::BoolmeshBoolean;
+use axiolid_mesh_compile::deviation::{REFEREED_UNION, REFEREED_UNION_EXACT};
 use axiolid_mesh_compile::ReferenceMeshCompiler;
 use axiolid_mesh_compile_contract::{MeshClosure, MeshCompiler};
 use axiolid_model::{
@@ -250,6 +251,22 @@ fn a_column_with_corbels_on_four_faces_is_one_solid() {
             );
             let what = format!("theta {theta}, composed {composed}");
             assert_one_solid(&graph, root, 1.2 + 4.0 * 0.025, 1e-9, &what);
+            // The chain is cut in the shared frame, not decided by the exact
+            // referee (#391): a union that skipped the frame would still
+            // fuse there, and this is what shows it did not.
+            let options = ExecutionOptions::new(Tolerance::METRE)
+                .with_chord_error(1e-3)
+                .expect("a positive chord error");
+            let (_, report) = compiler()
+                .compile_mesh_with_deviation(&graph, root, &options)
+                .unwrap_or_else(|e| panic!("{what}: {e}"));
+            assert!(
+                report
+                    .contributions
+                    .iter()
+                    .all(|c| c.detail != REFEREED_UNION && c.detail != REFEREED_UNION_EXACT),
+                "{what}: refereed"
+            );
         }
     }
 }
