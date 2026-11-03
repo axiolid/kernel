@@ -117,3 +117,116 @@ fn for_each_corner_buffer(mesh: &mut TriMesh, mut edit: impl FnMut(&mut Vec<u32>
         }
     }
 }
+
+/// Rebuild every corner buffer so slot `i` holds what slot `source[i]` held.
+///
+/// A repair that splits a triangle keeps its first piece in place and
+/// appends the others; this gives each new corner the value of the corner
+/// it grew from. Every source slot must exist in every buffer, which
+/// [`corner_buffers_aligned`] decides beforehand.
+pub(crate) fn remap_corners(mesh: &mut TriMesh, source: &[usize]) {
+    for_each_corner_buffer(mesh, |corners| {
+        let next: Vec<u32> = source.iter().map(|&s| corners[s]).collect();
+        *corners = next;
+    });
+}
+
+/// Whether every corner buffer has one entry per index-buffer slot.
+///
+/// Read-only twin of [`for_each_corner_buffer`]; the two name the same
+/// buffers and must be kept in step.
+pub(crate) fn corner_buffers_aligned(mesh: &TriMesh) -> bool {
+    let len = mesh.indices.len();
+    let normals = mesh.normals.as_ref().and_then(|n| n.indices.as_ref());
+    normals.into_iter().all(|c| c.len() == len)
+        && mesh
+            .attributes
+            .iter()
+            .filter_map(|channel| channel.corner_indices.as_ref())
+            .all(|c| c.len() == len)
+}
+
+/// Whether corners `a` and `b` hold the same value in every corner-indexed
+/// buffer: the same value index, or bit-equal value tuples.
+///
+/// An unmapped or out-of-range corner equals only a corner with the same
+/// index. Read-only twin of [`for_each_corner_buffer`].
+pub(crate) fn corners_agree(mesh: &TriMesh, a: usize, b: usize) -> bool {
+    let bits = |tuple: &[f64]| tuple.iter().map(|v| v.to_bits()).collect::<Vec<_>>();
+    if let Some(normals) = mesh.normals.as_ref() {
+        if let Some(indices) = normals.indices.as_ref() {
+            let (Some(&i), Some(&j)) = (indices.get(a), indices.get(b)) else {
+                return false;
+            };
+            if i != j {
+                let value = |k: u32| {
+                    normals
+                        .values
+                        .get(k as usize)
+                        .map(|n| bits(&[n.x, n.y, n.z]))
+                };
+                match (value(i), value(j)) {
+                    (Some(x), Some(y)) if x == y => {}
+                    _ => return false,
+                }
+            }
+        }
+    }
+    for channel in &mesh.attributes {
+        let Some(corners) = channel.corner_indices.as_ref() else {
+            continue;
+        };
+        let (Some(&i), Some(&j)) = (corners.get(a), corners.get(b)) else {
+            return false;
+        };
+        if i == j {
+            continue;
+        }
+        match (channel.get(i as usize), channel.get(j as usize)) {
+            (Some(x), Some(y)) if bits(x) == bits(y) => {}
+            _ => return false,
+        }
+    }
+    true
+}
+
+/// Whether the per-vertex data of vertex `m`, lying at parameter `t` on the
+/// edge `low`-`high`, is what interpolating the endpoints gives.
+///
+/// Used before a split reuses `m` as a new corner of a triangle that did not
+/// have it, so that "preserved" stays true. A `Linear` channel (and a
+/// per-vertex normal) must equal `low + (high - low) * t` exactly; any other
+/// blend must be bit-equal at `low`, `high` and `m`. A missing value
+/// disagrees. Corner-indexed buffers are [`corners_agree`]'s concern.
+pub(crate) fn vertex_data_agrees(mesh: &TriMesh, low: u32, high: u32, m: u32, t: f64) -> bool {
+    let at = |v: u32| v as usize;
+    if let Some(normals) = mesh.normals.as_ref().filter(|n| n.indices.is_none()) {
+        let get = |v: u32| normals.values.get(at(v)).copied();
+        let (Some(a), Some(b), Some(p)) = (get(low), get(high), get(m)) else {
+            return false;
+        };
+        if a + (b - a) * t != p {
+            return false;
+        }
+    }
+    for channel in mesh.attributes.iter().filter(|c| !c.is_corner_indexed()) {
+        let (Some(a), Some(b), Some(p)) = (
+            channel.get(at(low)),
+            channel.get(at(high)),
+            channel.get(at(m)),
+        ) else {
+            return false;
+        };
+        let agrees = (0..p.len()).all(|k| {
+            if channel.blend == axiolid_mesh::Blend::Linear {
+                a[k] + (b[k] - a[k]) * t == p[k]
+            } else {
+                a[k].to_bits() == p[k].to_bits() && b[k].to_bits() == p[k].to_bits()
+            }
+        });
+        if !agrees {
+            return false;
+        }
+    }
+    true
+}

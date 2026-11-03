@@ -9,6 +9,13 @@ caret rule for `0.x` versions.
 
 ## [Unreleased]
 
+### Added
+
+- `RepairAction::SplitTJunctions` and `split_t_junctions` split triangle
+  edges at vertices lying on them within tolerance, so a mesh closed up to
+  T-junctions becomes a closed oriented cycle. It adds no vertex and reports
+  the deviation it accepted and the triangles it declined to split (#416).
+
 ## [0.3.3] - 2026-11-03
 
 ### Fixed

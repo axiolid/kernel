@@ -1,6 +1,6 @@
 # axiolid-heal
 
-Explicit diagnosis and opt-in repair of triangle meshes. `diagnose` reports non-manifold edges, inconsistent winding, boundary edges, duplicate vertices, degenerate triangles and exact self-intersections without touching the mesh. Repairs (weld vertices, drop degenerate elements, unify orientation, orient outward) run only when a caller names them in a `RepairPlan`, and the `RepairReport` records what was applied, what was skipped and what happened to each attribute channel. There is no repair-everything mode, and no other operation heals implicitly.
+Explicit diagnosis and opt-in repair of triangle meshes. `diagnose` reports non-manifold edges, inconsistent winding, boundary edges, duplicate vertices, degenerate triangles and exact self-intersections without touching the mesh. Repairs (weld vertices, drop degenerate elements, split T-junctions, unify orientation, orient outward) run only when a caller names them in a `RepairPlan`, and the `RepairReport` records what was applied, what was skipped and what happened to each attribute channel. There is no repair-everything mode, and no other operation heals implicitly.
 
 ```bash
 cargo add axiolid-heal

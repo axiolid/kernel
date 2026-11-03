@@ -241,6 +241,11 @@ impl Repair<TriMesh> for MeshHealer {
                 RepairAction::DropDegenerateElements => drop_degenerate(&mut out, tolerance),
                 RepairAction::UnifyOrientation => unify_orientation(&mut out),
                 RepairAction::OrientOutward => orient_outward(&mut out, tolerance),
+                RepairAction::SplitTJunctions => {
+                    let (split, summary) = crate::tjunction::split_t_junctions(&out, tolerance)?;
+                    out = split;
+                    summary.split_triangles > 0
+                }
             };
             if changed {
                 report.applied.push(action);

@@ -19,6 +19,15 @@ pub enum RepairAction {
     /// Separate from [`Self::UnifyOrientation`]: that one makes neighbours
     /// agree, this one decides which way round the agreed shell faces.
     OrientOutward,
+    /// Split triangle edges at vertices lying on them within tolerance
+    /// (T-junctions).
+    ///
+    /// Opt-in: it turns a mesh closed up to T-junctions into a closed
+    /// oriented cycle, and adds no vertex. A triangle is declined, not split,
+    /// when a vertex it would reuse carries per-vertex data that differs from
+    /// interpolating the side's endpoints, so no value is invented. See
+    /// [`crate::split_t_junctions`].
+    SplitTJunctions,
 }
 
 /// Ordered caller-approved repair plan.

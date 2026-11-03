@@ -11,10 +11,12 @@ pub mod diagnosis;
 pub mod intersect;
 pub mod mesh;
 pub mod repair;
+pub mod tjunction;
 pub mod traits;
 
 pub use diagnose::diagnose;
 pub use diagnosis::{Defect, DefectKind, Diagnosis};
 pub use intersect::{self_intersections, self_intersections_brute_force, IntersectingPair};
 pub use repair::{RepairAction, RepairPlan, RepairReport};
+pub use tjunction::{split_t_junctions, TJunctionSplit};
 pub use traits::{Diagnose, Repair};
