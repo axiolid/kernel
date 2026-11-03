@@ -11,6 +11,12 @@ caret rule for `0.x` versions.
 
 ### Added
 
+- `cycle_volume_properties` measures the signed volume and centroid of a mesh
+  that is a closed oriented cycle (every edge used equally often in each
+  direction), such as shells that share an edge. It is bit-identical to
+  `volume_properties` on two-manifold input and refuses anything open with
+  `CycleVolumeError` (#416).
+
 - The package now ships `LICENSE` and `LICENSE-COMMERCIAL` (symlinks to the
   repository root), so the licence texts travel with the archive (#358).
 

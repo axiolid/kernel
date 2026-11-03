@@ -55,8 +55,8 @@ pub use frechet::{
 };
 pub use measure::Measure;
 pub use mesh::{
-    second_moments, surface_properties, volume_properties, MeshMeasureError, SurfaceProperties,
-    VolumeProperties,
+    cycle_volume_properties, second_moments, surface_properties, volume_properties,
+    CycleVolumeError, MeshMeasureError, SurfaceProperties, VolumeProperties,
 };
 pub use mesh_hausdorff::{
     hausdorff_distance, one_sided_hausdorff, HausdorffBounds, HausdorffError, MeshHausdorff,

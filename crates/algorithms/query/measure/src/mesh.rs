@@ -1,6 +1,6 @@
 //! Deterministic raw triangle-mesh measures.
 use axiolid_core::{Point3, Tolerance, Vec3};
-use axiolid_mesh::{audit_mesh, MeshHealth, TriangleMeshView};
+use axiolid_mesh::{audit_mesh, audit_mesh_cycle, MeshCycleHealth, MeshHealth, TriangleMeshView};
 use core::fmt;
 
 #[derive(Debug, Clone, Copy, PartialEq)]
@@ -65,6 +65,12 @@ pub fn volume_properties<M: TriangleMeshView + ?Sized>(
     if !health.is_closed_two_manifold() {
         return Err(MeshMeasureError::MeshNotVolumeUsable(health));
     }
+    divergence_volume(mesh).ok_or(MeshMeasureError::ZeroSignedVolume)
+}
+
+/// Divergence-theorem sum shared by [`volume_properties`] and
+/// [`cycle_volume_properties`]; `None` when the sum is zero or not finite.
+fn divergence_volume<M: TriangleMeshView + ?Sized>(mesh: &M) -> Option<VolumeProperties> {
     // Sum about a local origin rather than the world origin.
     //
     // Volume and centroid are translation-invariant, so re-basing the operands
@@ -86,14 +92,69 @@ pub fn volume_properties<M: TriangleMeshView + ?Sized>(
         weighted += (a + b + c) * (tetra / 4.0);
     }
     if !volume.is_finite() || volume == 0.0 {
-        return Err(MeshMeasureError::ZeroSignedVolume);
+        return None;
     }
-    Ok(VolumeProperties {
+    Some(VolumeProperties {
         signed_volume: volume,
         // The sum ran in local coordinates, so the centroid comes back
         // relative to `base`. Shift it home.
         centroid: base + (weighted / volume),
     })
+}
+
+/// What [`cycle_volume_properties`] refuses.
+#[non_exhaustive]
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum CycleVolumeError {
+    /// The mesh is not a closed oriented cycle: an index or position is
+    /// invalid, no triangle is usable, a triangle is degenerate, or an edge
+    /// is used unequally often in each direction. The audit says which.
+    NotClosedOrientedCycle(Box<MeshCycleHealth>),
+    /// The sum is zero or not finite.
+    ZeroSignedVolume,
+}
+
+impl fmt::Display for CycleVolumeError {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Self::NotClosedOrientedCycle(_) => f.write_str("mesh is not a closed oriented cycle"),
+            Self::ZeroSignedVolume => f.write_str("mesh has zero or non-finite signed volume"),
+        }
+    }
+}
+
+impl std::error::Error for CycleVolumeError {}
+
+/// Signed volume and centroid of a mesh whose triangles form a closed
+/// oriented cycle, the weaker input [`volume_properties`] does not accept.
+///
+/// A cycle is a mesh in which every undirected edge is used equally often in
+/// each direction (see `axiolid_mesh::MeshCycleHealth`). It may hold shells
+/// that touch along an edge, or an edge shared by four triangles. The
+/// divergence sum of such a mesh does not depend on its base point and equals
+/// the integral of the integer winding number `w` of the surface; on
+/// two-manifold input the result is bit-identical to [`volume_properties`].
+///
+/// The result is the enclosed volume only when `w` is 0 or 1 everywhere,
+/// which is the contract [`volume_properties`] has always had: overlapping or
+/// duplicated shells count twice and an inverted shell subtracts. No edge
+/// audit can see that; `axiolid_heal::self_intersections` can find crossing
+/// shells, but it skips triangle pairs sharing a vertex.
+///
+/// A T-junction leaves three unbalanced edges and is refused. Run
+/// `axiolid_heal::split_t_junctions` (or `RepairAction::SplitTJunctions`)
+/// first; it is opt-in because it only splits edges and creates no vertex.
+/// A mesh whose vector area vanishes without being closed, such as a box
+/// without top and bottom, is refused by the same audit.
+pub fn cycle_volume_properties<M: TriangleMeshView + ?Sized>(
+    mesh: &M,
+    tolerance: Tolerance,
+) -> Result<VolumeProperties, CycleVolumeError> {
+    let audit = audit_mesh_cycle(mesh, tolerance);
+    if !audit.is_closed_oriented_cycle() {
+        return Err(CycleVolumeError::NotClosedOrientedCycle(Box::new(audit)));
+    }
+    divergence_volume(mesh).ok_or(CycleVolumeError::ZeroSignedVolume)
 }
 
 /// Second moments of the enclosed solid about the origin.
