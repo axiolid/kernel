@@ -727,6 +727,15 @@ Every publishable crate versions and publishes independently ([ADR 0067](/adr/00
 
 ## axiolid-construct
 
+### 0.3.28 - 2026-11-03
+
+### Added
+
+- `profile_validate::ExactProfileValidator` implements `ValidateProfile` for
+  `ContourProfile` and `Profile`. It decides closure, self-contact and hole
+  nesting exactly on the contour as the exact path lowers it, or refuses with
+  a typed finding naming the segments (#352, ADR 0095).
+
 ### 0.3.27 - 2026-11-03
 
 ### Added
@@ -6488,6 +6497,18 @@ Every publishable crate versions and publishes independently ([ADR 0067](/adr/00
 
 
 ## axiolid-overlay
+
+### 0.3.21 - 2026-11-03
+
+### Added
+
+- The package now ships `LICENSE` and `LICENSE-COMMERCIAL` (symlinks to the
+  repository root), so the licence texts travel with the archive (#358).
+- `check_arc_polygon` decides exactly whether an arc polygon's rings are
+  simple and its holes nested: self-contact (crossings, pinches, tangencies,
+  fold-backs), shared boundary, holes outside the outer ring or overlapping,
+  contacts that cut the interior apart, plus the isolated contact points
+  between rings (#352, ADR 0095).
 
 ### 0.3.20 - 2026-10-28
 

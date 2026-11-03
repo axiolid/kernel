@@ -97,7 +97,7 @@ axiolid-tetrahedralize = { path = "crates/algorithms/discrete/tetrahedralize", v
 axiolid-levelset = { path = "crates/algorithms/sampled/levelset", version = "0.3.1" }
 axiolid-evaluate = { path = "crates/algorithms/parametric/evaluate", version = "0.3.19" }
 axiolid-nurbs = { path = "crates/algorithms/parametric/nurbs", version = "0.3.8" }
-axiolid-construct = { path = "crates/algorithms/construction/construct", version = "0.3.27" }
+axiolid-construct = { path = "crates/algorithms/construction/construct", version = "0.3.28" }
 axiolid-arrangement = { path = "crates/algorithms/planar/arrangement", version = "0.3.1" }
 axiolid-profile = { path = "crates/representations/region/profile", version = "0.3.2" }
 axiolid-curve = { path = "crates/representations/analytic/curve", version = "0.3.11" }
@@ -112,7 +112,7 @@ axiolid-inspect = { path = "crates/algorithms/query/inspect", version = "0.3.6" 
 axiolid-measure = { path = "crates/algorithms/query/measure", version = "0.3.13" }
 axiolid-brep-boolean = { path = "crates/algorithms/construction/brep-boolean", version = "0.1.13" }
 axiolid-fixtures = { path = "crates/representations/fixtures", version = "0.3.1" }
-axiolid-overlay = { path = "crates/algorithms/planar/overlay", version = "0.3.19" }
+axiolid-overlay = { path = "crates/algorithms/planar/overlay", version = "0.3.21" }
 axiolid-project = { path = "crates/algorithms/planar/project", version = "0.3.1" }
 axiolid-route = { path = "crates/algorithms/planar/route", version = "0.3.7" }
 axiolid-triangulate = { path = "crates/algorithms/planar/triangulate", version = "0.3.6" }

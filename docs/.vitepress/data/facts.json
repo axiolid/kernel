@@ -94,10 +94,10 @@
       "description": "Solid generation: profiles, lofts, sweeps, revolutions and half-space clipping",
       "layer": "algorithms",
       "path": "crates/algorithms/construction/construct",
-      "released": "0.3.27",
+      "released": "0.3.28",
       "released_date": "2026-11-03",
       "role": "algorithm.construction",
-      "version": "0.3.27"
+      "version": "0.3.28"
     },
     "axiolid-contracts": {
       "description": "Common backend-neutral execution and diagnostic contracts",
@@ -400,10 +400,10 @@
       "description": "Deterministic validated planar overlay contract",
       "layer": "algorithms",
       "path": "crates/algorithms/planar/overlay",
-      "released": "0.3.20",
-      "released_date": "2026-10-28",
+      "released": "0.3.21",
+      "released_date": "2026-11-03",
       "role": "algorithm.planar",
-      "version": "0.3.20"
+      "version": "0.3.21"
     },
     "axiolid-pointcloud": {
       "description": "Portable point-sampled geometry values with optional per-point channels.",
