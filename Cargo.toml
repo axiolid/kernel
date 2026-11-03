@@ -86,7 +86,7 @@ axiolid-mesh = { path = "crates/representations/discrete/mesh", version = "0.3.5
 axiolid-pointcloud = { path = "crates/representations/discrete/pointcloud", version = "0.3.3" }
 axiolid-model = { path = "crates/representations/modeling/graph", version = "0.3.17" }
 axiolid-primitive = { path = "crates/representations/analytic/primitive", version = "0.3.3" }
-axiolid-heal = { path = "crates/algorithms/repair/heal", version = "0.3.1" }
+axiolid-heal = { path = "crates/algorithms/repair/heal", version = "0.3.3" }
 axiolid-brep-audit = { path = "crates/algorithms/repair/brep-audit", version = "0.3.2" }
 axiolid-decimate = { path = "crates/algorithms/discrete/decimate", version = "0.3.2" }
 axiolid-decompose = { path = "crates/algorithms/discrete/decompose", version = "0.3.1" }

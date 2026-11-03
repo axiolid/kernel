@@ -9,6 +9,8 @@ caret rule for `0.x` versions.
 
 ## [Unreleased]
 
+## [0.3.3] - 2026-11-03
+
 ### Fixed
 
 - `self_intersections` no longer reports disjoint, nearly coplanar
@@ -23,6 +25,9 @@ caret rule for `0.x` versions.
   strictly inside the other (equal triangles, a vertex on an edge with shared
   area) are now reported; touching along an edge or at a vertex still is not
   (#399).
+- Zero-area triangles are never reported as intersecting; the previous
+  test reported a needle piercing another triangle. `diagnose` still flags
+  such a triangle as `DegenerateElement` (#399).
 
 ### Added
 

@@ -8,7 +8,7 @@ Explicit diagnosis and opt-in repair contracts for dirty geometry.
 
 | | |
 | --- | --- |
-| Latest release | 0.3.2 (2026-10-28) |
+| Latest release | 0.3.3 (2026-11-03) |
 | crates.io | [`axiolid-heal`](https://crates.io/crates/axiolid-heal) |
 | Facade | [`axiolid`](./axiolid) feature `heal` |
 | Layer | algorithms (`algorithm.repair`) |
@@ -30,14 +30,29 @@ Explicit diagnosis and opt-in repair of triangle meshes. `diagnose` reports non-
 
 ## Changes
 
-Latest release, 0.3.2 (2026-10-28):
+Latest release, 0.3.3 (2026-11-03):
 
-### Changed
+### Fixed
 
-- The licence is now `MPL-2.0 OR LicenseRef-Commercial` (was `MPL-2.0`):
-  a commercial licence is available from the copyright holder
-  (`LICENSE-COMMERCIAL`, ADR 0089, #358).
-- The minimum supported Rust version is now 1.99 (was 1.88), and the
-  workspace builds on Rust 1.99.1 (#349).
+- `self_intersections` no longer reports disjoint, nearly coplanar
+  triangles as intersecting after a rotation has rounded their vertices off
+  their common plane. The triangle-triangle test was exact only in its side
+  tests and fell back to a float `n_p x n_q` direction, which is noise for
+  nearly parallel planes. Every decision is now a certified `orient3d` or
+  `orient2d` sign: an edge of one triangle against the closed other triangle,
+  and for exactly coplanar pairs a separating-edge test on the exact
+  projection (#399).
+- Coplanar triangles that overlap without a proper edge crossing or a vertex
+  strictly inside the other (equal triangles, a vertex on an edge with shared
+  area) are now reported; touching along an edge or at a vertex still is not
+  (#399).
+- Zero-area triangles are never reported as intersecting; the previous
+  test reported a needle piercing another triangle. `diagnose` still flags
+  such a triangle as `DegenerateElement` (#399).
+
+### Added
+
+- The package now ships `LICENSE` and `LICENSE-COMMERCIAL` (symlinks to the
+  repository root), so the licence texts travel with the archive (#358).
 
 Full history: [`crates/algorithms/repair/heal/CHANGELOG.md`](https://github.com/axiolid/kernel/blob/main/crates/algorithms/repair/heal/CHANGELOG.md)
