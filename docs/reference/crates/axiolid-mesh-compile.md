@@ -61,8 +61,17 @@ owns graph traversal and dispatch; the construction algorithms themselves
   coplanar to the snap, and a chain of unions stays in that frame. A
   refused shared-frame cut falls back to the world-frame cut. Operands
   placed by differing linear parts, or stretched by direction, are cut in
-  the world frame
-  (TODO(#391)).
+  the world frame.
+- A union of operands placed by differing linear parts that the mesh cut
+  cannot settle is decided by the exact compiler (#391, ADR 0098): where
+  faces of the two operands nearly share a plane within the linear
+  tolerance without being exactly coplanar, or where the cut is refused as
+  a pinch or as `UNMERGED_UNION_CONTACT`, the union node is compiled exactly
+  and the exact result tessellated, under the deviation detail
+  `REFEREED_UNION` (`REFEREED_UNION_EXACT` when it read nothing within the
+  tolerance). Where the referee refuses (a mesh operand, a family the exact
+  compiler lacks), the mesh result stands, or the mesh refusal with
+  "; the exact referee refused: {reason}" appended.
 - A union whose result holds two bodies within the linear tolerance of
   each other is refused with `GeomError::Degenerate`, starting with
   `UNMERGED_UNION_CONTACT`: the operands meet within the tolerance, as the

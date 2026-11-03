@@ -115,8 +115,9 @@
 //! by the same linear part is cut in their shared frame and the result
 //! placed ([`crate::frame`], #356): there the faces that meet are axis-aligned
 //! and exactly coplanar, or a residue apart that this snap closes. Operands
-//! placed by linear parts that differ in a bit have no such frame
-//! (TODO(#391)).
+//! placed by linear parts that differ in a bit have no such frame: a union
+//! of them that this snap cannot settle is decided by the exact compiler
+//! ([`crate::referee`], #391).
 //!
 //! # Never silently, never worse
 //!

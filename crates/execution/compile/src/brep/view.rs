@@ -12,11 +12,18 @@
 //! kind is refused by name here, up front, whether or not a meshed face
 //! reaches it.
 //!
-//! A use's span is the parameter domain of its pcurve; sampling always runs
+//! [`from_exact`] resolves the typed handles of an [`ExactBRep`] into its own
+//! catalogs, and a use's span is the interval the B-rep records for it
+//! (`pcurve_interval`), which may run against the pcurve's own direction. A
+//! pcurve use with no recorded interval, or a handle outside its catalog, is
+//! refused (#391).
+//!
+//! A graph use's span is the parameter domain of its pcurve; sampling always runs
 //! from `span.start` to `span.end`. `key` ranks a pcurve among the distinct
 //! pcurve handles of the B-rep, so an edge shared by several uses keeps the
 //! pcurve of the smallest handle ([`super::edges`]).
 
+use axiolid_brep::{Curve2Id, ExactBRep};
 use axiolid_contracts::{GeomError, GeomResult, Operation};
 use axiolid_core::Interval;
 use axiolid_curve::{Curve2, Curve3};
@@ -94,6 +101,100 @@ pub(crate) fn from_graph<'a>(
     for face in brep.faces() {
         view.add_face(Face {
             surface: face_surface(graph, face)?,
+            bounds: face.bounds.clone(),
+            orientation: face.orientation,
+        });
+    }
+    for shell in brep.shells() {
+        view.add_shell(shell.clone());
+    }
+    for solid in brep.solids() {
+        view.add_solid(solid.clone());
+    }
+    Ok(view)
+}
+
+/// Resolve `exact`'s handles in its own catalogs.
+pub(crate) fn from_exact(exact: &ExactBRep) -> GeomResult<ResolvedBRep<'_>> {
+    let brep = exact.topology();
+    let handles: BTreeSet<Curve2Id> = brep
+        .loops()
+        .iter()
+        .flat_map(|wire| wire.edges.iter())
+        .filter_map(|use_| use_.pcurve)
+        .collect();
+    let ranks: HashMap<Curve2Id, u32> = handles
+        .into_iter()
+        .enumerate()
+        .map(|(rank, id)| (id, rank as u32))
+        .collect();
+    let missing =
+        |what: &str| GeomError::InvalidInput(format!("exact B-rep {what} is not in its catalog"));
+    let mut view = ResolvedBRep::default();
+    for vertex in brep.vertices() {
+        view.add_vertex(*vertex);
+    }
+    for edge in brep.edges() {
+        let curve = edge
+            .curve
+            .map(|id| {
+                exact
+                    .curves3()
+                    .get(id.index())
+                    .ok_or_else(|| missing("edge curve"))
+            })
+            .transpose()?;
+        view.add_edge(Edge {
+            start: edge.start,
+            end: edge.end,
+            curve,
+        });
+    }
+    for (index, wire) in brep.loops().iter().enumerate() {
+        let loop_id = brep.loop_id_at(index).ok_or_else(|| missing("loop"))?;
+        let edges = wire
+            .edges
+            .iter()
+            .enumerate()
+            .map(|(position, use_)| {
+                let pcurve = use_
+                    .pcurve
+                    .map(|id| {
+                        let curve = exact
+                            .curves2()
+                            .get(id.index())
+                            .ok_or_else(|| missing("pcurve"))?;
+                        let span = exact
+                            .pcurve_interval(loop_id, position)
+                            .ok_or_else(|| missing("pcurve interval"))?;
+                        Ok(Pcurve {
+                            curve,
+                            span,
+                            key: ranks[&id],
+                        })
+                    })
+                    .transpose()?;
+                Ok(EdgeUse {
+                    edge: use_.edge,
+                    orientation: use_.orientation,
+                    pcurve,
+                })
+            })
+            .collect::<GeomResult<Vec<_>>>()?;
+        view.add_loop(Loop { edges });
+    }
+    for face in brep.faces() {
+        let surface = face
+            .surface
+            .map(|id| {
+                exact
+                    .surfaces()
+                    .get(id.index())
+                    .ok_or_else(|| missing("face surface"))
+            })
+            .transpose()?;
+        view.add_face(Face {
+            surface,
             bounds: face.bounds.clone(),
             orientation: face.orientation,
         });

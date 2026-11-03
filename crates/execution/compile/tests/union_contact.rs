@@ -344,11 +344,12 @@ fn a_union_snap_never_removes_overlap_material() {
 }
 
 #[test]
-fn differently_turned_operands_a_gap_within_the_tolerance_apart_are_refused_by_name() {
+fn differently_turned_operands_a_gap_within_the_tolerance_apart_fuse() {
     // Two placements of the same turn, composed another way: their linear
     // parts differ in the last bits, so the faces that meet are not exactly
-    // coplanar once placed, and are not cut in a shared frame (the limit
-    // ADR 0096 records; TODO(#391)).
+    // coplanar once placed, and are not cut in a shared frame (ADR 0096,
+    // D6). The mesh cut cannot settle that contact; the exact compiler
+    // decides it (#391, ADR 0098) and its union is tessellated.
     let site = Vec3::new(6.0e5, 5.6e6, 200.0);
     let a = Transform3::from_translation(site) * Transform3::from_rotation_z(0.3);
     let b = Transform3::from_translation(site)
@@ -356,8 +357,11 @@ fn differently_turned_operands_a_gap_within_the_tolerance_apart_are_refused_by_n
         * Transform3::from_rotation_z(0.15);
     assert_ne!(a.matrix3, b.matrix3, "the placements must differ in bits");
     let (graph, root) = boxes(a, b, Vec3::new(1.0 + 0.5e-6, 0.0, 0.0));
-    let error = compile(&graph, root).expect_err("the contact is not merged");
-    assert!(is_unmerged(&error), "{error}");
+    let (mesh, closure) = compile(&graph, root).expect("fused");
+    assert_eq!(component_count(&mesh), 1);
+    assert_eq!(closure, MeshClosure::Solid);
+    // The exact union reads the gap as contact: two unit boxes, volume 2.
+    assert!((volume(&mesh) - 2.0).abs() < 1e-5, "{}", volume(&mesh));
 }
 
 /// xorshift64*: a fixed stream, so the cases are the same on every run.
@@ -419,8 +423,11 @@ fn a_union_never_returns_bodies_in_contact() {
                 );
                 assert_eq!(closure, MeshClosure::Solid, "case {case}");
             }
+            // A refusal is the mesh cut's, and the exact referee has been
+            // asked and refused too (#391): it names its reason.
             Err(error) => assert!(
-                is_unmerged(&error) || is_pinch(&error),
+                (is_unmerged(&error) || is_pinch(&error))
+                    && error.to_string().contains("the exact referee refused"),
                 "case {case} (gap {gap:e}, face {face:?}): {error}"
             ),
         }

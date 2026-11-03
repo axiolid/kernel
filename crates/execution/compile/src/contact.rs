@@ -19,8 +19,11 @@
 //! are measured with [`axiolid_inspect::surface_gap`].
 //!
 //! What it does not see: one body whose faces cross with sub-rounding cracks
-//! where contact faces met under different placements. That stays open
-//! (`TODO(#391)`).
+//! where contact faces met under different placements. That is not this
+//! guard's: a union whose operands have faces that nearly share a plane
+//! ([`axiolid_inspect::near_coplanar`]) is decided by the exact compiler
+//! ([`crate::referee`], #391, ADR 0098), and the guard also decides whether
+//! the referee's result is accepted.
 
 use axiolid_contracts::GeomError;
 use axiolid_core::{Aabb, Point3, Scalar};

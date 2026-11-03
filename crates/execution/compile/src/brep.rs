@@ -132,6 +132,9 @@ mod inversion;
 mod trim;
 mod view;
 
+#[cfg(test)]
+mod exact_tests;
+
 use view::{Pcurve, ResolvedBRep};
 
 const MAX_BREP_FACES: usize = 1 << 16;
@@ -306,6 +309,22 @@ fn check_tessellable<C3, C2, S>(brep: &BRep<C3, C2, S>) -> GeomResult<()> {
         )));
     }
     Ok(())
+}
+
+/// Tessellate an exact B-rep, reading its supports from its own catalogs and
+/// its pcurve intervals (#391).
+///
+/// What [`tessellate`] does for a graph B-rep, with the same closure and
+/// certified [`Deviation`]: a family whose bound is not certified is
+/// `Unbounded` by name, never a number.
+pub(crate) fn tessellate_exact(
+    exact: &axiolid_brep::ExactBRep,
+    tolerance: axiolid_core::Tolerance,
+    chord_error: Scalar,
+) -> GeomResult<(TriMesh, MeshClosure, Deviation)> {
+    check_tessellation_input_budget(exact.topology())?;
+    check_tessellable(exact.topology())?;
+    tessellate_resolved(&view::from_exact(exact)?, tolerance, chord_error)
 }
 
 /// [`tessellate`] over a B-rep whose supports are already resolved (#412).

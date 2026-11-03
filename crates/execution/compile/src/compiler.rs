@@ -55,6 +55,42 @@ impl<B: MeshBoolean> Backend for ReferenceMeshCompiler<B> {
     }
 }
 
+/// Why the mesh cut of a boolean was refused.
+#[derive(Debug)]
+enum CutRefusal {
+    /// The result touches itself (#194) or holds two bodies within the
+    /// tolerance (ADR 0096, D2): the operands meet where the mesh boolean,
+    /// which has no tolerance, cannot decide. The exact referee may.
+    Contact(GeomError),
+    /// Any other refusal.
+    Other(GeomError),
+}
+
+impl CutRefusal {
+    fn into_error(self) -> GeomError {
+        match self {
+            Self::Contact(error) | Self::Other(error) => error,
+        }
+    }
+}
+
+/// A boolean's mesh cut, and whether its faces include a pair that nearly
+/// share a plane ([`axiolid_inspect::near_coplanar`]): contact the mesh
+/// boolean did not decide, whatever it returned (#391).
+struct MeshCut {
+    built: Built,
+    unsettled: bool,
+}
+
+/// Who decided a boolean's result.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum Decided {
+    /// The mesh boolean.
+    Mesh,
+    /// The exact compiler, tessellated ([`crate::referee`]).
+    Referee,
+}
+
 /// One entry in the explicit evaluation stack.
 ///
 /// `Enter` schedules dependency discovery; `Exit` runs after every dependency
@@ -746,9 +782,18 @@ impl<B: MeshBoolean> ReferenceMeshCompiler<B> {
                 right,
                 operator,
             }) => {
-                let built =
-                    self.build_boolean(graph, (*left, *right), *operator, options, budget, cache)?;
+                let (built, decided) = self.build_boolean(
+                    graph,
+                    (id, (*left, *right)),
+                    *operator,
+                    options,
+                    budget,
+                    cache,
+                )?;
                 Ok(match measure {
+                    // The exact compiler's own result states its bound
+                    // (#391): measuring it against itself would be circular.
+                    Measure::Deviation(_) | Measure::Skip if decided == Decided::Referee => built,
                     // Measured against the exact result only when a report
                     // asks for it: it compiles the exact boolean (#235).
                     // Operands snapped within tolerance stay reported (#276).
@@ -897,19 +942,27 @@ impl<B: MeshBoolean> ReferenceMeshCompiler<B> {
     /// planes, cannot close under a general rotation. That cut is never
     /// worse: where it is refused, for any reason (the unmerged-contact
     /// guard included), the operands are cut in the world frame as before.
+    ///
+    /// A union the world-frame mesh cut cannot settle is decided by the
+    /// exact compiler (#391, [`crate::referee`]): when faces of its operands
+    /// nearly share a plane within the linear tolerance, or when the cut is
+    /// refused as a pinch or as unmerged contact. The referee is never
+    /// worse than the mesh path: where it refuses, a valid mesh result is
+    /// returned as before, and a contact refusal keeps its message and names
+    /// the referee's reason.
     fn build_boolean(
         &self,
         graph: &GeometryGraph,
-        (left, right): (NodeId, NodeId),
+        (id, (left, right)): (NodeId, (NodeId, NodeId)),
         operator: axiolid_core::BooleanOperator,
         options: &ExecutionOptions,
         budget: Budget,
         cache: &Cache,
-    ) -> GeomResult<Built> {
+    ) -> GeomResult<(Built, Decided)> {
         if let Ok(Some(built)) =
             self.boolean_in_shared_frame(graph, (left, right), operator, options, budget, cache)
         {
-            return Ok(built);
+            return Ok((built, Decided::Mesh));
         }
         let subject = self.cached(cache, left, budget)?;
         refuse_surface_operand(subject, "subject")?;
@@ -933,13 +986,52 @@ impl<B: MeshBoolean> ReferenceMeshCompiler<B> {
                 (&built.mesh, Some(&built.fates), Some(&built.deviation))
             }
         };
-        self.boolean_of(
+        let cut = self.boolean_of(
             subject,
             (tool, tool_fates, tool_deviation),
             operator,
             options,
             budget.placed,
-        )
+        );
+        if operator != axiolid_core::BooleanOperator::Union {
+            return cut
+                .map(|cut| (cut.built, Decided::Mesh))
+                .map_err(CutRefusal::into_error);
+        }
+        // A union the mesh cut cannot settle is decided by the exact
+        // compiler (#391, ADR 0098). It is never worse than the mesh path:
+        // where the referee refuses, an unsettled but valid mesh result is
+        // returned as before, and a contact refusal keeps its message and
+        // names the referee's reason.
+        let referee = |reason: &mut Option<String>| {
+            let tool = self.cached(cache, right, budget)?;
+            match crate::referee::union(graph, id, options, subject, tool) {
+                Ok(built) => Ok::<_, GeomError>(Some(built)),
+                Err(why) => {
+                    *reason = Some(why);
+                    Ok(None)
+                }
+            }
+        };
+        let mut reason = None;
+        match cut {
+            Ok(cut) if !cut.unsettled => Ok((cut.built, Decided::Mesh)),
+            Ok(cut) => Ok(match referee(&mut reason)? {
+                Some(built) => (built, Decided::Referee),
+                None => (cut.built, Decided::Mesh),
+            }),
+            Err(CutRefusal::Contact(error)) => match referee(&mut reason)? {
+                Some(built) => Ok((built, Decided::Referee)),
+                None => Err(match error {
+                    GeomError::Degenerate(text) => GeomError::Degenerate(format!(
+                        "{text}; the exact referee refused: {}",
+                        reason.unwrap_or_default()
+                    )),
+                    other => other,
+                }),
+            },
+            Err(CutRefusal::Other(error)) => Err(error),
+        }
     }
 
     /// The operand of a boolean as a frame sees it (#356): an `Instance`'s
@@ -977,8 +1069,12 @@ impl<B: MeshBoolean> ReferenceMeshCompiler<B> {
     /// The boolean cut in the frame its operands share and placed by the
     /// subject's transform (#356): `None` when they share none, that is
     /// when either is not framed ([`Self::frame_of`]) or their linear parts
-    /// differ in a bit ([`crate::frame::shared_linear`]; TODO(#391)), or
-    /// when the tool is a half-space clip. The tool is moved by its offset
+    /// differ in a bit ([`crate::frame::shared_linear`]; a union is then
+    /// refereed, [`crate::referee`]), or
+    /// when the tool is a half-space clip, or when the instance chains
+    /// beneath the frames compose to linear parts that differ in a bit
+    /// (the sources were themselves placed by differently composed turns):
+    /// the world path re-reads it and the referee decides. The tool is moved by its offset
     /// in the subject's frame, which is exactly zero when the translations
     /// are equal.
     ///
@@ -1010,6 +1106,17 @@ impl<B: MeshBoolean> ReferenceMeshCompiler<B> {
         if !crate::frame::shared_linear(subject_frame, tool_frame) {
             return Ok(None);
         }
+        // The outer frames agree, but a source placed beneath them by turns
+        // computed differently leaves faces that nearly share a plane in
+        // the frame as well: the world path re-reads and referees it (#391).
+        if let (Some(a), Some(b)) = (
+            chain_linear(graph, left, subject_frame),
+            chain_linear(graph, right, tool_frame),
+        ) {
+            if !crate::frame::shared_linear(a, b) {
+                return Ok(None);
+            }
+        }
         refuse_surface_operand(subject, "subject")?;
         refuse_surface_operand(tool, "tool")?;
         let offset = crate::frame::relative_offset(subject_frame, tool_frame).ok_or_else(|| {
@@ -1036,13 +1143,16 @@ impl<B: MeshBoolean> ReferenceMeshCompiler<B> {
                     local_budget.chord
                 ))
             })?;
-        let local = self.boolean_of(
-            subject,
-            (&tool.mesh, Some(&tool.fates), Some(&tool.deviation)),
-            operator,
-            &local_options,
-            local_budget.placed.max(tool_budget.placed),
-        )?;
+        let local = self
+            .boolean_of(
+                subject,
+                (&tool.mesh, Some(&tool.fates), Some(&tool.deviation)),
+                operator,
+                &local_options,
+                local_budget.placed.max(tool_budget.placed),
+            )
+            .map_err(CutRefusal::into_error)?
+            .built;
         let rounding = placed_rounding(&local.mesh, subject_frame, budget.chord)?;
         let mut placed = channels::transform(&local, subject_frame, rounding);
         // Defence in depth: the local tolerance is the world one over the
@@ -1076,7 +1186,7 @@ impl<B: MeshBoolean> ReferenceMeshCompiler<B> {
         operator: axiolid_core::BooleanOperator,
         options: &ExecutionOptions,
         placed: Scalar,
-    ) -> GeomResult<Built> {
+    ) -> Result<MeshCut, CutRefusal> {
         // Faces of the two operands a rounding residue apart are moved
         // together first, so a skin or sliver that thin is not cut as one
         // (#276, narrowed to rounding in #291; `crate::snap`): the rounding
@@ -1113,6 +1223,25 @@ impl<B: MeshBoolean> ReferenceMeshCompiler<B> {
             Some(outcome) => (outcome, settled.moved),
             None => (self.cut(&subject.mesh, tool, operator, options)?, 0.0),
         };
+        // Faces of the pair actually cut that nearly share a plane, a
+        // residue off exact contact, are not decided by a boolean without a
+        // tolerance whatever its result looks like (#391): the exact
+        // compiler referees them.
+        let snapped_pair = moved > 0.0;
+        let cut_subject = settled
+            .subject
+            .as_ref()
+            .filter(|_| snapped_pair)
+            .unwrap_or(&subject.mesh);
+        let cut_tool = settled
+            .tool
+            .as_ref()
+            .filter(|_| snapped_pair)
+            .unwrap_or(tool);
+        let eps = options.tolerance().linear();
+        let unsettled = operator == axiolid_core::BooleanOperator::Union
+            && eps > 0.0
+            && axiolid_inspect::near_coplanar(cut_subject, cut_tool, eps).is_some();
         let mut built = channels::after_boolean(
             outcome.mesh,
             &subject.fates,
@@ -1130,7 +1259,7 @@ impl<B: MeshBoolean> ReferenceMeshCompiler<B> {
                 crate::deviation::DeviationBound::Certified(moved),
             );
         }
-        Ok(built)
+        Ok(MeshCut { built, unsettled })
     }
 
     /// The mesh boolean of `subject` and `tool`, refused where its result
@@ -1144,10 +1273,13 @@ impl<B: MeshBoolean> ReferenceMeshCompiler<B> {
         tool: &TriMesh,
         operator: axiolid_core::BooleanOperator,
         options: &ExecutionOptions,
-    ) -> GeomResult<axiolid_mesh_boolean_contract::BooleanOutcome> {
-        let outcome = self.boolean.boolean(subject, tool, operator, options)?;
+    ) -> Result<axiolid_mesh_boolean_contract::BooleanOutcome, CutRefusal> {
+        let outcome = self
+            .boolean
+            .boolean(subject, tool, operator, options)
+            .map_err(CutRefusal::Other)?;
         if let Some(pinch) = crate::pinch::find(&outcome.mesh) {
-            return Err(GeomError::Degenerate(match pinch {
+            return Err(CutRefusal::Contact(GeomError::Degenerate(match pinch {
                 crate::pinch::Pinch::Edge { from, to } => format!(
                     "{operator:?} result touches itself along the edge {from:?} to {to:?}: \
                      the operands meet tangentially there (a void tangent to its host's face), \
@@ -1157,12 +1289,12 @@ impl<B: MeshBoolean> ReferenceMeshCompiler<B> {
                     "{operator:?} result touches itself at the point {at:?}: the operands \
                      meet tangentially there, leaving no material between two faces"
                 ),
-            }));
+            })));
         }
         if operator == axiolid_core::BooleanOperator::Union {
             let eps = options.tolerance().linear();
             if let Some(found) = crate::contact::unmerged(&outcome.mesh, eps) {
-                return Err(crate::contact::refusal(&found, eps));
+                return Err(CutRefusal::Contact(crate::contact::refusal(&found, eps)));
             }
         }
         Ok(outcome)
@@ -2129,4 +2261,21 @@ fn authored_mesh_is_closed(mesh: &TriMesh) -> bool {
     }
     let adjacency = axiolid_mesh::EdgeAdjacency::build(mesh);
     adjacency.edge_count() > 0 && adjacency.is_closed_two_manifold()
+}
+
+/// The linear part an operand is placed by through its whole chain of
+/// instances, `outer` being its own transform: the product down to the
+/// first node that is not an instance. `None` when the operand is not an
+/// instance (a boolean's frame was checked when it was cut).
+fn chain_linear(graph: &GeometryGraph, id: NodeId, outer: Transform3) -> Option<Transform3> {
+    let Some(GeometryNode::Instance(first)) = graph.get(id) else {
+        return None;
+    };
+    let mut composed = outer;
+    let mut source = first.source;
+    while let Some(GeometryNode::Instance(next)) = graph.get(source) {
+        composed *= next.transform;
+        source = next.source;
+    }
+    Some(composed)
 }

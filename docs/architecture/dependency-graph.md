@@ -309,6 +309,7 @@ graph TD
     axiolid_mesh_compile --> axiolid_dispatch
     axiolid_mesh_compile --> axiolid_exact_compile_contract
     axiolid_mesh_compile --> axiolid_guarantees
+    axiolid_mesh_compile --> axiolid_heal
     axiolid_mesh_compile --> axiolid_inspect
     axiolid_mesh_compile --> axiolid_measure
     axiolid_mesh_compile --> axiolid_mesh

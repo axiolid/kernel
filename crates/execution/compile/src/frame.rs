@@ -13,7 +13,11 @@
 //!
 //! The linear parts must be equal bit for bit: parts that differ in the last
 //! bits (a rotation composed another way) place the same face on slightly
-//! different planes, and no frame holds both exactly (TODO(#391)).
+//! different planes, and no frame holds both exactly. A union of such operands
+//! that the mesh cut cannot settle is decided by the exact compiler
+//! ([`crate::referee`], #391). So is a union whose operands'
+//! instance chains compose to linear parts that differ in a bit beneath
+//! equal outer frames: the frame yields to the world path.
 
 use axiolid_core::{Transform3, Vec3};
 

@@ -296,6 +296,20 @@ pub const SNAPPED_OPERANDS: &str = "operands snapped onto each other within tole
 /// result.
 pub const COINCIDENT_OPERANDS: &str = "operand faces read as one surface within tolerance";
 
+/// The [`DeviationContribution::detail`] of a union the mesh cut could not
+/// settle and the exact compiler decided (#391, ADR 0098): the mesh is
+/// the exact compiler's union tessellated, and the exact union is that of
+/// operands read as in contact within the tolerance
+/// ([`COINCIDENT_OPERANDS`] names how far). The bound is the
+/// tessellation's: how far the exact union's surface lies from the mesh.
+pub const REFEREED_UNION: &str =
+    "tessellated from the exact compiler's union, operands within tolerance";
+
+/// [`REFEREED_UNION`] when no decision within the tolerance fired: the mesh
+/// is the tessellation of the exact union of the operands as given.
+pub const REFEREED_UNION_EXACT: &str =
+    "tessellated from the exact compiler's union, the exact union of the given operands";
+
 /// The [`DeviationContribution::detail`] of [`DeviationPath::Placement`]:
 /// the rounding of applying an instance's transform to its source's
 /// vertices in `f64` (#295), [`PLACEMENT_EPSILONS`] `f64::EPSILON` of the
@@ -622,6 +636,18 @@ impl Deviation {
             );
         }
         placed
+    }
+
+    /// The worst contribution's bound ([`DeviationBound::worst`]): unbounded
+    /// wins, so a reason is never dropped. Unbounded when there is none.
+    pub(crate) fn worst_bound(&self) -> DeviationBound {
+        self.0
+            .iter()
+            .map(|c| c.bound)
+            .reduce(DeviationBound::worst)
+            .unwrap_or(DeviationBound::Unbounded(
+                "this path does not report its deviation",
+            ))
     }
 
     /// The worst bound over every contribution, `None` when any is

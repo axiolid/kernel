@@ -39,6 +39,7 @@ axiolid-inspect.workspace = true
 # divergence sum that would happily integrate a broken mesh. `exact`
 # measures and certifies distances on the exact compiler's B-reps.
 axiolid-measure = { workspace = true, features = ["exact"] }
+axiolid-heal.workspace = true
 axiolid-mesh-boolean-boolmesh.workspace = true
 axiolid-brep-audit.workspace = true
 axiolid-mesh-section-contract.workspace = true
@@ -51,4 +52,4 @@ role = "execution.orchestration"
 domain = "graph.compile"
 public = true
 format-neutral = true
-allowed-internal-dependencies = ["axiolid-mesh-boolean-boolmesh", "axiolid-core", "axiolid-curve", "axiolid-construct", "axiolid-contracts", "axiolid-dispatch", "axiolid-guarantees", "axiolid-mesh-boolean-contract", "axiolid-mesh-compile-contract", "axiolid-exact-compile-contract", "axiolid-brep", "axiolid-brep-audit", "axiolid-inspect", "axiolid-brep-boolean", "axiolid-mesh-contracts", "axiolid-mesh-section-contract", "axiolid-measure", "axiolid-mesh", "axiolid-model", "axiolid-nurbs", "axiolid-primitive", "axiolid-profile", "axiolid-reference", "axiolid-surface", "axiolid-topology"]
+allowed-internal-dependencies = ["axiolid-mesh-boolean-boolmesh", "axiolid-core", "axiolid-curve", "axiolid-construct", "axiolid-contracts", "axiolid-dispatch", "axiolid-guarantees", "axiolid-heal", "axiolid-mesh-boolean-contract", "axiolid-mesh-compile-contract", "axiolid-exact-compile-contract", "axiolid-brep", "axiolid-brep-audit", "axiolid-inspect", "axiolid-brep-boolean", "axiolid-mesh-contracts", "axiolid-mesh-section-contract", "axiolid-measure", "axiolid-mesh", "axiolid-model", "axiolid-nurbs", "axiolid-primitive", "axiolid-profile", "axiolid-reference", "axiolid-surface", "axiolid-topology"]

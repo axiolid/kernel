@@ -54,7 +54,7 @@ use axiolid_model::{GeometryGraph, GeometryNode, NodeId, SolidOperation};
 
 mod boolean;
 mod clip;
-mod polyhedral;
+pub(crate) mod polyhedral;
 
 /// Scalar reference implementation of the exact-compilation capability.
 #[derive(Debug, Clone, Copy, Default)]

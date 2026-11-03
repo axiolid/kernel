@@ -42,7 +42,7 @@ const NOT_CLOSED: &str =
 
 /// The exact polyhedral B-rep of a closed triangle mesh, its triangles its
 /// faces.
-pub(super) fn from_triangles(mesh: &TriMesh) -> GeomResult<ExactBRep> {
+pub(crate) fn from_triangles(mesh: &TriMesh) -> GeomResult<ExactBRep> {
     // A triangle repeating a corner index covers no edge pair; the mesh
     // compiler's closure check skips it too.
     let triangles: Vec<[u32; 3]> = mesh

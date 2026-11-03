@@ -14,6 +14,7 @@ mod half_space_boundary;
 mod pinch;
 mod planar;
 mod polyline;
+mod referee;
 mod ruled;
 mod snap;
 pub mod station;
