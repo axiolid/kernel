@@ -12,13 +12,24 @@ the skins kept by differences, the library tests the helpers, and the
 `axiolid-inspect` tests the clearance. `--only NAME` runs only the mutants
 whose names contain NAME.
 
-Equivalent mutant, deliberately not listed: removing the world-frame
-fallback of `build_boolean` (a refused shared-frame cut returning its error
-instead of cutting the operands in the world frame). No test configuration
-is refused in the shared frame but succeeds in the world frame, because both
-frames cut the same operands with the same guard.
+A guard that only a looser rule would reach is probed together with that
+rule: the stretch-by-direction check (`is_similarity`) and the world-
+tolerance guard on the placed result back each other up, so removing one
+alone is equivalent (a unit test pins the first, and the other is killed
+with the first removed); likewise the world-frame fallback of
+`build_boolean` is only reached by a refused shared-frame cut, which the
+similarity check keeps out of reach, so it is probed with that check
+removed.
+
+Not probed: the `placement_retry` exclusion in `frame_of` (an instance whose
+source is re-meshed for its placement's rounding is left to the world
+frame). Dropping it changes only how finely the shared frame meshes such a
+source, which the bound of a measured boolean would show, but that bound is
+unbounded for the boolean of curved operands that retry needs, so no test
+can see it.
 """
 import probe_lib
+from probe_lib import Mutant, ROOT
 
 COMPILER = "crates/execution/compile/src/compiler.rs"
 CONTACT = "crates/execution/compile/src/contact.rs"
@@ -31,11 +42,29 @@ R = ["-p", "axiolid-mesh-compile", "--test", "rotated_face_contact"]
 S = ["-p", "axiolid-mesh-compile", "--test", "thin_skin"]
 L = ["-p", "axiolid-mesh-compile", "--lib"]
 I = ["-p", "axiolid-inspect"]
+T = ["-p", "axiolid-mesh-compile", "--test", "surface_models"]
+PR = ["-p", "axiolid-mesh-compile", "--test", "placement_rounding"]
+
+def edits(*changes):
+    return [(ROOT / path, old, new) for path, old, new in changes]
+
+
+SIMILAR = (FRAME, "        && is_similarity(a)\n", "        && true\n")
+FALLBACK = (
+    COMPILER,
+    "        if let Ok(Some(built)) =\n            self.boolean_in_shared_frame(graph, (left, right), operator, options, budget, cache)\n        {",
+    "        if let Some(built) =\n            self.boolean_in_shared_frame(graph, (left, right), operator, options, budget, cache)?\n        {",
+)
+GUARD = (
+    COMPILER,
+    "            if let Some(found) = crate::contact::unmerged(&placed.mesh, eps) {",
+    "            if let Some(found) = crate::contact::unmerged(&placed.mesh, eps).filter(|_| false) {",
+)
 
 MUTANTS = [
     ("guard off", COMPILER,
-     "        if operator == axiolid_core::BooleanOperator::Union {\n            let eps",
-     "        if false && operator == axiolid_core::BooleanOperator::Union {\n            let eps",
+     "        if operator == axiolid_core::BooleanOperator::Union {\n            let eps = options.tolerance().linear();\n            if let Some(found) = crate::contact::unmerged(&outcome",
+     "        if false && operator == axiolid_core::BooleanOperator::Union {\n            let eps = options.tolerance().linear();\n            if let Some(found) = crate::contact::unmerged(&outcome",
      [U, R, L]),
     ("guard reads no tolerance", COMPILER,
      "crate::contact::unmerged(&outcome.mesh, eps)",
@@ -81,6 +110,26 @@ MUTANTS = [
      "    if edge_crosses(a, b) || edge_crosses(b, a) {",
      "    if false && (edge_crosses(a, b) || edge_crosses(b, a)) {",
      [I]),
+    ("stretch by direction read as a shared frame", FRAME,
+     "        && is_similarity(a)\n", "        && true\n", [L]),
+    Mutant("stretched frame let through without the world guard",
+           edits(SIMILAR, GUARD),
+           [["cargo", "test", "-q", *U]]),
+    Mutant("refused shared-frame cut returned, stretch let through",
+           edits(SIMILAR, FALLBACK),
+           [["cargo", "test", "-q", *U]]),
+    ("shared frame cut at the world tolerance", COMPILER,
+     ".with_tolerance(local_budget.tolerance)",
+     ".with_tolerance(budget.tolerance)", [U]),
+    ("shared frame takes surface operands", COMPILER,
+     '        refuse_surface_operand(subject, "subject")?;\n        refuse_surface_operand(tool, "tool")?;\n',
+     "        let _ = (subject, tool);\n", [T]),
+    ("union snap moves inward", SNAP,
+     "            if !whole && outward[k][i] * (face.at - p[k]) < 0.0 || !whole && outward[k][i] == 0.0 {",
+     "            if !whole && outward[k][i] == 0.0 {", [U]),
+    ("union snap moves a body away from the contact", SNAP,
+     "        if whole {\n            key(v)\n        } else {\n            patch[k][i] as u64\n        }",
+     "        key(v)", [U]),
 ]
 
 probe_lib.main(MUTANTS, timeout=1800, reject_uncompiled=True)

@@ -291,6 +291,14 @@ fn snapped(report: &DeviationReport) -> Option<Scalar> {
         .reduce(Scalar::max)
 }
 
+/// The rounding of placing the wall at [`FAR`] (`4 eps` times its largest
+/// coordinate in a row that rounds, `deviation::placement_rounding`), which a
+/// snap in the cut's own frame is reported grown by. The report folds it into
+/// the bound instead of naming it, so the test derives it.
+fn placement_rounding_at_far() -> Scalar {
+    4.0 * Scalar::EPSILON * (FAR.x.abs().max(FAR.y.abs()).max(FAR.z.abs()) + 8.0)
+}
+
 /// `expected` within `slack` of the certified interval.
 fn assert_volume(volume: VolumeInterval, expected: Scalar, slack: Scalar, what: &str) {
     assert!(
@@ -529,7 +537,9 @@ fn near_flush_openings_far_from_the_origin_are_never_refused_after_the_snap() {
         // there (about `1e-16`, invisible once placed) is landed on too,
         // and reported with the placement's rounding it grows by.
         assert!(
-            moved.is_none() || residues || moved.is_some_and(|m| m <= 8.0 * ulp(FAR.y)),
+            moved.is_none()
+                || residues
+                || moved.is_some_and(|m| m <= placement_rounding_at_far() + 4.0 * Scalar::EPSILON),
             "{what}: a snap without a rounding residue: {report:?}"
         );
         assert!(

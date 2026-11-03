@@ -297,6 +297,53 @@ fn a_union_snap_moves_nothing_away_from_the_contact() {
 }
 
 #[test]
+fn a_union_snap_never_removes_overlap_material() {
+    // The tool overlaps the host by `g` along x on half of its y extent. Its
+    // -x face would land on the host's +x plane over its whole height, which
+    // cuts the part inside the host's reach of y in [0.5, 1] away: the
+    // overlapping pair fuses as it is and keeps its volume 2 + g / 2.
+    let g = 0.5e-6;
+    let mut builder = GeometryGraphBuilder::new();
+    let mut push = |node| builder.push(node).expect("a valid node");
+    let mut boxed = |x: f64, y: f64, at: Vec3| {
+        let profile = push(GeometryNode::Profile(Profile::Rectangle(
+            RectangleProfile {
+                x,
+                y,
+                thickness: None,
+                outer_radius: None,
+                inner_radius: None,
+            },
+        )));
+        let solid = push(GeometryNode::SolidOperation(SolidOperation::Extrusion {
+            profile,
+            direction: Vec3::Z,
+            depth: 1.0,
+        }));
+        push(GeometryNode::Instance(Instance {
+            source: solid,
+            transform: Transform3::from_translation(at),
+        }))
+    };
+    let host = boxed(1.0, 1.0, Vec3::new(0.5, 0.5, 0.0));
+    let tool = boxed(1.0 + g, 1.0, Vec3::new(1.5 - g / 2.0, 1.0, 0.0));
+    let root = push(GeometryNode::SolidOperation(SolidOperation::Boolean {
+        left: host,
+        right: tool,
+        operator: BooleanOperator::Union,
+    }));
+    let graph = builder.finish(vec![root]).expect("a valid graph");
+    let (mesh, closure) = compile(&graph, root).expect("fused");
+    assert_eq!(component_count(&mesh), 1);
+    assert_eq!(closure, MeshClosure::Solid);
+    assert!(
+        (volume(&mesh) - (2.0 + 0.5 * g)).abs() < 1e-12,
+        "{}",
+        volume(&mesh)
+    );
+}
+
+#[test]
 fn differently_turned_operands_a_gap_within_the_tolerance_apart_are_refused_by_name() {
     // Two placements of the same turn, composed another way: their linear
     // parts differ in the last bits, so the faces that meet are not exactly
