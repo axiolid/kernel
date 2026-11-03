@@ -27,7 +27,7 @@ SK = ["-p", "axiolid-route", "--test", "skeleton"]
 TR = ["-p", "axiolid-triangulate", "--test", "cdt"]
 
 MUTANTS = [
-    ('Delaunay not restored after recovery', R, '    restore_delaunay(tri);\n', '', TR),
+    ('Delaunay not restored after recovery', R, '    restore_delaunay(tri, &mut incident);\n', '', TR),
     ('spurs kept: no spread filter', S, '            spread(nodes[i], c, 0.25 * c, &segments) >= prune * c', '            true', SK),
     ('short leaf branches kept', S, '            if adj[here].len() >= 3 && length < clearance[here].1 {', '            if false && adj[here].len() >= 3 && length < clearance[here].1 {', SK),
     ('the farthest wall ahead', S, '        if best.is_none_or(|(bt, _)| t < bt) {', '        if best.is_none_or(|(bt, _)| t > bt) {', SK),

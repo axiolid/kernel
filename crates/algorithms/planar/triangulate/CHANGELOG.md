@@ -13,6 +13,26 @@ caret rule for `0.x` versions.
 
 - The package now ships `LICENSE` and `LICENSE-COMMERCIAL` (symlinks to the
   repository root), so the licence texts travel with the archive (#358).
+- `TriangulationError::NonFinitePoint { index }`: a point with a NaN or
+  infinite coordinate is refused up front (#355).
+
+### Fixed
+
+- A point with a non-finite coordinate is refused with `NonFinitePoint`.
+  Recovery by walking the segment would read its orientation as exactly
+  collinear and could return a made-up split (#355).
+
+### Changed
+
+- Constraint recovery no longer scans every triangle per missing
+  constraint. Edges are found through a vertex-to-triangle index that every
+  flip keeps current, and the edges a constraint crosses and the vertices on
+  it are found by walking the segment with the exact orientation predicate.
+  The triangulation is identical, triangle for triangle. On a jittered grid
+  with zigzag breaklines (`triangulate_constraints` benchmark, release
+  build), 10,000 points with 4,950 segments took 12.1 s and now take 0.065 s;
+  49,729 points with 12,432 segments took 168 s and now take 0.175 s
+  (best of three, same machine) (#355).
 
 ## [0.3.6] - 2026-10-28
 

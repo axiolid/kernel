@@ -129,12 +129,24 @@ pub enum TriangulationError {
     },
     /// The rings enclose no triangle, so the domain is empty.
     EmptyDomain,
+    /// An input point has a non-finite coordinate (NaN or infinite).
+    ///
+    /// The orientation and incircle predicates are exact only for finite
+    /// doubles; a non-finite one would read as exactly collinear and place
+    /// a made-up edge, so the input is refused.
+    NonFinitePoint {
+        /// Index of the first such point.
+        index: u32,
+    },
 }
 
 impl core::fmt::Display for TriangulationError {
     fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
         match self {
             Self::TooFewPoints => write!(f, "a triangulation needs at least three points"),
+            Self::NonFinitePoint { index } => {
+                write!(f, "point {index} has a non-finite coordinate")
+            }
             Self::AllPointsCollinear => write!(f, "every input point is collinear"),
             Self::VertexUnplaceable { index } => {
                 write!(f, "vertex {index} could not be placed in any triangle")

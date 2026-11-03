@@ -85,7 +85,7 @@ use crate::{decided, in_circumcircle, turns_left, Constraint};
 /// # Errors
 ///
 /// Returns [`TriangulationError`] when the input has fewer than three points,
-/// is entirely collinear, references a vertex that does not exist, has a
+/// a point with a non-finite coordinate, is entirely collinear, references a vertex that does not exist, has a
 /// constraint between two coincident points, or contains constraints that
 /// cross one another.
 ///
@@ -113,8 +113,8 @@ pub(crate) struct Built {
 ///
 /// `rings` is `None` for the plain hull triangulation. The checks run in a
 /// fixed order, so the same bad input always reports the same error: too
-/// few points, constraint range, ring range and size, empty ring list,
-/// collinear points, coincident constraints, ring shape, then recovery.
+/// few points, non-finite points, constraint range, ring range and size,
+/// empty ring list, collinear points, coincident constraints, ring shape, then recovery.
 pub(crate) fn build(
     points: &[Point2],
     constraints: &[Constraint],
@@ -122,6 +122,14 @@ pub(crate) fn build(
 ) -> Result<Built, TriangulationError> {
     if points.len() < 3 {
         return Err(TriangulationError::TooFewPoints);
+    }
+    if let Some(index) = points
+        .iter()
+        .position(|p| !(p.x.is_finite() && p.y.is_finite()))
+    {
+        return Err(TriangulationError::NonFinitePoint {
+            index: u32::try_from(index).unwrap_or(u32::MAX),
+        });
     }
     let count = u32::try_from(points.len()).unwrap_or(u32::MAX);
     for c in constraints {

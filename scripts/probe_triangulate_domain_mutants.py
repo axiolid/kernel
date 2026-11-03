@@ -46,17 +46,12 @@ DOM = ["-p", "axiolid-triangulate", "--test", "domain"]
 MUTANTS = [
     # Splitting constraints at the vertices on them (#360).
     ("a constraint through a vertex is not split", R,
-     "        chain.extend(vertices_on(tri, &is_vertex, c.a, c.b));",
+     "        chain.extend(vertices_on(tri, &incident, c.a, c.b)?);",
      "        chain.extend(Vec::<u32>::new());", [CDT]),
-    ("the bounding-box filter is strict", R,
-     "                && lo_x <= q.x\n",
-     "                && lo_x < q.x\n", [CDT]),
-    ("pieces are not ordered along the constraint", R,
-     "    if (pa.x, pa.y) > (pb.x, pb.y) {",
-     "    if false {", [CDT]),
-    ("a merged duplicate counts as a vertex on the constraint", R,
-     "            is_vertex[v as usize]\n                && v != a",
-     "            v != a", [DUP]),
+    # The bounding-box filter, the order along the constraint and the merged
+    # duplicates were filters of a scan over every vertex; the walk of #355
+    # finds the vertices in order and a merged duplicate is in no triangle.
+    # Its mutants are in probe_triangulate_recover_mutants.py.
     # The domain (#353).
     ("a ring keeps the orientation it was given", D,
      "        let sign = if is_ccw(points, &seq) == outer { 1 } else { -1 };",

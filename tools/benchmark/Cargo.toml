@@ -118,6 +118,10 @@ name = "triangulate_points"
 harness = false
 
 [[bench]]
+name = "triangulate_constraints"
+harness = false
+
+[[bench]]
 name = "certified_length"
 harness = false
 
