@@ -38,6 +38,28 @@ impl HiddenLineError {
     }
 }
 
+/// One input mesh that the per-mesh audit refuses, with the reason.
+///
+/// A registry's audit lists every such mesh of a request in request order, so
+/// a caller that leaves them out learns all refusals in one call instead of
+/// one per `hidden_lines` run. The pair is what [`HiddenLineError::mesh`]
+/// would carry for that mesh.
+#[derive(Debug, Clone, PartialEq)]
+#[non_exhaustive]
+pub struct RefusedMesh {
+    /// The refused input mesh.
+    pub mesh: MeshId,
+    /// Why it is refused.
+    pub error: GeomError,
+}
+
+impl RefusedMesh {
+    /// A refused mesh and its reason.
+    pub const fn new(mesh: MeshId, error: GeomError) -> Self {
+        Self { mesh, error }
+    }
+}
+
 impl From<GeomError> for HiddenLineError {
     fn from(error: GeomError) -> Self {
         Self::request(error)

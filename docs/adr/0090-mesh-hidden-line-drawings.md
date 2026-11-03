@@ -128,6 +128,12 @@ Option<MeshId>, error: GeomError }` instead of a bare `GeomError`:
   `Unsupported` or `Unavailable`.
 - The conformance suite names the mesh each refusal case must blame
   (`WrongRefusalMesh`).
+- `hidden_lines` names the first refused mesh only. Amended (#370):
+  `MeshHiddenLinesRegistry::audit` runs just the per-mesh shape and topology
+  audit, through the code `hidden_lines` uses, and returns every refused mesh
+  as a `RefusedMesh { mesh, error }` in request order (empty when all pass),
+  so a caller that drops the named meshes learns all of them in one call.
+  Refusals of the whole request stay `Err`; no substitute drawing is made.
 
 The refusals are: `InvalidInput`, `NotManifold`, `Degenerate`,
 `BudgetExceeded` (named resources "hidden-line meshes", "hidden-line source

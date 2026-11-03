@@ -9,7 +9,7 @@ use axiolid_mesh::{audit_mesh_scratch_bytes, try_audit_mesh};
 use axiolid_mesh_hidden_lines_contract::{
     conformance::{ConformanceReport, ConformanceSuite},
     EdgeKind, HiddenLineError, HiddenLineMesh, HiddenLineOutcome, HiddenLineRequest,
-    MeshHiddenLines, MeshRole, Visibility,
+    MeshHiddenLines, MeshRole, RefusedMesh, Visibility,
 };
 
 use crate::device::matches_device;
@@ -27,6 +27,9 @@ struct RegisteredHiddenLines {
 /// degeneracy, budget, cancellation, and contract errors fail immediately.
 /// A refusal caused by one input mesh names it
 /// ([`HiddenLineError::mesh`]); a refusal of the whole request does not.
+/// [`hidden_lines`](Self::hidden_lines) names the first refused mesh only; a
+/// caller that drops refused meshes and draws the rest learns all of them in
+/// one call from [`audit`](Self::audit).
 #[derive(Debug, Clone, Default)]
 pub struct MeshHiddenLinesRegistry {
     providers: Vec<RegisteredHiddenLines>,
@@ -76,6 +79,43 @@ impl MeshHiddenLinesRegistry {
     /// Registered providers in dispatch order.
     pub fn providers(&self) -> impl Iterator<Item = &dyn MeshHiddenLines> {
         self.providers.iter().map(|entry| entry.provider.as_ref())
+    }
+
+    /// Every input mesh that [`hidden_lines`](Self::hidden_lines) would
+    /// refuse, in request order, without searching.
+    ///
+    /// Runs only the per-mesh audit of shape and topology, through the code
+    /// `hidden_lines` uses, so a mesh is listed exactly when `hidden_lines`
+    /// would refuse a request holding it. An empty list means every mesh
+    /// passes the audit (a provider can still refuse). A caller that leaves
+    /// the listed meshes out and calls `hidden_lines` again draws the rest;
+    /// no substitute drawing is made. A refusal of the whole request (limits,
+    /// frame, memory, cancellation, an empty request, a duplicate id or a mesh
+    /// without triangles) is returned as `Err`, as it is by `hidden_lines`.
+    pub fn audit(
+        &self,
+        request: &HiddenLineRequest<'_>,
+        options: &ExecutionOptions,
+    ) -> Result<Vec<RefusedMesh>, HiddenLineError> {
+        options.check_cancelled()?;
+        validate_request_shape(request, options)?;
+        if let Some(budget) = options.memory_budget_bytes() {
+            let fits = request.meshes.iter().all(|entry| {
+                audit_mesh_scratch_bytes(entry.mesh.triangle_count())
+                    .is_some_and(|bytes| bytes <= budget)
+            });
+            if !fits {
+                return Err(GeomError::BudgetExceeded { resource: "memory" }.into());
+            }
+        }
+        let mut refused = Vec::new();
+        for entry in request.meshes {
+            options.check_cancelled()?;
+            if let Some(error) = mesh_verdict(entry, options)? {
+                refused.push(RefusedMesh::new(entry.id, error));
+            }
+        }
+        Ok(refused)
     }
 
     /// Validate and execute one hidden-line request.
@@ -266,40 +306,51 @@ fn validate_topology(
 ) -> Result<(), HiddenLineError> {
     for entry in request.meshes {
         options.check_cancelled()?;
-        let refuse = |error: GeomError| HiddenLineError::mesh(entry.id, error);
-        let health = try_audit_mesh(entry.mesh, options.tolerance())
-            .map_err(|_| GeomError::BudgetExceeded { resource: "memory" })?;
-        if let Some((triangle, index)) = health.first_invalid_index {
-            return Err(refuse(GeomError::InvalidInput(format!(
-                "triangle {triangle} references position {index}, but the mesh has {}",
-                health.positions
-            ))));
-        }
-        if let Some(position) = health.first_non_finite_position {
-            return Err(refuse(GeomError::InvalidInput(format!(
-                "position {position} is not finite"
-            ))));
-        }
-        if health.degenerate_triangles > 0 {
-            return Err(refuse(GeomError::Degenerate(format!(
-                "{} degenerate triangle(s)",
-                health.degenerate_triangles
-            ))));
-        }
-        if health.non_manifold_edges > 0 || health.inconsistent_winding_edges > 0 {
-            return Err(refuse(GeomError::NotManifold(format!(
-                "non_manifold={}, inconsistent_winding={}",
-                health.non_manifold_edges, health.inconsistent_winding_edges
-            ))));
-        }
-        if entry.role == MeshRole::Solid && health.boundary_edges > 0 {
-            return Err(refuse(GeomError::NotManifold(format!(
-                "a solid must be closed; boundary={}",
-                health.boundary_edges
-            ))));
+        if let Some(error) = mesh_verdict(entry, options)? {
+            return Err(HiddenLineError::mesh(entry.id, error));
         }
     }
     Ok(())
+}
+
+/// Why one mesh is refused, or `None` when it passes the audit. Shared by
+/// `hidden_lines` and `audit`, so both give the same verdict per mesh.
+fn mesh_verdict(
+    entry: &HiddenLineMesh<'_>,
+    options: &ExecutionOptions,
+) -> Result<Option<GeomError>, HiddenLineError> {
+    let health = try_audit_mesh(entry.mesh, options.tolerance())
+        .map_err(|_| GeomError::BudgetExceeded { resource: "memory" })?;
+    if let Some((triangle, index)) = health.first_invalid_index {
+        return Ok(Some(GeomError::InvalidInput(format!(
+            "triangle {triangle} references position {index}, but the mesh has {}",
+            health.positions
+        ))));
+    }
+    if let Some(position) = health.first_non_finite_position {
+        return Ok(Some(GeomError::InvalidInput(format!(
+            "position {position} is not finite"
+        ))));
+    }
+    if health.degenerate_triangles > 0 {
+        return Ok(Some(GeomError::Degenerate(format!(
+            "{} degenerate triangle(s)",
+            health.degenerate_triangles
+        ))));
+    }
+    if health.non_manifold_edges > 0 || health.inconsistent_winding_edges > 0 {
+        return Ok(Some(GeomError::NotManifold(format!(
+            "non_manifold={}, inconsistent_winding={}",
+            health.non_manifold_edges, health.inconsistent_winding_edges
+        ))));
+    }
+    if entry.role == MeshRole::Solid && health.boundary_edges > 0 {
+        return Ok(Some(GeomError::NotManifold(format!(
+            "a solid must be closed; boundary={}",
+            health.boundary_edges
+        ))));
+    }
+    Ok(None)
 }
 
 fn scratch_fits(

@@ -14,6 +14,10 @@
 //!
 //! No tolerance enters a visibility decision; a provider refuses what it
 //! cannot decide.
+//!
+//! A refusal names the first refused mesh only ([`HiddenLineError`]). A
+//! registry's audit lists every refused mesh ([`RefusedMesh`]) in one call, so
+//! a caller can leave them out and ask again; no substitute drawing is made.
 
 pub mod conformance;
 mod contract;
@@ -25,7 +29,7 @@ pub use contract::{
     HiddenLineOutcome, HiddenLineRequest, HiddenLineSegment, HiddenLineSource, MeshHiddenLines,
     MeshId, MeshRole, OrthographicView, SourceEdge, Visibility,
 };
-pub use error::HiddenLineError;
+pub use error::{HiddenLineError, RefusedMesh};
 
 pub const CAPABILITY_ID: axiolid_contracts::CapabilityId =
     axiolid_contracts::capability_ids::MESH_HIDDEN_LINES;

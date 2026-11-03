@@ -930,3 +930,130 @@ fn a_refusal_naming_a_mesh_outside_the_request_is_a_contract_violation() {
     assert_eq!(error.mesh, None);
     assert_eq!(calls_of(&calls), 1);
 }
+
+// --- audit --------------------------------------------------------------
+
+/// A box missing its last two triangles: open, so refused as a `Solid`.
+fn open_box(dx: f64) -> TriMesh {
+    let shift = Vec3::new(dx, 0.0, 0.0);
+    let mut mesh = cube();
+    for p in &mut mesh.positions {
+        *p += shift;
+    }
+    mesh.indices.truncate(30);
+    mesh
+}
+
+fn audit_registry() -> MeshHiddenLinesRegistry {
+    registry(&counter(), well_behaved)
+}
+
+fn audit_ids(refused: &[axiolid_mesh_hidden_lines_contract::RefusedMesh]) -> Vec<MeshId> {
+    refused.iter().map(|r| r.mesh).collect()
+}
+
+#[test]
+fn audit_names_every_open_box_in_request_order() {
+    let (a, b) = (open_box(0.0), open_box(3.0));
+    let meshes = [mesh(1, MeshRole::Solid, &a), mesh(2, MeshRole::Solid, &b)];
+    let request = HiddenLineRequest::new(&meshes, view(), selection(), limits());
+    let registry = audit_registry();
+    let refused = registry.audit(&request, &options()).unwrap();
+    assert_eq!(audit_ids(&refused), [MeshId(1), MeshId(2)]);
+    assert!(refused
+        .iter()
+        .all(|r| matches!(r.error, GeomError::NotManifold(_))));
+    let first = registry.hidden_lines(&request, &options()).unwrap_err();
+    assert_eq!(first.mesh, Some(refused[0].mesh));
+    assert_eq!(first.error, refused[0].error);
+}
+
+#[test]
+fn audit_lists_only_the_invalid_mesh_of_a_mixed_request() {
+    let (good, bad, good2) = (cube(), open_box(3.0), cube());
+    let meshes = [
+        mesh(1, MeshRole::Solid, &good),
+        mesh(2, MeshRole::Solid, &bad),
+        mesh(3, MeshRole::Solid, &good2),
+    ];
+    let request = HiddenLineRequest::new(&meshes, view(), selection(), limits());
+    let refused = audit_registry().audit(&request, &options()).unwrap();
+    assert_eq!(audit_ids(&refused), [MeshId(2)]);
+}
+
+#[test]
+fn audit_of_valid_meshes_is_empty() {
+    let (solid, sheet) = (cube(), quad());
+    let meshes = [
+        mesh(1, MeshRole::Solid, &solid),
+        mesh(2, MeshRole::Sheet, &sheet),
+    ];
+    let request = HiddenLineRequest::new(&meshes, view(), selection(), limits());
+    assert!(audit_registry()
+        .audit(&request, &options())
+        .unwrap()
+        .is_empty());
+}
+
+#[test]
+fn audit_returns_request_level_faults_as_errors() {
+    let solid = cube();
+    let meshes = [mesh(1, MeshRole::Solid, &solid)];
+    let registry = audit_registry();
+    let tight = HiddenLineLimits::new(0, 1_000, 1_000, 1_000_000, 1_000);
+    let request = HiddenLineRequest::new(&meshes, view(), selection(), tight);
+    let error = registry.audit(&request, &options()).unwrap_err();
+    assert_eq!(error.mesh, None);
+    assert!(matches!(error.error, GeomError::BudgetExceeded { .. }));
+
+    let request = HiddenLineRequest::new(&meshes, view(), selection(), limits());
+    let error = registry
+        .audit(&request, &options().with_memory_budget(0))
+        .unwrap_err();
+    assert_eq!(error.mesh, None);
+    assert_eq!(
+        error.error,
+        GeomError::BudgetExceeded { resource: "memory" }
+    );
+
+    let token = CancellationToken::new();
+    token.cancel();
+    let error = registry
+        .audit(&request, &options().with_cancellation(token))
+        .unwrap_err();
+    assert_eq!(error.error, GeomError::Cancelled);
+}
+
+#[test]
+fn audit_verdict_equals_the_single_mesh_hidden_lines_error() {
+    let open = open_box(0.0);
+    let mut bad_index = cube();
+    bad_index.indices[0] = 99;
+    let mut nan = cube();
+    nan.positions[0] = Vec3::new(f64::NAN, 0.0, 0.0);
+    let mut degenerate = cube();
+    degenerate.indices[0..3].copy_from_slice(&[0, 0, 1]);
+    let valid = cube();
+    let registry = audit_registry();
+    for (role, m) in [
+        (MeshRole::Solid, &open),
+        (MeshRole::Sheet, &open),
+        (MeshRole::Solid, &bad_index),
+        (MeshRole::Solid, &nan),
+        (MeshRole::Solid, &degenerate),
+        (MeshRole::Solid, &valid),
+    ] {
+        let meshes = [mesh(5, role, m)];
+        let request = HiddenLineRequest::new(&meshes, view(), selection(), limits());
+        let audited = registry.audit(&request, &options()).unwrap();
+        let single = registry.hidden_lines(&request, &options());
+        match single {
+            Err(error) => {
+                assert_eq!(audited.len(), 1);
+                assert_eq!(error.mesh, Some(audited[0].mesh));
+                assert_eq!(error.error, audited[0].error);
+            }
+            Ok(_) => assert!(audited.is_empty()),
+        }
+    }
+}

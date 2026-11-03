@@ -13,6 +13,10 @@ caret rule for `0.x` versions.
 
 - The package now ships `LICENSE` and `LICENSE-COMMERCIAL` (symlinks to the
   repository root), so the licence texts travel with the archive (#358).
+- `MeshHiddenLinesRegistry::audit` lists every input mesh that
+  `hidden_lines` would refuse, in request order, without searching (#370).
+  It shares the per-mesh audit with `hidden_lines`; refusals of the whole
+  request stay `Err`.
 
 ## [0.3.10] - 2026-11-03
 
