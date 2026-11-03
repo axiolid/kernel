@@ -11,13 +11,24 @@
 //! is rounded before a decision; only the endpoints of the output pieces are,
 //! each the exact point rounded once to the nearest binary64.
 //!
+//! [`ScalarVisibleFaces`] implements
+//! [`MeshVisibleFaces`](axiolid_mesh_hidden_lines_contract::MeshVisibleFaces)
+//! (ADR 0094) on the same view: the regions of the image where a face group
+//! (or the cap of a solid cut by the near plane) is frontmost. It cuts the
+//! image with an exact arrangement (`axiolid-exact-arrangement`) of the
+//! visible edge pieces, clip segments, cross-sections of interpenetrating
+//! triangles and the crop box, labels each side of each piece exactly, and
+//! rounds each region vertex once, so it equals the hidden-line endpoint of
+//! the same point.
+//!
 //! Module map: `view` (the affine map), `recipe` (the sign questions),
 //! `param` (parameters along an edge and their interval algebra), `edges`
 //! (topology and edge kinds), `broad` (candidate triangles from a BVH), `occlusion` (one edge against the triangles), `caps` (the cross-sections
 //! of solids a near plane cuts),
 //! `output` (correctly rounded endpoints), `prepare` (request validation and the
-//! scene shared with the visible-face operation), `provider` (the provider
-//! itself).
+//! scene shared with the visible-face operation), `provider` (the hidden-line
+//! provider itself), `faces` (the visible-face provider; its module docs give
+//! the algorithm).
 
 mod broad;
 mod caps;
@@ -32,6 +43,9 @@ mod provider;
 mod recipe;
 mod view;
 
+pub use faces::ScalarVisibleFaces;
+#[doc(hidden)]
+pub use faces::{ScanVisibleFaces, UnprunedVisibleFaces};
 pub use provider::ScalarHiddenLines;
 #[doc(hidden)]
 pub use provider::ScanHiddenLines;

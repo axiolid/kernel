@@ -23,91 +23,12 @@ use std::cell::Cell;
 use std::collections::BTreeMap;
 use std::time::Instant;
 
-use axiolid_core::{Frame3, Point3, Vec3};
+use axiolid_core::Frame3;
 use axiolid_mesh::TriMesh;
 use axiolid_mesh_hidden_lines_contract::{OrthographicView, Visibility};
-use common::{
-    box_mesh, draw, frame, isometric_frame, looking_along, plan_frame, scalar, solids, BOX_EDGES,
-};
+use common::{box_mesh, draw, plan_frame, scalar, scene, solids, views, Lcg, BOX_EDGES};
 
 type V3 = [f64; 3];
-
-struct Lcg(u64);
-
-impl Lcg {
-    fn below(&mut self, n: u64) -> u64 {
-        self.0 = self
-            .0
-            .wrapping_mul(6364136223846793005)
-            .wrapping_add(1442695040888963407);
-        (self.0 >> 33) % n
-    }
-}
-
-/// 1 to 12 boxes on a 1/8 grid; a third of them rotated about their centre.
-fn scene(seed: u64) -> Vec<TriMesh> {
-    let mut rng = Lcg(seed.wrapping_mul(0x9E37_79B9_7F4A_7C15) | 1);
-    let count = 1 + rng.below(12) as usize;
-    let about_z: [f64; 6] = [0.31, 0.57, 0.93, 1.21, 2.17, 2.6];
-    let about_x: [f64; 3] = [0.2, 0.4, 0.7];
-    let about_y: [f64; 3] = [0.15, 0.35, 0.55];
-    (0..count)
-        .map(|_| {
-            let min = [
-                rng.below(13) as f64 / 8.0,
-                rng.below(13) as f64 / 8.0,
-                rng.below(9) as f64 / 8.0,
-            ];
-            let size = [
-                (1 + rng.below(8)) as f64 / 8.0,
-                (1 + rng.below(8)) as f64 / 8.0,
-                (1 + rng.below(8)) as f64 / 8.0,
-            ];
-            let max = [min[0] + size[0], min[1] + size[1], min[2] + size[2]];
-            let mut mesh = box_mesh(min, max);
-            if rng.below(3) == 0 {
-                let centre = Point3::new(
-                    (min[0] + max[0]) / 2.0,
-                    (min[1] + max[1]) / 2.0,
-                    (min[2] + max[2]) / 2.0,
-                );
-                let (sz, cz) = about_z[rng.below(6) as usize].sin_cos();
-                let (sx, cx) = about_x[rng.below(3) as usize].sin_cos();
-                let (sy, cy) = about_y[rng.below(3) as usize].sin_cos();
-                for p in &mut mesh.positions {
-                    let d = *p - centre;
-                    // Generic angles about all three axes: no face is left
-                    // parallel to an axis view, so none is edge-on up to noise.
-                    let d = Vec3::new(cy * d.x + sy * d.z, d.y, -sy * d.x + cy * d.z);
-                    let tilted = Vec3::new(d.x, cx * d.y - sx * d.z, sx * d.y + cx * d.z);
-                    *p = centre
-                        + Vec3::new(
-                            cz * tilted.x - sz * tilted.y,
-                            sz * tilted.x + cz * tilted.y,
-                            tilted.z,
-                        );
-                }
-            }
-            mesh
-        })
-        .collect()
-}
-
-fn views() -> Vec<(&'static str, Frame3)> {
-    let o = Point3::ZERO;
-    vec![
-        ("plan", plan_frame()),
-        ("+X", frame(Vec3::Y, Vec3::Z, Vec3::X, o)),
-        ("-X", frame(Vec3::Z, Vec3::Y, -Vec3::X, o)),
-        ("+Y", frame(Vec3::Z, Vec3::X, Vec3::Y, o)),
-        ("-Y", frame(Vec3::X, Vec3::Z, -Vec3::Y, o)),
-        ("isometric", isometric_frame(Point3::new(0.1, 0.2, 0.3))),
-        (
-            "oblique",
-            looking_along(Vec3::new(0.3, -0.5, 0.8), Point3::new(-0.4, 0.7, 0.1)),
-        ),
-    ]
-}
 
 // --- the oracle ------------------------------------------------------------
 

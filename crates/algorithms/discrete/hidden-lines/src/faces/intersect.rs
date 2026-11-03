@@ -10,9 +10,9 @@
 
 use std::cmp::Ordering;
 
-use axiolid_contracts::{ExecutionOptions, GeomResult};
+use axiolid_contracts::{ExecutionOptions, GeomError, GeomResult};
 use axiolid_exact::Dyadic;
-use axiolid_exact_arrangement::{PointId, Segment};
+use axiolid_exact_arrangement::{PointId, Segment, CROSSING_SCRATCH_BYTES};
 
 use super::points::Points;
 use super::segments::plane_points;
@@ -22,6 +22,9 @@ use crate::decide::decide;
 use crate::recipe::{Constraint, Kind, Lift, ValueSign};
 
 /// A chord of one triangle: its two image points.
+/// Bytes charged for one intersection segment: its two exact end points.
+const SEGMENT_SCRATCH_BYTES: usize = 2 * CROSSING_SCRATCH_BYTES;
+
 struct Chord {
     ends: [PointId; 2],
     is_edge: bool,
@@ -73,9 +76,11 @@ pub(crate) fn intersection_segments(
     faces: &Faces<'_>,
     points: &mut Points,
     work: &mut Work,
+    declared: usize,
     options: &ExecutionOptions,
     out: &mut Vec<Segment>,
 ) -> Result<(), Error> {
+    let first = out.len();
     for a in 0..faces.tris.len() {
         if !faces.covers(a) {
             continue;
@@ -104,6 +109,16 @@ pub(crate) fn intersection_segments(
                 pair(faces, points, a, b, work).map_err(|error| faces.blame(a, error))?
             {
                 out.push(segment);
+                // Each segment keeps two exact points and may be split by
+                // every other segment it meets; charge it like a crossing.
+                let charged = SEGMENT_SCRATCH_BYTES.saturating_mul(out.len() - first);
+                if let Some(budget) = options.memory_budget_bytes() {
+                    if declared.saturating_add(charged) > budget {
+                        return Err(Error::from(GeomError::BudgetExceeded {
+                            resource: "memory",
+                        }));
+                    }
+                }
             }
         }
     }
@@ -180,7 +195,7 @@ mod tests {
         let faces = setup.faces(&mut work);
         let mut points = setup.points();
         let mut out = Vec::new();
-        intersection_segments(&faces, &mut points, &mut work, &options(), &mut out)?;
+        intersection_segments(&faces, &mut points, &mut work, 0, &options(), &mut out)?;
         Ok(out.iter().map(|s| flat(&points, s)).collect())
     }
 

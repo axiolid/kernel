@@ -35,10 +35,16 @@
 mod intersect;
 mod label;
 mod points;
+mod provider;
+mod regions;
 mod segments;
 mod side;
 #[cfg(test)]
 mod testing;
+
+pub use provider::ScalarVisibleFaces;
+#[doc(hidden)]
+pub use provider::{ScanVisibleFaces, UnprunedVisibleFaces};
 
 use std::cmp::Ordering;
 
