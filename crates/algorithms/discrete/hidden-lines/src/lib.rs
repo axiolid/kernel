@@ -23,6 +23,7 @@ mod broad;
 mod caps;
 mod decide;
 mod edges;
+mod faces;
 mod occlusion;
 mod output;
 mod param;

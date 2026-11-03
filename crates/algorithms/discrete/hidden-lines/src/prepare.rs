@@ -55,6 +55,13 @@ impl ResourceNames {
         vertices: "hidden-line source vertices",
         triangles: "hidden-line source triangles",
     };
+
+    pub(crate) const VISIBLE_FACES: Self = Self {
+        label: "visible-face",
+        meshes: "visible-face meshes",
+        vertices: "visible-face source vertices",
+        triangles: "visible-face source triangles",
+    };
 }
 
 /// Where one mesh sits in the prepared lists.

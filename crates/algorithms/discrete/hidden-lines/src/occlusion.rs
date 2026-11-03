@@ -177,7 +177,7 @@ fn resolve_with(
 }
 
 /// The constraints that keep a point: depth range and region.
-fn kept_constraints(scene: &Scene<'_>) -> Vec<Constraint> {
+pub(crate) fn kept_constraints(scene: &Scene<'_>) -> Vec<Constraint> {
     let mut out = Vec::new();
     if let Some(near) = scene.near {
         out.push(Constraint::new(Kind::BelowNear(near), false));
