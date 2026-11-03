@@ -30,6 +30,7 @@ axiolid-brep-boolean.workspace = true
 axiolid-reference.workspace = true
 axiolid-surface.workspace = true
 axiolid-nurbs.workspace = true
+axiolid-inspect.workspace = true
 
 [dev-dependencies]
 # The measurement oracle. `volume_properties` audits closed-two-manifoldness
@@ -40,7 +41,6 @@ axiolid-nurbs.workspace = true
 axiolid-measure = { workspace = true, features = ["exact"] }
 axiolid-mesh-boolean-boolmesh.workspace = true
 axiolid-brep-audit.workspace = true
-axiolid-inspect.workspace = true
 axiolid-mesh-section-contract.workspace = true
 axiolid-dispatch = { workspace = true, features = ["mesh-section"] }
 

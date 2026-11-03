@@ -901,7 +901,10 @@ impl<B: MeshBoolean> ReferenceMeshCompiler<B> {
     }
 
     /// The mesh boolean of `subject` and `tool`, refused where its result
-    /// touches itself (#194).
+    /// touches itself (#194), and, for a union, where it holds two bodies
+    /// within the linear tolerance of each other (#356, #357): the operands
+    /// meet there and the boolean, which has no tolerance, left them apart.
+    /// That union is refused by name, [`crate::UNMERGED_UNION_CONTACT`].
     fn cut(
         &self,
         subject: &TriMesh,
@@ -922,6 +925,19 @@ impl<B: MeshBoolean> ReferenceMeshCompiler<B> {
                      meet tangentially there, leaving no material between two faces"
                 ),
             }));
+        }
+        if operator == axiolid_core::BooleanOperator::Union {
+            let eps = options.tolerance().linear();
+            if let Some(found) = crate::contact::unmerged(&outcome.mesh, eps) {
+                return Err(GeomError::Degenerate(format!(
+                    "{}: two bodies {:e} apart, within the linear tolerance {eps:e} \
+                     (boxes {:?} and {:?})",
+                    crate::UNMERGED_UNION_CONTACT,
+                    found.distance,
+                    found.first,
+                    found.second
+                )));
+            }
         }
         Ok(outcome)
     }

@@ -53,6 +53,12 @@ owns graph traversal and dispatch; the construction algorithms themselves
   at zero, and the deviation report names it
   (`deviation::SNAPPED_OPERANDS`). A boolean whose snapped operands are
   refused is cut as given, with no snap reported.
+- A union whose result holds two bodies within the linear tolerance of
+  each other is refused with `GeomError::Degenerate`, starting with
+  `UNMERGED_UNION_CONTACT`: the operands meet within the tolerance, as the
+  exact compiler reads them (ADR 0080), and the tolerance-free mesh boolean
+  left them apart (#356, #357; ADR 0096). Bodies further apart are
+  authored and kept.
 
 ## Depends on
 
@@ -64,6 +70,7 @@ owns graph traversal and dispatch; the construction algorithms themselves
 - [`axiolid-curve`](./axiolid-curve)
 - [`axiolid-exact-compile-contract`](./axiolid-exact-compile-contract)
 - [`axiolid-guarantees`](./axiolid-guarantees)
+- [`axiolid-inspect`](./axiolid-inspect)
 - [`axiolid-mesh`](./axiolid-mesh)
 - [`axiolid-mesh-boolean-contract`](./axiolid-mesh-boolean-contract)
 - [`axiolid-mesh-compile-contract`](./axiolid-mesh-compile-contract)

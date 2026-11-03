@@ -6,6 +6,7 @@ mod bounded;
 mod brep;
 mod certify;
 mod channels;
+mod contact;
 pub mod deviation;
 mod directrix;
 mod half_space_boundary;
@@ -24,6 +25,7 @@ pub const BACKEND_ID: BackendId = BackendId::new("scalar-compile");
 
 mod compiler;
 pub use compiler::ReferenceMeshCompiler;
+pub use contact::UNMERGED_UNION_CONTACT;
 pub use deviation::{DeviationBound, DeviationContribution, DeviationPath, DeviationReport};
 
 mod exact;

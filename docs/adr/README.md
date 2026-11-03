@@ -79,3 +79,4 @@ Package names and paths in older accepted records describe the tree at the time 
 | [0092](./0092-mesh-sections-report-the-solids-cut-as-closed-regions.md) | Mesh sections report the solid's cut as closed regions |
 | [0093](./0093-mesh-sections-merge-in-plane-faces-on-an-exact-arrangement.md) | Mesh sections merge in-plane faces on an exact arrangement |
 | [0095](./0095-profiles-are-validated-on-their-lowered-arc-rings.md) | Profiles are validated on their lowered arc rings |
+| [0096](./0096-a-union-decides-operand-contact-at-the-linear-tolerance.md) | A union decides operand contact at the linear tolerance |

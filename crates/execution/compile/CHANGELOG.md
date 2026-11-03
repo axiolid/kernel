@@ -9,6 +9,19 @@ caret rule for `0.x` versions.
 
 ## [Unreleased]
 
+### Fixed
+
+- A mesh union whose result holds two bodies within the linear tolerance of
+  each other (faces in contact under a general rotation, or a gap smaller
+  than the tolerance) is refused by name, `GeomError::Degenerate` starting
+  with `UNMERGED_UNION_CONTACT`, instead of returned as two disjoint solids
+  (#356, #357). A union whose operand already holds two shells within the
+  tolerance is refused too.
+
+### Changed
+
+- Depends on `axiolid-inspect` (`surface_gap`) in production (ADR 0096).
+
 ## [0.3.42] - 2026-11-03
 
 ### Added
