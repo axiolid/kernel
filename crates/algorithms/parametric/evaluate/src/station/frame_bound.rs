@@ -97,12 +97,33 @@
 //! before it; its distance from the certified joint
 //! ([`super::CompositeBasis::joint_intervals`]) adds to the measure.
 //!
+//! # Intrinsic curves (#361)
+//!
+//! An intrinsic curve's heading is the closed-form integral of its
+//! curvature law, so over a seam-free span `|T'| <= sup |k|` and `|T''| <=
+//! sup |k'| + sup k^2` in arc length, from the law's own suprema
+//! (`crate::bound::intrinsic_derivative_bounds2`), and the axes follow by
+//! the rules above. An elevated curve over an intrinsic plan composes them
+//! with the profile in plan distance, as over a line or a circle. Only the
+//! POINT is a quadrature, with no error bound of its own, so
+//! [`piece_frame_bounds`] leaves these curves unbounded and [`FrameLaw`]
+//! compares every frame it reads with the exact one, as for the curves
+//! read by quadrature: the exact point from a certified
+//! [`IntrinsicPositionTable`](crate::bound::IntrinsicPositionTable), the
+//! exact axes from the closed-form heading. The measure is exact. The
+//! families are a 2D intrinsic curve, a level planar intrinsic space curve
+//! and an elevated curve over an intrinsic plan with a closed-form
+//! profile, each with an orthonormal start frame and any curvature law
+//! with closed-form bounds of `k` to `k'''`.
+//!
 //! # Not bounded
 //!
-//! `None`, never a guess: an intrinsic curve, a chain, and an offset beside
-//! one of them, beside an elevated or a banked curve; a circle with a
-//! skewed frame; an elevated or banked curve with another plan or an
-//! intrinsic profile; a span that crosses a seam, a vertex of a polyline
+//! `None`, never a guess: a chain, and an offset beside one of them, beside
+//! an intrinsic, an elevated or a banked curve; a banked curve over an
+//! intrinsic or chain plan; an intrinsic space curve with torsion or out of
+//! a level plane; an intrinsic curve with a stretched or skewed start
+//! frame; a circle with a skewed frame; an elevated or banked curve with
+//! another plan or an intrinsic profile; a span that crosses a seam, a vertex of a polyline
 //! or a piece of a law; a tangent too steep for a horizontal lower bound;
 //! a cant whose roll reaches a quarter turn; a curve read by quadrature
 //! placed in a frame that tilts `+Z`, and a placed offset piece.
@@ -117,7 +138,7 @@ use axiolid_contracts::GeomResult;
 use axiolid_core::{Scalar, Transform3, Vec2, Vec3};
 use axiolid_curve::{Curve2, Curve3};
 
-use super::certify::{checked_tolerance, PieceReader};
+use super::certify::{checked_tolerance, reads_intrinsic, IntrinsicReader, PieceReader};
 use super::offset::OffsetTable;
 use super::{CompositeBasis, DistanceConvention, StationCurve, StationPiece, KEEPS_UP_TOLERANCE};
 use crate::arc_parameter::ARC_LENGTH_TOLERANCE;
@@ -393,7 +414,8 @@ fn placement_stretch(rigid: axiolid_core::Transform3) -> Option<Scalar> {
 /// elevation, cant or pivot law); a caller splits there.
 ///
 /// `None` where the frame law is not certified: an ellipse, a B-spline,
-/// an intrinsic curve, a chain, an offset, a skewed circle, an elevated or
+/// an intrinsic curve (only [`FrameLaw`] certifies those, #361), a chain,
+/// an offset, a skewed circle, an elevated or
 /// banked curve whose plan is not a line or a circle or whose profile is
 /// not of closed-form pieces, a span across a seam, a tangent too steep to
 /// bound its horizontal part, a roll reaching a quarter turn, and a
@@ -540,12 +562,68 @@ fn finish(
     finite.then_some(out)
 }
 
+/// The tangent law of a piece of an intrinsic curve over `[lo, hi]` of its
+/// measure (#361): the curvature law's closed-form suprema, `|T'| <= sup
+/// |k|` and `|T''| <= sup |k'| + sup k^2` in arc length, composed with the
+/// profile in plan distance on an elevated curve (the line and circle
+/// plans' path). `None` across a seam of the law, where `k'` may jump: the
+/// caller splits.
+fn intrinsic_tangent_law(
+    reader: &IntrinsicReader<'_>,
+    lo: Scalar,
+    hi: Scalar,
+) -> Option<TangentLaw> {
+    let (bounds, middle) = reader.derivatives(lo, hi)?;
+    if reader.is_elevated() {
+        return plan_measured(bounds, middle, lo, hi, Kind::ReferenceUp);
+    }
+    if !(bounds.third.is_finite() && bounds.second.is_finite()) {
+        return None;
+    }
+    Some(TangentLaw {
+        point: [bounds.first, bounds.second],
+        tangent: [bounds.second, bounds.third],
+        middle: unit(middle)?,
+        kind: Kind::Planar,
+        measure: 0.0,
+    })
+}
+
+/// The bounds of a piece of an intrinsic curve (#361) over `[from, to]`
+/// into it: the closed-form tangent law, with the read frames compared
+/// against the exact ones. `None` where they are not bounded.
+fn intrinsic_frame_bounds(
+    reader: &IntrinsicReader<'_>,
+    piece: &StationPiece<'_>,
+    from: Scalar,
+    to: Scalar,
+    reading: FrameReading,
+) -> Option<FrameLawBounds> {
+    let (u0, u1) = (from.min(to), from.max(to));
+    let length = piece.length();
+    let slack = numerical_measure(length);
+    if !(u0.is_finite() && u1.is_finite()) || u0 < -slack || u1 > length + slack {
+        return None;
+    }
+    let (u0, u1) = (u0.max(0.0), u1.min(length));
+    let (m0, m1) = if piece.reversed {
+        (piece.end - u1, piece.end - u0)
+    } else {
+        (piece.start + u0, piece.start + u1)
+    };
+    let law = intrinsic_tangent_law(reader, m0, m1)?;
+    let errors = reader.errors(piece, u0, u1).ok()??;
+    finish(piece, law, m1 - m0, reading, errors)
+}
+
 /// A piece's reader, built when first asked for.
 enum Slot<'c> {
     /// A piece whose frame is read in closed form.
     Closed,
     /// A piece read by quadrature, with its reader.
     Read(Box<PieceReader<'c>>),
+    /// A piece of an intrinsic curve (#361), with its reader.
+    Intrinsic(Box<IntrinsicReader<'c>>),
     /// A piece read by quadrature that is not bounded.
     Unbounded,
 }
@@ -580,9 +658,15 @@ enum LawBasis<'b, 'c> {
 /// it, which [`CompositeBasis::joint_intervals`] certifies: its distance
 /// from the true joint is added to the measure.
 ///
+/// A 2D intrinsic curve, a level planar intrinsic space curve and an
+/// elevated curve over an intrinsic plan are bounded by their curvature
+/// law's closed-form suprema, each frame read compared with the exact one
+/// (see [the module documentation](self#intrinsic-curves-361)).
+///
 /// Not bounded (`None`): every family [`piece_frame_bounds`] leaves
-/// unbounded other than those above (an intrinsic curve, a chain, an
-/// offset beside a curve parameterised by its plan length or beside a
+/// unbounded other than those above (a chain, an intrinsic space curve
+/// with torsion or tilted, a banked curve over an intrinsic or chain plan,
+/// an offset beside a curve parameterised by its plan length or beside a
 /// banked curve, a skewed circle, a steep tangent), a curve read by
 /// quadrature placed in a frame that tilts `+Z`, a placed offset piece,
 /// and a piece after joints whose distances are not certified at the
@@ -609,6 +693,12 @@ fn by_quadrature(curve: StationCurve<'_>) -> bool {
     matches!(curve, StationCurve::Offset(_)) || !curve.measure_is_exact()
 }
 
+/// Whether a piece's frame needs a reader: read by quadrature, or an
+/// intrinsic curve whose point is compared with certified positions.
+fn needs_reader(curve: StationCurve<'_>) -> bool {
+    by_quadrature(curve) || reads_intrinsic(curve)
+}
+
 impl<'b, 'c> FrameLaw<'b, 'c> {
     /// The frame law along the atomic `curve`, placed by `placement` if
     /// any, its quadratures certified to `tolerance`.
@@ -624,7 +714,7 @@ impl<'b, 'c> FrameLaw<'b, 'c> {
         tolerance: Scalar,
     ) -> GeomResult<Self> {
         let tolerance = checked_tolerance(tolerance)?;
-        let whole = if by_quadrature(curve) {
+        let whole = if needs_reader(curve) {
             let piece = StationPiece::whole(curve)?;
             Some(match placement {
                 Some(rigid) => piece.placed(rigid, true),
@@ -710,6 +800,12 @@ impl<'b, 'c> FrameLaw<'b, 'c> {
         reading: FrameReading,
     ) -> Option<FrameLawBounds> {
         let slot = self.slots[k].get_or_init(|| {
+            if reads_intrinsic(piece.curve) {
+                return match IntrinsicReader::new(piece, self.tolerance) {
+                    Ok(Some(reader)) => Slot::Intrinsic(Box::new(reader)),
+                    _ => Slot::Unbounded,
+                };
+            }
             if !by_quadrature(piece.curve) {
                 return Slot::Closed;
             }
@@ -721,6 +817,7 @@ impl<'b, 'c> FrameLaw<'b, 'c> {
         match slot {
             Slot::Closed => piece_frame_bounds(piece, from, to, reading),
             Slot::Read(reader) => read_frame_bounds(reader, piece, from, to, table, reading),
+            Slot::Intrinsic(reader) => intrinsic_frame_bounds(reader, piece, from, to, reading),
             Slot::Unbounded => None,
         }
     }

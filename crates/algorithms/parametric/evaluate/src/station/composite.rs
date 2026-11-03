@@ -824,6 +824,13 @@ impl<'c> StationPiece<'c> {
         side: SeamSide,
         table: Option<&OffsetTable>,
     ) -> GeomResult<(Scalar, SectionFrame)> {
+        let (m, curve_side) = self.read_at(u, side);
+        Ok((m, self.curve.section_at(m, curve_side, table)?))
+    }
+
+    /// The curve's own measure a read at distance `u` into the piece from
+    /// `side` stands at, and the side of the curve it reads (#361).
+    pub(crate) fn read_at(&self, u: Scalar, side: SeamSide) -> (Scalar, SeamSide) {
         let length = self.length();
         let u = u.clamp(0.0, length);
         let side = if u <= slack(u) {
@@ -833,8 +840,7 @@ impl<'c> StationPiece<'c> {
         } else {
             side
         };
-        let (m, curve_side) = self.measure(u, side);
-        Ok((m, self.curve.section_at(m, curve_side, table)?))
+        self.measure(u, side)
     }
 
     /// A curve's section as the piece presents it: reversed, then placed.

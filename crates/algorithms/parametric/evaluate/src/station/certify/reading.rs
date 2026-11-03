@@ -50,7 +50,7 @@ use crate::station::offset::{OffsetTable, StationOffset};
 use crate::station::{reference_up_frame, SectionFrame, KEEPS_UP_TOLERANCE};
 
 /// The rounding allowed a computed unit axis.
-const AXIS_ROUNDING: Scalar = 1e-14;
+pub(super) const AXIS_ROUNDING: Scalar = 1e-14;
 
 /// What a piece's frames are read along.
 enum Source<'c> {
@@ -93,7 +93,7 @@ pub(crate) struct PieceReader<'c> {
 /// The exact frame at `point` with unit tangent `tangent`, as the kernel
 /// frames it: the planar frame where the tangent is horizontal, the
 /// reference-up frame elsewhere.
-fn framed(point: Point3, tangent: Vec3) -> GeomResult<SectionFrame> {
+pub(super) fn framed(point: Point3, tangent: Vec3) -> GeomResult<SectionFrame> {
     if tangent.z == 0.0 {
         return Ok(SectionFrame {
             point,

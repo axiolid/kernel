@@ -24,6 +24,18 @@ caret rule for `0.x` versions.
   read cost at most 64 panels and independent of the order of reads, where
   `IntrinsicPositions` (midpoint rule) marches forward and restarts on a
   backward read.
+- `FrameLaw` bounds the frames of sections at stations along intrinsic
+  curves (#361): a 2D intrinsic curve, a level planar intrinsic space curve
+  and an elevated curve over an intrinsic plan (a gradient curve over
+  lines, arcs and clothoids). The derivative bounds are the curvature
+  law's closed-form suprema (`|T'| <= sup|k|`, `|T''| <= sup|k'| + sup
+  k^2`, composed with the profile in plan distance), and each frame read
+  is compared with the exact one (point from an `IntrinsicPositionTable`,
+  axes from the closed-form heading) into `point_error` and `axis_error`.
+  `piece_frame_bounds` still returns `None` for every intrinsic curve.
+  Still unbounded: chains, banked curves over intrinsic or chain plans,
+  intrinsic space curves with torsion or tilted, and curves with a stretched
+  or skewed start frame.
 
 ## [0.3.18] - 2026-10-28
 

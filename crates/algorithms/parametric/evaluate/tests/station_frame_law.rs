@@ -297,7 +297,8 @@ fn offsets_beside_an_ellipse_and_a_b_spline_are_bounded() {
 }
 
 #[test]
-fn a_piece_after_a_quadrature_carries_its_joint_and_an_intrinsic_one_is_unbounded() {
+fn a_piece_after_a_quadrature_carries_its_joint_and_an_offset_beside_an_intrinsic_one_is_unbounded()
+{
     let plan = ellipse();
     // Two spans of the ellipse end to end: the second starts where the
     // kernel sums the first's estimated length.
@@ -337,8 +338,10 @@ fn a_piece_after_a_quadrature_carries_its_joint_and_an_intrinsic_one_is_unbounde
         CurvatureLaw::clothoid(0.0, 1.0 / 300.0, 60.0),
         60.0,
     ));
+    // The clothoid itself is bounded since #361 (`station_frame_law_intrinsic`);
+    // an offset beside it is not.
     let law = FrameLaw::atomic(StationCurve::Two(&clothoid), None, TOLERANCE).unwrap();
-    assert!(law.bounds(5.0, 10.0, FrameReading::Section).is_none());
+    assert!(law.bounds(5.0, 10.0, FrameReading::Section).is_some());
     let base = StationPiece::between(StationCurve::Two(&clothoid), 0.0, 60.0).unwrap();
     let beside =
         CompositeBasis::new(offset_pieces(&[base], OffsetLaw::Planar { distance: 2.0 }).unwrap())

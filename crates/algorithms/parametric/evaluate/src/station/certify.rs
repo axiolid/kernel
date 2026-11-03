@@ -114,9 +114,11 @@ use beside::chord_offset_length;
 use panels::{adapt, finish, product, Compensated, Jet, Measured, PANEL_SHARE, VELOCITY_ROUNDING};
 
 mod beside;
+mod intrinsic;
 mod panels;
 mod reading;
 
+pub(crate) use intrinsic::{reads_intrinsic, IntrinsicReader};
 pub(crate) use reading::PieceReader;
 
 /// The input a length no certified bound here reaches is refused for.
