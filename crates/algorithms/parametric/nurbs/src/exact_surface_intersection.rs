@@ -221,9 +221,6 @@ pub enum Derivation {
     /// `A(v) cos u + B(v) sin u = C(v)`; the curve is `u` as a function of
     /// the tube angle `v` (ADR 0076).
     TorusAngleSection,
-    /// A plane containing a torus's axis cuts the two meridian circles of
-    /// the tube at the angles where the plane meets the ring (#382).
-    TorusMeridianCircles,
     /// A plane through a cone's apex cuts rays along its rulings, starting
     /// at the apex.
     ConeApexRulings,
@@ -250,6 +247,9 @@ pub enum Derivation {
     /// real roots of the other's equation along the carrier's ellipse, a
     /// quartic in the half-angle, isolated exactly (#287).
     ParallelEllipticalCylinderRulings,
+    /// A plane containing a torus's axis cuts the two meridian circles of
+    /// the tube at the angles where the plane meets the ring (#382).
+    TorusMeridianCircles,
 }
 
 /// Derive the exact intersection curve of two elementary surfaces.

@@ -591,7 +591,10 @@ fn box_less_a_torus_through_its_top(g: &mut Graph) -> NodeId {
         2.0 * PI,
     );
     let block = g.extrusion(rect(1.0, 1.0), 1.0);
-    let block = g.instance(block, Transform3::from_translation(Vec3::new(-1.0, 0.0, 0.0)));
+    let block = g.instance(
+        block,
+        Transform3::from_translation(Vec3::new(-1.0, 0.0, 0.0)),
+    );
     g.minus(block, torus)
 }
 
@@ -625,7 +628,10 @@ fn a_box_less_a_torus_through_its_top_face_is_exact_within_a_micrometre() {
     let error = ReferenceExactCompiler::new()
         .compile_exact(&graph, cut, &ExecutionOptions::new(Tolerance::ZERO))
         .expect_err("refused at zero");
-    assert!(error.to_string().contains("too close to a face boundary"), "{error}");
+    assert!(
+        error.to_string().contains("too close to a face boundary"),
+        "{error}"
+    );
 }
 
 #[test]

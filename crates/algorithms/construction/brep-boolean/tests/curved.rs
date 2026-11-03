@@ -205,7 +205,12 @@ fn a_box_less_a_torus_whose_tube_leaves_through_the_top() {
         );
     }
     assert!(report.linear() <= 1e-7, "{}", report.linear());
-    let exact = boolean(&column, &torus, BooleanOperator::Difference, Tolerance::ZERO);
+    let exact = boolean(
+        &column,
+        &torus,
+        BooleanOperator::Difference,
+        Tolerance::ZERO,
+    );
     assert!(matches!(exact, Err(BooleanError::Undecided)), "{exact:?}");
 }
 
@@ -246,7 +251,11 @@ fn a_bend_hanging_from_a_column_foot_shares_its_cap_once() {
         close("difference", volume(&cut), COLUMN, 1e-12);
         // The solids only touch.
         let common = boolean(&column, &bend, BooleanOperator::Intersection, tolerance);
-        assert_eq!(common.err(), Some(BooleanError::EmptyResult), "{tolerance:?}");
+        assert_eq!(
+            common.err(),
+            Some(BooleanError::EmptyResult),
+            "{tolerance:?}"
+        );
     }
 }
 
