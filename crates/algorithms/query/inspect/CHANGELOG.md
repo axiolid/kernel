@@ -9,6 +9,14 @@ caret rule for `0.x` versions.
 
 ## [Unreleased]
 
+### Added
+
+- `near_coplanar` and `NearCoplanar`: the first pair of triangles of two
+  meshes that nearly share a plane within a linear distance, not exactly
+  coplanar. Placement leaves such a residue where faces meet in exact
+  arithmetic; a boolean that decides on the raw values cannot settle it
+  (#391).
+
 ## [0.3.8] - 2026-11-03
 
 ### Added

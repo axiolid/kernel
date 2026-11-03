@@ -89,7 +89,7 @@ pub fn surface_gap(a: &TriMesh, b: &TriMesh, search_length: f64) -> Option<f64> 
 /// Every closest pair of convex sets is realised on a boundary feature, so
 /// checking all edge pairs and all vertex-to-face distances is exhaustive
 /// for triangles.
-fn triangle_distance(a: &[Point3; 3], b: &[Point3; 3]) -> f64 {
+pub(crate) fn triangle_distance(a: &[Point3; 3], b: &[Point3; 3]) -> f64 {
     // An edge through the other's interior has no closest pair on the
     // boundary features below: both sides of the crossing are positive
     // distances away (#390).
@@ -245,7 +245,7 @@ pub(crate) fn triangle_at(mesh: &TriMesh, index: usize) -> Option<[Point3; 3]> {
 }
 
 /// Bounding box of a triangle.
-fn bounds_of(triangle: &[Point3; 3]) -> Aabb {
+pub(crate) fn bounds_of(triangle: &[Point3; 3]) -> Aabb {
     let mut bounds = Aabb::from_point(triangle[0]);
     bounds.extend(triangle[1]);
     bounds.extend(triangle[2]);
@@ -253,7 +253,7 @@ fn bounds_of(triangle: &[Point3; 3]) -> Aabb {
 }
 
 /// Grow a box by a uniform margin, so a query catches near misses.
-fn grow(bounds: Aabb, margin: f64) -> Aabb {
+pub(crate) fn grow(bounds: Aabb, margin: f64) -> Aabb {
     let padding = Vec3::splat(margin);
     let mut grown = Aabb::from_point(bounds.min - padding);
     grown.extend(bounds.max + padding);
@@ -261,7 +261,7 @@ fn grow(bounds: Aabb, margin: f64) -> Aabb {
 }
 
 /// BVH over the triangles of a mesh, padded by the search length.
-fn build_index(mesh: &TriMesh, search_length: f64) -> Bvh<u32> {
+pub(crate) fn build_index(mesh: &TriMesh, search_length: f64) -> Bvh<u32> {
     let items = (0..mesh.indices.len() / 3).filter_map(|index| {
         let triangle = triangle_at(mesh, index)?;
         Some(SpatialItem::new(
