@@ -9,7 +9,7 @@
 
 use axiolid_core::{Frame2, Point2, Scalar, Vec2};
 use axiolid_curve::{CurvatureLaw, Intrinsic2};
-use axiolid_evaluate::bound::IntrinsicPositionTable;
+use axiolid_evaluate::bound::{IntrinsicPositionTable, IntrinsicPositions};
 
 fn frame() -> Frame2 {
     Frame2 {
@@ -258,6 +258,94 @@ fn a_bloss_transition_is_within_its_certified_error() {
             assert!((p - exact).length() <= error, "{target}: {s}");
             assert!(error <= target);
         }
+    }
+}
+
+/// Composite Simpson, 2^18 panels, of `(cos theta, sin theta)` over `[0, s]`.
+fn simpson(theta: &dyn Fn(Scalar) -> Scalar, s: Scalar) -> Vec2 {
+    let n = 1usize << 18;
+    let h = s / n as Scalar;
+    let (mut x, mut y) = (0.0, 0.0);
+    for i in 0..=n {
+        let w = if i == 0 || i == n {
+            1.0
+        } else if i % 2 == 1 {
+            4.0
+        } else {
+            2.0
+        };
+        let u = h * i as Scalar;
+        x += w * theta(u).cos();
+        y += w * theta(u).sin();
+    }
+    Vec2::new(x * h / 3.0, y * h / 3.0)
+}
+
+#[test]
+fn harmonic_transitions_are_within_their_certified_error() {
+    let l = 90.0;
+    let kappa = 1.0 / 200.0;
+    // Cosine ramp: k = kappa/2 (1 - cos(pi s / L)).
+    let cosine = CurvatureLaw::Sinusoid {
+        mean: 0.5 * kappa,
+        amplitude: -0.5 * kappa,
+        angular_frequency: core::f64::consts::PI / l,
+        phase: core::f64::consts::FRAC_PI_2,
+    };
+    let cosine_theta = move |u: Scalar| {
+        0.5 * kappa * (u - l / core::f64::consts::PI * (core::f64::consts::PI * u / l).sin())
+    };
+    // Sine-corrected: k = (d/L) s - d/(2 pi) sin(2 pi s / L).
+    let tau = core::f64::consts::TAU;
+    let corrected = CurvatureLaw::sine_corrected_transition(0.0, kappa, l);
+    let corrected_theta = move |u: Scalar| {
+        kappa * u * u / (2.0 * l) + kappa * l / (tau * tau) * ((tau * u / l).cos() - 1.0)
+    };
+    type Case<'a> = (&'a str, CurvatureLaw, &'a dyn Fn(Scalar) -> Scalar);
+    let cases: [Case<'_>; 2] = [
+        ("cosine", cosine, &cosine_theta),
+        ("sine-corrected", corrected, &corrected_theta),
+    ];
+    for (name, law, theta) in cases {
+        let curve = Intrinsic2::new(frame(), law, l);
+        for target in [1e-3, 1e-6, 1e-9] {
+            let table = IntrinsicPositionTable::new2(&curve, target, l).unwrap();
+            for s in samples(l, 12) {
+                let (p, error) = table.point2(s).unwrap();
+                let exact = place(&frame(), simpson(theta, s));
+                assert!((p - exact).length() <= error, "{name} {target}: {s}");
+                assert!(error <= target, "{name}: {error} > {target}");
+            }
+        }
+    }
+}
+
+#[test]
+fn a_slow_harmonic_is_charged_its_cancellation() {
+    // k = A sin(w s + p) with w s ~ 1e-7: the heading is evaluated as
+    // -(A/w)(cos(w s + p) - cos p), a difference of nearly equal cosines
+    // times 1e7, so its rounding (about 2e-9 rad here) is far above the
+    // turning's. The reference is the integral's series in `w s`, exact to
+    // rounding of the heading itself (below 1e-16).
+    let (a, w, p, l) = (1e-2, 1e-9, 1.0_f64, 100.0);
+    let law = CurvatureLaw::Sinusoid {
+        mean: 0.0,
+        amplitude: a,
+        angular_frequency: w,
+        phase: p,
+    };
+    let theta = move |u: Scalar| {
+        a * (p.sin() * u + p.cos() * w * u * u / 2.0 - p.sin() * w * w * u.powi(3) / 6.0)
+    };
+    let curve = Intrinsic2::new(frame(), law, l);
+    let table = IntrinsicPositionTable::new2(&curve, 1e-12, l).unwrap();
+    let mut positions = IntrinsicPositions::new2(&curve, 1e-12).unwrap();
+    for s in samples(l, 10) {
+        let exact = place(&frame(), simpson(&theta, s));
+        let (q, error) = table.point2(s).unwrap();
+        assert!((q - exact).length() <= error, "table {s}");
+        let (q, error) = positions.point2(s).unwrap();
+        assert!((q - exact).length() <= error, "midpoint {s}");
     }
 }
 

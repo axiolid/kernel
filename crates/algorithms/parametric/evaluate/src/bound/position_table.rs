@@ -42,7 +42,10 @@
 //!
 //! The rounding terms are those of the midpoint positions: the heading's,
 //! at most `64 eps (1 + K L) (1 + seams)` radians (`K` bounding `|k|`, `L`
-//! the end), which turns each tangent by as much so a point at `s` moves by
+//! the end) plus the harmonics' own, `8 eps |A/w| (2 + |p| + |w| L)` each
+//! (`crate::chain::harmonic_rounding`; the cosine difference of a slow
+//! harmonic cancels, so its rounding is not proportional to the turning),
+//! which turns each tangent by as much so a point at `s` moves by
 //! at most `s` times it; the compensated sums' `16 eps s`; and the start
 //! frame's stretch, applied to all of these, with `8 eps (|origin| +
 //! stretch s)` for placing the point.
@@ -52,7 +55,7 @@ use axiolid_curve::{Intrinsic2, Intrinsic3};
 
 use super::positions::{add, unit_frame, Placement};
 use super::{frame_stretch2, frame_stretch3, inflate};
-use crate::chain::curvature_bound;
+use crate::chain::{curvature_bound, harmonic_rounding};
 
 /// Most panels one table may use.
 pub const MAX_TABLE_PANELS: usize = 1 << 22;
@@ -218,7 +221,8 @@ impl IntrinsicPositionTable {
         }
         let turning = curvature_bound(law, 0.0, end)? * end;
         let heading_rounding =
-            64.0 * Scalar::EPSILON * (1.0 + turning) * (1.0 + seams.len() as Scalar);
+            64.0 * Scalar::EPSILON * (1.0 + turning) * (1.0 + seams.len() as Scalar)
+                + harmonic_rounding(law, end)?;
         let mut table = Self {
             local,
             placement,

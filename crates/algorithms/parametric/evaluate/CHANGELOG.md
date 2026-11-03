@@ -9,6 +9,15 @@ caret rule for `0.x` versions.
 
 ## [Unreleased]
 
+### Fixed
+
+- `IntrinsicPositions` (#317) now charges the heading's rounding of a
+  harmonic term of a curvature law (`Sinusoid`, `Composite`) on its own,
+  `8 eps |A/w| (2 + |p| + |w| L)` per harmonic: the closed-form heading
+  `-(A/w)(cos(w s + p) - cos p)` cancels, so for a slow or strongly phased
+  harmonic its rounding is far above the `64 eps (1 + K L)` charged before,
+  and a point could lie past its certified error.
+
 ### Added
 
 - The package now ships `LICENSE` and `LICENSE-COMMERCIAL` (symlinks to the

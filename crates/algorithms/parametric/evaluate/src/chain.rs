@@ -551,3 +551,49 @@ pub(crate) fn curvature_bound(law: &CurvatureLaw, lo: Scalar, hi: Scalar) -> Opt
     let bound = bound * (1.0 + crate::bound::ROUNDING);
     bound.is_finite().then_some(bound)
 }
+
+/// Upper bound on the rounding, in radians, of the closed-form heading of
+/// `law` over `[0, length]` that is not proportional to the turning (#361).
+///
+/// `harmonic_turning` evaluates `-(A/w) (cos(w s + p) - cos p)`: the
+/// argument carries a rounding of `eps (|w s| + |p|)`, the two cosines
+/// `eps` each, and the difference, product and quotient a few more, so the
+/// error is at most `c eps |A/w| (2 + |p| + |w| s)` with `c` below 4; 8 is
+/// taken. A piecewise law sums over its pieces, each written in an arc
+/// length no longer than `length`. A zero frequency integrates to `A
+/// sin(p) s`, a relative rounding the turning term already charges. `None`
+/// for a non-finite sum (a frequency too near zero to divide by).
+pub(crate) fn harmonic_rounding(law: &CurvatureLaw, length: Scalar) -> Option<Scalar> {
+    let term = |h: &axiolid_curve::Harmonic| -> Scalar {
+        if h.angular_frequency == 0.0 {
+            return 0.0;
+        }
+        8.0 * Scalar::EPSILON
+            * (h.amplitude / h.angular_frequency).abs()
+            * (2.0 + h.phase.abs() + h.angular_frequency.abs() * length)
+    };
+    let sum = match law {
+        CurvatureLaw::Constant { .. } | CurvatureLaw::Polynomial { .. } => 0.0,
+        CurvatureLaw::Sinusoid {
+            amplitude,
+            angular_frequency,
+            phase,
+            ..
+        } => term(&axiolid_curve::Harmonic {
+            amplitude: *amplitude,
+            angular_frequency: *angular_frequency,
+            phase: *phase,
+        }),
+        CurvatureLaw::Composite { harmonics, .. } => harmonics.iter().map(term).sum(),
+        CurvatureLaw::Piecewise { laws, .. } => {
+            let mut total = 0.0;
+            for piece in laws {
+                total += harmonic_rounding(piece, length)?;
+            }
+            total
+        }
+        _ => return None,
+    };
+    let out = sum * (1.0 + crate::bound::ROUNDING);
+    out.is_finite().then_some(out)
+}

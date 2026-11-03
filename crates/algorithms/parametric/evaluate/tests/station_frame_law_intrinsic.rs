@@ -353,6 +353,68 @@ fn a_clothoid_basis_is_bounded() {
     }
 }
 
+/// Composite Simpson, 2^16 panels, of `(cos theta, sin theta)` over `[0, s]`.
+fn simpson(theta: &dyn Fn(Scalar) -> Scalar, s: Scalar) -> Vec2 {
+    let n = 1usize << 16;
+    let h = s / n as Scalar;
+    let (mut x, mut y) = (0.0, 0.0);
+    for i in 0..=n {
+        let w = if i == 0 || i == n {
+            1.0
+        } else if i % 2 == 1 {
+            4.0
+        } else {
+            2.0
+        };
+        let u = h * i as Scalar;
+        x += w * theta(u).cos();
+        y += w * theta(u).sin();
+    }
+    Vec2::new(x * h / 3.0, y * h / 3.0)
+}
+
+/// A cosine ramp and a sine-corrected transition (harmonic laws) are
+/// bounded, their points from a Simpson reference.
+#[test]
+fn harmonic_transitions_are_bounded() {
+    let (l, kappa) = (60.0, 1.0 / 100.0);
+    let pi = core::f64::consts::PI;
+    let tau = core::f64::consts::TAU;
+    let cosine = CurvatureLaw::Sinusoid {
+        mean: 0.5 * kappa,
+        amplitude: -0.5 * kappa,
+        angular_frequency: pi / l,
+        phase: core::f64::consts::FRAC_PI_2,
+    };
+    let corrected = CurvatureLaw::sine_corrected_transition(0.0, kappa, l);
+    let cosine_theta = move |u: Scalar| 0.5 * kappa * (u - l / pi * (pi * u / l).sin());
+    let corrected_theta = move |u: Scalar| {
+        kappa * u * u / (2.0 * l) + kappa * l / (tau * tau) * ((tau * u / l).cos() - 1.0)
+    };
+    let cases: [(CurvatureLaw, &dyn Fn(Scalar) -> Scalar); 2] =
+        [(cosine, &cosine_theta), (corrected, &corrected_theta)];
+    for (law, theta) in cases {
+        let curve = Curve2::Intrinsic(Intrinsic2::new(frame(), law, l));
+        let law = FrameLaw::atomic(StationCurve::Two(&curve), None, TOLERANCE).unwrap();
+        let reference = |s: Scalar| {
+            let f = frame();
+            let local = simpson(theta, s);
+            let p = f.origin + f.x * local.x + f.y * local.y;
+            let t = f.x * theta(s).cos() + f.y * theta(s).sin();
+            planar(Vec3::new(p.x, p.y, 0.0), Vec3::new(t.x, t.y, 0.0))
+        };
+        for (lo, hi) in [(2.0, 20.0), (25.0, 58.0)] {
+            check(
+                &law,
+                reference,
+                |s| station_section2(&curve, s).unwrap(),
+                lo,
+                hi,
+            );
+        }
+    }
+}
+
 #[test]
 fn a_level_space_curve_is_bounded() {
     let c = 1.0 / 1800.0;

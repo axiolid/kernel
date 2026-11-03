@@ -36,7 +36,7 @@ use axiolid_core::{Frame2, Frame3, Point2, Point3, Scalar, Vec2};
 use axiolid_curve::{Intrinsic2, Intrinsic3};
 
 use super::{frame_stretch2, frame_stretch3, inflate};
-use crate::chain::curvature_bound;
+use crate::chain::{curvature_bound, harmonic_rounding};
 
 /// Most midpoint panels one curve's positions may use.
 pub const MAX_POSITION_PANELS: usize = 1 << 22;
@@ -161,7 +161,8 @@ impl IntrinsicPositions {
         }
         let turning = curvature_bound(law, 0.0, length)? * length;
         let heading_rounding =
-            64.0 * Scalar::EPSILON * (1.0 + turning) * (1.0 + seams.len() as Scalar);
+            64.0 * Scalar::EPSILON * (1.0 + turning) * (1.0 + seams.len() as Scalar)
+                + harmonic_rounding(law, length)?;
         Some(Self {
             local,
             placement,

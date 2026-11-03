@@ -3,7 +3,8 @@ intrinsic plans (#361, ADR 0082 amendment).
 
 Each mutant breaks one step the bounds rest on. The position table: the
 Gauss-Legendre remainder dropped, the partial panel's remainder dropped, a
-checkpoint that forgets the remainder so far. The reader: the read point's
+checkpoint that forgets the remainder so far, the harmonics' own heading
+rounding dropped (here and in the midpoint positions). The reader: the read point's
 computed distance from the exact point dropped, a banked curve taken as an
 elevated one, the orthonormal start frame and the level plane of a space
 curve not required. The frame law: the tangent's second derivative without
@@ -36,6 +37,7 @@ ROOT = pathlib.Path(__file__).resolve().parents[1]
 TIMEOUT = 1800
 EVAL = "crates/algorithms/parametric/evaluate"
 TABLE = f"{EVAL}/src/bound/position_table.rs"
+POSITIONS_SRC = f"{EVAL}/src/bound/positions.rs"
 READER = f"{EVAL}/src/station/certify/intrinsic.rs"
 FB = f"{EVAL}/src/station/frame_bound.rs"
 
@@ -86,6 +88,12 @@ MUTANTS = [
      "                    remainder: 0.0,\n"
      "                    ..state\n"
      "                });", [POSITIONS]),
+    ("the table drops the harmonics' rounding", TABLE,
+     "                + harmonic_rounding(law, end)?;",
+     "                + 0.0 * harmonic_rounding(law, end)?;", [POSITIONS]),
+    ("the midpoint positions drop the harmonics' rounding", POSITIONS_SRC,
+     "                + harmonic_rounding(law, length)?;",
+     "                + 0.0 * harmonic_rounding(law, length)?;", [POSITIONS]),
     # The reader.
     ("the read point's distance from the exact one is dropped", READER,
      "        let point_error = (frame.point - exact.point).length() + table + POINT_ROUNDING * scale;",
