@@ -17,7 +17,7 @@
 //! pcurve handles of the B-rep, so an edge shared by several uses keeps the
 //! pcurve of the smallest handle ([`super::edges`]).
 
-use axiolid_contracts::{GeomError, GeomResult};
+use axiolid_contracts::{GeomError, GeomResult, Operation};
 use axiolid_core::Interval;
 use axiolid_curve::{Curve2, Curve3};
 use axiolid_model::{GeometryGraph, GeometryNode, NodeId};
@@ -129,7 +129,8 @@ fn use_pcurve(graph: &GeometryGraph, id: NodeId) -> GeomResult<&Curve2> {
 ///
 /// A face may legitimately omit its surface: a planar polygon's boundary
 /// already determines its plane. A declared handle that does not resolve to
-/// a Surface node is a graph error, not an absent surface.
+/// a Surface node is a graph error, not an absent surface; one that resolves
+/// to a surface relation is refused by name.
 fn face_surface<'g>(
     graph: &'g GeometryGraph,
     face: &Face<NodeId>,
@@ -139,6 +140,14 @@ fn face_surface<'g>(
     };
     match graph.get(id) {
         Some(GeometryNode::Surface(s)) => Ok(Some(s)),
+        // A relation (a ruled or swept surface) is a model node with no
+        // `Surface` value to tessellate a face over; a refusal by name, not
+        // a malformed graph (#402).
+        Some(GeometryNode::SurfaceRelation(_)) => Err(GeomError::UnsupportedInput {
+            backend: crate::BACKEND_ID,
+            operation: Operation::Tessellation,
+            input: "a B-rep face on a surface relation",
+        }),
         Some(_) => Err(GeomError::InvalidInput(format!(
             "face support {id:?} is not a Surface node"
         ))),

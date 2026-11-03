@@ -378,6 +378,13 @@ impl<B: MeshBoolean> ReferenceMeshCompiler<B> {
     ) -> GeomResult<&axiolid_surface::Surface> {
         match graph.get(id) {
             Some(GeometryNode::Surface(surface)) => Ok(surface),
+            // A relation is a model node with no `Surface` value to
+            // evaluate; a refusal by name, not a malformed graph (#402).
+            Some(GeometryNode::SurfaceRelation(_)) => Err(GeomError::UnsupportedInput {
+                backend: crate::BACKEND_ID,
+                operation: axiolid_contracts::Operation::SurfaceEvaluation,
+                input: "a surface relation as a reference surface",
+            }),
             Some(_) => Err(GeomError::InvalidInput(format!(
                 "reference surface {id:?} is not a Surface node"
             ))),
@@ -835,6 +842,18 @@ impl<B: MeshBoolean> ReferenceMeshCompiler<B> {
                     .with_deviation(crate::deviation::Deviation::one(
                         crate::deviation::DeviationPath::TrimmedSurface,
                         family,
+                        bound,
+                    ))
+            }),
+            // A surface ruled between two sides: a sheet (#402).
+            GeometryNode::SurfaceRelation(axiolid_model::SurfaceRelation::Ruled {
+                first,
+                second,
+            }) => crate::ruled::ruled(graph, first, second, options).map(|(mesh, bound)| {
+                Built::with_closure(mesh, axiolid_mesh_compile_contract::MeshClosure::Surface)
+                    .with_deviation(crate::deviation::Deviation::one(
+                        crate::deviation::DeviationPath::RuledSurface,
+                        "ruled",
                         bound,
                     ))
             }),

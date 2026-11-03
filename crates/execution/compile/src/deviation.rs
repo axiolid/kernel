@@ -369,6 +369,8 @@ pub enum DeviationPath {
     /// absolute term every other contribution of the instance also
     /// carries, named under [`PLACEMENT_ROUNDING`] so the report shows it.
     Placement,
+    /// A surface ruled between two sides (#402).
+    RuledSurface,
 }
 
 /// A bound on how far the exact surface may lie from the mesh.

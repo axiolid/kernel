@@ -58,6 +58,13 @@ pub(crate) fn curve_bounded(
                 input: "curve-bounded surface over a non-planar basis",
             })
         }
+        Some(GeometryNode::SurfaceRelation(_)) => {
+            return Err(GeomError::UnsupportedInput {
+                backend,
+                operation: Operation::SurfaceEvaluation,
+                input: "a curve-bounded surface over a surface relation",
+            })
+        }
         Some(_) => {
             return Err(GeomError::InvalidInput(format!(
                 "curve-bounded basis {basis:?} is not a Surface node"
