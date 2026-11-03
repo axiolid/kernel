@@ -407,7 +407,8 @@ variant is additive. Every graph written before keeps its meaning.
 
 Format 1.5 adds a surface ruled between two sides, so `FORMAT_VERSION` is
 `1.5`, a minor change under the version rules above. `SurfaceRelation` is
-`#[non_exhaustive]`, so the variant is additive.
+`#[non_exhaustive]`, so the variant is additive. The variant's design is
+[ADR 0097](./0097-ruled-surfaces-are-a-graph-relation-between-two-curve-sides.md).
 
 - **What it adds.** One variant, `SurfaceRelation::Ruled { first, second }`,
   and the enum `RuledSide`: a `Curve { curve, interval }` (an atomic

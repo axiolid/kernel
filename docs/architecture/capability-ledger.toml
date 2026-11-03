@@ -367,9 +367,9 @@ id = "B5"
 area = "curves-surfaces"
 name = "swept/revolved/extruded/offset SURFACES as types"
 level = "narrow"
-summary = "A Revolution helper struct exists but is pub(crate) (private, used internally by the NURBS revolution-profile module), not a public exported analytic-surface type; curve OFFSET (not surface offset) is exact-only for the helix special case and refused otherwise"
-evidence = ["crates/algorithms/parametric/nurbs/src/revolution_profile.rs::Revolution", "crates/algorithms/parametric/evaluate/src/intrinsic_relation.rs", "crates/algorithms/parametric/evaluate/tests/intrinsic_relation.rs::a_helix_offset_lands_on_the_normal_offset_of_the_base"]
-occt = ["src/ModelingData/TKG3d/Geom"]
+summary = "Swept and ruled surfaces are model relations (SurfaceRelation::LinearExtrusion, Revolution and Ruled), not axiolid_surface::Surface values. LinearExtrusion and Revolution are carried but refused by the compilers. Ruled (#402) joins two curve sides, a line, circle, ellipse or B-spline over an oriented interval or an apex, and meshes as an open sheet with a certified deviation (curve term plus twist term); a side on another curve family, a conic over more than a turn, a spline interval outside its domain and coincident sides are refused by name. The exact compiler and B-rep faces on any surface relation are refused. A Revolution helper struct stays pub(crate) in the NURBS revolution-profile module; curve OFFSET (not surface offset) is exact-only for the helix special case and refused otherwise"
+evidence = ["crates/algorithms/parametric/nurbs/src/revolution_profile.rs::Revolution", "crates/algorithms/parametric/evaluate/src/intrinsic_relation.rs", "crates/algorithms/parametric/evaluate/tests/intrinsic_relation.rs::a_helix_offset_lands_on_the_normal_offset_of_the_base", "crates/representations/modeling/graph/src/surface_relation.rs::RuledSide", "crates/execution/compile/src/ruled.rs::ruled", "crates/representations/modeling/graph/tests/ruled_surface.rs", "crates/execution/compile/tests/ruled_surface.rs", "scripts/probe_ruled_surface_mutants.py"]
+occt = ["src/ModelingData/TKG3d/Geom", "src/ModelingAlgorithms/TKGeomAlgo/GeomFill"]
 cgal = []
 issue = "sweep-loft-breadth"
 
