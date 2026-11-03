@@ -102,8 +102,8 @@ MUTANTS = [
      '    let eps = tolerance.linear().max(1e-9);\n    if eps <= 0.0', [MESH]),
     # Reach: the coordinates the result is placed at (#312).
     ('the snap ignores the placed scale', COMPILER,
-     'crate::snap::settle(&subject.mesh, tool, options.tolerance(), budget.placed);',
-     'crate::snap::settle(&subject.mesh, tool, options.tolerance(), 0.0);', [PLACED]),
+     'crate::snap::reach(&subject.mesh, tool, options.tolerance(), placed)\n',
+     'crate::snap::reach(&subject.mesh, tool, options.tolerance(), 0.0)\n', [PLACED]),
     ('the reach ignores the placed scale', SNAP,
      '    let scale = operands.max(placed);',
      '    let scale = operands;', [PLACED]),
