@@ -24,11 +24,12 @@
 //! # Scope
 //!
 //! Ring tori (`R > r`) against planes and spheres off the torus axis. On
-//! the axis the closed-form coaxial path applies; cylinders, cones and
+//! the axis the closed-form coaxial path applies, and a plane through it
+//! meets the tube in its two meridian circles; cylinders, cones and
 //! other tori give quartics in `u` and are refused by name.
 
-use axiolid_core::Interval;
-use axiolid_curve::{AngleGraph2, Branch, Curve3, TorusCarrier, TorusSection3};
+use axiolid_core::{Frame3, Interval, Vec3};
+use axiolid_curve::{AngleGraph2, Branch, Circle3, Curve3, TorusCarrier, TorusSection3};
 use axiolid_exact::{Arith, Dyadic, IntPoly};
 use axiolid_guarantees::Sign;
 use axiolid_surface::{Surface, Torus};
@@ -111,6 +112,32 @@ pub(crate) fn torus_section(
     if is_zero(&a) && is_zero(&b) {
         // On the torus axis: circles, from the coaxial closed form.
         return Ok(None);
+    }
+    // A plane through the axis (`C` vanishes identically: `n . Z = 0` and
+    // `n . (O - o) = 0`, both decided on the dyadic coefficients) meets the
+    // tube where `n . (cos u X + sin u Y) = 0`: two meridian circles, at
+    // the angles `u0` and `u0 + pi` (#382).
+    if let Surface::Plane(p) = other {
+        if is_zero(&c) {
+            let n = p.frame.z;
+            let along = (frame.x * n.dot(frame.y) - frame.y * n.dot(frame.x)).normalize();
+            let meridian = |dir: Vec3| {
+                Curve3::Circle(Circle3 {
+                    frame: Frame3 {
+                        origin: frame.origin + dir * major_radius,
+                        x: dir,
+                        y: frame.z,
+                        z: dir.cross(frame.z),
+                    },
+                    radius: minor_radius,
+                })
+            };
+            return Ok(Some(ExactIntersectionCurve::with_spans(
+                vec![meridian(along), meridian(-along)],
+                vec![None, None],
+                Derivation::TorusMeridianCircles,
+            )));
+        }
     }
 
     let (ta, tb, tc) = (in_half_angle(&a), in_half_angle(&b), in_half_angle(&c));

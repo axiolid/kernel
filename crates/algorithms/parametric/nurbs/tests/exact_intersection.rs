@@ -612,6 +612,51 @@ fn a_coaxial_sphere_and_cylinder_meet_in_two_circles() {
 }
 
 #[test]
+fn a_plane_through_a_torus_axis_meets_it_in_two_meridian_circles() {
+    let torus = Surface::Torus(Torus {
+        frame: frame(Point3::new(0.0, 0.0, 0.0), Vec3::new(0.0, 0.0, 1.0)),
+        major_radius: 4.0,
+        minor_radius: 1.5,
+    });
+    let plane = Surface::Plane(Plane {
+        frame: frame(Point3::new(0.0, 0.0, 0.0), Vec3::new(1.0, 1.0, 0.0)),
+    });
+
+    let result = exact_surface_intersection(&torus, &plane).expect("derivable");
+    assert_eq!(result.derivation, Derivation::TorusMeridianCircles);
+    assert_eq!(result.branches.len(), 2);
+    let mut centres = Vec::new();
+    for branch in &result.branches {
+        match branch {
+            Curve3::Circle(circle) => {
+                assert_eq!(circle.radius, 1.5);
+                assert!((circle.frame.origin.length() - 4.0).abs() < 1.0e-12);
+                centres.push(circle.frame.origin);
+            }
+            other => panic!("expected circles, got {other:?}"),
+        }
+        assert_on_both(&torus, &plane, branch);
+    }
+    // Opposite sides of the axis.
+    assert!((centres[0] + centres[1]).length() < 1.0e-12);
+}
+
+#[test]
+fn a_plane_a_rounding_off_a_torus_axis_is_a_torus_section() {
+    let torus = Surface::Torus(Torus {
+        frame: frame(Point3::new(0.0, 0.0, 0.0), Vec3::new(0.0, 0.0, 1.0)),
+        major_radius: 4.0,
+        minor_radius: 1.5,
+    });
+    // One rounding off the axis: the circles are no longer decided.
+    let plane = Surface::Plane(Plane {
+        frame: frame(Point3::new(1.0e-300, 0.0, 0.0), Vec3::new(1.0, 1.0, 0.0)),
+    });
+    let result = exact_surface_intersection(&torus, &plane).expect("derivable");
+    assert_eq!(result.derivation, Derivation::TorusAngleSection);
+}
+
+#[test]
 fn a_coaxial_torus_and_plane_meet_in_two_circles() {
     let torus = Surface::Torus(Torus {
         frame: frame(Point3::new(0.0, 0.0, 0.0), Vec3::new(0.0, 0.0, 1.0)),
