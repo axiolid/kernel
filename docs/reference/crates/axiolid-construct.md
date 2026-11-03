@@ -38,6 +38,11 @@ does those and calls in here.
 
 ## Design notes
 
+A profile can be validated exactly on the contour the exact path lowers it to
+(`profile_validate::ExactProfileValidator`, ADR 0095): closure, self-contact and hole nesting,
+with findings that name segments.
+`scripts/probe_profile_validate_mutants.py` lists the faults its tests must catch.
+
 Tests that check a generated mesh is accepted by a mesh Boolean provider
 live in `crates/execution/compile/tests/`, not here. A dev-dependency on a
 provider or execution crate would pull this algorithms crate's tests above

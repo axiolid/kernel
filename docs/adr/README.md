@@ -78,3 +78,4 @@ Package names and paths in older accepted records describe the tree at the time 
 | [0091](./0091-mesh-sections-report-in-plane-regions-and-open-chains.md) | Mesh sections report in-plane faces as regions and cut curves as chains |
 | [0092](./0092-mesh-sections-report-the-solids-cut-as-closed-regions.md) | Mesh sections report the solid's cut as closed regions |
 | [0093](./0093-mesh-sections-merge-in-plane-faces-on-an-exact-arrangement.md) | Mesh sections merge in-plane faces on an exact arrangement |
+| [0095](./0095-profiles-are-validated-on-their-lowered-arc-rings.md) | Profiles are validated on their lowered arc rings |

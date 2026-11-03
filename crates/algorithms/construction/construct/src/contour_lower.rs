@@ -52,30 +52,112 @@ use axiolid_profile::{Contour, ProfileSegment};
 /// `Tolerance::ZERO`); gaps are reported rather than closed, because a
 /// silently bridged gap changes the profile the caller asked for.
 pub fn contour_to_arc_ring(contour: &Contour, tolerance: Tolerance) -> GeomResult<ArcRing> {
+    lower_contour(contour, tolerance)
+        .map(|lowered| lowered.ring)
+        .map_err(ContourFault::into_geom_error)
+}
+
+/// A contour lowered to its arc ring, with what a validator needs to map the
+/// ring back to the contour (#352).
+#[derive(Debug, Clone)]
+pub(crate) struct LoweredContour {
+    pub(crate) ring: ArcRing,
+    /// The contour segment each ring edge came from: a segment sweeping half
+    /// a turn or more contributes several consecutive edges.
+    pub(crate) segment_of_edge: Vec<usize>,
+    /// The largest joint gap the lowering closed, closing joint included.
+    pub(crate) max_gap: Scalar,
+}
+
+/// Why a contour does not lower, with the segment at fault.
+#[derive(Debug, Clone, PartialEq)]
+pub(crate) enum ContourFault {
+    TooFewSegments {
+        count: usize,
+    },
+    UnsupportedSegment {
+        segment: usize,
+        kind: &'static str,
+    },
+    DegenerateSegment {
+        segment: usize,
+        reason: &'static str,
+    },
+    /// The end of `segment` and the start of the next are `gap` apart, beyond
+    /// the slack. `closing` is the joint from the last segment to the first.
+    Gap {
+        segment: usize,
+        gap: Scalar,
+        at: Point2,
+        closing: bool,
+    },
+}
+
+impl ContourFault {
+    /// The error `contour_to_arc_ring` has always returned for this fault.
+    fn into_geom_error(self) -> GeomError {
+        match self {
+            Self::TooFewSegments { count } => GeomError::InvalidInput(format!(
+                "a closed contour needs at least two segments, got {count}"
+            )),
+            Self::UnsupportedSegment { kind, .. } => GeomError::UnsupportedInput {
+                backend: crate::BACKEND_ID,
+                operation: Operation::Sweep,
+                input: kind,
+            },
+            Self::DegenerateSegment { reason, .. } => GeomError::Degenerate(reason.to_owned()),
+            Self::Gap {
+                gap,
+                at,
+                closing: false,
+                ..
+            } => {
+                GeomError::InvalidInput(format!("contour segments leave a gap of {gap} at {at:?}"))
+            }
+            Self::Gap {
+                gap, closing: true, ..
+            } => GeomError::InvalidInput(format!(
+                "contour does not close: {gap} from last segment end to start"
+            )),
+        }
+    }
+}
+
+/// Lower one closed contour, stopping at the first fault.
+pub(crate) fn lower_contour(
+    contour: &Contour,
+    tolerance: Tolerance,
+) -> Result<LoweredContour, ContourFault> {
     if contour.segments.len() < 2 {
-        return Err(GeomError::InvalidInput(format!(
-            "a closed contour needs at least two segments, got {}",
-            contour.segments.len()
-        )));
+        return Err(ContourFault::TooFewSegments {
+            count: contour.segments.len(),
+        });
     }
 
     let mut vertices = Vec::with_capacity(contour.segments.len());
+    let mut segment_of_edge = Vec::with_capacity(contour.segments.len());
     let mut previous_end: Option<(Point2, Scalar)> = None;
     let mut first_scale = 0.0;
+    let mut max_gap: Scalar = 0.0;
 
-    for segment in &contour.segments {
-        let lowered = lower_segment(segment)?;
+    for (index, segment) in contour.segments.iter().enumerate() {
+        let lowered = lower_segment(segment, index)?;
         let start = lowered.vertices[0].point;
         if let Some((previous, previous_scale)) = previous_end {
             let gap = (start - previous).length();
             if gap > joint_slack(tolerance, previous_scale, lowered.start_scale) {
-                return Err(GeomError::InvalidInput(format!(
-                    "contour segments leave a gap of {gap} at {start:?}"
-                )));
+                return Err(ContourFault::Gap {
+                    segment: index - 1,
+                    gap,
+                    at: start,
+                    closing: false,
+                });
             }
+            max_gap = max_gap.max(gap);
         } else {
             first_scale = lowered.start_scale;
         }
+        segment_of_edge.extend(std::iter::repeat_n(index, lowered.vertices.len()));
         vertices.extend(lowered.vertices);
         previous_end = Some((lowered.end, lowered.end_scale));
     }
@@ -84,13 +166,21 @@ pub fn contour_to_arc_ring(contour: &Contour, tolerance: Tolerance) -> GeomResul
     if let (Some((last, last_scale)), Some(first)) = (previous_end, vertices.first()) {
         let gap = (first.point - last).length();
         if gap > joint_slack(tolerance, last_scale, first_scale) {
-            return Err(GeomError::InvalidInput(format!(
-                "contour does not close: {gap} from last segment end to start"
-            )));
+            return Err(ContourFault::Gap {
+                segment: contour.segments.len() - 1,
+                gap,
+                at: first.point,
+                closing: true,
+            });
         }
+        max_gap = max_gap.max(gap);
     }
 
-    Ok(ArcRing::new(vertices))
+    Ok(LoweredContour {
+        ring: ArcRing::new(vertices),
+        segment_of_edge,
+        max_gap,
+    })
 }
 
 /// Rounding of one evaluated segment endpoint, per unit of the magnitudes
@@ -145,7 +235,7 @@ struct LoweredSegment {
 }
 
 /// One segment as the ring vertices it contributes and its end point.
-fn lower_segment(segment: &ProfileSegment) -> GeomResult<LoweredSegment> {
+fn lower_segment(segment: &ProfileSegment, index: usize) -> Result<LoweredSegment, ContourFault> {
     let (from, to) = if segment.same_sense {
         (segment.domain.start, segment.domain.end)
     } else {
@@ -169,7 +259,7 @@ fn lower_segment(segment: &ProfileSegment) -> GeomResult<LoweredSegment> {
             })
         }
         Curve2::Circle(circle) => {
-            let (vertices, end) = lower_arc(circle, from, to)?;
+            let (vertices, end) = lower_arc(circle, from, to, index)?;
             let scale = circle.frame.origin.length() + circle.radius.abs();
             Ok(LoweredSegment {
                 vertices,
@@ -178,10 +268,9 @@ fn lower_segment(segment: &ProfileSegment) -> GeomResult<LoweredSegment> {
                 end_scale: scale,
             })
         }
-        other => Err(GeomError::UnsupportedInput {
-            backend: crate::BACKEND_ID,
-            operation: Operation::Sweep,
-            input: unsupported_curve_name(other),
+        other => Err(ContourFault::UnsupportedSegment {
+            segment: index,
+            kind: unsupported_curve_name(other),
         }),
     }
 }
@@ -203,7 +292,12 @@ fn lower_segment(segment: &ProfileSegment) -> GeomResult<LoweredSegment> {
 /// circle to the same rounding an unsplit arc does (a few ulps of the
 /// circle's coordinates); nothing is fitted. A segment sweeping more than a
 /// whole turn overlaps itself and is refused.
-fn lower_arc(circle: &Circle2, from: Scalar, to: Scalar) -> GeomResult<(Vec<ArcVertex>, Point2)> {
+fn lower_arc(
+    circle: &Circle2,
+    from: Scalar,
+    to: Scalar,
+    index: usize,
+) -> Result<(Vec<ArcVertex>, Point2), ContourFault> {
     let evaluate = |t: Scalar| {
         let (sin, cos) = t.sin_cos();
         circle.frame.origin
@@ -215,21 +309,22 @@ fn lower_arc(circle: &Circle2, from: Scalar, to: Scalar) -> GeomResult<(Vec<ArcV
 
     let handedness = circle.frame.x.perp_dot(circle.frame.y);
     if handedness == 0.0 {
-        return Err(GeomError::Degenerate(
-            "circular profile segment has a degenerate frame".to_owned(),
-        ));
+        return Err(ContourFault::DegenerateSegment {
+            segment: index,
+            reason: "circular profile segment has a degenerate frame",
+        });
     }
     let sweep = (to - from) * handedness.signum();
     if sweep == 0.0 {
-        return Err(GeomError::Degenerate(
-            "circular profile segment has an empty parameter range".to_owned(),
-        ));
+        return Err(ContourFault::DegenerateSegment {
+            segment: index,
+            reason: "circular profile segment has an empty parameter range",
+        });
     }
     if sweep.abs() > core::f64::consts::TAU {
-        return Err(GeomError::UnsupportedInput {
-            backend: crate::BACKEND_ID,
-            operation: Operation::Sweep,
-            input: "circular profile segment sweeping more than a whole turn",
+        return Err(ContourFault::UnsupportedSegment {
+            segment: index,
+            kind: "circular profile segment sweeping more than a whole turn",
         });
     }
     // Equal sub-arcs, each below half a turn.
@@ -319,5 +414,44 @@ pub fn orient_arc_ring(ring: &ArcRing, counter_clockwise: bool) -> GeomResult<Ar
         Ok(ring.clone())
     } else {
         Ok(reverse_arc_ring(ring))
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use axiolid_core::{Frame2, Interval, Vec2};
+    use axiolid_curve::Line2;
+
+    fn arc(from: Scalar, to: Scalar) -> ProfileSegment {
+        ProfileSegment {
+            curve: Curve2::Circle(Circle2 {
+                frame: Frame2 {
+                    origin: Point2::new(0.0, 0.0),
+                    x: Vec2::X,
+                    y: Vec2::Y,
+                },
+                radius: 1.0,
+            }),
+            domain: Interval::new(from, to),
+            same_sense: true,
+        }
+    }
+
+    #[test]
+    fn the_sub_edges_of_a_split_arc_map_to_their_segment() {
+        let chord = ProfileSegment {
+            curve: Curve2::Line(Line2 {
+                origin: Point2::new(0.0, -1.0),
+                direction: Point2::new(1.0, 1.0) - Point2::new(0.0, 0.0),
+            }),
+            domain: Interval::UNIT,
+            same_sense: true,
+        };
+        // Three quarters of a turn is two sub-arcs; the line closes it.
+        let contour = Contour::new(vec![arc(0.0, 1.5 * core::f64::consts::PI), chord]);
+        let lowered = lower_contour(&contour, Tolerance::METRE).expect("lowers");
+        assert_eq!(lowered.segment_of_edge, vec![0, 0, 1]);
+        assert_eq!(lowered.ring.vertices.len(), 3);
     }
 }

@@ -9,6 +9,13 @@ caret rule for `0.x` versions.
 
 ## [Unreleased]
 
+### Added
+
+- `profile_validate::ExactProfileValidator` implements `ValidateProfile` for
+  `ContourProfile` and `Profile`. It decides closure, self-contact and hole
+  nesting exactly on the contour as the exact path lowers it, or refuses with
+  a typed finding naming the segments (#352, ADR 0095).
+
 ## [0.3.27] - 2026-11-03
 
 ### Added

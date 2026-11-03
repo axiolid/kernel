@@ -74,6 +74,7 @@ pub mod polyhedron;
 mod polyhedron_exact;
 pub mod profile;
 pub mod profile_lower;
+pub mod profile_validate;
 pub mod result;
 pub mod revolve;
 pub mod revolve_contour;
