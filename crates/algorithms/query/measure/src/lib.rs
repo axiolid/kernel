@@ -20,6 +20,7 @@ pub mod exact_hausdorff;
 pub mod frechet;
 pub mod measure;
 pub mod mesh;
+pub mod mesh_faces;
 pub mod mesh_hausdorff;
 pub mod mesh_measure;
 pub mod mesh_proximity;
@@ -57,6 +58,9 @@ pub use measure::Measure;
 pub use mesh::{
     cycle_volume_properties, second_moments, surface_properties, volume_properties,
     CycleVolumeError, MeshMeasureError, SurfaceProperties, VolumeProperties,
+};
+pub use mesh_faces::{
+    extent_along, select_by_normal, FaceSelection, FaceSelectionError, NormalCone,
 };
 pub use mesh_hausdorff::{
     hausdorff_distance, one_sided_hausdorff, HausdorffBounds, HausdorffError, MeshHausdorff,

@@ -27,6 +27,14 @@ impl fmt::Display for MeshMeasureError {
 }
 impl std::error::Error for MeshMeasureError {}
 
+/// Area of one triangle given its corners about the mesh's local origin.
+///
+/// Shared by [`surface_properties`] and face selection so both sum the same
+/// per-triangle values bit for bit.
+pub(crate) fn triangle_area([a, b, c]: [Vec3; 3]) -> f64 {
+    (b - a).cross(c - a).length() * 0.5
+}
+
 pub fn surface_properties<M: TriangleMeshView + ?Sized>(
     mesh: &M,
     tolerance: Tolerance,
@@ -43,7 +51,7 @@ pub fn surface_properties<M: TriangleMeshView + ?Sized>(
     let (mut area, mut weighted) = (0.0f64, Vec3::ZERO);
     for i in 0..mesh.triangle_count() {
         let [a, b, c] = mesh.triangle(i).map(|j| mesh.position(j as usize) - base);
-        let weight = (b - a).cross(c - a).length() * 0.5;
+        let weight = triangle_area([a, b, c]);
         area += weight;
         weighted += (a + b + c) * (weight / 3.0);
     }

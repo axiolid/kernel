@@ -16,6 +16,11 @@ caret rule for `0.x` versions.
   direction), such as shells that share an edge. It is bit-identical to
   `volume_properties` on two-manifold input and refuses anything open with
   `CycleVolumeError` (#416).
+- `select_by_normal` and `extent_along` select the faces of a mesh whose normal
+  lies in a `NormalCone` (the tolerance's angular part is slack on the
+  half-angle) and measure their area and their extent along a direction.
+  Selecting every face reproduces `surface_properties` area bit for bit
+  (#417).
 
 - The package now ships `LICENSE` and `LICENSE-COMMERCIAL` (symlinks to the
   repository root), so the licence texts travel with the archive (#358).
