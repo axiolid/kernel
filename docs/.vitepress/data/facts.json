@@ -58,10 +58,10 @@
       "description": "General exact B-rep booleans over analytic faces (ADR 0075)",
       "layer": "algorithms",
       "path": "crates/algorithms/construction/brep-boolean",
-      "released": "0.1.12",
-      "released_date": "2026-10-28",
+      "released": "0.1.13",
+      "released_date": "2026-11-03",
       "role": "algorithm.construction",
-      "version": "0.1.12"
+      "version": "0.1.13"
     },
     "axiolid-capi": {
       "description": "Versioned, memory-safe C ABI for the Axiolid application facade.",
@@ -319,10 +319,10 @@
       "description": "Scalar reference MeshCompiler: profiles, extrusion, transforms, boolean dispatch.",
       "layer": "execution",
       "path": "crates/execution/compile",
-      "released": "0.3.40",
-      "released_date": "2026-10-29",
+      "released": "0.3.41",
+      "released_date": "2026-11-03",
       "role": "execution.orchestration",
-      "version": "0.3.40"
+      "version": "0.3.41"
     },
     "axiolid-mesh-compile-contract": {
       "description": "Portable graph-to-mesh compilation contract",
@@ -391,10 +391,10 @@
       "description": "General polynomial and rational B-spline analysis and transformation algorithms",
       "layer": "algorithms",
       "path": "crates/algorithms/parametric/nurbs",
-      "released": "0.3.7",
-      "released_date": "2026-10-28",
+      "released": "0.3.8",
+      "released_date": "2026-11-03",
       "role": "algorithm.parametric",
-      "version": "0.3.7"
+      "version": "0.3.8"
     },
     "axiolid-overlay": {
       "description": "Deterministic validated planar overlay contract",

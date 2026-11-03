@@ -8,7 +8,7 @@ Scalar reference MeshCompiler: profiles, extrusion, transforms, boolean dispatch
 
 | | |
 | --- | --- |
-| Latest release | 0.3.40 (2026-10-29) |
+| Latest release | 0.3.41 (2026-11-03) |
 | crates.io | [`axiolid-mesh-compile`](https://crates.io/crates/axiolid-mesh-compile) |
 | Layer | execution (`execution.orchestration`) |
 | API documentation | [rustdoc](/api/rustdoc/axiolid_mesh_compile/index.html) · [docs.rs](https://docs.rs/axiolid-mesh-compile) |
@@ -78,31 +78,17 @@ owns graph traversal and dispatch; the construction algorithms themselves
 
 ## Changes
 
-Latest release, 0.3.40 (2026-10-29):
+Latest release, 0.3.41 (2026-11-03):
 
-### Changed
+### Added
 
-- The exact boolean takes any operand the exact compiler compiles exactly,
-  as subject or as tool, read through its placements: an extrusion, a
-  revolution (its cylinders, cones and tori), another boolean, or whatever
-  else it compiles exactly, instead of refusing all but a placed extrusion
-  ("exact boolean operand that is not an extrusion", "exact boolean tool that
-  is not a placed extrusion"). A box united with a quarter-turn revolution of
-  a circle is certified by `compile_mesh_with_deviation` within the budget;
-  its difference and intersection are measured like an extrusion's, and an
-  oblique cut of faceted operands can exceed the budget (#380). The
-  measurement covers the torus faces as it does planes and cylinders. An operand the exact
-  compiler refuses is refused with its own family named ("primitive",
-  "tapered revolution", "polygon mesh", "half-space", a full-turn profile
-  touching the axis). A tool that is a boolean is exact now too: the
-  tool is compiled exactly, and what cannot be compiled is refused by name
-  (#326's triage decision). Its half-space-intersection example is still
-  refused by `compile_clip` (#378).
-- The deviation search no longer stops at 10% above its lower bound when
-  that gap straddles the requested budget: it keeps tightening while the
-  bound straddles the budget, within the cell cap and the resolution floor
-  (it can still stop above the budget), so a mesh whose true deviation is
-  within the budget is usually certified within it (a torus' tessellation at `1e-3` measured `0.95e-3`
-  and was reported `1.004e-3`) (#378).
+- The package now ships `LICENSE` and `LICENSE-COMMERCIAL` (symlinks to the
+  repository root), so the licence texts travel with the archive (#358).
+
+### Fixed
+
+- A box less a torus whose tube leaves through its top face (#381), and a
+  column united with a revolved bend whose cap lies in its foot (#382),
+  compile exactly at a micrometre; requires `axiolid-brep-boolean` 0.1.13.
 
 Full history: [`crates/execution/compile/CHANGELOG.md`](https://github.com/axiolid/kernel/blob/main/crates/execution/compile/CHANGELOG.md)

@@ -269,7 +269,7 @@ version = "0.1.3"
 
 [[package]]
 name = "axiolid-nurbs"
-version = "0.3.7"
+version = "0.3.8"
 dependencies = [
  "axiolid-contracts",
  "axiolid-core",

@@ -8,7 +8,7 @@ General polynomial and rational B-spline analysis and transformation algorithms.
 
 | | |
 | --- | --- |
-| Latest release | 0.3.7 (2026-10-28) |
+| Latest release | 0.3.8 (2026-11-03) |
 | crates.io | [`axiolid-nurbs`](https://crates.io/crates/axiolid-nurbs) |
 | Facade | [`axiolid`](./axiolid) feature `nurbs` |
 | Layer | algorithms (`algorithm.parametric`) |
@@ -42,19 +42,14 @@ it uses `axiolid-evaluate` for evaluation rather than reimplementing it.
 
 ## Changes
 
-Latest release, 0.3.7 (2026-10-28):
+Latest release, 0.3.8 (2026-11-03):
 
-### Changed
+### Added
 
-- The minimum supported Rust version is now 1.99 (was 1.88), and the
-  workspace builds on Rust 1.99.1 (#349).
-
-### Fixed
-
-- `invert_surface_certified` and `invert_periodic_surface_certified` refuse
-  an off-surface point as `OffSurface` once the certified lower bound
-  exceeds the tolerance, where they returned `BudgetExceeded` from refining
-  the retained boxes down to the parameter resolution (#320). Projection is
-  unchanged.
+- The package now ships `LICENSE` and `LICENSE-COMMERCIAL` (symlinks to the
+  repository root), so the licence texts travel with the archive (#358).
+- `Derivation::TorusMeridianCircles`: a plane containing a torus's axis
+  meets it in the tube's two meridian circles, in closed form instead of a
+  traced angle section (#382).
 
 Full history: [`crates/algorithms/parametric/nurbs/CHANGELOG.md`](https://github.com/axiolid/kernel/blob/main/crates/algorithms/parametric/nurbs/CHANGELOG.md)

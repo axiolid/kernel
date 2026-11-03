@@ -9,10 +9,18 @@ caret rule for `0.x` versions.
 
 ## [Unreleased]
 
+## [0.3.41] - 2026-11-03
+
 ### Added
 
 - The package now ships `LICENSE` and `LICENSE-COMMERCIAL` (symlinks to the
   repository root), so the licence texts travel with the archive (#358).
+
+### Fixed
+
+- A box less a torus whose tube leaves through its top face (#381), and a
+  column united with a revolved bend whose cap lies in its foot (#382),
+  compile exactly at a micrometre; requires `axiolid-brep-boolean` 0.1.13.
 
 ## [0.3.40] - 2026-10-29
 

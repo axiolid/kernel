@@ -9,10 +9,15 @@ caret rule for `0.x` versions.
 
 ## [Unreleased]
 
+## [0.3.8] - 2026-11-03
+
 ### Added
 
 - The package now ships `LICENSE` and `LICENSE-COMMERCIAL` (symlinks to the
   repository root), so the licence texts travel with the archive (#358).
+- `Derivation::TorusMeridianCircles`: a plane containing a torus's axis
+  meets it in the tube's two meridian circles, in closed form instead of a
+  traced angle section (#382).
 
 ## [0.3.7] - 2026-10-28
 

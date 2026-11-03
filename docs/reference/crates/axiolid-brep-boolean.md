@@ -8,7 +8,7 @@ General exact B-rep booleans over analytic faces (ADR 0075).
 
 | | |
 | --- | --- |
-| Latest release | 0.1.12 (2026-10-28) |
+| Latest release | 0.1.13 (2026-11-03) |
 | crates.io | [`axiolid-brep-boolean`](https://crates.io/crates/axiolid-brep-boolean) |
 | Layer | algorithms (`algorithm.construction`) |
 | API documentation | [rustdoc](/api/rustdoc/axiolid_brep_boolean/index.html) · [docs.rs](https://docs.rs/axiolid-brep-boolean) |
@@ -51,14 +51,27 @@ results against them.
 
 ## Changes
 
-Latest release, 0.1.12 (2026-10-28):
+Latest release, 0.1.13 (2026-11-03):
 
-### Changed
+### Added
 
-- The licence is now `MPL-2.0 OR LicenseRef-Commercial` (was `MPL-2.0`):
-  a commercial licence is available from the copyright holder
-  (`LICENSE-COMMERCIAL`, ADR 0089, #358).
-- The minimum supported Rust version is now 1.99 (was 1.88), and the
-  workspace builds on Rust 1.99.1 (#349).
+- The package now ships `LICENSE` and `LICENSE-COMMERCIAL` (symlinks to the
+  repository root), so the licence texts travel with the archive (#358).
+
+### Fixed
+
+- A box less a torus whose tube leaves through a face the ring's radius from
+  the axis was refused as `Undecided` (#381). The traced section touches the
+  latitude circle where the tube's quarter faces meet; its double root split
+  into cuts `2e-8` apart, which were never merged for a traced section.
+  They are now one cut within tolerance, reported as `MergedPoints`, so the
+  box less the torus cuts at a micrometre; `Tolerance::ZERO` still refuses.
+- A column united with a revolved bend whose start cap lies in the column's
+  foot did not sew (#382). The plane through the torus axis meets the torus
+  in the cap's circles as a traced section while the cap imprints them in
+  closed form, and the two copies of one stretch were kept apart. A traced
+  piece along an operand's line or conic edge now takes that edge's curve,
+  so the union is exact at `Tolerance::ZERO` and, placed by a general rigid
+  motion, cuts at a micrometre.
 
 Full history: [`crates/algorithms/construction/brep-boolean/CHANGELOG.md`](https://github.com/axiolid/kernel/blob/main/crates/algorithms/construction/brep-boolean/CHANGELOG.md)
