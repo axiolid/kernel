@@ -193,6 +193,28 @@ pub enum OverlayError {
     /// boundary. Such an edge is a point, not an arc.
     ZeroRadiusArc,
 }
+
+impl core::fmt::Display for OverlayError {
+    fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
+        f.write_str(match self {
+            Self::InvalidFrame => "a frame is not orthonormal, or the operands' frames differ",
+            Self::NonFinitePoint => "a point has a non-finite coordinate",
+            Self::RingTooShort => "a ring or polyline has too few vertices",
+            Self::RepeatedVertex => "a ring repeats a vertex within tolerance",
+            Self::ZeroArea => "a ring encloses no area above tolerance",
+            Self::SelfIntersection => "non-adjacent boundary segments meet or cross",
+            Self::HoleOutsideOuter => "a hole lies outside its outer ring",
+            Self::InvalidOffsetDistance => {
+                "an offset distance or stroke width is not finite, or a width is not positive"
+            }
+            Self::InvalidOffsetStyle => "a join or cap parameter is not a finite positive value",
+            Self::ZeroRadiusArc => "an arc edge implies a radius not above tolerance",
+        })
+    }
+}
+
+impl std::error::Error for OverlayError {}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct OverlayEvidence {
     pub subject_rings: usize,
@@ -998,5 +1020,51 @@ mod tests {
         stray.holes.push(hole);
         let stray = Region::new(vec![stray], t).expect("each ring valid");
         assert_eq!(stray.union(&a, t), Err(OverlayError::HoleOutsideOuter));
+    }
+
+    #[test]
+    fn overlay_error_displays_and_boxes() {
+        let all = [
+            OverlayError::InvalidFrame,
+            OverlayError::NonFinitePoint,
+            OverlayError::RingTooShort,
+            OverlayError::RepeatedVertex,
+            OverlayError::ZeroArea,
+            OverlayError::SelfIntersection,
+            OverlayError::HoleOutsideOuter,
+            OverlayError::InvalidOffsetDistance,
+            OverlayError::InvalidOffsetStyle,
+            OverlayError::ZeroRadiusArc,
+        ];
+        let mut seen = std::collections::BTreeSet::new();
+        for error in all {
+            let text = error.to_string();
+            assert!(!text.is_empty());
+            assert!(seen.insert(text), "{error:?} has a distinct message");
+            let boxed: Box<dyn std::error::Error> = Box::new(error);
+            assert!(!boxed.to_string().is_empty());
+        }
+    }
+
+    /// A refusal wraps its operand error: the message carries the error's
+    /// own wording and `source` hands the error back.
+    #[test]
+    fn overlay_refusal_wraps_and_exposes_its_error() {
+        use crate::OverlayRefusal;
+        use std::error::Error;
+        let refusal = OverlayRefusal::from(OverlayError::ZeroArea);
+        assert_eq!(
+            refusal.to_string(),
+            format!("invalid overlay operand: {}", OverlayError::ZeroArea)
+        );
+        assert_eq!(
+            refusal.source().map(ToString::to_string),
+            Some(OverlayError::ZeroArea.to_string())
+        );
+        let budget = OverlayRefusal::BudgetExceeded {
+            needed: 2,
+            budget: 1,
+        };
+        assert!(budget.source().is_none());
     }
 }

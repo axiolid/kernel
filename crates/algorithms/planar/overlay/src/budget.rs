@@ -70,7 +70,7 @@ impl From<OverlayError> for OverlayRefusal {
 impl std::fmt::Display for OverlayRefusal {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
-            Self::Invalid(error) => write!(f, "invalid overlay operand: {error:?}"),
+            Self::Invalid(error) => write!(f, "invalid overlay operand: {error}"),
             Self::BudgetExceeded { needed, budget } => write!(
                 f,
                 "overlay exceeded its memory budget: {needed} bytes charged, {budget} allowed"
@@ -79,7 +79,14 @@ impl std::fmt::Display for OverlayRefusal {
     }
 }
 
-impl std::error::Error for OverlayRefusal {}
+impl std::error::Error for OverlayRefusal {
+    fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
+        match self {
+            Self::Invalid(error) => Some(error),
+            Self::BudgetExceeded { .. } => None,
+        }
+    }
+}
 
 /// The running charge against an optional budget.
 #[derive(Debug, Clone, Copy)]
