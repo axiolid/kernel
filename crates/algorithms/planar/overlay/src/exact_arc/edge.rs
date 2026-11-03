@@ -115,6 +115,34 @@ impl Bounds {
         self.x0 <= other.x1 && other.x0 <= self.x1 && self.y0 <= other.y1 && other.y0 <= self.y1
     }
 
+    /// The box grown by `by` (a distance, not negative) on every side, with
+    /// the same relative padding as [`Bounds::around`].
+    pub(crate) fn grown(&self, by: f64) -> Self {
+        let scale = self
+            .x0
+            .abs()
+            .max(self.x1.abs())
+            .max(self.y0.abs())
+            .max(self.y1.abs())
+            + by;
+        let pad = by + 1e-9 * scale;
+        Self {
+            x0: self.x0 - pad,
+            y0: self.y0 - pad,
+            x1: self.x1 + pad,
+            y1: self.y1 + pad,
+        }
+    }
+
+    /// A certified lower bound on the distance between any point of this
+    /// box and any point of `other`: the gap between the boxes, shrunk past
+    /// the rounding of its own arithmetic. Zero when they overlap.
+    pub(crate) fn gap(&self, other: &Self) -> f64 {
+        let dx = (other.x0 - self.x1).max(self.x0 - other.x1).max(0.0);
+        let dy = (other.y0 - self.y1).max(self.y0 - other.y1).max(0.0);
+        (dx * dx + dy * dy).sqrt() * (1.0 - 1e-12)
+    }
+
     /// Whether any coordinate is NaN, which no comparison can place.
     pub(crate) fn has_nan(&self) -> bool {
         self.x0.is_nan() || self.y0.is_nan() || self.x1.is_nan() || self.y1.is_nan()

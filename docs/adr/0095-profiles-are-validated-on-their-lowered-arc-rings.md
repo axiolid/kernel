@@ -119,3 +119,71 @@ Validation runs on the lowered ring, exactly, and reports what it finds.
   `ExactProfileValidator`.
 - `scripts/probe_arc_check_mutants.py`,
   `scripts/probe_profile_validate_mutants.py`: mutation probes of the two.
+
+## Amendment 2026-11-03 — the exact extruder validates; clearance is opt-in
+
+Two follow-ups (#401, #388) change what the table of alternatives and the
+consequences above say.
+
+**The extruder runs the validator (#401).** The alternative "Wire the
+validator into the exact builders" was deferred; the deferral let
+`extrude_profile_exact` build a solid from a bow tie, a pinch, a chord
+crossing an arc and holes outside or crossing the outer contour. It now runs
+the validator on the contour it lowers, before orienting or building
+anything. A definite finding is `InvalidInput` naming the findings; a nesting
+the exact check could not decide (and any defect this version does not know)
+is `UnsupportedInput`. Isolated contacts stay accepted, as `is_valid` does.
+Clearance is not part of this check.
+
+**Clearance is an option, not a default (#388).** Closeness within a distance
+is a consumer policy, so contact stays tolerance-free and nearness is asked
+for:
+
+- `axiolid_overlay::check_arc_polygon_with(polygon, tolerance,
+  ArcCheckOptions::new().with_clearance(distance))` adds an
+  `ArcPolygonDefect::Clearance` per pair of edges whose distance has a local
+  minimum strictly between zero and `distance` away from their meeting points,
+  or that form an exact cusp (they meet and leave in the same direction). The
+  neighbourhood of a meeting point at a nonzero angle (a narrow wedge) is not
+  reported. The options follow `OverlayOptions`
+  (a `#[non_exhaustive]` struct, `new()`, a builder method); the default is
+  exactly `check_arc_polygon`. The distance is explicit rather than read from
+  the tolerance, so a consumer chooses `tolerance.linear()` or another policy;
+  a distance that is not finite or is negative is an `InvalidClearance`
+  defect, never replaced.
+- `ExactProfileValidator::validate_with` and `validate_contours_with` take the
+  same `ArcCheckOptions` and report a `ProfileFinding::Clearance` naming
+  segments (the sub-arcs of one arc merge). `ExactProfileValidator` stays a
+  unit struct: a field would break every `ExactProfileValidator.validate(..)`
+  call.
+- **Decision.** Boxes grown by the distance drop far pairs; `Bounds::gap` is a
+  certified lower bound that is also reported. For the rest, two edges that do
+  not meet are closer than `t` exactly when an end of one is within `t` of the
+  other, or, for a segment and an arc or two arcs with distinct centres, the
+  points on their common normal are (the line through the arc's centre
+  perpendicular to the segment, or the line of centres). Each test is an exact
+  sign of a sum of at most three square roots of dyadics, decided by
+  `axiolid-exact`'s tower over coordinates scaled by `|4b|`. A meeting point is
+  not a near miss but does not hide one: every test needs a distance strictly
+  between zero and `t`, so the joint of two consecutive edges, a vertex touching
+  an edge and a tangency (the zero-distance points, contacts and self-contacts
+  the exact check reports) are left out, while another part of the same two
+  edges that misses by less than `t`, or a neck between consecutive edges, is
+  found. The zero is an exact sign, not a tolerance. A cusp is an end of one
+  edge on the other edge with both leaving it in the same direction (`cross =
+  0`, `dot > 0` of exact leaving vectors), or a zero common-normal distance
+  strictly inside both edges (a line tangent to an arc, two tangent arcs):
+  such edges stay within `distance` of each other for a stretch however small
+  it is, so they are reported. Tangent holes are therefore reported too, and a
+  smooth joint (opposite leaving directions) is not.
+- **Fail closed.** A test that cannot be decided makes the pair a finding with
+  `undecided` set; a pair is dropped only when every test is decided and none is
+  below. Findings are ordered by first edge, then second.
+- **Costs.** One tower evaluation per candidate pair and test, over a handful
+  of pairs after the box filter (consecutive edges included); none runs unless
+  asked. The stretch of two edges around a meeting point that lies within
+  `distance` of the other edge is the contact's neighbourhood and is not
+  reported; only a point of an edge's end or a common normal is a witness.
+
+The limitation "Closeness within the tolerance but without touching is not
+reported" no longer holds when the option is set.

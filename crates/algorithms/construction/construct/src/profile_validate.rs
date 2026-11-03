@@ -50,7 +50,23 @@
 //!
 //! Two parts of the authored boundary that come closer than that, without
 //! touching, are decided for the lowered ring.
-//! TODO(#388): report near-contacts within the tolerance.
+//!
+//! # Near-contacts (opt-in, #388)
+//!
+//! Parts that miss each other by less than a distance are valid exactly.
+//! A consumer that treats them as touching asks
+//! [`ExactProfileValidator::validate_with`] for a clearance (usually
+//! `tolerance.linear()`) and gets a [`ProfileFinding::Clearance`] naming the
+//! two segments, with a certified lower bound on their distance. A pair is
+//! reported when its distance has a local minimum below the clearance away
+//! from where they meet, or when it forms an exact cusp (they meet and leave
+//! in the same direction); the neighbourhood of a meeting point at a nonzero
+//! angle, a narrow wedge, is not. The check is
+//! `axiolid_overlay::check_arc_polygon_with`'s: exact, and a pair it cannot
+//! decide is reported with `undecided` set, never cleared. It is off in
+//! [`ValidateProfile::validate`], so the extruder and every existing caller
+//! see the same report as before. The lowered ring is judged, as everywhere
+//! here: the authored parts may be `2 * max_joint_gap` closer or farther.
 //!
 //! # Refused and reported
 //!
@@ -71,9 +87,13 @@
 //! interior apart (a hole touching the outer contour at several points, a
 //! closed chain of holes) are a `DisconnectedInterior` finding.
 
+use std::collections::BTreeMap;
+
 use axiolid_contracts::GeomError;
 use axiolid_core::{Point2, Scalar, Tolerance};
-use axiolid_overlay::{check_arc_polygon, ArcPolygon, ArcPolygonDefect, ArcRingRef, OverlayError};
+use axiolid_overlay::{
+    check_arc_polygon_with, ArcCheckOptions, ArcPolygon, ArcPolygonDefect, ArcRingRef, OverlayError,
+};
 use axiolid_profile::{Contour, ContourProfile, Profile, ValidateProfile};
 
 use crate::contour_lower::{lower_contour, ContourFault, LoweredContour};
@@ -161,6 +181,21 @@ pub enum ProfileFinding {
     HolesOverlap {
         holes: [usize; 2],
     },
+    /// Two segments are closer than the requested clearance
+    /// ([`ExactProfileValidator::validate_with`]): their distance has a
+    /// local minimum strictly between zero and it away from their meeting
+    /// points, or they form an exact cusp (they meet and leave in the same
+    /// direction). The neighbourhood of a meeting point at a nonzero angle (a
+    /// narrow wedge) is not reported. `segments` are
+    /// `(contour, segment)` pairs, ascending. `lower_bound` is a certified
+    /// lower bound on their distance; `undecided` is false when the exact
+    /// test proved the distance is below the clearance and true when it
+    /// could not decide and the pair is reported rather than cleared.
+    Clearance {
+        segments: [(ContourRef, usize); 2],
+        lower_bound: Scalar,
+        undecided: bool,
+    },
 }
 
 /// A point where two different contours meet.
@@ -202,6 +237,36 @@ impl ProfileReport {
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
 pub struct ExactProfileValidator;
 
+impl ExactProfileValidator {
+    /// [`ValidateProfile::validate`] with options: the default options are
+    /// exactly `validate`; `ArcCheckOptions::with_clearance` adds
+    /// [`ProfileFinding::Clearance`] for segments closer than the distance.
+    pub fn validate_with(
+        &self,
+        profile: &Profile,
+        tolerance: Tolerance,
+        options: ArcCheckOptions,
+    ) -> ProfileReport {
+        match profile_to_contour(profile, tolerance) {
+            Ok(contours) => validate_contours_with(&contours, tolerance, options),
+            Err(error) => ProfileReport {
+                findings: vec![ProfileFinding::NotLowered(error)],
+                ..ProfileReport::default()
+            },
+        }
+    }
+
+    /// [`ExactProfileValidator::validate_with`] for a [`ContourProfile`].
+    pub fn validate_contours_with(
+        &self,
+        profile: &ContourProfile,
+        tolerance: Tolerance,
+        options: ArcCheckOptions,
+    ) -> ProfileReport {
+        validate_contours_with(profile, tolerance, options)
+    }
+}
+
 impl ValidateProfile<ContourProfile> for ExactProfileValidator {
     type Report = ProfileReport;
 
@@ -214,17 +279,19 @@ impl ValidateProfile<Profile> for ExactProfileValidator {
     type Report = ProfileReport;
 
     fn validate(&self, profile: &Profile, tolerance: Tolerance) -> ProfileReport {
-        match profile_to_contour(profile, tolerance) {
-            Ok(contours) => validate_contours(&contours, tolerance),
-            Err(error) => ProfileReport {
-                findings: vec![ProfileFinding::NotLowered(error)],
-                ..ProfileReport::default()
-            },
-        }
+        self.validate_with(profile, tolerance, ArcCheckOptions::new())
     }
 }
 
 pub(crate) fn validate_contours(profile: &ContourProfile, tolerance: Tolerance) -> ProfileReport {
+    validate_contours_with(profile, tolerance, ArcCheckOptions::new())
+}
+
+fn validate_contours_with(
+    profile: &ContourProfile,
+    tolerance: Tolerance,
+    options: ArcCheckOptions,
+) -> ProfileReport {
     let mut report = ProfileReport::default();
     let mut lowered: Vec<LoweredContour> = Vec::with_capacity(1 + profile.holes.len());
     let mut broken = false;
@@ -259,13 +326,28 @@ pub(crate) fn validate_contours(profile: &ContourProfile, tolerance: Tolerance) 
         outer: rings.next().expect("the outer contour lowered"),
         holes: rings.collect(),
     };
-    let check = check_arc_polygon(&polygon, tolerance);
+    let check = check_arc_polygon_with(&polygon, tolerance, options);
     let segment = |ring: ArcRingRef, edge: usize| match ring {
         ArcRingRef::Outer => lowered[0].segment_of_edge[edge],
         ArcRingRef::Hole(k) => lowered[k + 1].segment_of_edge[edge],
     };
+    // Clearance defects name edges; several edges of one arc make one
+    // finding, so they are merged per segment pair and sorted.
+    let mut near: BTreeMap<[(ContourRef, usize); 2], (Scalar, bool)> = BTreeMap::new();
     for defect in check.defects {
         report.findings.push(match defect {
+            ArcPolygonDefect::Clearance {
+                edges,
+                lower_bound,
+                undecided,
+            } => {
+                let mut pair = edges.map(|(ring, edge)| (ring.into(), segment(ring, edge)));
+                pair.sort_unstable();
+                let entry = near.entry(pair).or_insert((lower_bound, undecided));
+                entry.0 = entry.0.min(lower_bound);
+                entry.1 &= undecided;
+                continue;
+            }
             ArcPolygonDefect::Ring { ring, error } => ProfileFinding::DegenerateRing {
                 contour: ring.into(),
                 error,
@@ -296,6 +378,15 @@ pub(crate) fn validate_contours(profile: &ContourProfile, tolerance: Tolerance) 
             other => ProfileFinding::Polygon(other),
         });
     }
+    report.findings.extend(
+        near.into_iter().map(
+            |(segments, (lower_bound, undecided))| ProfileFinding::Clearance {
+                segments,
+                lower_bound,
+                undecided,
+            },
+        ),
+    );
     report.contacts = check
         .contacts
         .into_iter()

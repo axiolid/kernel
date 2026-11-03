@@ -25,6 +25,7 @@
 //! in `tests/degenerate_drop.rs` must catch.
 mod arc;
 mod arc_check;
+mod arc_clearance;
 mod arc_overlay;
 mod arrangement;
 mod budget;
@@ -48,8 +49,10 @@ pub use arc::{
     arc_edge_radius, arc_ring_area, reverse_arc_ring, validate_arc_ring, ArcRing, ArcVertex,
 };
 pub use arc_check::{
-    check_arc_polygon, ArcPolygonCheck, ArcPolygonDefect, ArcRingContact, ArcRingRef,
+    check_arc_polygon, check_arc_polygon_with, ArcPolygonCheck, ArcPolygonDefect, ArcRingContact,
+    ArcRingRef,
 };
+pub use arc_clearance::ArcCheckOptions;
 pub use arc_overlay::{arc_overlay, ArcOverlayEvidence, ArcOverlayResult, ArcPolygon};
 pub use arrangement::{
     ArcArrangement, ArrangementEdge, ArrangementRegion, EdgeSource, EdgeUse as ArrangementEdgeUse,

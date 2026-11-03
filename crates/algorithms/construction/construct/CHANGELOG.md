@@ -9,6 +9,17 @@ caret rule for `0.x` versions.
 
 ## [Unreleased]
 
+### Added
+
+- `ExactProfileValidator::validate_with` and `validate_contours_with` take
+  `ArcCheckOptions`; with a clearance, segments of the lowered contour whose
+  distance has a local minimum below it away from their meeting points, or
+  that form an exact cusp, are a `ProfileFinding::Clearance` naming both
+  segments (a narrow wedge at a nonzero angle is not reported), with a certified lower
+  bound on their distance and an `undecided` flag for a pair the exact check
+  could not clear. `ValidateProfile::validate` and the extruder are unchanged
+  (#388, ADR 0095).
+
 ### Fixed
 
 - `extrude_profile_exact` ran no profile check and built a solid from a

@@ -29,6 +29,9 @@ Validated, deterministic planar booleans (intersection, union, difference, xor) 
 - An arc polygon is checked exactly for self-contact, shared boundary and hole nesting by
   `check_arc_polygon`, with no tolerance in any contact or nesting decision (`src/arc_check.rs`,
   #352, ADR 0095). `scripts/probe_arc_check_mutants.py` lists the faults its tests must catch.
+  `check_arc_polygon_with` can also report edges that miss each other by less than a distance
+  (`ArcCheckOptions::with_clearance`, `src/arc_clearance.rs`, #388), decided exactly; its faults
+  are listed by `scripts/probe_arc_clearance_mutants.py`.
 - Operand validation and output settling share one exact notion of when two boundary edges
   meet (`src/contact.rs`, #272): an end on the other edge within the tolerance, or a proper
   crossing, so every output is a valid operand wherever it lies.

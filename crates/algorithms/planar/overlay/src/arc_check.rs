@@ -41,18 +41,27 @@
 //!   [`ArcPolygonDefect::DisconnectedInterior`]. It is judged only when no
 //!   other nesting defect is present, since a crossing also makes cycles.
 //!
+//! - **Clearance (opt-in, #388).** With [`ArcCheckOptions::with_clearance`],
+//!   [`check_arc_polygon_with`] also reports every pair of edges that miss
+//!   each other by less than the distance as an
+//!   [`ArcPolygonDefect::Clearance`], decided exactly (see `arc_clearance`).
+//!   It is off by default: rings that miss by less than the tolerance are
+//!   valid exactly, and [`check_arc_polygon`] says so.
+//!
 //! Winding is not read: each ring is taken as the region it encloses.
 //!
 //! Output order is deterministic: defects by ring, then edge pair, then the
 //! nesting defects in the order overlaps, holes outside, holes overlapping,
-//! disconnected interiors;
+//! disconnected interiors, then the clearance defects by first edge (ring,
+//! edge), then second edge;
 //! contacts by ring pair, then arrangement vertex index.
 
 use std::collections::BTreeSet;
 
-use axiolid_core::{Point2, Tolerance};
+use axiolid_core::{Point2, Scalar, Tolerance};
 
 use crate::arc::{validate_arc_ring, ArcRing};
+use crate::arc_clearance::{near_pairs, ArcCheckOptions};
 use crate::arc_overlay::ArcPolygon;
 use crate::arrangement::ArcArrangement;
 use crate::exact_arc::boxes::BoxTree;
@@ -105,6 +114,24 @@ pub enum ArcPolygonDefect {
     HoleOutsideOuter { hole: usize },
     /// Two holes' interiors meet (crossing or nested). `holes` ascending.
     HolesOverlap { holes: [usize; 2] },
+    /// Two edges are closer than the requested clearance
+    /// ([`ArcCheckOptions::with_clearance`]): their distance has a local
+    /// minimum strictly between zero and it away from their meeting points,
+    /// or they form an exact cusp (they meet and leave in the same
+    /// direction). The neighbourhood of a meeting point at a nonzero angle (a
+    /// narrow wedge) is not reported. `edges` are `(ring, edge)`
+    /// pairs, ascending. `lower_bound` is a certified lower bound on their
+    /// distance. `undecided` is false when the exact test proved the
+    /// distance is below the clearance, and true when it could not decide
+    /// and the pair is reported rather than cleared.
+    Clearance {
+        edges: [(ArcRingRef, usize); 2],
+        lower_bound: Scalar,
+        undecided: bool,
+    },
+    /// The requested clearance is not a finite, non-negative distance, so
+    /// no clearance was checked.
+    InvalidClearance { clearance: Scalar },
 }
 
 /// A point where two different rings meet.
@@ -143,14 +170,31 @@ impl ArcPolygonCheck {
 /// [`validate_arc_ring`]. Nesting is checked only when every ring passes it
 /// and has no self-contact.
 pub fn check_arc_polygon(polygon: &ArcPolygon, tolerance: Tolerance) -> ArcPolygonCheck {
+    check_arc_polygon_with(polygon, tolerance, ArcCheckOptions::new())
+}
+
+/// [`check_arc_polygon`] with options (#388): the default options are
+/// exactly [`check_arc_polygon`]; [`ArcCheckOptions::with_clearance`] adds
+/// the clearance defects.
+///
+/// The clearance check tests the edges of every ring that passes
+/// [`validate_arc_ring`], whatever other defects the polygon has, and
+/// appends its defects after all others.
+pub fn check_arc_polygon_with(
+    polygon: &ArcPolygon,
+    tolerance: Tolerance,
+    options: ArcCheckOptions,
+) -> ArcPolygonCheck {
     let rings: Vec<&ArcRing> = std::iter::once(&polygon.outer)
         .chain(&polygon.holes)
         .collect();
     let mut check = ArcPolygonCheck::default();
     let mut simple = true;
+    let mut usable = vec![true; rings.len()];
     for (index, ring) in rings.iter().enumerate() {
         let name = ArcRingRef::of(index);
         if let Err(error) = validate_arc_ring(ring, tolerance) {
+            usable[index] = false;
             // A zero net area can be a figure eight, whose crossing is the
             // more useful finding; the other refusals leave no edges to test.
             let zero_area = error == OverlayError::ZeroArea;
@@ -173,6 +217,23 @@ pub fn check_arc_polygon(polygon: &ArcPolygon, tolerance: Tolerance) -> ArcPolyg
     }
     if simple {
         nesting(&rings, tolerance, &mut check);
+    }
+    if let Some(clearance) = options.clearance {
+        if !clearance.is_finite() || clearance < 0.0 {
+            check
+                .defects
+                .push(ArcPolygonDefect::InvalidClearance { clearance });
+        } else if clearance > 0.0 {
+            check.defects.extend(
+                near_pairs(&rings, &usable, clearance)
+                    .into_iter()
+                    .map(|pair| ArcPolygonDefect::Clearance {
+                        edges: pair.edges.map(|(ring, edge)| (ArcRingRef::of(ring), edge)),
+                        lower_bound: pair.lower_bound,
+                        undecided: pair.undecided,
+                    }),
+            );
+        }
     }
     check
 }
