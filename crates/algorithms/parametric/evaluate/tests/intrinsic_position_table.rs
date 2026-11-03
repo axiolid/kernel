@@ -328,6 +328,52 @@ fn an_over_cap_table_and_a_bad_end_are_refused() {
 }
 
 #[test]
+fn a_partial_panel_is_charged_its_own_remainder() {
+    // One panel covers the whole arc at this target, so a point inside it
+    // is all partial panel: the rule's error there, about `w^5 k^4 / 4320`,
+    // is far above the rounding and must be in the reported error.
+    let radius = 100.0;
+    let arc = Intrinsic2::new(
+        frame(),
+        CurvatureLaw::Constant {
+            curvature: 1.0 / radius,
+        },
+        10.0,
+    );
+    let table = IntrinsicPositionTable::new2(&arc, 1e-3, 10.0).unwrap();
+    assert_eq!(table.panels(), 1);
+    let mut charged: Scalar = 0.0;
+    for s in samples(10.0, 20) {
+        let (p, error) = table.point2(s).unwrap();
+        let a = s / radius;
+        let exact = place(
+            &frame(),
+            Vec2::new(radius * a.sin(), radius * (1.0 - a.cos())),
+        );
+        let off = (p - exact).length();
+        assert!(off <= error, "{s}: {off} > {error}");
+        charged = charged.max(off);
+    }
+    // The rule really errs here, well past rounding.
+    assert!(charged > 1e-10, "{charged}");
+}
+
+#[test]
+fn the_reported_error_never_falls_along_the_curve() {
+    // Checkpoints carry the remainder so far: an error that fell at one
+    // would be a remainder forgotten.
+    let alignment = gentle();
+    let table = IntrinsicPositionTable::new2(&alignment.curve, 1e-9, 280.0).unwrap();
+    assert!(table.panels() > 128, "{}", table.panels());
+    let mut last = 0.0;
+    for s in samples(280.0, 4000) {
+        let (_, error) = table.point2(s).unwrap();
+        assert!(error >= last, "{s}: {error} < {last}");
+        last = error;
+    }
+}
+
+#[test]
 fn a_ten_kilometre_alignment_needs_few_panels() {
     let alignment = Alignment::new(vec![
         Piece::Line(2000.0),

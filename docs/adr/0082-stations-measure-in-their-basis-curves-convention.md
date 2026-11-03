@@ -1491,3 +1491,61 @@ Evidence: `crates/algorithms/parametric/evaluate/src/station/certify/reading.rs`
 `crates/execution/compile/tests/station_bound_quadrature.rs` (the exact
 solid framed independently, by a fine quadrature) and
 `scripts/probe_quadrature_frames_mutants.py`.
+
+## Amendment 2026-11-03: clothoid and other intrinsic plans (#361)
+
+Context: an alignment family (rheonda/cad#139) needs a gradient curve whose
+plan is one intrinsic curve: lines, arcs and transitions as one piecewise
+law, which openbimrs/ifc lowers so. Its runs were `UNCERTIFIED_FRAMES`.
+
+- **The frame law is closed form.** The heading is the law's integral, so
+  with `|k|` and `|k'|` bounded per seam-free piece, `|T'| <= sup|k|` and
+  `|T''| <= sup|k'| + sup k^2` in arc length. On an elevated curve they are
+  composed with the profile in plan distance (#252's `D_2`, `D_3`). The axes
+  follow by the unit-vector rule. There is no separate twist term: the
+  reference-up frame's turn about the tangent is fixed by the tangent and
+  `+Z`, and the plan frame turns with the heading.
+- **Only the point is a quadrature.** Each read point is compared with a
+  certified `IntrinsicPositionTable`: the composite two-point
+  Gauss-Legendre rule on the closed-form tangent, remainder `w^5 / 4320
+  |f''''|` with `|f''''| <= |k'''| + 4|k||k''| + 3k'^2 + 6k^2|k'| + k^4`
+  (the Peano kernel of the rule keeps one sign, so the vector form needs no
+  `sqrt 2`), panels cut at the law's seams, checkpointed every 64 panels so
+  that any read costs at most 64 panels and does not depend on the order of
+  reads. Each read axis is compared with the closed-form axes. The distances
+  plus the table's error and the heading's rounding are `point_error` and
+  `axis_error`. The measure is exact: plan distance is the parameter.
+- **Families.** A 2D intrinsic curve; a level planar `Intrinsic3`; an
+  elevated curve over an intrinsic plan with a closed-form profile; every
+  curvature law with closed-form bounds of `k` to `k'''` (clothoid, Bloss,
+  sine and cosine transitions), with an orthonormal start frame.
+- **The soundness rule.** `piece_frame_bounds` reports `point_error = 0`, so
+  it keeps returning `None` for every intrinsic curve; only the reader, which
+  compares what it reads, certifies them.
+- **Still unbounded by name.** Chains (cubic pieces), banked curves over
+  intrinsic or chain plans (cant, out of scope), intrinsic space curves with
+  torsion or tilted, vertical clothoids (`ElevationLaw::Intrinsic`), and
+  offsets beside intrinsic curves.
+- **Measured.** On a 5 km alignment at a position error of `1e-6` (a
+  thousandth of a 1 mm budget), 512 points read in bisecting order cost 198 ms
+  with the midpoint positions and 3.9 ms with the table, table build
+  included; a run of sections along the gradient curve compiles and
+  certifies in 367 ms at a bound of 0.49 mm
+  (`tools/benchmark/benches/station_clothoid.rs`).
+
+| Option | Why not |
+| --- | --- |
+| Certify the kernel's 8-point Gauss read itself | Its remainder needs the 16th derivative per panel, and the read is used everywhere; comparing needs no certificate of the estimate. |
+| Reuse #317's midpoint positions | `O(h^2)` makes a 10 km alignment at a thousandth of a millimetre budget need about a million panels, its answers depend on the order of reads (the refinement bisects, so reads go backwards and restart the march), and it measured fifty times slower here. |
+| Fresnel functions per clothoid piece | Degree-one laws only, and a certified Fresnel evaluation is its own project. |
+
+Evidence: `crates/algorithms/parametric/evaluate/src/bound/position_table.rs`
+(`IntrinsicPositionTable`),
+`crates/algorithms/parametric/evaluate/src/station/certify/intrinsic.rs`,
+`crates/algorithms/parametric/evaluate/src/station/frame_bound.rs`
+(`FrameLaw`),
+`crates/algorithms/parametric/evaluate/tests/intrinsic_position_table.rs`
+and `station_frame_law_intrinsic.rs` (points from the Fresnel series, closed
+forms and a Simpson reference, never the kernel's quadrature),
+`crates/execution/compile/tests/station_bound_clothoid.rs` and
+`scripts/probe_clothoid_frames_mutants.py`.

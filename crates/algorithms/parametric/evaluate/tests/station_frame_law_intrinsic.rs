@@ -486,12 +486,22 @@ fn what_is_not_certified_stays_unbounded() {
         CurvatureLaw::Constant { curvature: 0.01 },
         60.0,
     ));
-    let cases: [(&str, StationCurve<'_>); 6] = [
+    // Tilted by a hair: its plane projection is orthonormal to 1e-12, but
+    // the curve is not level.
+    let hair = Frame3 {
+        origin: Point3::ZERO,
+        x: Vec3::new(0.6, 0.8, 1e-9),
+        y: Vec3::new(-0.8, 0.6, 0.0),
+        z: Vec3::new(-6e-10, -8e-10, 1.0),
+    };
+    let barely = Curve3::Intrinsic(Intrinsic3::new(hair, law.clone(), flat.clone(), 60.0));
+    let cases: [(&str, StationCurve<'_>); 7] = [
         ("banked over a clothoid", StationCurve::Three(&banked)),
         ("chain", StationCurve::Two(&chain)),
         ("stretched", StationCurve::Two(&stretched)),
         ("stretched, elevated", StationCurve::Three(&stretched_plan)),
         ("tilted", StationCurve::Three(&tilted)),
+        ("tilted by a hair", StationCurve::Three(&barely)),
         ("twisted", StationCurve::Three(&twisted)),
     ];
     for (name, curve) in cases {
