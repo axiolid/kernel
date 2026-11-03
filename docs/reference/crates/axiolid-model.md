@@ -8,7 +8,7 @@ Format-neutral geometry item tree. The currency between a format reader and a ke
 
 | | |
 | --- | --- |
-| Latest release | 0.3.17 (2026-10-29) |
+| Latest release | 0.3.18 (2026-11-03) |
 | crates.io | [`axiolid-model`](https://crates.io/crates/axiolid-model) |
 | Facade | [`axiolid`](./axiolid) feature `model` |
 | Layer | representations (`representation.graph`) |
@@ -54,13 +54,21 @@ Default: none.
 
 ## Changes
 
-Latest release, 0.3.17 (2026-10-29):
+Latest release, 0.3.18 (2026-11-03):
 
-### Changed
+### Added
 
-- The documentation of `SolidOperation::FixedReferenceSweep` states the
-  frame law, the tangent-continuity requirement, how `parameter_range` is
-  read, and what the reference compiler proves, reports unbounded and
-  refuses (#122).
+- `SurfaceRelation::Ruled { first, second }` and `RuledSide`: a surface
+  ruled between two sides, `p(u, v) = (1 - v) first(u) + v second(u)`. A
+  side is an atomic `Curve3` node over an oriented interval, or an apex
+  point. The builder refuses a non-finite or empty interval, a non-finite
+  apex, two apexes and the same curve over the same interval, with the new
+  `GraphError::InvalidRuledSurface { detail }`; a side that is no atomic
+  `Curve3` is an `InvalidReferenceType` (#402).
+- Wire format 1.5: only a graph holding a `Ruled` surface is labelled 1.5;
+  every other graph is written as before, and a 1.4 payload holding one is
+  refused as `UnknownKind` (#402).
+- The package now ships `LICENSE` and `LICENSE-COMMERCIAL` (symlinks to the
+  repository root), so the licence texts travel with the archive (#358).
 
 Full history: [`crates/representations/modeling/graph/CHANGELOG.md`](https://github.com/axiolid/kernel/blob/main/crates/representations/modeling/graph/CHANGELOG.md)

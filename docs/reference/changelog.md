@@ -4146,6 +4146,14 @@ Every publishable crate versions and publishes independently ([ADR 0067](/adr/00
   placement, `Exact` on a line, `Certified` with the error of the
   placement's point and of each axis (`PlacementBound::displacement` for a
   local point), or `Unbounded` by name. Requires `axiolid-evaluate` 0.3.20.
+- `SurfaceRelation::Ruled` (#402) compiles to an open sheet
+  (`MeshClosure::Surface`) with a certified deviation, the new
+  `DeviationPath::RuledSurface`. A side is a line, circle, ellipse or
+  B-spline (rational too) over an oriented interval, or an apex point; the
+  bound is the sides' curve term plus the rulings' twist term, derived in
+  `ruled.rs`. A side on another curve family, a conic over more than one
+  turn, a B-spline interval outside its domain and sides that coincide are
+  refused by name.
 
 ### Changed
 
@@ -4170,6 +4178,15 @@ Every publishable crate versions and publishes independently ([ADR 0067](/adr/00
   node, or whose edge curve handle points at a Surface node, was meshed (or
   reported Unbounded) before and is refused now. A B-rep with broken
   topology is still reported as such first.
+- A B-rep face whose support is a surface relation (a ruled, swept or
+  revolved surface) is refused as `UnsupportedInput` for `Tessellation`
+  (`a B-rep face on a surface relation`), no longer as `InvalidInput`; it
+  was never a malformed graph (#402).
+- A curve-bounded surface over a surface relation, and a sweep whose
+  reference surface is one, are refused as `UnsupportedInput` for
+  `SurfaceEvaluation` (`a curve-bounded surface over a surface relation`,
+  `a surface relation as a reference surface`), no longer as `InvalidInput`
+  (#402).
 
 ### Fixed
 
@@ -6129,6 +6146,23 @@ Every publishable crate versions and publishes independently ([ADR 0067](/adr/00
 
 
 ## axiolid-model
+
+### 0.3.18 - 2026-11-03
+
+### Added
+
+- `SurfaceRelation::Ruled { first, second }` and `RuledSide`: a surface
+  ruled between two sides, `p(u, v) = (1 - v) first(u) + v second(u)`. A
+  side is an atomic `Curve3` node over an oriented interval, or an apex
+  point. The builder refuses a non-finite or empty interval, a non-finite
+  apex, two apexes and the same curve over the same interval, with the new
+  `GraphError::InvalidRuledSurface { detail }`; a side that is no atomic
+  `Curve3` is an `InvalidReferenceType` (#402).
+- Wire format 1.5: only a graph holding a `Ruled` surface is labelled 1.5;
+  every other graph is written as before, and a 1.4 payload holding one is
+  refused as `UnknownKind` (#402).
+- The package now ships `LICENSE` and `LICENSE-COMMERCIAL` (symlinks to the
+  repository root), so the licence texts travel with the archive (#358).
 
 ### 0.3.17 - 2026-10-29
 
