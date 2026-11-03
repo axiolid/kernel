@@ -3,8 +3,9 @@
 Each mutant breaks one step a placement rests on: the axis mapping (local
 x, y, z onto tangent, left lateral, up), the origin on the station's
 offset point, the oriented (not base) frame, the seam side passed through,
-the exactness claim and what the compilers do with it, the frame a
-station along a placed curve carries and the refusal of a tilted
+the exactness claim and what the compilers do with it (an unbounded
+placement is reported by `compile/tests/station_placement_bound.rs`,
+#405), the frame a station along a placed curve carries and the refusal of a tilted
 plan-measured one (#285 reads a tilted arc-length one in its own frame), the
 directrix moved by the placement, and the graph's validation (family,
 dimension, station checks, references). Each must turn a test red:
@@ -34,6 +35,7 @@ V = "crates/representations/modeling/graph/src/validation.rs"
 N = "crates/representations/modeling/graph/src/node.rs"
 EVAL = ["-p", "axiolid-evaluate", "--test", "station_placement"]
 PLACE = ["-p", "axiolid-mesh-compile", "--test", "station_placement"]
+BOUND = ["-p", "axiolid-mesh-compile", "--test", "station_placement_bound"]
 MODEL = ["-p", "axiolid-model", "--test", "station"]
 
 MUTANTS = [
@@ -73,9 +75,14 @@ MUTANTS = [
     ('a placed basis loses its seams', B,
      '                StationCurve::Two(curve) => exact_station_seams2(curve),',
      '                StationCurve::Two(_) => Ok(Vec::new()),', [PLACE]),
-    ('an inexact placement reported bounded', K,
-     '                if !placement.exact {',
-     '                if false {', [PLACE]),
+    # An unbounded placement is reported by the compiler (#405 moved the
+    # test of `placement.exact` into `placement_accuracy`, which the
+    # exact-basis mutant of `probe_station_placement_bound_mutants.py` covers).
+    ('an unbounded placement reported bounded', K,
+     '                    PlacementAccuracy::Unbounded(reason) => unbounded(reason),',
+     '                    PlacementAccuracy::Unbounded(_) => {\n'
+     '                        channels::transform(source, placement.transform, rounding)\n'
+     '                    }', [BOUND]),
     ('an inexact placement compiled exactly', X,
      '                if !placement.exact {',
      '                if false {', [PLACE]),

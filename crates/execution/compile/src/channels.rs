@@ -33,7 +33,7 @@ mod transform;
 
 pub(crate) use boolean::after_boolean;
 pub(crate) use merge::merge;
-pub(crate) use transform::transform;
+pub(crate) use transform::{transform, transform_within};
 
 use axiolid_mesh::{AttributeFate, TriMesh};
 use axiolid_mesh_compile_contract::MeshClosure;

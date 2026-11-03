@@ -4,6 +4,7 @@ use axiolid_core::{Scalar, Transform3};
 use axiolid_mesh::{NormalAttribute, TriMesh};
 
 use super::Built;
+use crate::deviation::Deviation;
 
 /// Apply `transform` to a built mesh.
 ///
@@ -22,6 +23,35 @@ use super::Built;
 /// ([`crate::deviation::placement_rounding`] of the source's positions,
 /// #295); every deviation bound grows by it.
 pub(crate) fn transform(built: &Built, transform: Transform3, rounding: Scalar) -> Built {
+    moved(
+        built,
+        transform,
+        built.deviation.transformed(transform, rounding),
+    )
+}
+
+/// [`transform`] for a node placed at a station whose frame lies within
+/// `frame` of the exact one over the whole source (#405): every bound
+/// grows by it on top of the `rounding`, and it is named under
+/// [`crate::deviation::DeviationPath::StationPlacement`]
+/// ([`crate::deviation::Deviation::transformed_within`]).
+pub(crate) fn transform_within(
+    built: &Built,
+    transform: Transform3,
+    rounding: Scalar,
+    frame: Scalar,
+) -> Built {
+    moved(
+        built,
+        transform,
+        built
+            .deviation
+            .transformed_within(transform, rounding, frame),
+    )
+}
+
+/// `built`'s mesh moved by `transform`, with `deviation` its report.
+fn moved(built: &Built, transform: Transform3, deviation: Deviation) -> Built {
     let source = &built.mesh;
     let positions = source
         .positions
@@ -59,7 +89,7 @@ pub(crate) fn transform(built: &Built, transform: Transform3, rounding: Scalar) 
         mesh,
         fates: built.fates.clone(),
         closure: built.closure,
-        deviation: built.deviation.transformed(transform, rounding),
+        deviation,
         local: None,
     }
 }

@@ -135,8 +135,16 @@
 //! tangent, left lateral and up, its origin onto the station's point
 //! (`axiolid_model::station` names the mapping). The frame is exact only
 //! on a line ([`ResolvedPlacement::exact`]); on any other basis it is the
-//! exact curve's at a distance read by an estimate, so a mesh placed in
-//! it reports its placement [`DeviationBound::Unbounded`] by name.
+//! exact curve's at a distance read by an estimate, and
+//! [`placement_accuracy`] states how far the placement lies from the exact
+//! one (#405): [`PlacementAccuracy::Certified`] on a circle, a polyline, an
+//! elevated or banked curve over a line or a circle, an intrinsic plan
+//! alone or under a closed-form profile and composites of them, where a
+//! mesh placed in it reports the frame's error as a certified
+//! `StationPlacement` contribution that grows every bound of the instance;
+//! [`PlacementAccuracy::Unbounded`] by name elsewhere, where it reports its
+//! placement [`DeviationBound::Unbounded`]. The `accuracy` module states
+//! the bound.
 //!
 //! A station along a placed curve is its source's station carried by the
 //! placement: a rigid motion keeps arc length, and one that keeps `+Z`
@@ -234,12 +242,16 @@ use axiolid_reference::station::{Mitre, SectionFrame, StationSeam};
 
 use crate::DeviationBound;
 
+mod accuracy;
 mod basis;
 mod bound;
 mod exact;
 
+pub(crate) use accuracy::UNCERTIFIED_STATION_FRAME;
+pub use accuracy::{placement_accuracy, PlacementAccuracy, PlacementBound};
 pub use basis::curve_path;
 pub(crate) use basis::{trim_parameters, Basis};
+pub(crate) use bound::CERTIFICATION_SHARE;
 pub(crate) use exact::stationed_spine_exact;
 
 /// Most sections one interval between two stations is bisected into.
@@ -299,6 +311,19 @@ pub fn resolve(graph: &GeometryGraph, id: NodeId) -> GeomResult<ResolvedStation>
     resolve_oriented(graph, &station, 0).map(|(resolved, _, _)| resolved)
 }
 
+/// An oriented station resolved, with what it was resolved from.
+struct Parts<'g> {
+    /// The basis the station is measured along.
+    basis: Basis<'g>,
+    /// The distance the station is read at, snapped onto its window's seam.
+    distance: Scalar,
+    resolved: ResolvedStation,
+    /// The frame at the station turned by its orientation.
+    turned: SectionFrame,
+    /// Whether that frame is exact (see [`ResolvedPlacement::exact`]).
+    exact: bool,
+}
+
 /// An oriented station resolved: the station, its turned frame, and
 /// whether that frame is exact (see [`ResolvedPlacement::exact`]).
 fn resolve_oriented(
@@ -306,6 +331,17 @@ fn resolve_oriented(
     station: &OrientedCurveStation,
     depth: usize,
 ) -> GeomResult<(ResolvedStation, SectionFrame, bool)> {
+    let parts = resolve_parts(graph, station, depth)?;
+    Ok((parts.resolved, parts.turned, parts.exact))
+}
+
+/// [`resolve_oriented`] with the basis and the distance the frame was read
+/// at, which [`placement_accuracy`] reads the same frame's error at.
+fn resolve_parts<'g>(
+    graph: &'g GeometryGraph,
+    station: &OrientedCurveStation,
+    depth: usize,
+) -> GeomResult<Parts<'g>> {
     let OrientedCurveStation {
         station: CurveStation {
             basis,
@@ -326,15 +362,18 @@ fn resolve_oriented(
     let turned = oriented(&section, orientation, orientation, 0.0)?;
     let mut placed = turned.frame();
     placed.origin = point;
-    Ok((
-        ResolvedStation {
+    let exact = basis.frame_is_exact(distance, *seam);
+    Ok(Parts {
+        basis,
+        distance,
+        resolved: ResolvedStation {
             point,
             frame: placed,
             section,
         },
         turned,
-        basis.frame_is_exact(distance, *seam),
-    ))
+        exact,
+    })
 }
 
 /// A node placed at a station (#264), resolved.
@@ -354,7 +393,7 @@ pub struct ResolvedPlacement {
     /// including the one the station is read on is such a line. Otherwise
     /// the frame is the exact curve's at a distance read by an estimate
     /// (the arc-length inverse, quadrature), and nothing placed in it is
-    /// reported exact.
+    /// reported exact; [`placement_accuracy`] bounds its error (#405).
     pub exact: bool,
 }
 

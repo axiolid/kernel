@@ -151,6 +151,10 @@ pub(crate) enum Basis<'g> {
         /// Whether a frame read on it is exact (a line, placed in exact
         /// frames).
         exact: bool,
+        /// Whether the placement, if any, is exact, whatever the curve is
+        /// (#405): a curve placed at a station whose frame is not exact
+        /// has no frame law to certify a frame against.
+        placed_exactly: bool,
     },
     Composite(CompositeBasis<'g>),
 }
@@ -169,6 +173,7 @@ impl<'g> Basis<'g> {
             } => Basis::Atomic {
                 curve,
                 placed,
+                placed_exactly: exact,
                 exact: exact
                     && match curve {
                         StationCurve::Two(curve) => station_frame_is_exact2(curve),

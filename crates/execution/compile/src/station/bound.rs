@@ -164,7 +164,7 @@ pub(super) struct SectionLaw<'r, 'g> {
 
 /// The share of a run's budget its frames' quadratures are certified to
 /// (#316): their lengths, so a read's measure, to a thousandth of it.
-const CERTIFICATION_SHARE: Scalar = 1e-3;
+pub(crate) const CERTIFICATION_SHARE: Scalar = 1e-3;
 
 /// `sup |W'|` and `sup |W''|` of a turned axis.
 type Pair = [Scalar; 2];

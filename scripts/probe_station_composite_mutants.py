@@ -120,8 +120,8 @@ MUTANTS = [
      '                    let piece = StationPiece::between_parameters(curve, lo, hi)?;',
      '                    let piece = StationPiece::whole(curve)?;', [COMP]),
     ('a composite frame always claimed exact', C,
-     '        basis.frame_is_exact(distance, *seam),',
-     '        true,', [COMP]),
+     '    let exact = basis.frame_is_exact(distance, *seam);',
+     '    let exact = true;', [COMP]),
 ]
 
 probe_lib.main(MUTANTS, timeout=1800)

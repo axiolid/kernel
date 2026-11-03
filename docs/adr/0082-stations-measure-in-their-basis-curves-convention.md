@@ -1617,3 +1617,75 @@ against finite differences of the frames' tangent and closed forms),
 a reversed arc, a vertical sag and a crest in the section and plan frames, a
 fold inside a clothoid, a receding longitudinal offset, a turned section and
 an ellipse reported unbounded) and `scripts/probe_station_fold_mutants.py`.
+
+## Amendment 2026-11-03: certified placements at stations on curved bases (#405)
+
+Context: an alignment family (rheonda/cad#139) places elements along a
+gradient curve over an intrinsic plan, or a plan curve alone, and refuses an
+unbounded placement. A node placed at a station (#264) was exact on a line
+and `Unbounded` on every other basis; #361 certified runs of sections, not
+one placement.
+
+- **The exact placement.** The source's local `x`, `y`, `z` on the oriented
+  axes of the exact frame law (#316, #361) at the station's distance,
+  snapped by its window (#294) and read from its seam side (#263), its
+  origin at the offsets read in the exact base frame. The kernel's frame is
+  compared with it, never trusted.
+- **One read, compared** (`axiolid-evaluate` `FrameLaw::error_at`). On an
+  intrinsic plan, alone, level or under a closed-form profile, the read
+  point is compared with a certified `IntrinsicPositionTable` and the axes
+  with the closed-form heading (#361); on a circle, a polyline, and an
+  elevated or banked curve over a line or a circle, the frame is read in
+  closed form at its parameter and charged its rounding (`POINT_ROUNDING`
+  of the largest magnitude the read works with, its point, the curve's data
+  and the placement's translation, since `r - r cos a` rounds at the scale
+  of `r`; `AXIS_ROUNDING` per axis): `e_p`, `e_a`.
+- **The distance's resolution.** Where the distance is resolved by the
+  arc-length inverse (a circle, a polyline) the read stands within `delta =
+  2 ARC_LENGTH_TOLERANCE max(1, s)` of `s` (#247); on a composite, a piece
+  after joints measured by quadrature adds its start's certified distance
+  from the true joint (#316). The exact frame at `s` lies within `delta
+  |O'|` of the read point and `delta max(|T'|, |L'|, |U'|)` of its axes,
+  the bounds taken over `[s - 2 delta, s + 2 delta]` on the side read. Plan
+  distance and an intrinsic curve's arc length are the parameter: `delta =
+  0`. A station within `delta` of a seam it is not on could stand on the
+  other side's law: unbounded by name.
+- **The placement** (`axiolid-mesh-compile` `station::placement_accuracy`,
+  `PlacementAccuracy`, `PlacementBound`). With offsets in the base frame and
+  an orientation turning the axes by unit components (`sqrt 3 e` for a
+  turned frame, `e` for the base one): `point_error = e_p + e_a (|lat| +
+  |vert| + |long|)` plus the rounding of placing the offsets, `axis_error =
+  c e_a` plus, for a turned frame, `1e-14 / |axis x reference|`, the
+  conditioning of Gram-Schmidt on nearly parallel inputs, `e_p` and `e_a` with the resolution added. The mesh compiler
+  certifies the quadratures to a thousandth of the chord budget, as for runs.
+- **The body.** A local point `q` lands within `point_error + axis_error
+  |q|_1` of its exact place; `|q|_1` is convex, so `R = max |v|_1` over the
+  source mesh's vertices covers every point of the mesh, and every point of
+  the exact source lies within the source's bound of one of them. `F =
+  point_error + axis_error R` grows every contribution of the instance, as
+  the placement's rounding does (#295), and is named `Certified(F)` under
+  `DeviationPath::StationPlacement`; the source is re-meshed with room for
+  rounding and `F` when they would carry it over the budget. The exact
+  compiler still refuses every basis but a line.
+- **Still unbounded by name**: frames read by quadrature (an ellipse, a
+  B-spline, an offset curve), chains, banked curves over intrinsic or chain
+  plans, intrinsic space curves with torsion or tilted, a stretched or
+  skewed start frame, elevated curves with an intrinsic profile or another
+  plan, a skewed circle, a steep tangent, a roll reaching a quarter turn, a
+  basis placed at a station whose frame is not exact, and a station within
+  its distance's resolution of a seam it is not read on.
+
+| Option | Why not |
+| --- | --- |
+| A `bound: Option<PlacementBound>` field on `ResolvedPlacement` | `placement` takes no tolerance, `None` names no reason, and every internal reader of a placement would build a position table it never reads. |
+| `certified_placement` refusing by name | A refusal is an error: the mesh compiler would tell "cannot certify" from "cannot resolve" by matching errors, and a line's exact frame would read as merely certified. |
+| Name the frame's error only under `StationPlacement` | A node's bound is its worst contribution, not their sum: the source's bound and the frame's would be under-reported. |
+| An L2 radius with `sqrt 3` | The axes' errors are bounded per axis; `|q|_1` is tight and never larger. |
+| Read a circle's angle in closed form to make it exact | Changes the reading every station rests on, for a term of `2e-12 s`. |
+
+Evidence: `crates/algorithms/parametric/evaluate/src/station/frame_bound/error.rs`
+(`FrameLaw::error_at`), `crates/execution/compile/src/station/accuracy.rs`,
+`crates/algorithms/parametric/evaluate/tests/station_frame_error.rs`,
+`crates/execution/compile/tests/station_placement_bound.rs` (the exact placed
+body from closed forms and Fresnel series) and
+`scripts/probe_station_placement_bound_mutants.py`.

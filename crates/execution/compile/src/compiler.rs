@@ -22,6 +22,7 @@ use axiolid_construct::extrude::extrude_profile;
 use axiolid_construct::profile::profile_rings;
 
 use crate::channels::{self, Built};
+use crate::station::{PlacementAccuracy, UNCERTIFIED_STATION_FRAME};
 
 /// Scalar reference compiler.
 ///
@@ -522,6 +523,10 @@ impl<B: MeshBoolean> ReferenceMeshCompiler<B> {
         // than the initial room left.
         let mut rooms: std::collections::HashMap<EvalKey, Scalar> =
             std::collections::HashMap::new();
+        // How far each node placed at a station lies from its exact
+        // placement (#405), read once: the retry and the build see one.
+        let mut accuracies: std::collections::HashMap<EvalKey, PlacementAccuracy> =
+            std::collections::HashMap::new();
         while let Some(step) = stack.pop() {
             match step {
                 Step::Enter(key) => {
@@ -544,9 +549,21 @@ impl<B: MeshBoolean> ReferenceMeshCompiler<B> {
                     }
                     let budget = key.budget();
                     let node = self.node(graph, key.id)?;
+                    if matches!(node, GeometryNode::InstanceAtStation(_)) {
+                        if let std::collections::hash_map::Entry::Vacant(slot) =
+                            accuracies.entry(key)
+                        {
+                            slot.insert(crate::station::placement_accuracy(
+                                graph,
+                                key.id,
+                                crate::station::CERTIFICATION_SHARE * budget.chord,
+                            )?);
+                        }
+                    }
+                    let accuracy = accuracies.get(&key).copied();
                     if let std::collections::hash_map::Entry::Vacant(slot) = rooms.entry(key) {
                         if let Some((source, transform, room)) =
-                            self.placement_retry(graph, node, key, cache)?
+                            self.placement_retry(graph, node, key, cache, accuracy)?
                         {
                             slot.insert(room);
                             stack.push(Step::Exit(key));
@@ -568,7 +585,8 @@ impl<B: MeshBoolean> ReferenceMeshCompiler<B> {
                                 budget.chord
                             ))
                         })?;
-                    let built = self.build(graph, key, room, &local_options, cache, measure)?;
+                    let built =
+                        self.build(graph, (key, room, accuracy), &local_options, cache, measure)?;
                     cache.insert(key, built);
                 }
             }
@@ -595,6 +613,7 @@ impl<B: MeshBoolean> ReferenceMeshCompiler<B> {
         node: &GeometryNode,
         key: EvalKey,
         cache: &Cache,
+        accuracy: Option<PlacementAccuracy>,
     ) -> GeomResult<Option<(NodeId, Transform3, Scalar)>> {
         let Some((source_id, transform)) = placed_source(graph, node, key.id)? else {
             return Ok(None);
@@ -605,29 +624,33 @@ impl<B: MeshBoolean> ReferenceMeshCompiler<B> {
             source_id,
             instance_local_budget(transform, budget, 0.0)?,
         )?;
+        // What the placement adds to every bound: its rounding, and where
+        // the station's frame has a certified error (#405), that.
         let rounding = placed_rounding(&source.mesh, transform, budget.chord)?;
-        if rounding <= placement_room(transform, budget.chord, 0.0)? {
+        let shown = rounding + frame_term(accuracy, &source.mesh).unwrap_or(0.0);
+        if shown <= placement_room(transform, budget.chord, 0.0)? || shown >= budget.chord {
             return Ok(None);
         }
         let Some(bound) = source.deviation.bound() else {
             return Ok(None);
         };
         let factor = crate::deviation::stretch(transform);
-        if crate::deviation::grown(bound, factor, rounding) <= budget.chord {
+        if crate::deviation::grown(bound, factor, shown) <= budget.chord {
             return Ok(None);
         }
-        let room = (rounding * 1.125).min(rounding + (budget.chord - rounding) * 0.5);
+        let room = (shown * 1.125).min(shown + (budget.chord - shown) * 0.5);
         Ok(Some((source_id, transform, room)))
     }
 
     /// Build one node, assuming its mesh dependencies are already cached.
     /// `room` is the room an instance's source was re-meshed with for its
-    /// placement's rounding (#295), `0` for the initial one.
+    /// placement's rounding (#295), `0` for the initial one, and `accuracy`
+    /// how far a node placed at a station lies from its exact placement
+    /// (#405).
     fn build(
         &self,
         graph: &GeometryGraph,
-        key: EvalKey,
-        room: Scalar,
+        (key, room, accuracy): (EvalKey, Scalar, Option<PlacementAccuracy>),
         options: &ExecutionOptions,
         cache: &Cache,
         measure: Measure<'_>,
@@ -664,24 +687,45 @@ impl<B: MeshBoolean> ReferenceMeshCompiler<B> {
                 let rounding = placed_rounding(&source.mesh, instance.transform, budget.chord)?;
                 Ok(channels::transform(source, instance.transform, rounding))
             }
-            // An instance in a station's frame (#264): exact on a line,
-            // otherwise its placement is named unbounded.
+            // An instance in a station's frame (#264): exact on a line;
+            // elsewhere its frame's certified error grows every bound
+            // (#405), or its placement is named unbounded.
             GeometryNode::InstanceAtStation(placed) => {
                 let placement = crate::station::placement(graph, id)?;
                 let source_budget = instance_local_budget(placement.transform, budget, room)?;
                 let source = self.cached(cache, placed.source, source_budget)?;
                 let rounding = placed_rounding(&source.mesh, placement.transform, budget.chord)?;
-                let mut built = channels::transform(source, placement.transform, rounding);
-                if !placement.exact {
+                let accuracy = accuracy.ok_or_else(|| {
+                    GeomError::InvalidInput(format!(
+                        "node {id:?} placed at a station was built before its accuracy was read"
+                    ))
+                })?;
+                let unbounded = |reason| {
+                    let mut built = channels::transform(source, placement.transform, rounding);
                     built.deviation.add(
                         crate::deviation::DeviationPath::StationPlacement,
                         crate::deviation::NUMERICAL_STATION_FRAME,
-                        crate::deviation::DeviationBound::Unbounded(
-                            "the station's frame is read at a distance resolved by an estimate",
-                        ),
+                        crate::deviation::DeviationBound::Unbounded(reason),
                     );
-                }
-                Ok(built)
+                    built
+                };
+                Ok(match accuracy {
+                    PlacementAccuracy::Exact => {
+                        channels::transform(source, placement.transform, rounding)
+                    }
+                    PlacementAccuracy::Certified(_) => {
+                        match frame_term(Some(accuracy), &source.mesh) {
+                            Some(frame) => channels::transform_within(
+                                source,
+                                placement.transform,
+                                rounding,
+                                frame,
+                            ),
+                            None => unbounded(UNCERTIFIED_STATION_FRAME),
+                        }
+                    }
+                    PlacementAccuracy::Unbounded(reason) => unbounded(reason),
+                })
             }
             GeometryNode::Collection(members) => {
                 let members = members
@@ -895,7 +939,7 @@ impl<B: MeshBoolean> ReferenceMeshCompiler<B> {
         let node = self.node(graph, id)?;
         if let GeometryNode::Instance(instance) = node {
             if self
-                .placement_retry(graph, node, EvalKey::new(id, budget), cache)?
+                .placement_retry(graph, node, EvalKey::new(id, budget), cache, None)?
                 .is_some()
             {
                 return Ok(None);
@@ -1503,6 +1547,25 @@ pub(crate) fn placement_room(
     let floor = crate::deviation::placement_rounding(&[Point3::ZERO], transform);
     refuse_below_rounding(chord, floor)?;
     Ok((floor + (chord - floor) * ROOM_SHARE).max(shown))
+}
+
+/// How far a source lies from its exact placement at a station whose frame
+/// has a certified error (#405): the bound's displacement of the source's
+/// farthest vertex, `point_error + axis_error R`, `R` the largest `|x| +
+/// |y| + |z|` of its vertices, which covers every point of the mesh (`|q|_1`
+/// is convex). `None` for any other accuracy, or a term that is not finite.
+fn frame_term(accuracy: Option<PlacementAccuracy>, source: &TriMesh) -> Option<Scalar> {
+    let Some(PlacementAccuracy::Certified(bound)) = accuracy else {
+        return None;
+    };
+    let reach = source
+        .positions
+        .iter()
+        .map(|p| p.x.abs() + p.y.abs() + p.z.abs())
+        .fold(0.0, Scalar::max)
+        * (1.0 + 1e-12);
+    let frame = bound.displacement(Point3::new(reach, 0.0, 0.0));
+    frame.is_finite().then_some(frame)
 }
 
 /// The rounding of placing `source`'s vertices with `transform` (#295),

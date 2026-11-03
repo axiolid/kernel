@@ -127,11 +127,22 @@
 //!   a changing section, and different curved profiles are
 //!   [`DeviationBound::Unbounded`] by name.
 //! - Instances at stations (#264) move their source rigidly: on a line
-//!   basis the frame is exact and the source's bound stands; on any other
+//!   basis the frame is exact and the source's bound stands. On any other
 //!   the frame is the exact curve's at a distance read by an estimate (the
-//!   arc-length inverse, quadrature), so the placement is
-//!   [`DeviationBound::Unbounded`] under the path
-//!   [`DeviationPath::StationPlacement`].
+//!   arc-length inverse, quadrature), and `crate::station::placement_accuracy`
+//!   states how far the placement lies from the exact one (#405): on a
+//!   circle, a polyline, an elevated or banked curve over a line or a
+//!   circle, an intrinsic plan alone or under a closed-form profile and
+//!   composites of them, a [`DeviationBound::Certified`] error `F` of any
+//!   point of the source (`point_error + axis_error R`, `R` the largest
+//!   sum `|x| + |y| + |z|` over the source mesh's vertices) that every contribution
+//!   grows by as it grows by the placement's rounding, and that is named
+//!   once under the path [`DeviationPath::StationPlacement`]; the source is
+//!   re-meshed with room for the rounding and `F` when they would carry it
+//!   over the budget. Any other basis (a frame read by quadrature, a chain,
+//!   a basis itself placed inexactly, a station beside a seam it is not
+//!   read on) is [`DeviationBound::Unbounded`] under that path, with the
+//!   reason named.
 //! - Booleans (#235): cutting two meshes moves the intersection curve, and
 //!   a one-sided bound on each operand does not bound it, so nothing is
 //!   derived from the operands. Where `ReferenceExactCompiler` builds the
@@ -257,7 +268,8 @@ pub(crate) const KEYHOLE_STEINER_POINT: &str =
 pub const MITRE_BESIDE_AN_ARC: &str = "mitre beside an arc";
 
 /// The [`DeviationContribution::detail`] of a node placed at a station
-/// whose frame is read at a numerically resolved distance (#264).
+/// whose frame is read at a numerically resolved distance (#264): the
+/// frame's certified error (#405), or why it has none.
 pub(crate) const NUMERICAL_STATION_FRAME: &str = "frame at a numerically resolved station";
 
 /// The [`DeviationContribution::detail`] of B-rep faces that declare no
@@ -346,7 +358,9 @@ pub enum DeviationPath {
     /// Open sections at stations joined by tag (#241).
     SectionedSurface,
     /// A node placed in the frame of a curve station (#264), on a basis
-    /// whose frame is not exact.
+    /// whose frame is not exact: [`DeviationBound::Certified`] by how far
+    /// the placement may lie from the exact one (#405), or
+    /// [`DeviationBound::Unbounded`] by name.
     StationPlacement,
     /// A surface trimmed by a parameter rectangle (#311).
     TrimmedSurface,
@@ -561,12 +575,39 @@ impl Deviation {
     /// rounding on top, which is also named under [`PLACEMENT_ROUNDING`]
     /// when it is not zero.
     pub(crate) fn transformed(&self, transform: Transform3, rounding: Scalar) -> Self {
+        self.moved(transform, rounding, 0.0)
+    }
+
+    /// [`Self::transformed`] for a transform that places the source at a
+    /// station whose frame lies within `frame` of the exact one over the
+    /// whole source (#405): every contribution grows by it as it grows by
+    /// the rounding, and it is named once under
+    /// [`DeviationPath::StationPlacement`].
+    pub(crate) fn transformed_within(
+        &self,
+        transform: Transform3,
+        rounding: Scalar,
+        frame: Scalar,
+    ) -> Self {
+        let mut placed = self.moved(transform, rounding, frame);
+        placed.add(
+            DeviationPath::StationPlacement,
+            NUMERICAL_STATION_FRAME,
+            DeviationBound::Certified(frame),
+        );
+        placed
+    }
+
+    /// Every contribution after the transform: grown by its stretch, and
+    /// by `rounding + frame` on top; the rounding named under
+    /// [`PLACEMENT_ROUNDING`] when it is not zero.
+    fn moved(&self, transform: Transform3, rounding: Scalar, frame: Scalar) -> Self {
         let factor = stretch(transform);
         let mut placed = Self(
             self.0
                 .iter()
                 .map(|c| DeviationContribution {
-                    bound: c.bound.placed(factor, rounding),
+                    bound: c.bound.placed(factor, rounding + frame),
                     ..*c
                 })
                 .collect(),

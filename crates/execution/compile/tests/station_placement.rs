@@ -14,7 +14,9 @@ use axiolid_exact_compile_contract::ExactCompiler;
 use axiolid_measure::exact_properties;
 use axiolid_mesh::TriMesh;
 use axiolid_mesh_boolean_boolmesh::BoolmeshBoolean;
-use axiolid_mesh_compile::station::{placement, resolve, seams, ResolvedPlacement};
+use axiolid_mesh_compile::station::{
+    placement, placement_accuracy, resolve, seams, PlacementAccuracy, ResolvedPlacement,
+};
 use axiolid_mesh_compile::{
     DeviationBound, DeviationPath, DeviationReport, ReferenceExactCompiler, ReferenceMeshCompiler,
 };
@@ -288,17 +290,24 @@ fn a_placement_on_an_arc_matches_an_independent_frame_and_is_not_exact() {
     let (mesh, _) = compile(&graph, tube).unwrap();
     hugs_line(&mesh, point, t, 0.1);
 
-    // A solid placed there meshes, with its placement named unbounded, and
+    // A solid placed there meshes with its placement certified (#405) and
     // is refused by the exact compiler by name.
+    let accuracy = placement_accuracy(&graph, placed_solid, 1e-6).unwrap();
+    assert!(
+        matches!(accuracy, PlacementAccuracy::Certified(bound)
+            if bound.point_error > 0.0 && bound.point_error < 1e-8 && bound.axis_error > 0.0),
+        "{accuracy:?}"
+    );
     let (_, report) = compile(&graph, placed_solid).unwrap();
     assert!(
         matches!(
             placement_contribution(&report),
-            Some(DeviationBound::Unbounded(_))
+            Some(DeviationBound::Certified(frame)) if frame > 0.0 && frame < 1e-6
         ),
         "{report:?}"
     );
-    assert_eq!(report.bound, None);
+    assert!(report.bound.is_some(), "{report:?}");
+    assert!(report.unbounded().next().is_none(), "{report:?}");
     refused_naming(
         ReferenceExactCompiler::new().compile_exact(&graph, placed_solid, &options()),
         "frame is not exact",
@@ -353,6 +362,16 @@ fn a_placement_on_an_elevated_base_leans_with_the_grade_or_stands_in_plan() {
         point,
         EPS,
     );
+    // Neither frame is exact, both are certified (#405): a line's plan
+    // distance is the parameter, so the read is rounding alone.
+    for placed in [section, plan] {
+        let accuracy = placement_accuracy(&graph, placed, 1e-6).unwrap();
+        assert!(
+            matches!(accuracy, PlacementAccuracy::Certified(bound)
+                if bound.point_error < 1e-11 && bound.axis_error < 1e-12),
+            "{accuracy:?}"
+        );
+    }
 }
 
 #[test]

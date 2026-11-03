@@ -97,8 +97,27 @@ owns graph traversal and dispatch; the construction algorithms themselves
 
 Latest release, 0.3.44 (2026-11-03):
 
+### Added
+
+- `station::placement_accuracy`, `PlacementAccuracy` and `PlacementBound`
+  (#405): how far a node placed at a station lies from its exact
+  placement, `Exact` on a line, `Certified` with the error of the
+  placement's point and of each axis (`PlacementBound::displacement` for a
+  local point), or `Unbounded` by name. Requires `axiolid-evaluate` 0.3.20.
+
 ### Changed
 
+- A node placed at a station on a circle, a polyline, an elevated or
+  banked curve over a line or a circle, an intrinsic plan alone or under a
+  closed-form profile, or a composite of them reports its placement
+  certified (#405), where it was unbounded on every basis but a line: the
+  frame's error `F` grows every contribution of the instance, as the
+  placement's rounding does, and is named once as a certified
+  `StationPlacement` contribution. The source is re-meshed with room for
+  the rounding and `F` when they would carry it over the budget. Frames
+  read by quadrature, chains, a basis itself placed inexactly and a station
+  beside a seam it is not read on stay unbounded, now with their reasons
+  named; the exact compiler still refuses every basis but a line.
 - The B-rep tessellator reads its supports through a resolved view, an
   edge's 3D curve, a use's pcurve with its parameter span and a face's
   surface, instead of looking each handle up in the graph (#412). A handle
