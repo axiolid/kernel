@@ -20,8 +20,8 @@ TESTS = ["-p", "axiolid-construct", "--test", "sweeps"]
 
 MUTANTS = [
     ('vertex on the axis at one end only welded', S, '        if here != there {', '        if false {', TESTS),
-    ('sliding vertex welded', S, '        if here && from[f] != to[f] {', '        if false {', TESTS),
-    ('every vertex on the axis refused', S, '        if here && from[f] != to[f] {', '        if here {', TESTS),
+    ('sliding vertex welded', S, '            match shift {\n', '            match shift.or(Some(0.0)) {\n', TESTS),
+    ('every vertex on the axis refused', S, '            match shift {\n', '            match shift.filter(|_| false) {\n', TESTS),
     ('nothing welded', S, '        welded.push(here);', '        welded.push(false);', TESTS),
     ('everything welded', S, '        welded.push(here);', '        welded.push(true);', TESTS),
     ('end flags read from the start ring', S, '    let at_end = flags[outer..2 * outer]', '    let at_end = flags[..outer]', TESTS),

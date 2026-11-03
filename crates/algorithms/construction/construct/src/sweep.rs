@@ -87,8 +87,18 @@ pub fn tapered_extrude(
 /// blend, and one that slides along the axis has stations that are distinct
 /// points of the axis: the end caps then meet the axis in segments of
 /// different extent, which no closed mesh joins without a vertex where one
-/// ends. Both are refused by name, not welded.
-fn tapered_welds(start: &Rings, end: &Rings, flags: &[bool]) -> GeomResult<Vec<bool>> {
+/// ends. Both are refused by name, not welded. Positions along the axis that
+/// agree within the tolerance count as one place (#367): the projections of a
+/// tilted axis are not bitwise equal. The largest difference is returned, to
+/// be charged to the chord budget.
+fn tapered_welds(
+    start: &Rings,
+    end: &Rings,
+    flags: &[bool],
+    axis_origin: Point3,
+    axis_direction: Vec3,
+    tolerance: Tolerance,
+) -> GeomResult<(Vec<bool>, Scalar)> {
     let outer = start.outer.len();
     let holes: usize = start.holes.iter().map(Vec::len).sum();
     let at_start = flags[..outer]
@@ -112,20 +122,36 @@ fn tapered_welds(start: &Rings, end: &Rings, flags: &[bool]) -> GeomResult<Vec<b
         input,
     };
     let mut welded = Vec::with_capacity(outer + holes);
+    let mut slide: Scalar = 0.0;
     for (f, (&here, &there)) in at_start.zip(at_end).enumerate() {
         if here != there {
             return Err(refuse(
                 "tapered revolution of a profile touching the axis at one end only",
             ));
         }
-        if here && from[f] != to[f] {
-            return Err(refuse(
-                "tapered revolution of a profile whose vertex on the axis slides along it",
-            ));
+        if here {
+            // Projected points of a tilted axis are not bitwise equal when
+            // they are at one place: compare their positions along the axis
+            // within the tolerance, and charge the difference (#367).
+            let shift = crate::revolve::slide_along_axis(
+                axis_origin,
+                axis_direction,
+                from[f],
+                to[f],
+                tolerance,
+            );
+            match shift {
+                Some(shift) => slide = slide.max(shift),
+                None => {
+                    return Err(refuse(
+                        "tapered revolution of a profile whose vertex on the axis slides along it",
+                    ))
+                }
+            }
         }
         welded.push(here);
     }
-    Ok(welded)
+    Ok((welded, slide))
 }
 
 /// Revolve between two profiles.
@@ -171,7 +197,7 @@ pub fn tapered_revolve(
         ));
     }
     // Refuses a structural mismatch of the two profiles before it is judged.
-    let far = blend_rings(start, end, 1.0)?;
+    blend_rings(start, end, 1.0)?;
     // The blend is linear in each vertex and a half-plane is convex, so
     // vertices strictly on one side at both ends stay there throughout.
     // Judging both profiles' vertices together also refuses a section that
@@ -182,7 +208,7 @@ pub fn tapered_revolve(
     // one pinches there, as in `revolve`. A leaning axis is judged over the
     // whole blend.
     let full = (angle.abs() - core::f64::consts::TAU).abs() <= 1e-9;
-    let flags = crate::revolve::check_blend_axis_side(
+    let contact = crate::revolve::check_blend_axis_side(
         start,
         end,
         axis_origin,
@@ -190,7 +216,18 @@ pub fn tapered_revolve(
         tolerance,
         full,
     )?;
-    let welded = tapered_welds(start, end, &flags)?;
+    // Vertices within the tolerance of the axis are projected onto it, and
+    // the projection adds to the deviation (#367).
+    let (start, end) = (&contact.start, &contact.end);
+    let far = blend_rings(start, end, 1.0)?;
+    let (welded, slide) = tapered_welds(
+        start,
+        end,
+        &contact.flags,
+        axis_origin,
+        axis_direction,
+        tolerance,
+    )?;
     let mut max_r: Scalar = 0.0;
     let starts = start.outer.iter().chain(start.holes.iter().flatten());
     let ends = far.outer.iter().chain(far.holes.iter().flatten());
@@ -202,7 +239,7 @@ pub fn tapered_revolve(
         }
         travel = travel.max((*q - *p).length());
     }
-    let budget = tolerance.linear();
+    let budget = crate::revolve::budget_after_projection(tolerance, contact.projection + slide)?;
     let curvature = angle * angle * max_r + 2.0 * angle.abs() * travel;
     let mut n = crate::revolve::steps(max_r, angle, budget)?;
     let stations = loop {

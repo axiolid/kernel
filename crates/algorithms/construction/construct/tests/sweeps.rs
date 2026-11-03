@@ -608,3 +608,96 @@ fn a_tapered_revolution_about_a_leaning_axis_is_judged_over_the_whole_blend() {
     let error = turn(&right, &left).expect_err("crosses N");
     assert!(matches!(error, GeomError::InvalidInput(_)), "{error:?}");
 }
+
+#[test]
+fn a_tapered_revolution_welds_apexes_within_the_tolerance_of_the_axis() {
+    // The double cone of #364 with both apexes 1e-5 off the axis, inside
+    // the 1e-3 tolerance (#367): they are projected onto it and welded.
+    let start = polygon(&[(1e-5, -1.0), (1.0, 0.0), (1e-5, 1.0)]);
+    let end = polygon(&[(1e-5, -1.0), (2.0, 0.0), (1e-5, 1.0)]);
+    let tol = tol_for(1e-3);
+    let mesh = sweep::tapered_revolve(&start, &end, Point3::ZERO, Vec3::Y, 1.0, tol)
+        .expect("near-axis apexes are welded");
+    let health = axiolid_mesh::audit_mesh(&mesh, Tolerance::new(1e-9, 1e-9).expect("tolerance"));
+    assert!(health.is_closed_two_manifold(), "{health:?}");
+    let near: Vec<_> = mesh
+        .positions
+        .iter()
+        .filter(|p| p.x.hypot(p.z) < 1e-4)
+        .collect();
+    assert_eq!(near.len(), 2, "{near:?}");
+    assert!(near.iter().all(|p| p.x == 0.0 && p.z == 0.0), "{near:?}");
+    // The projection is charged to the chord budget: apexes 0.9 tol off the
+    // axis leave a tenth of it for the turn, so it takes more steps.
+    let apart = |x: Scalar| {
+        let start = polygon(&[(x, -1.0), (1.0, 0.0), (x, 1.0)]);
+        let end = polygon(&[(x, -1.0), (2.0, 0.0), (x, 1.0)]);
+        sweep::tapered_revolve(&start, &end, Point3::ZERO, Vec3::Y, 1.0, tol)
+            .expect("welded")
+            .positions
+            .len()
+    };
+    assert!(apart(0.9e-3) > 2 * apart(0.0));
+}
+
+#[test]
+fn a_tapered_revolution_about_a_tilted_axis_welds_apexes_at_one_place_along_it() {
+    // The axis through (0.1, 0.3) along (0.6, 0.8): the apexes lie 1e-9 and
+    // 2e-9 off it at the same place along it, so their projections are one
+    // point though not bitwise equal.
+    let at = |s: Scalar, o: Scalar| Point2::new(0.1 + 0.6 * s - 0.8 * o, 0.3 + 0.8 * s + 0.6 * o);
+    let ring = |o: Scalar, far: Scalar| Rings {
+        outer: vec![at(1.0, o), at(2.0, o), at(1.5, far)],
+        holes: Vec::new(),
+    };
+    let (start, end) = (ring(1e-9, 0.5), ring(2e-9, 0.9));
+    let mesh = sweep::tapered_revolve(
+        &start,
+        &end,
+        Point3::new(0.1, 0.3, 0.0),
+        Vec3::new(0.6, 0.8, 0.0),
+        1.0,
+        tol_for(1e-3),
+    )
+    .expect("apexes at one place along the axis are welded");
+    let health = axiolid_mesh::audit_mesh(&mesh, Tolerance::new(1e-9, 1e-9).expect("tolerance"));
+    assert!(health.is_closed_two_manifold(), "{health:?}");
+}
+
+#[test]
+fn a_tapered_revolution_with_one_end_in_the_band_is_refused() {
+    let t = 1e-3;
+    let start = polygon(&[(0.9 * t, -1.0), (1.0, 0.0), (0.9 * t, 1.0)]);
+    let end = polygon(&[(1.1 * t, -1.0), (2.0, 0.0), (1.1 * t, 1.0)]);
+    let error = sweep::tapered_revolve(&start, &end, Point3::ZERO, Vec3::Y, 1.0, tol_for(t))
+        .expect_err("touching at one end only");
+    assert!(format!("{error:?}").contains("one end only"), "{error:?}");
+}
+
+#[test]
+fn a_tapered_ring_inside_the_band_is_refused() {
+    let t = 1e-3;
+    let flat = polygon(&[(0.2 * t, 0.0), (0.6 * t, 0.0), (0.5 * t, 1.0)]);
+    let error = sweep::tapered_revolve(&flat, &flat, Point3::ZERO, Vec3::Y, 1.0, tol_for(t))
+        .expect_err("a flattened ring");
+    assert!(
+        matches!(error, GeomError::UnsupportedInput { .. }),
+        "{error:?}"
+    );
+}
+
+#[test]
+fn a_slide_within_the_tolerance_is_charged_to_the_budget() {
+    // The apexes move 0.9 tol along the axis between the ends: they are
+    // welded, and the slide takes that much of the chord budget.
+    let t = 1e-3;
+    let turn = |slide: Scalar| {
+        let start = polygon(&[(0.0, -1.0), (1.0, 0.0), (0.0, 1.0)]);
+        let end = polygon(&[(0.0, -1.0 + slide), (2.0, 0.0), (0.0, 1.0 - slide)]);
+        sweep::tapered_revolve(&start, &end, Point3::ZERO, Vec3::Y, 1.0, tol_for(t))
+            .expect("welded")
+            .positions
+            .len()
+    };
+    assert!(turn(0.9 * t) > 2 * turn(0.0));
+}

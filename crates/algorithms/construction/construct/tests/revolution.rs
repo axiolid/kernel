@@ -581,11 +581,12 @@ fn touching_profiles_keep_the_budget_of_the_widest_radius() {
 }
 
 #[test]
-fn a_barely_crossing_vertex_is_decided_exactly() {
-    // 1e-300 past the axis is still across it: no tolerance band.
+fn a_crossing_vertex_beyond_the_tolerance_is_invalid() {
+    // Past the tolerance band it is across the axis; within it the vertex
+    // is the axis's (#367).
     let r = rings(
         vec![
-            Point2::new(-1e-300, 0.0),
+            Point2::new(-1e-2, 0.0),
             Point2::new(2.0, 0.0),
             Point2::new(2.0, 1.0),
         ],
@@ -653,7 +654,9 @@ fn a_tilted_axis_with_a_large_offset_is_decided_without_rounding() {
     // `origin + direction` rounds in f64 here and tilts the line enough to
     // put a one-sided triangle across it. Checked with rationals: all three
     // vertices lie strictly right of the axis through (1000.1, 0) along
-    // (0.6, 0.8).
+    // (0.6, 0.8), the first within a rounding of it: the exact sign keeps it
+    // from being a crossing, and the tolerance makes it the axis's, a pinch
+    // of the full turn (#367).
     let r = rings(
         vec![
             Point2::new(1006.1, 8.0),
@@ -665,6 +668,28 @@ fn a_tilted_axis_with_a_large_offset_is_decided_without_rounding() {
     let mesh = revolve(
         &r,
         Point3::new(1000.1, 0.0, 0.0),
+        Vec3::new(0.6, 0.8, 0.0),
+        FULL,
+        tol_for(1e-3),
+    );
+    assert!(
+        matches!(mesh, Err(GeomError::UnsupportedInput { .. })),
+        "{mesh:?}"
+    );
+}
+
+#[test]
+fn a_far_tilted_axis_keeps_a_triangle_beyond_the_tolerance_on_its_side() {
+    // The axis through (1e12, 0) along (0.6, 0.8): `origin + direction`
+    // rounds to 1.2e-4 there, which tilts the line by 1e-4 rad and carries
+    // it across a triangle that lies 0.05 left of the true line over 1e4 of
+    // its length. The vertices are beyond the tolerance, so they are neither
+    // welded nor a crossing.
+    let at = |s: Scalar, o: Scalar| Point2::new(1e12 + 0.6 * s + 0.8 * o, 0.8 * s - 0.6 * o);
+    let r = rings(vec![at(0.0, -0.05), at(1e4, -0.05), at(1e4, -1.05)], vec![]);
+    let mesh = revolve(
+        &r,
+        Point3::new(1e12, 0.0, 0.0),
         Vec3::new(0.6, 0.8, 0.0),
         FULL,
         tol_for(1e-3),
@@ -972,6 +997,11 @@ fn axis_x_vertices(mesh: &TriMesh) -> usize {
 /// The profile revolved a full turn about the Y axis through `AXIS_X`.
 fn turn_about_offset_axis(profile: &Profile) -> TriMesh {
     let rings = profile_rings(profile, AXIS_CHORD, tol_for(AXIS_CHORD)).expect("rings");
+    // The joints themselves are exact on the axis: the revolution's own
+    // projection of near-axis vertices (#367) must not be what puts them
+    // there.
+    let exact = rings.outer.iter().filter(|p| p.x == AXIS_X).count();
+    assert_eq!(exact, 2, "{:?}", rings.outer);
     revolve(
         &rings,
         Point3::new(AXIS_X, 0.0, 0.0),
@@ -1120,4 +1150,217 @@ fn the_snap_distance_joins_the_reported_deviation() {
         ProfileDeviation::Bounded(d) => assert!(d >= 5e-4, "{d}"),
         other => panic!("{other:?}"),
     }
+}
+
+// Vertices within the linear tolerance of an in-plane axis are the axis's
+// (#367): projected onto it, welded, and charged to the deviation.
+
+/// Mesh vertices within `radius` of the Y axis.
+fn near_y_axis(mesh: &TriMesh, radius: Scalar) -> Vec<Point3> {
+    mesh.positions
+        .iter()
+        .copied()
+        .filter(|p| p.x.hypot(p.z) < radius)
+        .collect()
+}
+
+/// A crescent in x >= 0: the unit circle's right half from (0, -1) to
+/// (0, 1), closed by an arc about (-0.5, 0) through the same two points.
+/// Both arcs' ends are trigonometric, so the joints land at x of the order
+/// of 1e-16 rather than on the Y axis.
+fn crescent() -> Profile {
+    use axiolid_core::{Frame2, Interval, Vec2};
+    let h = core::f64::consts::FRAC_PI_2;
+    let theta = 1.0_f64.atan2(0.5);
+    let back = axiolid_profile::ProfileSegment {
+        curve: axiolid_curve::Curve2::Circle(axiolid_curve::Circle2 {
+            frame: Frame2 {
+                origin: Point2::new(-0.5, 0.0),
+                x: Vec2::X,
+                y: Vec2::Y,
+            },
+            radius: 0.5_f64.hypot(1.0),
+        }),
+        domain: Interval::new(-theta, theta),
+        same_sense: false,
+    };
+    contour_of(vec![arc_segment(1.0, -h, h), back])
+}
+
+fn crescent_turn(angle: Scalar) -> Result<TriMesh, GeomError> {
+    let rings = profile_rings(&crescent(), AXIS_CHORD, tol_for(AXIS_CHORD)).expect("rings");
+    revolve(&rings, Point3::ZERO, Vec3::Y, angle, tol_for(AXIS_CHORD))
+}
+
+#[test]
+fn a_crescent_touching_the_axis_at_an_arc_joint_pinches_in_a_full_turn() {
+    let error = crescent_turn(FULL).expect_err("a pinch is refused, not meshed with a tiny orbit");
+    assert!(
+        matches!(error, GeomError::UnsupportedInput { .. }),
+        "{error:?}"
+    );
+}
+
+#[test]
+fn a_crescent_in_a_partial_turn_welds_its_joints_onto_the_axis() {
+    let mesh = crescent_turn(core::f64::consts::PI).expect("a partial turn closes the points");
+    assert_sound(&mesh);
+    let on_axis = near_y_axis(&mesh, 1e-6);
+    assert_eq!(on_axis.len(), 2, "{on_axis:?}");
+    assert!(
+        on_axis.iter().all(|p| p.x == 0.0 && p.z == 0.0),
+        "{on_axis:?}"
+    );
+}
+
+fn triangle_at(x: Scalar) -> Rings {
+    rings(
+        vec![
+            Point2::new(x, -1.0),
+            Point2::new(1.0, 0.0),
+            Point2::new(x, 1.0),
+        ],
+        vec![],
+    )
+}
+
+fn turn_triangle(x: Scalar, angle: Scalar) -> Result<TriMesh, GeomError> {
+    revolve(
+        &triangle_at(x),
+        Point3::ZERO,
+        Vec3::Y,
+        angle,
+        tol_for(AXIS_CHORD),
+    )
+}
+
+#[test]
+fn a_tilted_axis_welds_a_vertex_one_picometre_off() {
+    // The axis along (3, 4); A and B lie 1e-12 to its left, C well off it.
+    let (along, left) = (Point2::new(0.6, 0.8), Point2::new(-0.8, 0.6));
+    let at = |s: Scalar, o: Scalar| Point2::new(along.x * s + left.x * o, along.y * s + left.y * o);
+    let r = rings(vec![at(1.0, 1e-12), at(2.0, 1e-12), at(1.5, 0.5)], vec![]);
+    let axis = Vec3::new(3.0, 4.0, 0.0);
+    let mesh = revolve(&r, Point3::ZERO, axis, FULL, tol_for(AXIS_CHORD)).expect("revolve");
+    // The distance is to the line, whatever the direction's length: a tenfold
+    // direction gives the same weld.
+    let long = Vec3::new(30.0, 40.0, 0.0);
+    let longer = revolve(&r, Point3::ZERO, long, FULL, tol_for(AXIS_CHORD)).expect("revolve");
+    assert_eq!(longer.positions.len(), mesh.positions.len());
+    let half = rings(vec![at(1.0, 5e-4), at(2.0, 5e-4), at(1.5, 0.5)], vec![]);
+    let weld = revolve(&half, Point3::ZERO, long, FULL, tol_for(AXIS_CHORD)).expect("revolve");
+    assert_sound(&weld);
+    let axis_hits = |m: &TriMesh| {
+        let off = |p: &Point3| (p.x * 0.8 - p.y * 0.6).hypot(p.z);
+        m.positions.iter().filter(|p| off(p) < 1e-6).count()
+    };
+    assert_eq!(axis_hits(&weld), 2);
+    assert_sound(&mesh);
+    let off_axis = |p: &Point3| (p.x * 0.8 - p.y * 0.6).hypot(p.z);
+    // The weld keeps one vertex per axis point, lying on the axis to
+    // rounding: none of the 1e-12 offset is left.
+    let near: Vec<_> = mesh
+        .positions
+        .iter()
+        .filter(|p| off_axis(p) < 1e-6)
+        .collect();
+    assert_eq!(near.len(), 2, "{near:?}");
+    assert!(near.iter().all(|p| off_axis(p) < 1e-15), "{near:?}");
+}
+
+#[test]
+fn the_projection_distance_joins_the_deviation_bound() {
+    // A vertex 0.9 tol off the axis spends 0.9 of the budget on the weld, so
+    // the turn gets a tenth of it and takes more steps than for a vertex on
+    // the axis.
+    let on = turn_triangle(0.0, core::f64::consts::PI).expect("on the axis");
+    let near = turn_triangle(0.9 * AXIS_CHORD, core::f64::consts::PI).expect("near the axis");
+    assert!(
+        near.positions.len() > 2 * on.positions.len(),
+        "{} vs {}",
+        near.positions.len(),
+        on.positions.len()
+    );
+}
+
+#[test]
+fn a_vertex_twice_the_tolerance_off_the_axis_is_not_welded() {
+    let mesh = turn_triangle(2.0 * AXIS_CHORD, FULL).expect("revolve");
+    assert!(
+        mesh.positions.iter().all(|p| p.x != 0.0 || p.z != 0.0),
+        "a vertex beyond the tolerance stays on its orbit"
+    );
+    let welded = turn_triangle(0.5 * AXIS_CHORD, FULL).expect("revolve");
+    assert_eq!(near_y_axis(&welded, 1e-6).len(), 2);
+}
+
+#[test]
+fn a_vertex_at_the_tolerance_is_undecidable_and_refused() {
+    let error = turn_triangle(AXIS_CHORD, FULL).expect_err("the boundary is refused");
+    assert!(
+        matches!(error, GeomError::UnsupportedInput { .. }),
+        "{error:?}"
+    );
+}
+
+#[test]
+fn a_hole_inside_the_band_is_refused_not_lost() {
+    // The hole's vertices all lie within the tolerance of the axis: they
+    // project onto it and the void would vanish from the solid.
+    let t = AXIS_CHORD;
+    let mut r = rings(
+        vec![
+            Point2::new(0.0, 0.0),
+            Point2::new(2.0, 0.0),
+            Point2::new(2.0, 1.0),
+            Point2::new(0.0, 1.0),
+        ],
+        vec![],
+    );
+    r.holes.push(vec![
+        Point2::new(0.2 * t, 0.4),
+        Point2::new(0.2 * t, 0.6),
+        Point2::new(0.6 * t, 0.5),
+    ]);
+    let error = turn(&r, FULL).expect_err("a flattened hole is refused");
+    assert!(
+        matches!(error, GeomError::UnsupportedInput { .. }),
+        "{error:?}"
+    );
+}
+
+#[test]
+fn an_outer_ring_inside_the_band_is_refused_not_emptied() {
+    let t = AXIS_CHORD;
+    let r = rings(
+        vec![
+            Point2::new(0.2 * t, 0.0),
+            Point2::new(0.6 * t, 0.0),
+            Point2::new(0.6 * t, 1.0),
+            Point2::new(0.2 * t, 1.0),
+        ],
+        vec![],
+    );
+    for angle in [FULL, 1.0] {
+        let error = turn(&r, angle).expect_err("a flattened ring is refused");
+        assert!(
+            matches!(error, GeomError::UnsupportedInput { .. }),
+            "{error:?}"
+        );
+    }
+}
+
+#[test]
+fn a_far_side_vertex_within_the_tolerance_is_welded() {
+    // Half a tolerance past the axis, which used to be a crossing (#367).
+    let r = rings(
+        vec![
+            Point2::new(-0.5 * AXIS_CHORD, -1.0),
+            Point2::new(1.0, 0.0),
+            Point2::new(0.0, 1.0),
+        ],
+        vec![],
+    );
+    let mesh = turn(&r, core::f64::consts::PI).expect("welded onto the axis");
+    assert_sound(&mesh);
 }

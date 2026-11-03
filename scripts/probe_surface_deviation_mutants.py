@@ -47,7 +47,7 @@ QUAD = ["-p", "axiolid-construct", "--lib", "loft"]
 MUTANTS = [
     ('revolution profile chorded to the whole budget', C, '`axiolid_construct::revolve`).\n                let half = 0.5 * chord_error(options);', '`axiolid_construct::revolve`).\n                let half = chord_error(options);', [SURFACE]),
     ('revolution turned to the whole budget', C, '    Tolerance::new(0.5 * chord_error(options), options.tolerance().angular())', '    Tolerance::new(chord_error(options), options.tolerance().angular())', [SURFACE]),
-    ('turn sized at the tube centre', R, '    let n = bounded_steps(rings, axis_origin, dir, angle, max_r, tolerance.linear())?;', '    let n = bounded_steps(rings, axis_origin, dir, angle, 0.8 * max_r, tolerance.linear())?;', [SURFACE]),
+    ('turn sized at the tube centre', R, '    let n = bounded_steps(rings, axis_origin, dir, angle, max_r, budget)?;', '    let n = bounded_steps(rings, axis_origin, dir, angle, 0.8 * max_r, budget)?;', [SURFACE]),
     ('revolution wall twist ignored', R, '        if sagitta + twist <= budget {', '        if sagitta <= budget {', [SURFACE]),
     # The revolution's step cap is guarded twice (the sagitta count and the
     # growth loop both refuse), so no single mutant there can pass the

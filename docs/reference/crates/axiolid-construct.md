@@ -98,5 +98,29 @@ Latest release, 0.3.29 (2026-11-03):
   including those with an accepted isolated contact or an edge or arc below
   the tolerance, extrude unchanged, and the lowering's own refusals keep their
   error class (#401).
+- The mesh revolution (and the tapered one) treats a profile vertex within
+  `tolerance.linear()` of an in-plane axis as on it: it is projected onto the
+  axis and welded into one axis vertex, and the projection distance is taken
+  from the chord budget, so the reported bound stays within the budget. A
+  crescent whose two arcs meet on the axis at x of about 6e-17, or a vertex
+  1e-12 off a tilted axis, was classified strictly off it: a full turn meshed
+  a pinch with a tiny orbit instead of refusing it (fail-open), and a partial
+  turn left the vertex unwelded. A full turn now refuses the pinch by name (#367).
+  Behaviour that changes with it:
+  - A vertex on the far side of the axis within the tolerance is welded
+    rather than a crossing: `[(-0.5t, -1), (1, 0), (0, 1)]` over a half turn
+    was `InvalidInput` and is now meshed.
+  - A vertex close to the edge of the band can give `BudgetExceeded`, as the
+    projection leaves little budget for the turn; a distance within rounding
+    of the tolerance is refused by name.
+  - A ring that the projection flattens onto the axis (a hole whose vertices
+    all lie in the band, or an outer ring that does) is refused by name; it
+    would have vanished from the solid or left it empty.
+  - A tapered revolution with a vertex inside the band at one end and outside
+    it at the other is refused as touching at one end only.
+  - A tapered vertex on the axis at both ends is welded when its positions
+    along the axis agree within the tolerance (it was compared bitwise, which
+    a tilted axis almost never satisfied); the difference is charged to the
+    budget.
 
 Full history: [`crates/algorithms/construction/construct/CHANGELOG.md`](https://github.com/axiolid/kernel/blob/main/crates/algorithms/construction/construct/CHANGELOG.md)

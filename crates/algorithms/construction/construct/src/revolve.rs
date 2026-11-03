@@ -77,6 +77,23 @@
 //! exactly zero. With z noise within the tolerance, which the in-plane check
 //! forgives, a 2D-on-axis vertex is off the real axis and its orbit is a real
 //! circle, so a touching profile is refused (`UnsupportedInput`) instead.
+//!
+//! # Vertices near the axis (#367)
+//!
+//! A vertex that touches the axis need not be on it to the bit: the joint of
+//! two arcs is trigonometric (x of about 6e-17 on the Y axis), and almost no
+//! vertex is on a tilted axis. For the exact in-plane axis a vertex within
+//! `tolerance.linear()` of the axis line, measured to the line, is treated
+//! as on it: it is projected onto the line and welded as above, and the
+//! pinch refusal applies to it in a full turn. Moving a ring vertex by `d`
+//! moves the swept surface by at most `d`, so the largest projection is
+//! taken from the chord budget the steps must meet (`BudgetExceeded` when it
+//! leaves none), and the bound stays the budget. The distance is a float
+//! evaluation with a rounding bound; a distance within that bound of the
+//! tolerance is undecidable and `UnsupportedInput`, never welded. Under z
+//! noise nothing is projected, as nothing is welded. A ring left with no area
+//! by the projection (every vertex in the band) is `UnsupportedInput`: it
+//! would vanish from the solid or leave it empty.
 
 use axiolid_contracts::{GeomError, GeomResult, Operation};
 use axiolid_core::{Point2, Point3, Scalar, Tolerance, Vec3};
@@ -378,7 +395,7 @@ pub(crate) fn check_blend_axis_side(
     axis_direction: Vec3,
     tolerance: Tolerance,
     full: bool,
-) -> GeomResult<Vec<bool>> {
+) -> GeomResult<BlendContact> {
     let ends = Rings {
         outer: start.outer.clone(),
         holes: core::iter::once(&end.outer)
@@ -390,9 +407,122 @@ pub(crate) fn check_blend_axis_side(
     if axis_direction.z.abs() > tolerance.linear() * axis_direction.length() {
         check_leaning_axis(start, end, axis_origin, axis_direction, tolerance)?;
         let count = ends.outer.len() + ends.holes.iter().map(Vec::len).sum::<usize>();
-        return Ok(vec![false; count]);
+        return Ok(BlendContact {
+            flags: vec![false; count],
+            start: start.clone(),
+            end: end.clone(),
+            projection: 0.0,
+        });
     }
-    check_axis_side(&ends, axis_origin, axis_direction, tolerance, full)
+    let contact = check_axis_side(&ends, axis_origin, axis_direction, tolerance, full)?;
+    let mut holes = contact.rings.holes.into_iter();
+    let end_outer = holes.next().unwrap_or_default();
+    let start_holes: Vec<Vec<Point2>> = holes.by_ref().take(start.holes.len()).collect();
+    Ok(BlendContact {
+        flags: contact.on_axis,
+        start: Rings {
+            outer: contact.rings.outer,
+            holes: start_holes,
+        },
+        end: Rings {
+            outer: end_outer,
+            holes: holes.collect(),
+        },
+        projection: contact.projection,
+    })
+}
+
+/// What [`check_axis_side`] found: the flags of the vertices on the axis, the
+/// rings with those vertices projected onto it, and the farthest a vertex
+/// moved (#367).
+pub(crate) struct AxisContact {
+    pub(crate) on_axis: Vec<bool>,
+    pub(crate) rings: Rings,
+    pub(crate) projection: Scalar,
+}
+
+/// [`AxisContact`] of a tapered revolution: the flags over `[start.outer,
+/// end.outer, start.holes.., end.holes..]` and the two profiles projected.
+pub(crate) struct BlendContact {
+    pub(crate) flags: Vec<bool>,
+    pub(crate) start: Rings,
+    pub(crate) end: Rings,
+    pub(crate) projection: Scalar,
+}
+
+/// The chord budget left once the walls have moved by `projection` (#367):
+/// moving a ring vertex by `d` moves the swept surface by at most `d`, so
+/// the projection adds to the deviation bound. A projection that uses the
+/// whole budget leaves none, which is `BudgetExceeded`.
+pub(crate) fn budget_after_projection(
+    tolerance: Tolerance,
+    projection: Scalar,
+) -> GeomResult<Scalar> {
+    let left = tolerance.linear() - projection;
+    if left > 0.0 {
+        Ok(left)
+    } else {
+        Err(too_many_steps())
+    }
+}
+
+/// Whether `p` is within `tolerance.linear()` of the in-plane axis line
+/// through `a` along `d` (#367): `Some(distance bound)` when it is, `None`
+/// when it is not. The distance is a float evaluation of
+/// `|d x (p - a)| / |d|`, whose rounding error is bounded by eight machine
+/// epsilons of the operand magnitudes; a distance within that error of the
+/// tolerance cannot be decided and is `UnsupportedInput`.
+fn near_axis(a: Point2, d: Vec3, p: Point2, tolerance: Tolerance) -> GeomResult<Option<Scalar>> {
+    let tol = tolerance.linear();
+    if tol <= 0.0 {
+        return Ok(None);
+    }
+    let norm = d.x.hypot(d.y);
+    let cross = d.x * (p.y - a.y) - d.y * (p.x - a.x);
+    let distance = cross.abs() / norm;
+    let error = 8.0
+        * Scalar::EPSILON
+        * (d.x.abs() * (p.y.abs() + a.y.abs()) + d.y.abs() * (p.x.abs() + a.x.abs()))
+        / norm;
+    if distance + error <= tol {
+        Ok(Some(distance + error))
+    } else if distance - error > tol {
+        Ok(None)
+    } else {
+        Err(touching_unsupported())
+    }
+}
+
+/// How far apart `p` and `q`, both on the in-plane axis, are along it:
+/// `Some(distance)` when it is at most `tolerance.linear()` with room for the
+/// rounding of the two evaluations, else `None` (a slide, or undecidable
+/// within rounding, both refused by the caller) (#367).
+pub(crate) fn slide_along_axis(
+    axis_origin: Point3,
+    d: Vec3,
+    p: Point2,
+    q: Point2,
+    tolerance: Tolerance,
+) -> Option<Scalar> {
+    if p == q {
+        return Some(0.0);
+    }
+    let norm = d.x.hypot(d.y);
+    let along = |r: Point2| (d.x * (r.x - axis_origin.x) + d.y * (r.y - axis_origin.y)) / norm;
+    let error = |r: Point2| {
+        8.0 * Scalar::EPSILON
+            * (d.x.abs() * (r.x.abs() + axis_origin.x.abs())
+                + d.y.abs() * (r.y.abs() + axis_origin.y.abs()))
+            / norm
+    };
+    let shift = (along(p) - along(q)).abs() + error(p) + error(q);
+    (shift <= tolerance.linear()).then_some(shift)
+}
+
+/// `p` projected onto the in-plane axis line through `a` along `d`.
+fn project_onto_axis(a: Point2, d: Vec3, p: Point2) -> Point2 {
+    let t = (d.x * (p.x - a.x) + d.y * (p.y - a.y)) / (d.x * d.x + d.y * d.y);
+    Point2::new(a.x + d.x * t, a.y + d.y * t)
 }
 
 /// Refuse rings that lie on both sides of the axis, and report which touch
@@ -411,7 +541,9 @@ pub(crate) fn check_blend_axis_side(
 /// two vertices without one of those cases. A vertex on the projected axis
 /// is `UnsupportedInput` too when the axis origin or direction has any
 /// nonzero z: the vertex is then off the real axis by the noise, and welding
-/// it would collapse a real orbit.
+/// it would collapse a real orbit. For the exact axis a vertex within
+/// `tolerance.linear()` of the line counts as on it and is projected onto it
+/// (#367, see the module notes); the result carries the moved rings.
 ///
 /// "In the plane" follows the exact path: the axis origin and direction
 /// leave it only beyond `tolerance.linear()` in z, so placement noise does
@@ -425,18 +557,42 @@ pub(crate) fn check_axis_side(
     axis_direction: Vec3,
     tolerance: Tolerance,
     full: bool,
-) -> GeomResult<Vec<bool>> {
+) -> GeomResult<AxisContact> {
     let count = rings.outer.len() + rings.holes.iter().map(Vec::len).sum::<usize>();
     if axis_direction.z.abs() > tolerance.linear() * axis_direction.length() {
         check_leaning_axis(rings, rings, axis_origin, axis_direction, tolerance)?;
-        return Ok(vec![false; count]);
+        return Ok(AxisContact {
+            on_axis: vec![false; count],
+            rings: rings.clone(),
+            projection: 0.0,
+        });
     }
     let offset = axis_origin.z.abs() > tolerance.linear();
     let exact = axis_origin.z == 0.0 && axis_direction.z == 0.0;
     let a = Point2::new(axis_origin.x, axis_origin.y);
     let (mut positive, mut negative, mut noisy_touch) = (false, false, false);
     let mut on_axis = Vec::with_capacity(count);
-    for side in ring_sides(rings, a, axis_direction)? {
+    let mut snapped = Vec::with_capacity(count);
+    let mut moved = Vec::with_capacity(count);
+    let mut projection: Scalar = 0.0;
+    let points = rings.outer.iter().chain(rings.holes.iter().flatten());
+    for (side, p) in ring_sides(rings, a, axis_direction)?
+        .into_iter()
+        .zip(points)
+    {
+        let (side, p, near) = if side != Sign::Zero && exact && !offset {
+            match near_axis(a, axis_direction, *p, tolerance)? {
+                Some(distance) => {
+                    projection = projection.max(distance);
+                    (Sign::Zero, project_onto_axis(a, axis_direction, *p), true)
+                }
+                None => (side, *p, false),
+            }
+        } else {
+            (side, *p, false)
+        };
+        snapped.push(p);
+        moved.push(near);
         match side {
             Sign::Positive => positive = true,
             Sign::Negative => negative = true,
@@ -457,8 +613,40 @@ pub(crate) fn check_axis_side(
     // it is a pinch: two nappes of the swept surface meet at one point, so
     // the boundary is not a two-manifold there (the horn torus of #248 is
     // refused alike). A partial turn's caps close it into a sector point.
+    let rings = {
+        let mut flat = snapped.into_iter();
+        let mut take =
+            |ring: &Vec<Point2>| -> Vec<Point2> { flat.by_ref().take(ring.len()).collect() };
+        Rings {
+            outer: take(&rings.outer),
+            holes: rings.holes.iter().map(&mut take).collect(),
+        }
+    };
+    // A ring that the projection flattens onto the axis sweeps nothing: it
+    // would vanish from the solid (a hole) or leave it empty (an outer ring).
+    let mut first = 0;
+    for ring in core::iter::once(&rings.outer).chain(&rings.holes) {
+        let end = first + ring.len();
+        if moved[first..end].contains(&true) {
+            let area: Scalar = (0..ring.len())
+                .map(|k| {
+                    let (p, q) = (ring[k], ring[(k + 1) % ring.len()]);
+                    p.x * q.y - q.x * p.y
+                })
+                .sum();
+            if on_axis[first..end].iter().all(|&on| on) || area == 0.0 {
+                return Err(flattened_unsupported());
+            }
+        }
+        first = end;
+    }
+    let contact = |on_axis| AxisContact {
+        on_axis,
+        rings: rings.clone(),
+        projection,
+    };
     if !full {
-        return Ok(on_axis);
+        return Ok(contact(on_axis));
     }
     let mut start = 0;
     for len in core::iter::once(rings.outer.len()).chain(rings.holes.iter().map(Vec::len)) {
@@ -475,7 +663,16 @@ pub(crate) fn check_axis_side(
         }
         start += len;
     }
-    Ok(on_axis)
+    Ok(contact(on_axis))
+}
+
+/// The refusal for a ring that lies within the tolerance of the axis (#367).
+fn flattened_unsupported() -> GeomError {
+    GeomError::UnsupportedInput {
+        backend: crate::BACKEND_ID,
+        operation: Operation::Sweep,
+        input: "revolution of a ring within the tolerance of the axis: it sweeps no area",
+    }
 }
 
 /// The refusal for a family that cannot yet mesh a profile touching the
@@ -521,7 +718,8 @@ pub fn revolve(
         ));
     }
     let full = (angle.abs() - core::f64::consts::TAU).abs() <= 1e-9;
-    let on_axis = check_axis_side(rings, axis_origin, axis_direction, tolerance, full)?;
+    let contact = check_axis_side(rings, axis_origin, axis_direction, tolerance, full)?;
+    let (on_axis, rings, projection) = (contact.on_axis, &contact.rings, contact.projection);
     let dir = axis_direction / len;
     // Widest distance from the axis governs the angular step: a point at
     // radius r traces a circle of that radius.
@@ -530,7 +728,8 @@ pub fn revolve(
         let v = Point3::new(p.x, p.y, 0.0) - axis_origin;
         max_r = max_r.max((v - dir * dir.dot(v)).length());
     }
-    let n = bounded_steps(rings, axis_origin, dir, angle, max_r, tolerance.linear())?;
+    let budget = budget_after_projection(tolerance, projection)?;
+    let n = bounded_steps(rings, axis_origin, dir, angle, max_r, budget)?;
     // A full turn emits n stations and wraps onto the first; a partial turn
     // emits n + 1 so both ends exist to be capped.
     let count = if full { n } else { n + 1 };
