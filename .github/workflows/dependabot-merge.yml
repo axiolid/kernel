@@ -29,7 +29,9 @@ jobs:
     permissions:
       contents: write
       pull-requests: write
-      # gh pr checks reads the status check rollup, which needs both.
+      # gh pr checks reads the status check rollup and the workflow run
+      # behind each check.
+      actions: read
       checks: read
       statuses: read
     env:
