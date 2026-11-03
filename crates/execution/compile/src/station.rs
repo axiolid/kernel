@@ -36,6 +36,19 @@
 //! chain, a cell beside a mitre on a curved piece or with a changing
 //! section, different curved profiles).
 //!
+//! A spine whose section planes fold is no solid (#361): where a section
+//! vertex lies on the inner side of a bend at or past its centre of
+//! curvature, or recedes along the tangent faster than the basis advances,
+//! the planes stop advancing and the sections cross. The spine is refused as
+//! invalid input, by this compiler and the exact one alike, wherever the
+//! frame law has a closed-form bend (unturned sections), a touch within
+//! rounding included; for a turned section or a frame read by quadrature the
+//! `bound` module's conservative bound never refuses and reports
+//! [`DeviationBound::Unbounded`] by name when it cannot exclude a fold. The
+//! check is local: a run that meets itself far away is not detected, and a
+//! [`SectionedSurface`] is not checked (#407); a turned section or a frame
+//! read by quadrature is never refused (#406).
+//!
 //! The `exact` module builds the runs with a closed form exactly (#247):
 //! a constant section along a line or a straight polyline (an extrusion)
 //! or along a horizontal circle (a revolution), and a linear taper of
@@ -1105,38 +1118,39 @@ pub(crate) fn stationed_spine_bounded(
             .collect();
         Ok(points.map(|points| (local, points)))
     };
-    // Wall edges: each ring closes on itself.
-    let mut edges = Vec::new();
-    let mut base = 0;
-    for len in std::iter::once(rings[0].outer.len()).chain(rings[0].holes.iter().map(Vec::len)) {
-        edges.extend((0..len).map(|k| (base + k, base + (k + 1) % len)));
-        base += len;
-    }
+    let edges = wall_edges(&rings[0]);
     let profile = profile_bound(graph, sections, tagged, half, options.tolerance())?;
     let law = bound::SectionLaw::new(
         &run,
         &distances,
         sections.iter().map(|s| s.station.offsets).collect(),
         sections.iter().map(|s| s.orientation).collect(),
-        rings
-            .iter()
-            .map(|r| {
-                r.outer
-                    .iter()
-                    .chain(r.holes.iter().flatten())
-                    .copied()
-                    .collect()
-            })
-            .collect(),
+        ring_points(&rings),
         &edges,
         half,
     )?;
+    // Sections that fold are no solid (#361): refused where the planes
+    // are certified to stop advancing.
+    let fold = match &profile {
+        Ok(d) => law.fold(*d)?,
+        Err(_) => Ok(()),
+    };
     let samples = sample_run(
         &knots,
         half,
         &edges,
         |s, reading| placed(s, reading).map(|section| section.map(|(_, points)| points)),
-        |lo, hi, at_lo, at_hi| within(&law, profile.is_ok(), half, lo, hi, at_lo, at_hi),
+        |lo, hi, at_lo, at_hi| {
+            within(
+                &law,
+                profile.is_ok() && fold.is_ok(),
+                half,
+                lo,
+                hi,
+                at_lo,
+                at_hi,
+            )
+        },
     )?;
     let mut stations = Vec::with_capacity(samples.len());
     let mut rows = Vec::with_capacity(samples.len());
@@ -1151,9 +1165,75 @@ pub(crate) fn stationed_spine_bounded(
         }
         stations.push(LoftStation { loops });
     }
-    let bound = settle(&law, profile, &samples, &rows)?;
+    let bound = settle(&law, profile, fold, &samples, &rows)?;
     let mesh = loft_tapered(&rings[0], &rings[rings.len() - 1], &stations)?;
     Ok((mesh, bound))
+}
+
+/// The wall edges of a spine's sections: each ring of `first` closes on
+/// itself, the vertices numbered outer ring first, then the holes.
+fn wall_edges(first: &Rings) -> Vec<(usize, usize)> {
+    let mut edges = Vec::new();
+    let mut base = 0;
+    for len in std::iter::once(first.outer.len()).chain(first.holes.iter().map(Vec::len)) {
+        edges.extend((0..len).map(|k| (base + k, base + (k + 1) % len)));
+        base += len;
+    }
+    edges
+}
+
+/// Every section's vertices, outer ring first, then the holes.
+fn ring_points(rings: &[Rings]) -> Vec<Vec<Point2>> {
+    rings
+        .iter()
+        .map(|r| {
+            r.outer
+                .iter()
+                .chain(r.holes.iter().flatten())
+                .copied()
+                .collect()
+        })
+        .collect()
+}
+
+/// Refuses a spine whose section planes fold (#361) before an exact
+/// compiler builds it, as the mesh compiler does: the same check
+/// ([`bound::SectionLaw::fold`]). A run whose fold cannot be excluded is
+/// one the exact compiler cannot vouch for either, so it is refused by name
+/// as `unsupported` builds it.
+///
+/// # Errors
+///
+/// A fold, or a touch within rounding, as invalid input; a fold that cannot
+/// be excluded, by name; the check's budget, by name.
+#[allow(clippy::too_many_arguments)]
+pub(super) fn refuse_fold(
+    graph: &GeometryGraph,
+    basis: Basis<'_>,
+    sections: &[SectionAtStation],
+    frame: StationFrame,
+    rings: &[Rings],
+    tagged: bool,
+    (distances, sides): (Vec<Scalar>, RunSides),
+    options: &ExecutionOptions,
+    unsupported: fn(&'static str) -> GeomError,
+) -> GeomResult<()> {
+    let half = 0.5 * crate::compiler::chord_error(options);
+    let Ok(margin) = profile_bound(graph, sections, tagged, half, options.tolerance())? else {
+        return Ok(());
+    };
+    let (run, _) = Run::new(basis, frame, distances.clone(), sides)?;
+    let edges = wall_edges(&rings[0]);
+    let law = bound::SectionLaw::new(
+        &run,
+        &distances,
+        sections.iter().map(|s| s.station.offsets).collect(),
+        sections.iter().map(|s| s.orientation).collect(),
+        ring_points(rings),
+        &edges,
+        half,
+    )?;
+    law.fold(margin)?.map_err(unsupported)
 }
 
 /// A spine's section rings, each matched to the first's vertex for vertex
@@ -1295,10 +1375,12 @@ fn within(
 
 /// A run's deviation (#247): `fixed` (the profile's share) plus the worst
 /// certified bound over the meshed cells between consecutive `samples`,
-/// whose placed points are `rows`; unbounded by the first reason met.
+/// whose placed points are `rows`; unbounded by the first reason met: the
+/// profile's, a fold that cannot be excluded (#361), then a cell's.
 fn settle(
     law: &bound::SectionLaw<'_, '_>,
     fixed: Result<Scalar, &'static str>,
+    fold: Result<(), &'static str>,
     samples: &[Scalar],
     rows: &[Vec<Point3>],
 ) -> GeomResult<DeviationBound> {
@@ -1306,6 +1388,9 @@ fn settle(
         Ok(value) => value,
         Err(reason) => return Ok(DeviationBound::Unbounded(reason)),
     };
+    if let Err(reason) = fold {
+        return Ok(DeviationBound::Unbounded(reason));
+    }
     let mut cells: Scalar = 0.0;
     for (pair, points) in samples.windows(2).zip(rows.windows(2)) {
         match law.cell(pair[0], pair[1], &points[0], &points[1])? {
@@ -1607,7 +1692,7 @@ pub(crate) fn sectioned_surface(
         positions.extend(row.iter().copied());
         rows.push(row);
     }
-    let bound = settle(&law, Ok(0.0), &samples, &rows)?;
+    let bound = settle(&law, Ok(0.0), Ok(()), &samples, &rows)?;
     let mut indices = Vec::with_capacity((samples.len() - 1) * (count - 1) * 6);
     for row in 0..samples.len() - 1 {
         let a = (row * count) as u32;

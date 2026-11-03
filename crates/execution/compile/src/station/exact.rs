@@ -45,7 +45,7 @@ use axiolid_model::{
 };
 use axiolid_reference::station::{station_section2, station_section3, SectionFrame};
 
-use super::{oriented, spine_distances, spine_rings, Basis};
+use super::{oriented, refuse_fold, spine_distances, spine_rings, Basis};
 
 /// The closed-form bases.
 enum Exact {
@@ -200,15 +200,29 @@ pub(crate) fn stationed_spine_exact(
     }
     let tolerance = options.tolerance();
     let half = 0.5 * crate::compiler::chord_error(options);
-    let (rings, _) = spine_rings(graph, sections, half, tolerance)?;
+    let (rings, tagged) = spine_rings(graph, sections, half, tolerance)?;
     let basis = Basis::of(graph, directrix)?;
-    let (distances, _) = spine_distances(&basis, sections)?;
+    let (distances, sides) = spine_distances(&basis, sections)?;
     // Every station must stand on the basis, as the mesh compiler reads it.
     for &s in &distances {
         basis.section_on(s, frame, SeamSide::Outgoing)?;
     }
+    // A basis with no exact run is refused as such, before any fold check.
     let exact = exact_basis(graph, directrix, tolerance.linear())
         .ok_or_else(|| unsupported(OTHER_BASIS))?;
+    // Sections that fold are no solid, whichever compiler builds them
+    // (#361).
+    refuse_fold(
+        graph,
+        basis,
+        sections,
+        frame,
+        &rings,
+        tagged,
+        (distances.clone(), sides),
+        options,
+        unsupported,
+    )?;
     let first = &sections[0];
     let unit = |section: &SectionAtStation| {
         section

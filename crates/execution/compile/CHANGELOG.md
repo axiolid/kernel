@@ -22,6 +22,23 @@ caret rule for `0.x` versions.
   reported Unbounded) before and is refused now. A B-rep with broken
   topology is still reported as such first.
 
+### Fixed
+
+- A station-placed spine whose section planes fold is refused as invalid
+  input, by the mesh and the exact compiler alike (#361). A section vertex
+  on the inner side of a bend at or past its centre of curvature (the plan
+  arc's radius against the section's lateral extent, a vertical arc's
+  against its up extent in the section frame), or one receding along the
+  tangent faster than the basis advances, makes the sections cross: the
+  loft was meshed into a self-intersecting shell and reported certified.
+  The check is exact where the frame law has a closed-form bend (unturned
+  sections along a line, circle, polyline, elevated or banked curve over
+  those, or an intrinsic curve; a touch within rounding is refused too) and
+  conservative elsewhere (a turned section, a frame read by quadrature):
+  there it never refuses and reports the run unbounded by name when a fold
+  cannot be excluded. A fold between two far-apart parts of the run is not
+  detected.
+
 ## [0.3.43] - 2026-11-03
 
 ### Fixed

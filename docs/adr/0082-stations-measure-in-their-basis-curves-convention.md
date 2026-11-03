@@ -1549,3 +1549,71 @@ and `station_frame_law_intrinsic.rs` (points from the Fresnel series, closed
 forms and a Simpson reference, never the kernel's quadrature),
 `crates/execution/compile/tests/station_bound_clothoid.rs` and
 `scripts/probe_clothoid_frames_mutants.py`.
+
+## Amendment 2026-11-03: sections that cannot fold (#361)
+
+Context: a station-placed section stands in the plane normal to its frame's
+tangent. A vertex on the inner side of a bend at or past its centre of
+curvature has the planes stop advancing past it: the sections cross, and the
+loft is a self-intersecting shell that was reported certified. A swept disk
+as wide as its bend is refused for the same reason (`horn_torus`).
+
+- **The condition.** A vertex at `(a, b)` in the section frame with the
+  longitudinal offset `c` moves along the plane normal `N` at `F = O'.N + c'
+  - a L.N' - b U.N'`, in station distance. `F` is affine in `(a, b)`, so the
+  smallest `F` of a section stands at a vertex, and each vertex is affine in
+  `s` between two stations. On a plan arc `F = 1 - a kappa`; on a gradient
+  curve in the section frame `F = sigma (1 - b kappa_v)`, `kappa_v` the
+  vertical curvature; the plan frame's `U = +Z` never turns toward the
+  horizontal tangent, so vertical curvature never folds it; `c' <= -sigma`
+  folds a section on a line.
+- **The coefficients are closed form.** `FrameLaw::bend` bounds `O'.N`,
+  `L.N'` and `U.N'` over a seam-free span from the jet `(O', O'')` of the
+  basis (a line, a circle, a polyline's segment, an elevated or banked curve
+  over those, an intrinsic curve; a reversed piece negates `O'`, a placement
+  maps both) at the span's middle and the frames' Lipschitz constants from
+  `FrameLawBounds`. `FrameLawBounds::forward` bounds `O'.N` from below for
+  every frame with bounds, quadrature frames included.
+- **Exact decision.** The compilers bisect each seam-free span of an
+  unturned run with a bend: a span is clear once the lower bound of `F` at
+  every vertex, less the profile's flattening bound times `|beta|` and the
+  rounding, is positive; otherwise the span's middle is a witness whose
+  coefficients are known to rounding, and a vertex not certified positive
+  there is refused. A touch (a vertex within rounding of the centre) is a
+  non-manifold solid, so it is refused like a fold. A span still undecided
+  after 48 halvings lies within rounding or the profile's flattening bound of
+  a fold and is refused too, by
+  invalid input like the mesh compiler's other refusals of solids that do not
+  exist; the bisection stops with a budget error by name after 65536 spans.
+- **Conservative bound.** A turned section, or a frame read by quadrature
+  (an ellipse, a B-spline, an offset), has no closed-form bend. The rate of a
+  vertex along the turned plane's normal is bounded below from the forward
+  floor, the orientation's components widened by what it turns within the
+  span, the frames' derivative bounds and the profile's flattening bound,
+  to 8 halvings. It never refuses: where it cannot clear a span the run is
+  reported `Unbounded` by name (`FOLD_NOT_EXCLUDED`), like the other runs
+  whose frames are not certified.
+- **Local only.** The planes advance at every station distance; a run that
+  meets itself far away (two legs of a loop of the basis) is not detected. A
+  sectioned surface, and an open section run, are not checked here, and #407
+  tracks both. A turned section or a frame read by quadrature is never
+  refused; #406 asks for an exact decision there. The exact compiler, which
+  cannot build what the mesh compiler cannot vouch for, refuses such a run by
+  name as unsupported.
+
+| Option | Why not |
+| --- | --- |
+| Refuse every run whose bound is not positive, conservative cases too | A turned section or an ellipse's frame past the centre of a tight bend is a fold only by the bound, not by the geometry; refusing on an inequality that can be loose would refuse valid solids. Unbounded by name is the honest report. |
+| Check meshed cells for self-intersection | The mesh can step over a thin fold at the sampled distances, and the exact compiler has no mesh. |
+| Check a swept shape's volume sign | Needs the meshed solid, and tells nothing for a touch. |
+| Refuse only where the bound is certainly negative | A touch within rounding is a non-manifold solid; the refusal must include it. |
+
+Evidence: `crates/algorithms/parametric/evaluate/src/station/frame_bound/bend.rs`
+(`BendBounds`, `FrameLaw::bend`),
+`crates/algorithms/parametric/evaluate/tests/station_bend.rs` (coefficients
+against finite differences of the frames' tangent and closed forms),
+`crates/execution/compile/src/station/bound/fold.rs`,
+`crates/execution/compile/tests/station_fold.rs` (plan arc touch and past it,
+a reversed arc, a vertical sag and a crest in the section and plan frames, a
+fold inside a clothoid, a receding longitudinal offset, a turned section and
+an ellipse reported unbounded) and `scripts/probe_station_fold_mutants.py`.

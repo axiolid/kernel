@@ -81,6 +81,16 @@
 //! its exact position, `e_a` from the axes' distance from the closed-form
 //! heading's, and `delta` is zero.
 //!
+//! # Folding (#361)
+//!
+//! The bound assumes the sections cross nowhere. The `fold` check decides
+//! it per seam-free span of a station interval, from the frame law's signed
+//! bend, before any cell is bounded: refused as invalid input where the
+//! section planes stop advancing, unbounded by name ([`FOLD_NOT_EXCLUDED`])
+//! where a turned section, a frame read by quadrature or a span without a
+//! bound leaves it open; its
+//! module documentation states the condition and the decisions.
+//!
 //! # Mitres
 //!
 //! A cell beside a mitre ends on the mitre's plane. Where the piece it
@@ -90,6 +100,8 @@
 //! mesh quad is the exact wall, and only its `quad_deviation` counts.
 //! Any other cell beside a mitre is not bounded:
 //! [`MITRED_SECTIONS`].
+
+mod fold;
 
 use axiolid_contracts::GeomResult;
 use axiolid_core::{Point2, Point3, Scalar, Vec3};
@@ -116,6 +128,14 @@ pub(crate) const UNCERTIFIED_FRAMES: &str =
 pub(crate) const UNBOUNDED_TURN: &str =
     "stationed sections: the orientation turns between stations through a direction its \
      interpolation cannot bound";
+
+/// Why a run whose section planes may fold is not decided (#361): a
+/// turned section, or a frame read by quadrature, is checked only by a
+/// conservative bound of its forward rate, which never refuses.
+pub(crate) const FOLD_NOT_EXCLUDED: &str =
+    "stationed sections: a fold cannot be excluded (a turned section, a frame read by \
+     quadrature, or a span whose bend cannot be bounded, checked only by the conservative \
+     bound of the forward rate)";
 
 /// The frame reading a run's frame names, `None` for one this compiler
 /// does not know.
