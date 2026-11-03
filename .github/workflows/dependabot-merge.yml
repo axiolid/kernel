@@ -29,6 +29,9 @@ jobs:
     permissions:
       contents: write
       pull-requests: write
+      # gh pr checks reads the status check rollup, which needs both.
+      checks: read
+      statuses: read
     env:
       GH_TOKEN: ${{ github.token }}
       GH_REPO: ${{ github.repository }}
@@ -52,13 +55,25 @@ jobs:
           if grep -q 'update-type: version-update:semver-major' <<<"$body"; then
             echo "#$pr is a major update; leaving it for review."; exit 0
           fi
+          # Below 1.0 a minor bump (0.10 -> 0.15) is breaking, though
+          # Dependabot calls it semver-minor.
+          if grep -oE 'from v?0\.[0-9]+[^ ]* to v?0\.[0-9]+' <<<"$body" \
+              | awk '{split($2, a, "."); split($4, b, "."); if (a[2] != b[2]) f = 1} END {exit !f}'; then
+            echo "#$pr moves a 0.x dependency to a new minor version; leaving it for review."; exit 0
+          fi
           # A version-branch pin (`@<sha> # 1.99.1`) carries its Rust version, so
           # moving it changes the compiler; all repositories bump that together.
           if gh pr diff "$pr" | grep -qE '^-.*dtolnay/rust-toolchain@[0-9a-f]+ +# +[0-9]+\.[0-9]+'; then
             echo "#$pr moves a pinned Rust version; leaving it for review."; exit 0
           fi
-          if ! gh pr checks "$pr" >/dev/null; then
-            echo "#$pr still has pending or failing checks."; exit 0
+          # gh exits non-zero for pending or failing checks, so judge by the
+          # buckets it prints; no output means the query itself failed.
+          buckets=$(gh pr checks "$pr" --json bucket --jq '.[].bucket' 2>"$RUNNER_TEMP/checks.err" || true)
+          if [ -z "$buckets" ]; then
+            echo "::error::Could not read the checks of #$pr: $(cat "$RUNNER_TEMP/checks.err")"; exit 1
+          fi
+          if grep -qvxE 'pass|skipping' <<<"$buckets"; then
+            echo "#$pr still has pending or failing checks: $(sort -u <<<"$buckets" | tr '\n' ' ')"; exit 0
           fi
           gh pr merge "$pr" --squash --match-head-commit "$HEAD_SHA" \
             || echo "::warning::#$pr passed its checks but did not merge (conflict or branch rules)."
