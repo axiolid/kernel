@@ -111,3 +111,43 @@ zero.
   10,002 corners.
 - `scripts/probe_fast_morphology_mutants.py`: the faults the tests must
   catch.
+
+## Amendment 2026-11-04: needle notches (#340)
+
+#330's proposals offered chords whose spanned vertices lie within `t / 16`
+of the line (0.0125 m for a disc of radius 0.4 m, `t` 0.2 m). A wall of
+needles 0.05 m deep, under that disc, kept every notch: nothing was
+filled and the sum kept its quadratic cost.
+
+- **Proposals reach `t`, in two rounds.** `fill` proposes chords within
+  `t / 16` of their line as before, then chords within `t` over the edges
+  the first round left (each run of them alone). Proposing at `t` alone
+  fills the same notches but made #330's hole dilations 2 to 4 times
+  slower, so a wall of teeth is filled by the first round at the cost it
+  had and a wall of needles by the second. A needle deeper than `t` is
+  still kept whole, because no chord is proposed over it; proposing one is
+  a separate decision.
+- **Slab bound.** A notch whose spanned vertices all project onto the
+  chord, of length `g`, has excess `e_W = sqrt(t^2 + g^2 / 4) - t`
+  however deep it is. The proof is in `fill.rs`: a point within `t`
+  of a point `n` of the notch lies within `sqrt(t^2 + g^2 / 4)` of one end
+  of the notch's cross-section through `n` parallel to the chord, a point
+  of the set. It joins the minimum of the depth and the gap bound. The
+  fills of the needle walls measured here come from the gap bound (the
+  tips lie on the chord), not from `e_W`, which only competes with it; for
+  a notch deeper than `t` inside the slab, which `excess` accepts but
+  `fill` does not reach, the minimum is of `e_W` and the depth. A notch
+  that overhangs the chord's ends and is deeper than `t` is refused as
+  before. The triage's first formula, the sagitta
+  `t - sqrt(t^2 - g^2 / 4)` of a disc over the mouth, says how far a disc
+  enters the notch, not how far the sum grows, which needs every centre
+  within `t` of a point of the notch; it is also larger than `e_W` (by
+  `g^4 / (64 t^3)` to leading order) and undefined for `g >= 2 t`.
+- **Cost.** The toothed rooms and holes of #330 (2,402, 5,002 and 10,002
+  corners) give the same results bit for bit in `Fast` mode, in the same
+  time as before (0.046 s and 0.042 s for the hole dilation at 10,002
+  corners, main and two rounds; 0.198 s with proposals at `t` alone). The
+  table of the three variants, and the needle walls' numbers, are in
+  `docs/research/exact-morphology-on-needle-walls.md`.
+- **`Exact` is unchanged.** Its profile on the needle shape is in that
+  note; changing it stays a separate decision.
