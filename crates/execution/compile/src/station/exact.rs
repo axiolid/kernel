@@ -200,7 +200,7 @@ pub(crate) fn stationed_spine_exact(
     }
     let tolerance = options.tolerance();
     let half = 0.5 * crate::compiler::chord_error(options);
-    let (rings, tagged) = spine_rings(graph, sections, half, tolerance)?;
+    let (rings, tagged, paired) = spine_rings(graph, sections, half, tolerance)?;
     let basis = Basis::of(graph, directrix)?;
     let (distances, sides) = spine_distances(&basis, sections)?;
     // Every station must stand on the basis, as the mesh compiler reads it.
@@ -218,7 +218,7 @@ pub(crate) fn stationed_spine_exact(
         sections,
         frame,
         &rings,
-        tagged,
+        (tagged, paired),
         (distances.clone(), sides),
         options,
         unsupported,

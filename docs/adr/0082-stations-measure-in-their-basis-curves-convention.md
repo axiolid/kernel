@@ -1618,6 +1618,65 @@ a reversed arc, a vertical sag and a crest in the section and plan frames, a
 fold inside a clothoid, a receding longitudinal offset, a turned section and
 an ellipse reported unbounded) and `scripts/probe_station_fold_mutants.py`.
 
+## Amendment 2026-11-04: changing curved profiles (#361)
+
+Context: `profile_rings` flattens each section on its own, so two different
+curved profiles (a disk growing, a rounded rectangle whose corners grow, an
+ellipse becoming a disk) get unrelated vertex sets. The loft between them
+interpolates vertices that have no exact meaning, and the run was reported
+`Unbounded` ("different curved profiles").
+
+- **Pairing.** `paired_profile_rings` lowers each profile to oriented
+  segments (a rectangle, section or contour through its exact contour, a
+  circle and its bore as full-turn circles, an ellipse as a full-turn
+  ellipse, a derived profile as its basis with the transform applied to the
+  flattened points after the joints are snapped) and matches rings and
+  segments by index after orienting each ring by the exact signed area of
+  its segments (a closed form for lines, circles and ellipses; a zero or
+  non-finite area does not pair). A ring reversed in one profile and not in
+  another, a mirrored profile against an unmirrored one, does not pair:
+  reversing keeps the mirrored start point, so each vertex would match a
+  point of the opposite side. Every pair of
+  segments is cut into one common number of equal steps of its own
+  parameter, `n = max over the profiles of ceil(|dt| sqrt(m2 / (8 e)))`,
+  with `m2` the supremum of `|C''|` over the parameter (a line 0, a circle
+  `r hypot(|x|, |y|)`, an ellipse `hypot(a |x|, b |y|)`, times the largest
+  stretch of a derived profile).
+- **The bound holds between the stations.** The interpolated exact section
+  at fraction `u` is `(1 - u) A(f) + u B(f)`, a curve with second
+  derivative `(1 - u) A'' + u B''`, so `h^2 m2 / 8` bounds its distance from
+  the chords at `f = k / n`, and those chords are the interpolation of the
+  two rings' edges. The distance a joint moved when snapped, times the
+  stretch, is added, and the whole inflated by `1 + 1e-12`. This is the
+  profile's share of the run's bound and the margin of the fold check.
+- **Half step.** A run whose every profile is a circle starts each ring half
+  a step off the axes, as the circle flattener does (#194); a mixed run does
+  not.
+- **What does not pair** returns `None`, and the run keeps today's
+  `Unbounded` result by name: a polyline or B-spline segment (no closed-form
+  bound on `|C''|` that pairs by fraction), a centre line or composite, a
+  different ring or segment count, consecutive vertices within the linear
+  tolerance and more than `1 << 20` vertices. The exact compiler still
+  refuses a curved section that changes between stations.
+
+| Option | Why not |
+| --- | --- |
+| Match the rings by arc length or nearest vertex | The blend of two curves at equal arc length is not a curve with a second-derivative bound from the two; the bound would need a model of the matching. |
+| Flatten each profile alone and keep the stations' flattening bound | Between the stations the vertices pair unrelated points, so nothing bounds the interpolated sections. |
+| Pair polyline and B-spline segments by fraction too | A polyline's second derivative is a delta at its vertices and a B-spline's bound needs its knots; the first pairs only by vertex count, the second is not claimed. |
+| Match segments by family | A line against an arc is a valid blend (the line has no curvature); the family adds a refusal and no certainty. |
+
+Evidence: `crates/algorithms/construction/construct/src/profile/paired.rs`,
+`crates/algorithms/construction/construct/tests/paired_profile_rings.rs`
+(vertices on the exact curves, a dense sampling of the interpolated section
+within the deviation, a mirrored derived profile refused, a scaled, a
+non-uniformly scaled and a thin half-annulus band oriented and paired, the half step,
+the profiles that do not pair),
+`crates/execution/compile/tests/station_bound_curved_taper.rs` (a disk along
+a line and an arc, a rounded rectangle, an ellipse becoming a disk, against
+a dense sampling of the exact surface) and
+`scripts/probe_curved_taper_mutants.py`.
+
 ## Amendment 2026-11-03: certified placements at stations on curved bases (#405)
 
 Context: an alignment family (rheonda/cad#139) places elements along a

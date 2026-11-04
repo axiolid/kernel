@@ -7,10 +7,10 @@
 
 use axiolid_construct::profile::profile_rings;
 use axiolid_contracts::{ExecutionOptions, GeomError};
-use axiolid_core::{Frame2, Point2, Point3, Scalar, Tolerance, Transform2, Vec2, Vec3};
+use axiolid_core::{Frame2, Interval, Point2, Point3, Scalar, Tolerance, Transform2, Vec2, Vec3};
 use axiolid_curve::{
-    BankConvention, Banked3, CantLaw, CantPiece, Circle2, CurvatureLaw, Curve2, Curve3, Elevated3,
-    ElevationLaw, Ellipse2, Intrinsic2, Line2, Polyline2,
+    BSplineCurve2, BankConvention, Banked3, CantLaw, CantPiece, Circle2, CurvatureLaw, Curve2,
+    Curve3, Elevated3, ElevationLaw, Ellipse2, Intrinsic2, KnotSpec, Line2, Polyline2,
 };
 use axiolid_exact_compile_contract::ExactCompiler;
 use axiolid_measure::{exact_properties, volume_properties};
@@ -23,7 +23,9 @@ use axiolid_model::{
     GeometryGraph, GeometryGraphBuilder, GeometryNode, NodeId, OpenProfile, SectionAtStation,
     SolidOperation, Station, StationFrame, StationOffsets, StationOrientation, SurfaceRelation,
 };
-use axiolid_profile::{CircleProfile, Profile, RectangleProfile};
+use axiolid_profile::{
+    CircleProfile, Contour, ContourProfile, Profile, ProfileSegment, RectangleProfile,
+};
 use axiolid_reference::station::{station_section2, station_section3, SectionFrame};
 
 /// The chord budget of every run here, in metres.
@@ -761,14 +763,52 @@ fn a_numerical_frame_and_a_curved_taper_are_unbounded_by_name() {
         }))
         .unwrap();
     let profile = rectangle(&mut b, 1.0, 1.0);
-    let disk = |b: &mut GeometryGraphBuilder, radius| {
-        b.push_value(Profile::Circle(CircleProfile {
-            radius,
+    let small = b
+        .push_value(Profile::Circle(CircleProfile {
+            radius: 0.5,
             thickness: None,
+        }))
+        .unwrap();
+    // Three lines and a degree-1 B-spline edge: curved to the flattener,
+    // but not a segment family that pairs (#361).
+    let spline_edged = |b: &mut GeometryGraphBuilder, size: Scalar| {
+        let corners = [
+            Point2::new(0.0, 0.0),
+            Point2::new(size, 0.0),
+            Point2::new(size, size),
+            Point2::new(0.0, size),
+        ];
+        let mut segments: Vec<ProfileSegment> = (0..3)
+            .map(|k| ProfileSegment {
+                curve: Curve2::Line(Line2 {
+                    origin: corners[k],
+                    direction: corners[k + 1] - corners[k],
+                }),
+                domain: Interval::new(0.0, 1.0),
+                same_sense: true,
+            })
+            .collect();
+        segments.push(ProfileSegment {
+            curve: Curve2::BSpline(BSplineCurve2 {
+                degree: 1,
+                control_points: vec![corners[3], corners[0]],
+                knots: vec![0.0, 1.0],
+                multiplicities: vec![2, 2],
+                weights: None,
+                closed: false,
+                self_intersect: None,
+                knot_spec: KnotSpec::Unspecified,
+            }),
+            domain: Interval::new(0.0, 1.0),
+            same_sense: true,
+        });
+        b.push_value(Profile::Contour(ContourProfile {
+            outer: Contour::new(segments),
+            holes: Vec::new(),
         }))
         .unwrap()
     };
-    let (small, large) = (disk(&mut b, 0.5), disk(&mut b, 0.8));
+    let (small_edged, large_edged) = (spline_edged(&mut b, 1.0), spline_edged(&mut b, 2.0));
     let along_clothoid = spine(
         &mut b,
         clothoid,
@@ -782,8 +822,8 @@ fn a_numerical_frame_and_a_curved_taper_are_unbounded_by_name() {
         &mut b,
         line,
         vec![
-            section(small, 0.0, StationOffsets::ZERO),
-            section(large, 10.0, StationOffsets::ZERO),
+            section(small_edged, 0.0, StationOffsets::ZERO),
+            section(large_edged, 10.0, StationOffsets::ZERO),
         ],
         StationFrame::Section,
     );

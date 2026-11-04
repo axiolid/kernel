@@ -651,3 +651,44 @@ fn a_basis_the_exact_compiler_cannot_build_is_refused_as_such_first() {
         other => panic!("not refused as an unbuildable basis: {other:?}"),
     }
 }
+
+#[test]
+fn paired_curved_profiles_are_judged_with_their_pairing_bound() {
+    // A disk growing from 0.5 to 0.8 m along a 10 m arc, the section
+    // centred 9.19999 m to the left: the exact boundary reaches 9.99999 m,
+    // short of the centre of curvature, but the flattened vertices plus the
+    // pairing bound (the sagitta of the chords, about 0.005 m) reach it, so
+    // the run is refused as it is for a single curved profile. 8 m is clear.
+    let mut b = GeometryGraphBuilder::new();
+    let basis = b.push_value(plan_circle(10.0)).unwrap();
+    let disk = |b: &mut GeometryGraphBuilder, radius| {
+        b.push_value(Profile::Circle(CircleProfile {
+            radius,
+            thickness: None,
+        }))
+        .unwrap()
+    };
+    let (small, large) = (disk(&mut b, 0.5), disk(&mut b, 0.8));
+    let mut grow = |lateral: Scalar| {
+        let offsets = StationOffsets::new(lateral, 0.0, 0.0);
+        b.push(GeometryNode::SolidOperation(
+            SolidOperation::SectionsAtStations {
+                directrix: basis,
+                sections: vec![
+                    SectionAtStation::new(small, at(0.0, offsets)),
+                    SectionAtStation::new(large, at(10.0, offsets)),
+                ],
+                frame: StationFrame::Section,
+            },
+        ))
+        .unwrap()
+    };
+    let (clear, reaching) = (grow(8.0), grow(9.19999));
+    let graph = b.finish(vec![clear, reaching]).unwrap();
+    assert!(matches!(mesh(&graph, clear), Outcome::Certified));
+    refused(&mesh(&graph, reaching));
+    // The exact compiler builds neither: a fold is refused as such before
+    // the curved section that changes.
+    let detail = exact(&graph, reaching).expect_err("the exact compiler refuses");
+    assert!(detail.contains("sections fold"), "{detail}");
+}

@@ -34,7 +34,19 @@
 //! chain, on a banked curve over an intrinsic plan or on an intrinsic space
 //! curve with torsion or tilted, an offset beside an intrinsic curve or a
 //! chain, a cell beside a mitre on a curved piece or with a changing
-//! section, different curved profiles).
+//! section, different curved profiles that do not pair).
+//!
+//! Different curved profiles that pair segment for segment (#361) -- lines,
+//! circular and elliptic arcs, matched by ring and segment index after
+//! orientation -- are flattened together
+//! ([`axiolid_construct::profile::paired_profile_rings`]): each segment is
+//! cut into one common number of equal steps of its own parameter, so a
+//! vertex of one section is matched to the vertex at the same fraction of
+//! the other and the flattening bound holds for every interpolated section,
+//! not only the stations. That bound is the profile's share, and the fold
+//! margin. A polyline or B-spline segment, another segment family or a
+//! different segment structure does not pair and stays unbounded by name;
+//! the exact compiler refuses a curved section that changes either way.
 //!
 //! A spine whose section planes fold is no solid (#361): where a section
 //! vertex lies on the inner side of a bend at or past its centre of
@@ -226,7 +238,9 @@
 //! [`DeviationBound::Unbounded`]: crate::DeviationBound::Unbounded
 
 use axiolid_construct::loft::{loft_tapered, Station as LoftStation};
-use axiolid_construct::profile::{profile_deviation, profile_rings, ProfileDeviation, Rings};
+use axiolid_construct::profile::{
+    paired_profile_rings, profile_deviation, profile_rings, ProfileDeviation, Rings,
+};
 use axiolid_contracts::{ExecutionOptions, GeomError, GeomResult, Operation};
 use axiolid_core::{Frame3, Point2, Point3, Scalar, Tolerance, Transform3};
 use axiolid_curve::Curve2;
@@ -1131,7 +1145,7 @@ pub(crate) fn stationed_spine_bounded(
 ) -> GeomResult<(TriMesh, DeviationBound)> {
     let basis = Basis::of(graph, directrix)?;
     let half = 0.5 * crate::compiler::chord_error(options);
-    let (rings, tagged) = spine_rings(graph, sections, half, options.tolerance())?;
+    let (rings, tagged, paired) = spine_rings(graph, sections, half, options.tolerance())?;
     let (distances, sides) = spine_distances(&basis, sections)?;
     let (run, knots) = Run::new(basis, frame, distances.clone(), sides)?;
     let placed = |s: Scalar, reading: Reading| -> GeomResult<Option<(Rings, Vec<Point3>)>> {
@@ -1158,7 +1172,7 @@ pub(crate) fn stationed_spine_bounded(
         Ok(points.map(|points| (local, points)))
     };
     let edges = wall_edges(&rings[0]);
-    let profile = profile_bound(graph, sections, tagged, half, options.tolerance())?;
+    let profile = profile_bound(graph, sections, tagged, paired, half, options.tolerance())?;
     let law = bound::SectionLaw::new(
         &run,
         &distances,
@@ -1252,13 +1266,14 @@ pub(super) fn refuse_fold(
     sections: &[SectionAtStation],
     frame: StationFrame,
     rings: &[Rings],
-    tagged: bool,
+    (tagged, paired): (bool, Option<Scalar>),
     (distances, sides): (Vec<Scalar>, RunSides),
     options: &ExecutionOptions,
     unsupported: fn(&'static str) -> GeomError,
 ) -> GeomResult<()> {
     let half = 0.5 * crate::compiler::chord_error(options);
-    let Ok(margin) = profile_bound(graph, sections, tagged, half, options.tolerance())? else {
+    let Ok(margin) = profile_bound(graph, sections, tagged, paired, half, options.tolerance())?
+    else {
         return Ok(());
     };
     let (run, _) = Run::new(basis, frame, distances.clone(), sides)?;
@@ -1277,13 +1292,15 @@ pub(super) fn refuse_fold(
 
 /// A spine's section rings, each matched to the first's vertex for vertex
 /// (by tag, or by ring and index), the untagged ones flattened to
-/// `budget`; and whether the sections are tagged.
+/// `budget`; whether the sections are tagged; and, for untagged sections
+/// whose different curved profiles pair segment for segment (#361), the
+/// deviation of the rings flattened together.
 pub(super) fn spine_rings(
     graph: &GeometryGraph,
     sections: &[SectionAtStation],
     budget: Scalar,
     tolerance: Tolerance,
-) -> GeomResult<(Vec<Rings>, bool)> {
+) -> GeomResult<(Vec<Rings>, bool, Option<Scalar>)> {
     if sections.len() < 2 {
         return Err(GeomError::InvalidInput(
             "a station-placed spine needs at least two sections".into(),
@@ -1307,6 +1324,7 @@ pub(super) fn spine_rings(
             section.profile
         ))),
     };
+    let mut paired = None;
     let rings = if tagged {
         let tagged = sections
             .iter()
@@ -1318,10 +1336,41 @@ pub(super) fn spine_rings(
             .map(|(rings, tags)| match_rings(first, rings, tags))
             .collect::<GeomResult<Vec<_>>>()?
     } else {
-        sections
+        let alone = sections
             .iter()
             .map(|section| profile_rings(shape(section)?, budget, tolerance))
-            .collect::<GeomResult<Vec<_>>>()?
+            .collect::<GeomResult<Vec<_>>>()?;
+        // Different curved profiles flatten together where they pair.
+        let profiles = sections.iter().map(shape).collect::<GeomResult<Vec<_>>>()?;
+        let one = sections.iter().all(|s| {
+            s.profile == sections[0].profile
+                || graph.get(s.profile) == graph.get(sections[0].profile)
+        });
+        let mut curved = false;
+        for profile in &profiles {
+            curved |=
+                profile_deviation(profile, budget, tolerance)? != ProfileDeviation::Bounded(0.0);
+        }
+        if !one && !curved && profiles.iter().any(|p| mirrors(p) != mirrors(profiles[0])) {
+            return Err(GeomError::InvalidInput(
+                "station-placed spine sections: a mirrored profile against an unmirrored one \
+                 reverses its ring, so vertices matched by index lie on opposite sides; tag \
+                 the sections or mirror every one"
+                    .into(),
+            ));
+        }
+        let together = if one || !curved {
+            None
+        } else {
+            paired_profile_rings(&profiles, budget, tolerance)?
+        };
+        match together {
+            Some(together) => {
+                paired = Some(together.deviation);
+                together.rings
+            }
+            None => alone,
+        }
     };
     if rings.iter().any(|ring| !same_structure(ring, &rings[0])) {
         return Err(GeomError::InvalidInput(
@@ -1330,7 +1379,18 @@ pub(super) fn spine_rings(
                 .into(),
         ));
     }
-    Ok((rings, tagged))
+    Ok((rings, tagged, paired))
+}
+
+/// Whether a profile's placement chain mirrors it (an odd number of
+/// transforms of negative determinant), which reverses its flattened ring.
+fn mirrors(profile: &Profile) -> bool {
+    match profile {
+        Profile::Derived { basis, transform } => {
+            mirrors(basis) != (transform.matrix2.determinant() < 0.0)
+        }
+        _ => false,
+    }
 }
 
 /// A spine's stations' distances, increasing as given and snapped by
@@ -1350,25 +1410,34 @@ pub(super) fn spine_distances(
     snapped_sections(basis, sections)
 }
 
-/// Why sections with different curved profiles are unbounded (#247).
+/// Why sections with different curved profiles that do not pair segment for
+/// segment are unbounded (#247, #361).
 const CURVED_TAPER: &str =
-    "stationed sections: different curved profiles at the stations have no exact vertex \
-     correspondence between them";
+    "stationed sections: different curved profiles at the stations that do not pair segment \
+     for segment (another segment family, a polyline segment, a different segment structure) \
+     have no exact vertex correspondence between them";
 
 /// The profile's share of a spine's bound (#247): `0` for straight-edged
 /// sections (their rings are the exact profiles, a tagged section's
 /// always), the worst flattening bound where every section is one curved
 /// profile (the interpolation between a profile and itself is that
-/// profile, placed rigidly), else the reason it is unbounded.
+/// profile, placed rigidly), the `paired` bound where different curved
+/// profiles were flattened together (#361), else the reason it is
+/// unbounded.
 fn profile_bound(
     graph: &GeometryGraph,
     sections: &[SectionAtStation],
     tagged: bool,
+    paired: Option<Scalar>,
     budget: Scalar,
     tolerance: Tolerance,
 ) -> GeomResult<Result<Scalar, &'static str>> {
     if tagged {
         return Ok(Ok(0.0));
+    }
+    // Different curved profiles flattened together (#361).
+    if let Some(bound) = paired {
+        return Ok(Ok(bound));
     }
     let mut worst: Scalar = 0.0;
     for section in sections {
