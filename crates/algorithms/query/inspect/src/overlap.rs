@@ -188,18 +188,24 @@ where
 
 /// The shared volume, clamped to what either solid holds.
 fn shared(a: &Solid, b: &Solid) -> VolumeInterval {
-    let items: Vec<SpatialItem<u32>> = b
-        .faces
+    let total = pair_sum(&a.faces, &b.faces, a.base);
+    clamp(total, 0.0, a.volume.hi.min(b.volume.hi))
+}
+
+/// `sum over f, g of  s_f s_g * integral over f' and g' of (min(h_f, h_g) - base)`,
+/// unclamped.
+pub(crate) fn pair_sum(first: &[Face], second: &[Face], base: f64) -> Iv {
+    let items: Vec<SpatialItem<u32>> = second
         .iter()
         .enumerate()
         .map(|(i, f)| SpatialItem::new(i as u32, f.shadow()))
         .collect();
     let bvh = Bvh::build(items);
     let mut total = Iv::point(0.0);
-    for f in &a.faces {
+    for f in first {
         bvh.visit_aabb(&f.shadow(), &mut |j: &u32| {
-            let g = &b.faces[*j as usize];
-            let term = overlap(f, g, a.base).within(0.0, cap(f, g, a.base));
+            let g = &second[*j as usize];
+            let term = overlap(f, g, base).within(0.0, cap(f, g, base));
             total = if f.up == g.up {
                 total.add(term)
             } else {
@@ -208,17 +214,17 @@ fn shared(a: &Solid, b: &Solid) -> VolumeInterval {
             ControlFlow::Continue(())
         });
     }
-    clamp(total, 0.0, a.volume.hi.min(b.volume.hi))
+    total
 }
 
-fn clamp(v: Iv, low: f64, high: f64) -> VolumeInterval {
+pub(crate) fn clamp(v: Iv, low: f64, high: f64) -> VolumeInterval {
     VolumeInterval {
         lower: v.lo.max(low).min(high),
         upper: v.hi.min(high).max(low),
     }
 }
 
-fn lowest<M: TriangleMeshView + ?Sized>(mesh: &M) -> f64 {
+pub(crate) fn lowest<M: TriangleMeshView + ?Sized>(mesh: &M) -> f64 {
     (0..mesh.position_count())
         .map(|i| mesh.position(i).z)
         .fold(f64::INFINITY, f64::min)
@@ -228,9 +234,9 @@ fn lowest<M: TriangleMeshView + ?Sized>(mesh: &M) -> f64 {
 /// plane, and whether its outward side (after orienting the solid) faces
 /// up.
 #[derive(Debug, Clone, Copy)]
-struct Face {
+pub(crate) struct Face {
     p: [Point3; 3],
-    up: bool,
+    pub(crate) up: bool,
 }
 
 /// No less than any term of `f` and `g`: the smaller shadow's area times
@@ -318,42 +324,8 @@ impl Solid {
             });
         }
         let base = base.unwrap_or_else(|| lowest(mesh));
-        let mut faces = Vec::new();
-        for t in 0..mesh.triangle_count() {
-            let [a, b, c] = mesh.triangle(t).map(|i| mesh.position(i as usize));
-            let flat = |p: Point3| Point2::new(p.x, p.y);
-            match sign(&Orient {
-                a: flat(a),
-                b: flat(b),
-                c: flat(c),
-            }) {
-                Sign::Positive => faces.push(Face {
-                    p: [a, b, c],
-                    up: true,
-                }),
-                Sign::Negative => faces.push(Face {
-                    p: [a, c, b],
-                    up: false,
-                }),
-                _ => {}
-            }
-        }
-        // Volume: each shadow's area times the mean height above the base.
-        let mut volume = Iv::point(0.0);
-        for f in &faces {
-            let area = f.area();
-            let rise = [0, 1, 2]
-                .map(|i| Iv::point(f.p[i].z).sub(Iv::point(base)))
-                .into_iter()
-                .fold(Iv::point(0.0), Iv::add)
-                .div(Iv::point(3.0));
-            let term = area.mul(rise);
-            volume = if f.up {
-                volume.add(term)
-            } else {
-                volume.sub(term)
-            };
-        }
+        let mut faces = faces_as_given(mesh);
+        let mut volume = signed_volume(&faces, base);
         // Wound inward: turn every face over.
         if volume.hi < 0.0 {
             volume = Iv::point(0.0).sub(volume);
@@ -369,6 +341,52 @@ impl Solid {
             base,
         })
     }
+}
+
+/// The faces that cast a shadow, each wound as the mesh gives it.
+pub(crate) fn faces_as_given<M: TriangleMeshView + ?Sized>(mesh: &M) -> Vec<Face> {
+    let mut faces = Vec::new();
+    for t in 0..mesh.triangle_count() {
+        let [a, b, c] = mesh.triangle(t).map(|i| mesh.position(i as usize));
+        let flat = |p: Point3| Point2::new(p.x, p.y);
+        match sign(&Orient {
+            a: flat(a),
+            b: flat(b),
+            c: flat(c),
+        }) {
+            Sign::Positive => faces.push(Face {
+                p: [a, b, c],
+                up: true,
+            }),
+            Sign::Negative => faces.push(Face {
+                p: [a, c, b],
+                up: false,
+            }),
+            _ => {}
+        }
+    }
+    faces
+}
+
+/// The signed volume of the faces: each shadow's area times the mean
+/// height above `base`.
+pub(crate) fn signed_volume(faces: &[Face], base: f64) -> Iv {
+    let mut volume = Iv::point(0.0);
+    for f in faces {
+        let area = f.area();
+        let rise = [0, 1, 2]
+            .map(|i| Iv::point(f.p[i].z).sub(Iv::point(base)))
+            .into_iter()
+            .fold(Iv::point(0.0), Iv::add)
+            .div(Iv::point(3.0));
+        let term = area.mul(rise);
+        volume = if f.up {
+            volume.add(term)
+        } else {
+            volume.sub(term)
+        };
+    }
+    volume
 }
 
 fn triangle_area(a: Point2, b: Point2, c: Point2) -> Iv {
@@ -658,13 +676,13 @@ fn times(a: Sign, b: Sign) -> Sign {
 /// An outward-rounded interval: every operation rounds to nearest and
 /// steps each bound one float outward, which covers the rounding error.
 #[derive(Debug, Clone, Copy, PartialEq)]
-struct Iv {
-    lo: f64,
-    hi: f64,
+pub(crate) struct Iv {
+    pub(crate) lo: f64,
+    pub(crate) hi: f64,
 }
 
 impl Iv {
-    fn point(v: f64) -> Self {
+    pub(crate) fn point(v: f64) -> Self {
         Self { lo: v, hi: v }
     }
 
@@ -679,15 +697,15 @@ impl Iv {
         Self::new(lo.next_down(), hi.next_up())
     }
 
-    fn add(self, o: Self) -> Self {
+    pub(crate) fn add(self, o: Self) -> Self {
         Self::outward(self.lo + o.lo, self.hi + o.hi)
     }
 
-    fn sub(self, o: Self) -> Self {
+    pub(crate) fn sub(self, o: Self) -> Self {
         Self::outward(self.lo - o.hi, self.hi - o.lo)
     }
 
-    fn mul(self, o: Self) -> Self {
+    pub(crate) fn mul(self, o: Self) -> Self {
         let p = [
             self.lo * o.lo,
             self.lo * o.hi,

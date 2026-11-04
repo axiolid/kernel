@@ -16,6 +16,7 @@ pub mod overlap;
 pub mod planes;
 pub mod sight;
 pub mod topology;
+pub mod winding;
 
 pub use cast::{ray_cast, Hit};
 pub use clearance::{min_gap, surface_gap};
@@ -30,3 +31,4 @@ pub use sight::{line_of_sight, line_of_sight_within, Sight, SightError, MAX_SIGH
 pub use topology::{
     topology, ComponentTopology, EdgeLoop, MeshTopology, SurfaceKind, TopologyError,
 };
+pub use winding::{certify_unit_winding, WindingError};

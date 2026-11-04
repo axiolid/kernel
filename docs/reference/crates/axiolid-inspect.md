@@ -40,4 +40,13 @@ Latest release, 0.3.9 (2026-11-04):
   arithmetic; a boolean that decides on the raw values cannot settle it
   (#391).
 
+- `certify_unit_winding` and `WindingError`: bracket the winding excess
+  `E = integral of w(w-1)/2 = (integral of w^2 - integral of w) / 2` of a
+  closed oriented cycle, an upper bound on the volume where its winding
+  number is neither 0 nor 1 (equal to it where `w` is in {-1..2}), and
+  accept it within a positive budget.
+  Edge-touching shells and cavities pass; duplicated, overlapping and
+  inverted shells are refused, so `cycle_volume_properties` can be trusted
+  as the enclosed volume (#420).
+
 Full history: [`crates/algorithms/query/inspect/CHANGELOG.md`](https://github.com/axiolid/kernel/blob/main/crates/algorithms/query/inspect/CHANGELOG.md)
