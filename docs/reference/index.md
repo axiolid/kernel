@@ -65,7 +65,7 @@ Every page here is generated from the crate itself: its manifest, its crate docu
 | [`axiolid-field-ops`](./crates/axiolid-field-ops) | `algorithm.sampled` | 0.3.3 | Sampling, morphology, clearance, and navigation over Axiolid layered fields. |
 | [`axiolid-heal`](./crates/axiolid-heal) | `algorithm.repair` | 0.3.3 | Explicit diagnosis and opt-in repair contracts for dirty geometry |
 | [`axiolid-hidden-lines`](./crates/axiolid-hidden-lines) | `algorithm.discrete` | 0.1.3 | Exact scalar hidden-line drawings of triangle meshes in orthographic views |
-| [`axiolid-inspect`](./crates/axiolid-inspect) | `algorithm.query` | 0.3.8 | Mesh queries: clearance, containment, ray casting, and genus |
+| [`axiolid-inspect`](./crates/axiolid-inspect) | `algorithm.query` | 0.3.9 | Mesh queries: clearance, containment, ray casting, and genus |
 | [`axiolid-levelset`](./crates/axiolid-levelset) | `algorithm.sampled` | 0.3.2 | Level-set extraction: a closed manifold mesh from a sampled scalar field |
 | [`axiolid-linear-intersection`](./crates/axiolid-linear-intersection) | `algorithm.query` | 0.3.2 | Portable, deterministic intersections for linear geometry |
 | [`axiolid-measure`](./crates/axiolid-measure) | `algorithm.query` | 0.3.13 | Metric properties: area, volume, centroid, moments of inertia. |

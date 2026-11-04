@@ -122,6 +122,20 @@ Latest release, 0.3.44 (2026-11-03):
   turn, a B-spline interval outside its domain and sides that coincide are
   refused by name.
 
+- A union whose operands are placed by linear parts that differ in a bit,
+  and whose contact the mesh cut cannot settle, is decided by the exact
+  compiler (#391, ADR 0098): the union node is compiled exactly and the
+  exact result tessellated through a resolved view of its own catalogs and
+  pcurve intervals. The trigger is geometry: faces of the two operands that
+  nearly share a plane within the linear tolerance
+  (`axiolid_inspect::near_coplanar`), or a pinch (#194) or
+  `UNMERGED_UNION_CONTACT` refusal. The result is accepted only as a closed
+  solid that passes both guards, and is reported under the new details
+  `deviation::REFEREED_UNION` and `deviation::REFEREED_UNION_EXACT`, with
+  `COINCIDENT_OPERANDS` where the exact compiler read a feature within the
+  tolerance. Its operands' attribute channels are dropped by name,
+  `ProviderLimitation`.
+
 ### Changed
 
 - A node placed at a station on a circle, a polyline, an elevated or
@@ -154,6 +168,14 @@ Latest release, 0.3.44 (2026-11-03):
   `SurfaceEvaluation` (`a curve-bounded surface over a surface relation`,
   `a surface relation as a reference surface`), no longer as `InvalidInput`
   (#402).
+
+- A union of differently composed turns that was refused by name
+  (`UNMERGED_UNION_CONTACT` or a pinch) now fuses where the exact compiler
+  fuses it, and one that came back as a body with sub-rounding wedge cracks
+  is replaced by the exact union's tessellation. Where the exact compiler
+  refuses too, the refusal keeps its message and ends with "; the exact
+  referee refused: {reason}"; an unsettled but valid mesh result is
+  returned as before. Mesh operands are never refereed.
 
 ### Fixed
 

@@ -8,7 +8,7 @@ Mesh queries: clearance, containment, ray casting, and genus.
 
 | | |
 | --- | --- |
-| Latest release | 0.3.8 (2026-11-03) |
+| Latest release | 0.3.9 (2026-11-04) |
 | crates.io | [`axiolid-inspect`](https://crates.io/crates/axiolid-inspect) |
 | Layer | algorithms (`algorithm.query`) |
 | API documentation | [rustdoc](/api/rustdoc/axiolid_inspect/index.html) · [docs.rs](https://docs.rs/axiolid-inspect) |
@@ -30,23 +30,14 @@ Queries over triangle meshes: clearance between meshes, faces that nearly share 
 
 ## Changes
 
-Latest release, 0.3.8 (2026-11-03):
+Latest release, 0.3.9 (2026-11-04):
 
 ### Added
 
-- The package now ships `LICENSE` and `LICENSE-COMMERCIAL` (symlinks to the
-  repository root), so the licence texts travel with the archive (#358).
-
-- `surface_gap`: the distance between two meshes' surfaces with no
-  containment test, so a mesh in another's cavity is as far from it as the
-  surfaces are. `min_gap` delegates to it after its containment check
-  (#356, #357).
-
-### Fixed
-
-- `min_gap` and clearance reported a positive gap for meshes that cross with
-  no vertex inside the other (a bar through a box, a pipe through a wall).
-  An edge crossing a face is now a certified `orient3d` test and reads as
-  `Some(0.0)` (#390).
+- `near_coplanar` and `NearCoplanar`: the first pair of triangles of two
+  meshes that nearly share a plane within a linear distance, not exactly
+  coplanar. Placement leaves such a residue where faces meet in exact
+  arithmetic; a boolean that decides on the raw values cannot settle it
+  (#391).
 
 Full history: [`crates/algorithms/query/inspect/CHANGELOG.md`](https://github.com/axiolid/kernel/blob/main/crates/algorithms/query/inspect/CHANGELOG.md)

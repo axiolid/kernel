@@ -9,6 +9,8 @@ caret rule for `0.x` versions.
 
 ## [Unreleased]
 
+## [0.3.9] - 2026-11-04
+
 ### Added
 
 - `near_coplanar` and `NearCoplanar`: the first pair of triangles of two
