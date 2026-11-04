@@ -181,6 +181,23 @@ fn a_flat_wall_with_openings_coinciding_within_readings_is_certified() {
             let (_, deviation) = ReferenceMeshCompiler::new(BoolmeshBoolean)
                 .compile_mesh_with_deviation(&graph, root, &options)
                 .unwrap_or_else(|error| panic!("{what}: {error}"));
+            if e > 0.0 {
+                // The window's caps `e` inside the wall's faces leave two
+                // skins that enclose a void in the mesh: a shell the exact
+                // result, reading them away, lacks, and which the one-sided
+                // measured distance cannot see (#392). The skins are
+                // authored, far above rounding (ADR 0096, D7): the mesh
+                // stands, and its report is unbounded by name, the skins
+                // lying up to the wall's thickness from the exact result.
+                assert!(
+                    deviation.contributions.iter().any(|c| matches!(
+                        c.bound,
+                        DeviationBound::Unbounded(reason) if reason.contains("more shells")
+                    )),
+                    "{what}: {deviation:?}"
+                );
+                continue;
+            }
             for c in &deviation.contributions {
                 assert!(
                     matches!(c.bound, DeviationBound::Certified(_)),

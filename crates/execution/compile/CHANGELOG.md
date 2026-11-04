@@ -9,6 +9,14 @@ caret rule for `0.x` versions.
 
 ## [Unreleased]
 
+### Changed
+
+- A measured boolean is `Unbounded` ("boolean: the mesh has more shells
+  than the exact result") when its mesh has more connected components,
+  with bit-equal positions taken as one vertex, than the exact result has
+  shells (#392). The measured distance is one-sided and cannot see an extra
+  shell; fewer components are no refusal.
+
 ## [0.3.44] - 2026-11-03
 
 ### Added

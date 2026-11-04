@@ -83,6 +83,16 @@ MUTANTS = [
     ('a proven bound left unwidened', BOOL,
      '        DeviationBound::Certified(value) | DeviationBound::Proven(value) => {',
      '        DeviationBound::Certified(value) => {', [REFEREE]),
+    # #392: a mesh with more shells than the exact result is unbounded.
+    ('extra shells need one more than the exact result', BOOL,
+     '    geometric_components(mesh) > exact.topology().shells().len()',
+     '    geometric_components(mesh) >= exact.topology().shells().len()', [UNIT]),
+    ('extra shells never checked', BOOL,
+     '    let measured = if extra_shells(&exact, mesh) {',
+     '    let measured = if false && extra_shells(&exact, mesh) {', [UNIT]),
+    ('components counted on the raw mesh', BOOL,
+     '    axiolid_mesh::component_count(&TriMesh::new(positions, indices))',
+     '    axiolid_mesh::component_count(&TriMesh::new(mesh.positions.clone(), mesh.indices.clone()))', [UNIT]),
 ]
 
 probe_lib.main(MUTANTS, timeout=1800)

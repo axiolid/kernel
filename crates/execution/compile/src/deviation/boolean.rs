@@ -157,6 +157,19 @@
 //! spans no more than that reading on the surface. A wider gap, or one with no
 //! reading to explain it, stays refused by name.
 //!
+//! # Extra shells (#392)
+//!
+//! The measured distance is one-sided (exact surface to mesh), so it cannot
+//! see a shell the mesh has and the exact result lacks: a sliver or an
+//! inner face far from every exact face. Before measuring, the mesh's
+//! components are counted with bit-equal positions taken as one vertex (the
+//! boolean provider does not weld its output) and compared with the exact
+//! result's shells. Strictly more components make the contribution
+//! [`DeviationBound::Unbounded`] under [`EXTRA_SHELLS`]. The test is
+//! one-sided: fewer components are no refusal, since shells touching at a
+//! vertex may be one mesh component. The `COINCIDENT_OPERANDS` reading is
+//! still added.
+//!
 //! # Unbounded, by name
 //!
 //! A boolean the exact compiler refuses (an operand it does not compile
@@ -176,7 +189,7 @@ use axiolid_contracts::{ExecutionOptions, GeomError};
 use axiolid_core::{Point2, Point3, Scalar, Vec2, Vec3};
 use axiolid_curve::Curve2;
 use axiolid_mesh::TriMesh;
-use std::collections::HashSet;
+use std::collections::{BTreeMap, HashSet};
 
 use axiolid_model::{GeometryGraph, GeometryNode, NodeId, SolidOperation};
 use axiolid_reference::bound::{chord_bound2, continuity_breaks2, SurfaceBoundOracle};
@@ -205,6 +218,8 @@ const MEASURED_EXACT: &str =
 /// flattened by.
 const FLATTENED: &str =
     "measured against the exact boolean of operands flattened within their slab width, plus it";
+/// The reason a boolean's mesh has more shells than its exact result (#392).
+const EXTRA_SHELLS: &str = "boolean: the mesh has more shells than the exact result";
 /// The detail of a boolean with no exact result to measure against.
 const NO_EXACT: &str = "no exact result";
 
@@ -254,7 +269,9 @@ pub(crate) fn of_boolean(
     // The slab width is a deviation the report already carries: like a
     // sampled one, it lets the budget settle an all-planar search (#314).
     let reading = closing_reading(&report, options);
-    let measured = if flattened < budget {
+    let measured = if extra_shells(&exact, mesh) {
+        Err(EXTRA_SHELLS)
+    } else if flattened < budget {
         let left = budget - flattened;
         measure(&exact, mesh, left, left, flattened, reading)
     } else {
@@ -356,6 +373,33 @@ fn distance_of(readings: impl IntoIterator<Item = (Scalar, Scalar)>, extent: Sca
         .into_iter()
         .map(|(linear, angular)| widened(linear, angular * lever))
         .fold(0.0, Scalar::max)
+}
+
+/// Whether the mesh has more connected components than the exact result
+/// has shells (#392). One-sided: touching shells may share a component.
+fn extra_shells(exact: &ExactBRep, mesh: &TriMesh) -> bool {
+    geometric_components(mesh) > exact.topology().shells().len()
+}
+
+/// The mesh's components with bit-equal positions as one vertex (-0.0 as
+/// 0.0), as the provider's output is not welded.
+fn geometric_components(mesh: &TriMesh) -> usize {
+    let mut ids: BTreeMap<[u64; 3], u32> = BTreeMap::new();
+    let map: Vec<u32> = mesh
+        .positions
+        .iter()
+        .map(|p| {
+            let next = ids.len() as u32;
+            *ids.entry([p.x, p.y, p.z].map(|c| (c + 0.0).to_bits()))
+                .or_insert(next)
+        })
+        .collect();
+    let mut positions = vec![Point3::ZERO; ids.len()];
+    for (p, id) in mesh.positions.iter().zip(&map) {
+        positions[*id as usize] = *p;
+    }
+    let indices: Vec<u32> = mesh.indices.iter().map(|i| map[*i as usize]).collect();
+    axiolid_mesh::component_count(&TriMesh::new(positions, indices))
 }
 
 /// The gap within which an exact face's loops may close beyond rounding
@@ -1590,5 +1634,146 @@ mod tests {
             }
             mesh.positions[k] = original;
         }
+    }
+
+    type Cube = (GeometryGraph, NodeId, ExactBRep, TriMesh);
+
+    /// A `size` cube from `z = 0`, optionally with a cube of `hole` inside
+    /// it (an inner void), compiled exactly and to a mesh.
+    fn cube(size: Scalar, hole: Option<Scalar>) -> Cube {
+        let mut g = GeometryGraphBuilder::new();
+        let mut solid = |size: Scalar| {
+            let profile = g
+                .push(GeometryNode::Profile(Profile::Rectangle(
+                    RectangleProfile {
+                        x: size,
+                        y: size,
+                        thickness: None,
+                        outer_radius: None,
+                        inner_radius: None,
+                    },
+                )))
+                .unwrap();
+            g.push(GeometryNode::SolidOperation(SolidOperation::Extrusion {
+                profile,
+                direction: Vec3::Z,
+                depth: size,
+            }))
+            .unwrap()
+        };
+        let outer = solid(size);
+        let root = match hole {
+            None => outer,
+            Some(hole) => {
+                let inner = solid(hole);
+                let inner = g
+                    .push(GeometryNode::Instance(Instance {
+                        source: inner,
+                        transform: Transform3::from_translation(Vec3::new(
+                            0.0,
+                            0.0,
+                            (size - hole) / 2.0,
+                        )),
+                    }))
+                    .unwrap();
+                g.push(GeometryNode::SolidOperation(SolidOperation::Boolean {
+                    left: outer,
+                    right: inner,
+                    operator: BooleanOperator::Difference,
+                }))
+                .unwrap()
+            }
+        };
+        let graph = g.finish(vec![root]).unwrap();
+        let options = ExecutionOptions::new(Tolerance::new(1e-6, 1e-9).unwrap());
+        let mesh = crate::ReferenceMeshCompiler::new(BoolmeshBoolean::new())
+            .compile_mesh_reported(&graph, root, &options)
+            .unwrap()
+            .mesh;
+        let exact = ReferenceExactCompiler::new()
+            .compile_exact(&graph, root, &options)
+            .unwrap();
+        (graph, root, exact, mesh)
+    }
+
+    /// The mesh with `other` appended, its indices shifted.
+    fn joined(mesh: &TriMesh, other: &TriMesh) -> TriMesh {
+        let base = mesh.positions.len() as u32;
+        let mut positions = mesh.positions.clone();
+        positions.extend(other.positions.iter().copied());
+        let mut indices = mesh.indices.clone();
+        indices.extend(other.indices.iter().map(|i| i + base));
+        TriMesh::new(positions, indices)
+    }
+
+    #[test]
+    fn a_box_mesh_has_no_extra_shell() {
+        let (_, _, exact, mesh) = cube(2.0, None);
+        assert_eq!(exact.topology().shells().len(), 1);
+        assert!(!extra_shells(&exact, &mesh));
+    }
+
+    #[test]
+    fn a_disjoint_tetrahedron_is_an_extra_shell() {
+        let (_, _, exact, mesh) = cube(2.0, None);
+        let at = |x: Scalar, y: Scalar, z: Scalar| Point3::new(10.0 + x, y, z);
+        let tetra = TriMesh::new(
+            vec![
+                at(0.0, 0.0, 0.0),
+                at(1.0, 0.0, 0.0),
+                at(0.0, 1.0, 0.0),
+                at(0.0, 0.0, 1.0),
+            ],
+            vec![0, 2, 1, 0, 1, 3, 1, 2, 3, 0, 3, 2],
+        );
+        assert!(extra_shells(&exact, &joined(&mesh, &tetra)));
+    }
+
+    /// A copy of the box with fresh indices and equal positions is the
+    /// same surface, so its components merge by position.
+    #[test]
+    fn a_duplicate_with_equal_positions_is_no_extra_shell() {
+        let (_, _, exact, mesh) = cube(2.0, None);
+        assert!(!extra_shells(&exact, &joined(&mesh, &mesh)));
+        let mut negated = mesh.clone();
+        for p in &mut negated.positions {
+            if p.x == 0.0 {
+                p.x = -0.0;
+            }
+        }
+        assert!(!extra_shells(&exact, &joined(&mesh, &negated)));
+    }
+
+    #[test]
+    fn an_inner_void_is_a_shell_of_the_exact_result_too() {
+        let (_, _, exact, mesh) = cube(2.0, Some(0.5));
+        assert_eq!(exact.topology().shells().len(), 2);
+        assert_eq!(geometric_components(&mesh), 2);
+        assert!(!extra_shells(&exact, &mesh));
+    }
+
+    /// The wiring: an extra shell makes the boolean's bound unbounded by
+    /// name, whatever the measurement would find; the plain mesh is
+    /// certified.
+    #[test]
+    fn an_extra_shell_makes_the_bound_unbounded() {
+        let (graph, root, _, mesh) = cube(2.0, Some(0.5));
+        let options = ExecutionOptions::new(Tolerance::new(1e-6, 1e-9).unwrap());
+        let bound = |mesh: &TriMesh| of_boolean(&graph, root, &options, mesh).0[0].bound;
+        assert!(matches!(bound(&mesh), DeviationBound::Certified(_)));
+        let far = |x: Scalar, y: Scalar, z: Scalar| Point3::new(10.0 + x, y, z);
+        let tetra = TriMesh::new(
+            vec![
+                far(0.0, 0.0, 0.0),
+                far(1.0, 0.0, 0.0),
+                far(0.0, 1.0, 0.0),
+                far(0.0, 0.0, 1.0),
+            ],
+            vec![0, 2, 1, 0, 1, 3, 1, 2, 3, 0, 3, 2],
+        );
+        assert_eq!(
+            bound(&joined(&mesh, &tetra)),
+            DeviationBound::Unbounded(EXTRA_SHELLS)
+        );
     }
 }

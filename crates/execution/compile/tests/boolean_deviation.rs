@@ -429,6 +429,20 @@ fn an_all_planar_boolean_is_bounded_near_rounding() {
     ] {
         let options = options(1e-3);
         let case = compile(|g| wall_with_two_doors(g, world), &options);
+        // Placed, the mesh keeps the cut-out door slug as a shell of its
+        // own (#423), which the one-sided distance cannot see: unbounded
+        // by name (#392).
+        if name == "two doors, placed" {
+            let report = &case.3;
+            assert!(
+                report.contributions.iter().any(|c| matches!(
+                    c.bound,
+                    DeviationBound::Unbounded(reason) if reason.contains("more shells")
+                )),
+                "{report:?}"
+            );
+            continue;
+        }
         let (bound, _) = assert_measured(name, case, &options, Scalar::INFINITY);
         assert!(bound <= NEAR_ROUNDING, "{name}: {bound:e}");
     }
@@ -1129,4 +1143,28 @@ fn a_boolean_whose_merged_points_moved_further_than_its_coincident_supports_is_c
         Some(DeviationBound::Certified(readings.linear())),
         "{report:?}"
     );
+}
+
+/// A cut that severs the subject leaves two shells in the exact result and
+/// two components in the mesh: no extra shell, so the bound is certified
+/// (#392).
+#[test]
+fn a_difference_that_severs_the_subject_stays_certified() {
+    let options = options(1e-3);
+    let case = compile(
+        |g| {
+            let wall = g.extrusion(rect(4.0, 0.3), 3.0);
+            let wall = g.place(wall, building());
+            let cutter = g.extrusion(rect(1.0, 1.0), 5.0);
+            let cutter = g.place(
+                cutter,
+                building() * Transform3::from_translation(Vec3::new(0.0, 0.0, -1.0)),
+            );
+            g.boolean(wall, cutter, BooleanOperator::Difference)
+        },
+        &options,
+    );
+    assert_eq!(axiolid_mesh::component_count(&case.2), 2);
+    let (bound, _) = assert_measured("severed wall", case, &options, Scalar::INFINITY);
+    assert!(bound <= 1e-3, "{bound:e}");
 }
