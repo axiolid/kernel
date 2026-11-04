@@ -30,7 +30,9 @@
 //!   wholly inside or wholly outside), so the rings of `S'` are nested as
 //!   those of `S` are;
 //! - every spanned vertex lies within `t` of the chord's line, `t` a lower
-//!   bound on the radius of a disc about the origin holding `P`;
+//!   bound on the radius of a disc about the origin holding `P` (the
+//!   proposals reach no deeper, so a notch deeper than `t` stays: its slab
+//!   bound below is a bound `excess` has, not one `fill` reaches);
 //! - its excess `e`, below, is within the caller's budget.
 //!
 //! Two chords used never meet but at a vertex both end at. A chord of
@@ -65,6 +67,40 @@
 //! `|x - u| <= t + d_u + g^2 / (8 t)`. And always `|x - s| <= t + H` for
 //! the point `s` of `S` nearest `n`.
 //!
+//! # The slab bound
+//!
+//! A narrow notch has a second bound, one that does not depend on its
+//! depth, for a disc of radius `t` cannot reach far into a needle. Let
+//! every spanned vertex project onto the chord `a b`, of length `g`: then `N`, the polygon of
+//! those vertices, lies in the slab between the perpendiculars to the line
+//! at `a` and `b`, a convex set. Then
+//!
+//! ```text
+//! e_W = sqrt(t^2 + g^2 / 4) - t = (g^2 / 4) / (sqrt(t^2 + g^2 / 4) + t)
+//! ```
+//!
+//! is an excess whatever the depth (`fill` only proposes notches within
+//! `t`, so for it the bound competes with the others). Proof: let
+//! `|x - n| <= t` with `n` in `N`, and `L` the line through `n` parallel to the chord. The part of
+//! `L` in `N` through `n` is a segment `p q` of length at most `g`, the
+//! width of the slab. Its ends lie on the boundary of `N`; unless `L` is
+//! the chord's own line (where they are `a` and `b`, in `S`) they cannot
+//! lie on the chord, so they lie on the spanned boundary, a part of `S`.
+//! Let `f` be the foot of `x` on `L` and `h <= t` the distance from `x` to
+//! `L`. If `f` lies between `p` and `q`, the nearer end, say `p`, is at
+//! most `g / 2` from `f` along `L`: `|x - p|^2 <= h^2 + g^2 / 4 <=
+//! t^2 + g^2 / 4`. Otherwise `f` lies beyond one end, say `q`, and as `n`
+//! lies between `p` and `q`, `|f - q| <= |f - n|`, so `|x - q|^2 = h^2 +
+//! |f - q|^2 <= h^2 + |f - n|^2 = |x - n|^2 <= t^2`. Either way `x` lies
+//! within `sqrt(t^2 + g^2 / 4)` of `S`, so `S' + B(t) <= S + B(t + e_W)`.
+//! The slab is tested in `f64` with the same slack as the other bounds
+//! (each vertex projects at least `slack` inside the chord's ends), and
+//! `g` is the chord's length plus the slack. `e_W` joins the minimum above;
+//! for a notch deeper than `t` the minimum is that of `e_W` and `H`, the
+//! only bounds it has, and an overhanging vertex, beyond a chord's end,
+//! with a deep notch is refused. Fast still keeps a needle deeper than `t`,
+//! because nothing proposes a chord over it.
+//!
 //! Along a toothed wall the tips lie on the chord, so `e` is about the
 //! square of the tips' spacing over `8 t`: 2 micrometres for teeth 1.8 mm
 //! apart and a disc of 0.4 m (`t` 0.2 m), where `H`, the depth of the
@@ -79,6 +115,10 @@
 //! which a chord along a wall's tips passes through. Of equally far
 //! vertices the one nearest the middle is taken, so a long wall splits
 //! into halves and costs about `n log n`.
+//!
+//! The proposals are [`cover::proposals`] for discs of radius `t`: chords
+//! whose spanned vertices lie within `t` of the line (#340; #330 proposed
+//! within `t / 16`, and so filled no needle deeper than that).
 //!
 //! # The result's side
 //!
@@ -162,7 +202,8 @@ fn encloses_none(ring: usize, polygon: &[Point2], index: &Index<'_>) -> bool {
 
 /// The excess of the notch `polygon` (its chord from the first point to
 /// the last) for discs of radius `t` or more, or `None` when a spanned
-/// vertex lies farther than `t` from the chord's line (module docs).
+/// vertex lies farther than `t` from the chord's line and one projects
+/// beyond the chord's ends (module docs).
 fn excess(polygon: &[Point2], t: f64) -> Option<f64> {
     let (a, b) = (polygon[0], polygon[polygon.len() - 1]);
     let (dx, dy) = (b.x - a.x, b.y - a.y);
@@ -183,8 +224,21 @@ fn excess(polygon: &[Point2], t: f64) -> Option<f64> {
         })
         .collect();
     let deepest = at.iter().fold(0.0_f64, |m, &(_, d)| m.max(d)) + slack;
-    if deepest.is_nan() || deepest > t {
+    // The slab: every spanned vertex projects strictly inside the chord.
+    let slab = at.iter().all(|&(s, _)| s >= slack && s <= len - slack);
+    if deepest.is_nan() || (deepest > t && !slab) {
         return None;
+    }
+    // The slab bound, which holds however deep the notch is.
+    let g = len + slack;
+    let wide = slab.then(|| {
+        let h = 0.25 * g * g;
+        h / ((t * t + h).sqrt() + t) * (1.0 + 1e-12)
+    });
+    if deepest > t {
+        // The depth `H` bounds it too (module docs), the slab bound being
+        // the smaller only for a narrow notch.
+        return wide.map(|w| w.min(deepest)).filter(|e| e.is_finite());
     }
     at.push((0.0, 0.0));
     at.push((len, 0.0));
@@ -211,7 +265,10 @@ fn excess(polygon: &[Point2], t: f64) -> Option<f64> {
         }
         limit = if limit < slack { 0.0 } else { 0.5 * limit };
     }
-    let bound = best * (1.0 + 1e-12);
+    let mut bound = best * (1.0 + 1e-12);
+    if let Some(w) = wide {
+        bound = bound.min(w);
+    }
     bound.is_finite().then_some(bound)
 }
 
@@ -273,7 +330,7 @@ pub(crate) fn fill(
         let outside = sides[r].flip();
         // The chords used and their excess.
         let mut used: Vec<(Chord, f64)> = Vec::new();
-        let mut pending = cover::proposals(&boundary, outside, t / 16.0);
+        let mut pending = cover::proposals(&boundary, outside, t);
         pending.reverse();
         while let Some(chord) = pending.pop() {
             if chord.span < 2 {
@@ -415,8 +472,10 @@ mod tests {
         let e = excess(&notch, 1.0).unwrap();
         let want = 0.1f64.powi(2) / 8.0;
         assert!((want..want * (1.0 + 1e-9)).contains(&e), "{e}");
-        // Deeper than the disc: refused.
-        assert!(excess(&notch, 0.04).is_none());
+        // Deeper than the disc, inside the slab: the depth, `H`, the
+        // smaller of it and the slab bound here (0.068).
+        let e = excess(&notch, 0.04).unwrap();
+        assert!((0.05..0.05 * (1.0 + 1e-9)).contains(&e), "{e}");
         // With no support between, the depth bounds it.
         let deep = points(&[(0.0, 0.0), (0.1, 0.001), (0.2, 0.0)]);
         let e = excess(&deep, 1.0).unwrap();
@@ -471,5 +530,59 @@ mod tests {
         assert!(filled.rings[0].contains(&Point2::new(0.21, 0.01)));
         assert!(filled.rings[0].len() < 20, "{}", filled.rings[0].len());
         assert_eq!(filled.rings[1], island);
+    }
+
+    /// A room whose bottom wall has `teeth` needles of `depth`, their tips
+    /// `spacing` apart: counter-clockwise, `teeth * spacing` wide.
+    fn needle_room(teeth: usize, depth: f64, spacing: f64) -> Vec<Point2> {
+        let width = teeth as f64 * spacing;
+        let mut ring: Vec<Point2> = (0..=2 * teeth)
+            .map(|k| {
+                let x = width * k as f64 / (2 * teeth) as f64;
+                Point2::new(x, if k % 2 == 1 { depth } else { 0.0 })
+            })
+            .collect();
+        ring.extend([Point2::new(width, 3.0), Point2::new(0.0, 3.0)]);
+        ring
+    }
+
+    #[test]
+    fn a_needle_wall_within_the_disc_is_filled_with_the_gap_excess() {
+        // Teeth 0.05 deep (within `t`), tips 2e-4 apart, a disc of 0.2: the
+        // chord along the valleys is filled, its excess the tips' gap
+        // bound, `g^2 / (8 t)` = 2.5e-8.
+        let rings = vec![needle_room(1000, 0.05, 2e-4)];
+        let f = fill(&rings, &[Sign::Positive], 0.2, 1e-3, 1e-9);
+        assert_eq!(f.chords, 1);
+        assert!(f.excess < 3e-8, "{}", f.excess);
+        assert_eq!(f.rings[0].len(), 4);
+    }
+
+    #[test]
+    fn a_needle_wall_deeper_than_the_disc_is_kept() {
+        // Teeth 0.25 deep, a disc of 0.2: no chord is proposed over them.
+        let rings = vec![needle_room(100, 0.25, 2e-4)];
+        let f = fill(&rings, &[Sign::Positive], 0.2, 1e-3, 1e-9);
+        assert_eq!(f.chords, 0);
+        assert_eq!(f.rings, rings);
+    }
+
+    #[test]
+    fn the_slab_bound_holds_for_a_needle_deeper_than_the_disc() {
+        // One valley 0.05 deep, g = 2e-4, t = 0.2 (inside the disc): the
+        // slab bound, (g^2 / 4) / (sqrt(t^2 + g^2 / 4) + t).
+        let t = 0.2_f64;
+        let needle = points(&[(0.0, 0.0), (1e-4, 0.05), (2e-4, 0.0)]);
+        let want = 1e-8 / ((t * t + 1e-8).sqrt() + t);
+        let e = excess(&needle, t).unwrap();
+        assert!((want..want * (1.0 + 1e-9)).contains(&e), "{e} {want}");
+        // Deeper than the disc, inside the slab: bounded by the slab, not
+        // refused (`H` = 0.5 is the larger).
+        let deep = points(&[(0.0, 0.0), (1e-4, 0.5), (2e-4, 0.0)]);
+        let e = excess(&deep, t).unwrap();
+        assert!((want..want * (1.0 + 1e-9)).contains(&e), "{e} {want}");
+        // An overhang past the chord's end, deeper than the disc: refused.
+        let overhang = points(&[(0.0, 0.0), (-1e-4, 0.5), (2e-4, 0.0)]);
+        assert!(excess(&overhang, t).is_none());
     }
 }

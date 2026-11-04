@@ -1073,3 +1073,98 @@ fn a_hole_its_notches_would_close_keeps_its_ring() {
         assert_eq!(fast.polygons(), exact.polygons());
     }
 }
+
+/// #340's shape: the room of #323 with needles `depth` deep on its long
+/// walls, and a square column of 0.4 m in it.
+fn needle_room_with_column(teeth: u32, depth: f64) -> Region {
+    let t = Tolerance::new(1e-9, 1e-9).unwrap();
+    let room = toothed_room(teeth, depth, t);
+    let outer = room.polygons()[0].outer.clone();
+    Region::new(
+        vec![Polygon {
+            outer,
+            holes: vec![ring(&[(2.0, 2.3), (2.0, 2.7), (2.4, 2.7), (2.4, 2.3)])],
+        }],
+        t,
+    )
+    .unwrap()
+}
+
+#[test]
+fn the_fast_mode_fills_the_notches_between_needles() {
+    // Needles 0.05 m deep, 500 corners (the exact route takes 5 s at 2,002
+    // in a release build, and this test runs in debug), by a 0.4 m disc (`t` 0.2 m): deeper than `t / 16`, which
+    // #330's proposals did not reach. The fast mode fills them (an excess
+    // within the budget, well under the depth) and lies on the certified
+    // side within its deviation of the exact result, sampled in bands about
+    // the walls' offsets, outward and inward, at the tips and the valleys.
+    let (radius, budget, slack, depth) = (0.4, 1e-3, 1e-7, 0.05);
+    let r = needle_room_with_column(124, depth);
+    let mut points = samples(Point2::new(-0.5, -0.5), Point2::new(5.0, 5.5), 1500);
+    let broad = points.len();
+    for centre in [
+        radius,
+        5.0 - radius,
+        -radius,
+        5.0 + radius,
+        depth + radius,
+        5.0 - depth - radius,
+    ] {
+        points.extend(samples(
+            Point2::new(0.3, centre - 1e-2),
+            Point2::new(4.2, centre + 1e-2),
+            1500,
+        ));
+        points.extend(samples(
+            Point2::new(0.3, centre - 0.06),
+            Point2::new(4.2, centre + 0.06),
+            1500,
+        ));
+    }
+    for erode in [false, true] {
+        for outer in [false, true] {
+            let what = format!("erode {erode}, outer {outer}");
+            let exact = morphology(&r, erode, outer, radius, MorphologyMode::Exact).unwrap();
+            let fast = morphology(&r, erode, outer, radius, MorphologyMode::fast(budget)).unwrap();
+            let (bound, exact_bound) = (fast.bound().unwrap(), exact.bound().unwrap());
+            assert_eq!(bound.side, exact_bound.side, "{what}");
+            let excess = fast.excess().expect("a fast result's excess");
+            assert!(excess > 0.0 && excess <= budget, "{what}: {excess}");
+            assert!(
+                bound.deviation <= exact_bound.deviation + excess + 1e-12,
+                "{what}: {} against {}",
+                bound.deviation,
+                exact_bound.deviation
+            );
+            let d = bound.deviation + slack;
+            let mut checked = 0;
+            for (i, &p) in points.iter().enumerate() {
+                let held = in_region(&fast, p);
+                let (sure, near) = if erode {
+                    let rule = |s: f64| in_exact_erosion(&r, p, s);
+                    if outer {
+                        (rule(radius), rule(radius - d))
+                    } else {
+                        (rule(radius + d), rule(radius))
+                    }
+                } else {
+                    let rule = |s: f64| in_exact_dilation(&r, p, s);
+                    if outer {
+                        (rule(radius), rule(radius + d))
+                    } else {
+                        (rule(radius - d), rule(radius))
+                    }
+                };
+                assert!(!sure || held, "{what}: {p:?} left out");
+                assert!(!held || near, "{what}: {p:?} taken");
+                // A point of the bands that both rules decide, not one in
+                // their gap.
+                checked += usize::from(i >= broad && (sure || !near));
+            }
+            assert!(checked > 100, "{what}: {checked} points checked");
+            // The notches are filled: far fewer corners than the needles.
+            let corners: usize = fast.polygons().iter().map(|p| p.outer.points.len()).sum();
+            assert!(corners < 100, "{what}: {corners} corners");
+        }
+    }
+}

@@ -19,6 +19,13 @@
 //! (`MorphologyMode::Fast` with a budget of 1 mm), whose filled notches add
 //! the excess in the `excess` column to the deviation.
 //!
+//! The cases of #340 take the same room with needles (`needle`), teeth
+//! 0.05 m deep, 2,002 corners in both modes and 10,002 in `fast` only (the
+//! exact route does not finish there in useful time, see
+//! `docs/research/exact-morphology-on-needle-walls.md`). The disc of
+//! radius 0.4 m (`t` 0.2 m) holds the needles' depth, which is above
+//! `t / 16` (0.0125 m), the reach of #330's proposals.
+//!
 //! Each case is validated before its time counts: the result is not
 //! empty, every vertex lies inside the region for an erosion and outside
 //! it for a dilation, an inner erosion's vertices and an outer dilation's
@@ -33,7 +40,8 @@
 //! `102,602`) or `DISC_EROSION_LARGE` (for example `2402`) to run other
 //! sizes of #323's and #330's cases, an empty list to run none,
 //! `DISC_EROSION_MODES` (`exact`, `fast` or both) for #330's modes, and
-//! `DISC_EROSION_RUNS` for fewer timed runs.
+//! `DISC_EROSION_NEEDLE` (`exact`, `fast`, both or empty) for #340's modes,
+//! and `DISC_EROSION_RUNS` for fewer timed runs.
 //!
 //! ```bash
 //! cargo bench -p axiolid-benchmark --bench disc_erosion
@@ -49,6 +57,12 @@ use std::time::Instant;
 const CORNERS: [usize; 3] = [102, 602, 1202];
 /// Corners of #330's cases: 600, 1,250 and 2,500 teeth per wall.
 const LARGE: [usize; 3] = [2402, 5002, 10002];
+/// Corners of #340's needle cases, in `fast` mode.
+const NEEDLE_FAST: [usize; 2] = [2002, 10002];
+/// Corners of #340's needle cases that also run in `exact` mode.
+const NEEDLE_EXACT: usize = 2002;
+/// The needles' depth.
+const NEEDLE_DEPTH: f64 = 0.05;
 /// Timed runs per case; the median is reported.
 const RUNS: usize = 3;
 /// The disc's radius in #323's cases.
@@ -165,6 +179,7 @@ fn case(spec: &str) {
     let (teeth, depth) = match parts[0] {
         "plain" => (0, 0.0),
         "flat" => ((corners - 2) / 4, 0.0),
+        "needle" => ((corners - 2) / 4, NEEDLE_DEPTH),
         _ => ((corners - 2) / 4, 5.0e-4),
     };
     let erode = parts[1] == "erode";
@@ -311,6 +326,19 @@ fn main() {
                 for side in ["inner", "outer"] {
                     for &n in &large {
                         cases.push(format!("{walls}:{op}:{side}:{n}:{LARGE_RADIUS}:{mode}"));
+                    }
+                }
+            }
+        }
+    }
+    // #340: needles deeper than `t / 16`.
+    let needle = std::env::var("DISC_EROSION_NEEDLE").unwrap_or_else(|_| "exact,fast".into());
+    for mode in needle.split(',').filter(|m| !m.is_empty()) {
+        for op in ["erode", "dilate"] {
+            for side in ["inner", "outer"] {
+                for n in NEEDLE_FAST {
+                    if mode == "fast" || n <= NEEDLE_EXACT {
+                        cases.push(format!("needle:{op}:{side}:{n}:{LARGE_RADIUS}:{mode}"));
                     }
                 }
             }

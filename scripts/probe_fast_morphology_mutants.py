@@ -4,8 +4,8 @@
 
 Each mutant weakens one step -- the mode switch either way, the side of
 the set whose notches are filled, each condition on a chord (its exact
-proof, the depth within the disc, the budget, no ring inside its notch),
-the excess (the gap term, the supports, the depth bound), splitting a
+proof, the depth within the disc or the slab, the budget, no ring inside its notch),
+the excess (the gap term, the supports, the depth bound, the slab bound), splitting a
 refused chord, the ring a fill would close, the inscribed polygon drawn in
 by the excess and the deviation carrying it, and the budget's refusal --
 and must turn a test red.
@@ -19,6 +19,9 @@ Equivalent mutants, deliberately not listed:
   chords are found changes, and with it the cost and the excess, both
   within the stated bounds (the split of a chord not proved, which
   decides whether a wall of teeth is filled at all, is listed);
+- a notch deeper than the disc refused without the slab: `excess` then
+  returns the slab bound or nothing either way, the guard after it being
+  the same test;
 - the order of the halving limits over the supports: the bound is a
   minimum over all of them.
 """
@@ -65,9 +68,27 @@ MUTANTS = [
     ('a ring inside the notch not found', F,
      '        !inside(polygon, index.rings[r][e])',
      '        true', BOTH),
-    ('a notch deeper than the disc taken', F,
-     '    if deepest.is_nan() || deepest > t {',
-     '    if deepest.is_nan() {', BOTH),
+    ('a notch deeper than the disc bounded by its depth and supports', F,
+     '    if deepest > t {',
+     '    if false {', BOTH),
+    ('the slab test dropped: every notch in the slab', F,
+     '    let slab = at.iter().all(|&(s, _)| s >= slack && s <= len - slack);',
+     '    let slab = true;', BOTH),
+    ('the slab never holds', F,
+     '    let slab = at.iter().all(|&(s, _)| s >= slack && s <= len - slack);',
+     '    let slab = false;', BOTH),
+    ('the slab bound without the disc radius in its denominator', F,
+     '        h / ((t * t + h).sqrt() + t) * (1.0 + 1e-12)',
+     '        h / (t * t + h).sqrt() * (1.0 + 1e-12)', BOTH),
+    ('the slab bound with the half chord as its gap', F,
+     '    let g = len + slack;',
+     '    let g = 0.5 * len + slack;', BOTH),
+    ('the depth ceiling dropped on a notch deeper than the disc', F,
+     '        return wide.map(|w| w.min(deepest)).filter(|e| e.is_finite());',
+     '        return wide.filter(|e| e.is_finite());', BOTH),
+    ('proposals reach only a sixteenth of the disc', F,
+     '        let mut pending = cover::proposals(&boundary, outside, t);',
+     '        let mut pending = cover::proposals(&boundary, outside, t / 16.0);', BOTH),
     ('the gap term halved', F,
      '        best = best.min(top + slack + g * g / (8.0 * t));',
      '        best = best.min(top + slack + g * g / (16.0 * t));', BOTH),
