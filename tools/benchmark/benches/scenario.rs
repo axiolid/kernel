@@ -227,6 +227,19 @@ fn hidden_lines(criterion: &mut Criterion) {
                 format!("{:?}", scanned.segments),
                 "{name} {n}x{n}: broad phases disagree"
             );
+            // The drawing's hash and the exact work are printed so two commits
+            // can be compared: the hash must agree, the work may only fall.
+            {
+                use std::hash::{Hash, Hasher};
+                let mut hasher = std::collections::hash_map::DefaultHasher::new();
+                format!("{:?}", outcome.segments).hash(&mut hasher);
+                eprintln!(
+                    "hidden-lines {name} {n}x{n}: segments {:016x} escalations {} pairs {}",
+                    hasher.finish(),
+                    outcome.evidence.exact_escalations,
+                    outcome.evidence.candidate_pairs,
+                );
+            }
             group.throughput(Throughput::Elements(outcome.evidence.selected_edges as u64));
             for (phase, provider) in providers {
                 group.bench_function(format!("{name}/{n}x{n}/{phase}"), |bencher| {

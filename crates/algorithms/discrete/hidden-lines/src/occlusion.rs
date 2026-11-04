@@ -119,6 +119,7 @@ fn resolve_with(
     };
 
     let mut hidden: Vec<Span> = Vec::new();
+    let mut fully_hidden = false;
     let query = Query {
         image: edge.bounds,
         w_lo: edge.bounds.lo[2],
@@ -141,9 +142,15 @@ fn resolve_with(
         } else if let Some(span) = facing(solver, scene, tri, kept)? {
             solver.insert(&mut hidden, span)?;
         }
+        // Nothing left to hide: the rest of the candidates and the caps can
+        // only add spans inside `kept`.
+        if covers_kept(solver, &hidden, kept)? {
+            fully_hidden = true;
+            break;
+        }
     }
 
-    if let Some(near) = scene.near {
+    if let Some(near) = scene.near.filter(|_| !fully_hidden) {
         for span in hidden_by_caps(solver, scene, edge, near, kept, pairs, max_pairs)? {
             solver.insert(&mut hidden, span)?;
         }
@@ -174,6 +181,13 @@ fn resolve_with(
         });
     }
     Ok(Resolved::Pieces(pieces))
+}
+
+/// Whether `hidden` is the single span `kept`, ends compared exactly.
+fn covers_kept(solver: &mut Solver<'_>, hidden: &[Span], kept: Span) -> GeomResult<bool> {
+    let [span] = hidden else { return Ok(false) };
+    Ok(solver.cmp(span.lo, kept.lo)? == Ordering::Equal
+        && solver.cmp(span.hi, kept.hi)? == Ordering::Equal)
 }
 
 /// The constraints that keep a point: depth range and region.
@@ -216,6 +230,19 @@ fn facing(
 ) -> GeomResult<Option<Span>> {
     let [v0, v1, v2] = tri.v;
     let clockwise = tri.sigma == Ordering::Less;
+    let in_front = Constraint::new(
+        Kind::PlaneAbove {
+            t: tri.v,
+            neg: !clockwise,
+            lift: Lift::Own,
+        },
+        true,
+    );
+    // A plane nowhere in front of the edge hides nothing: skip the image
+    // clips, which cost exact evaluations.
+    if solver.certainly_nowhere(&in_front) {
+        return Ok(None);
+    }
     let mut span = kept;
     for (p, q) in [(v0, v1), (v1, v2), (v2, v0)] {
         let side = Constraint::new(
@@ -231,14 +258,6 @@ fn facing(
             None => return Ok(None),
         }
     }
-    let in_front = Constraint::new(
-        Kind::PlaneAbove {
-            t: tri.v,
-            neg: !clockwise,
-            lift: Lift::Own,
-        },
-        true,
-    );
     let Some(mut span) = solver.clip(span, &in_front)? else {
         return Ok(None);
     };

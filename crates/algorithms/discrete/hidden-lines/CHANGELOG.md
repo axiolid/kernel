@@ -9,6 +9,33 @@ caret rule for `0.x` versions.
 
 ## [Unreleased]
 
+### Changed
+
+- Hidden-line drawing does less exact work for the same output (#369): an
+  edge stops looking at further candidates, and skips the near-plane caps,
+  once one hidden span covers all of its kept part; a sign that a repeated
+  vertex id makes exactly zero (`orient2d` with a shared vertex, a point on
+  its own triangle's plane, a zero coordinate difference) is not evaluated;
+  and a triangle whose plane is certainly not in front of the edge at either
+  end, by the interval filter alone, is skipped before its three image
+  clips. Visible face regions share this resolver, so their
+  `candidate_pairs` and `exact_escalations` evidence and their candidate-pair
+  budget fall the same way; the earlier visible-face timing figures predate
+  this change. The drawing's segment hash is unchanged on every
+  `scenario/hidden-lines` case. Examined candidate pairs and exact
+  escalations fall, as the early exit stops counting pairs: isometric 20x20
+  125,577 to 79,064 pairs and 187,483 to 43,402 escalations; cut plan 20x20
+  23,680 to 14,240 pairs and 113,440 to 51,200 escalations; isometric 50x50
+  829,935 to 511,016 pairs and 1,215,313 to 287,386 escalations; cut plan
+  50x50 148,000 to 89,000 pairs and 709,000 to 320,000 escalations. A loaded
+  machine, three runs each (the BVH provider, ranges of the three
+  estimates): isometric 20x20 0.73-0.85 s to 0.35-0.47 s, cut plan 20x20
+  0.17-0.48 s to 0.08-0.11 s, isometric 50x50 3.9-6.2 s to 1.9-2.6 s, cut
+  plan 50x50 1.0-2.3 s to 0.51-0.79 s. Single runs vary by more than the
+  gain on some cases, so read the work counts as the firm result. Because
+  fewer pairs are examined, a `max_candidate_pairs` limit that the old
+  count reached may no longer be reached.
+
 ## [0.1.3] - 2026-11-03
 
 ### Added

@@ -9,6 +9,7 @@ import probe_lib
 
 OCC = "crates/algorithms/discrete/hidden-lines/src/occlusion.rs"
 EDG = "crates/algorithms/discrete/hidden-lines/src/edges.rs"
+REC = "crates/algorithms/discrete/hidden-lines/src/recipe.rs"
 PAR = "crates/algorithms/discrete/hidden-lines/src/param.rs"
 DEC = "crates/algorithms/discrete/hidden-lines/src/decide.rs"
 RATIO = "crates/algorithms/planar/exact-arrangement/src/ratio.rs"
@@ -131,6 +132,43 @@ MUTANTS = [
     ('BVH probe misses touching boxes at depth max', BRD,
      '                    max: Point3::new(query.image.hi[0], query.image.hi[1], query.w_hi),',
      '                    max: Point3::new(query.image.hi[0], query.image.hi[1], query.w_hi.next_down()),', TESTS),
+    # Exact-evaluation cost (#369): each shortcut must leave the drawing as it
+    # was, so a mutant that makes one apply where it does not must be seen.
+    ('early exit on a partly hidden edge: start unchecked', OCC,
+     '    Ok(solver.cmp(span.lo, kept.lo)? == Ordering::Equal\n',
+     '    Ok(solver.cmp(span.lo, kept.lo)? != Ordering::Less\n', TESTS),
+    ('early exit on a partly hidden edge: end unchecked', OCC,
+     '        && solver.cmp(span.hi, kept.hi)? == Ordering::Equal)',
+     '        && solver.cmp(span.hi, kept.hi)? != Ordering::Greater)', TESTS),
+    # No mutant for `let [span] = hidden` read as `[span, ..]`: the list is
+    # sorted and disjoint, so a first span equal to `kept` leaves no second.
+    ('early exit on the first hiding triangle', OCC,
+     '        if covers_kept(solver, &hidden, kept)? {',
+     '        if !hidden.is_empty() {', TESTS),
+    ('identity zero on a distinct orient2 vertex', REC,
+     '        if self.c == self.a || self.c == self.b {',
+     '        if self.c == self.a || self.c != self.b {', TESTS),
+    ('identity zero on distinct delta vertices', REC,
+     '        if self.from == self.to {',
+     '        if self.from != self.to {', TESTS),
+    ('identity zero on a distinct image-line vertex', REC,
+     '            Kind::ImageSide { p, q, .. } => at == p || at == q,',
+     '            Kind::ImageSide { p, q, .. } => at == p || at != q,', TESTS),
+    ('identity zero on a distinct plane vertex', REC,
+     '            } => t.contains(&at),',
+     '            } => !t.contains(&at),', TESTS),
+    ('identity zero when lifted to the near plane', REC,
+     '                t, lift: Lift::Own, ..\n            } => t.contains(&at),',
+     '                t, lift: _, ..\n            } => t.contains(&at),', TESTS),
+    ('depth reject on one end only', PAR,
+     '            && [self.start, self.end].into_iter().all(|at| {',
+     '            && [self.start, self.end].into_iter().any(|at| {', TESTS),
+    ('depth reject when the plane is in front', PAR,
+     '                    Some(Sign::Negative | Sign::Zero)',
+     '                    Some(Sign::Positive | Sign::Zero)', TESTS),
+    ('depth reject drops the touching case', PAR,
+     '                    Some(Sign::Negative | Sign::Zero)',
+     '                    Some(Sign::Negative)', TESTS),
 ]
 
 probe_lib.main(MUTANTS, timeout=3600, reject_uncompiled=True)

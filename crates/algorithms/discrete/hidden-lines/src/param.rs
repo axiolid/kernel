@@ -12,6 +12,8 @@
 use std::cmp::Ordering;
 
 use axiolid_contracts::GeomResult;
+use axiolid_exact::{Interval, SignExpr};
+use axiolid_guarantees::Sign;
 
 use crate::decide::decide;
 use crate::recipe::{Constraint, Delta, Kind, RootOrder, ValueSign};
@@ -109,6 +111,25 @@ impl<'a> Solver<'a> {
             )
         };
         Ok((at(self.start)?, at(self.end)?))
+    }
+
+    /// Whether the interval filter alone shows that the strict `constraint`
+    /// holds nowhere along the edge: its value at both ends is certainly not
+    /// positive, which `classify` reads as `Nowhere`. It never escalates, so
+    /// an undecided end is simply "not shown".
+    pub(crate) fn certainly_nowhere(&self, constraint: &Constraint) -> bool {
+        constraint.strict
+            && [self.start, self.end].into_iter().all(|at| {
+                let value = ValueSign {
+                    verts: self.verts,
+                    constraint,
+                    at,
+                };
+                matches!(
+                    value.sign_in::<Interval>(),
+                    Some(Sign::Negative | Sign::Zero)
+                )
+            })
     }
 
     /// Where `constraint` holds along the edge.
@@ -287,10 +308,10 @@ impl<'a> Solver<'a> {
 
 #[cfg(test)]
 mod tests {
-    use axiolid_exact::{Dyadic, Interval};
+    use axiolid_exact::{Arith, Dyadic, Interval};
 
     use super::*;
-    use crate::recipe::Kind;
+    use crate::recipe::{Kind, Lift, Orient2};
 
     fn vert(u: f64, v: f64, w: f64) -> Vert {
         let exact = [u, v, w].map(|x| Dyadic::try_from_f64(x).expect("finite"));
@@ -447,5 +468,144 @@ mod tests {
         assert!(solver.intersect(&a, &touching).unwrap().is_empty());
         let overlapping = [Span { lo: p1, hi: p3 }];
         assert_eq!(solver.intersect(&a, &overlapping).unwrap().len(), 1);
+    }
+
+    /// A vertex whose coordinates are products of two binary64 values, so
+    /// the interval filter cannot tell it from itself.
+    fn wide(u: f64, v: f64, w: f64) -> Vert {
+        let exact = [u, v, w].map(|x| {
+            let x = Dyadic::try_from_f64(x).expect("finite");
+            x.mul(&x)
+        });
+        Vert {
+            enc: exact.clone().map(|x| x.enclosure()),
+            exact,
+        }
+    }
+
+    fn escalations_of<E: SignExpr>(expr: &E) -> (Ordering, usize) {
+        let mut escalations = 0;
+        let order = decide(expr, &mut escalations).expect("decided");
+        (order, escalations)
+    }
+
+    #[test]
+    fn a_repeated_vertex_id_is_zero_without_exact_work() {
+        // Vertex 3 repeats vertex 0's coordinates under another id: only the
+        // id, not the value, may skip the exact tier.
+        let verts = [
+            wide(0.3, 0.1, 0.7),
+            wide(0.9, 0.2, 0.4),
+            wide(0.5, 0.8, 0.6),
+            wide(0.3, 0.1, 0.7),
+        ];
+        let orient = |c| Orient2 {
+            verts: &verts,
+            a: 0,
+            b: 1,
+            c,
+        };
+        for c in [0, 1] {
+            assert_eq!(escalations_of(&orient(c)), (Ordering::Equal, 0));
+        }
+        let (order, escalations) = escalations_of(&orient(3));
+        assert_eq!(order, Ordering::Equal);
+        assert!(escalations > 0, "a distinct id is computed, not assumed");
+        let delta = |from, to| Delta {
+            verts: &verts,
+            from,
+            to,
+            axis: 0,
+        };
+        assert_eq!(escalations_of(&delta(2, 2)), (Ordering::Equal, 0));
+        assert!(escalations_of(&delta(0, 3)).1 > 0);
+
+        let image_side = Constraint::new(
+            Kind::ImageSide {
+                p: 0,
+                q: 1,
+                neg: false,
+            },
+            false,
+        );
+        let side = |at| ValueSign {
+            verts: &verts,
+            constraint: &image_side,
+            at,
+        };
+        for at in [0, 1] {
+            assert_eq!(escalations_of(&side(at)), (Ordering::Equal, 0));
+        }
+        assert!(escalations_of(&side(3)).1 > 0);
+
+        let plane_above = |lift| {
+            Constraint::new(
+                Kind::PlaneAbove {
+                    t: [0, 1, 2],
+                    neg: false,
+                    lift,
+                },
+                true,
+            )
+        };
+        let own = plane_above(Lift::Own);
+        let plane = |at| ValueSign {
+            verts: &verts,
+            constraint: &own,
+            at,
+        };
+        for at in [0, 1, 2] {
+            assert_eq!(escalations_of(&plane(at)), (Ordering::Equal, 0));
+        }
+        assert!(escalations_of(&plane(3)).1 > 0);
+        // Lifted to the near plane the point is no longer on the plane.
+        assert!(!plane_above(Lift::Near(5.0)).zero_by_identity(0));
+    }
+
+    #[test]
+    fn a_plane_certainly_behind_or_through_the_edge_is_nowhere_in_front() {
+        // The triangle lies at W = 1, the edge at W = 0, 1 or 2.
+        let triangle = [
+            vert(-9.0, -9.0, 1.0),
+            vert(9.0, -9.0, 1.0),
+            vert(0.0, 9.0, 1.0),
+        ];
+        let plane = |neg| {
+            Constraint::new(
+                Kind::PlaneAbove {
+                    t: [2, 3, 4],
+                    neg,
+                    lift: Lift::Own,
+                },
+                true,
+            )
+        };
+        let solver_for = |w0: f64, w1: f64| {
+            let mut verts = vec![vert(0.0, 0.0, w0), vert(1.0, 0.0, w1)];
+            verts.extend(triangle.iter().map(|v| Vert {
+                exact: v.exact.clone(),
+                enc: v.enc,
+            }));
+            verts
+        };
+        let check = |w0, w1, neg| {
+            let verts = solver_for(w0, w1);
+            let solver = Solver::new(&verts, 0, 1);
+            solver.certainly_nowhere(&plane(neg))
+        };
+        // One orientation reads "plane above the point", the other its
+        // opposite: exactly one of them rejects an edge wholly on one side.
+        assert_ne!(check(0.0, 0.0, false), check(0.0, 0.0, true));
+        assert_ne!(check(2.0, 2.0, false), check(2.0, 2.0, true));
+        // Rejecting needs both ends: an edge through the plane is kept.
+        assert!(!check(0.0, 2.0, false) && !check(0.0, 2.0, true));
+        // An edge along the triangle's own vertices is zero at both ends,
+        // which is not in front.
+        let verts = solver_for(1.0, 1.0);
+        let along = Solver::new(&verts, 2, 3);
+        assert!(along.certainly_nowhere(&plane(false)) && along.certainly_nowhere(&plane(true)));
+        // Only a strict constraint is read as nowhere when it is zero.
+        let closed = Constraint::new(plane(false).kind, false);
+        assert!(!along.certainly_nowhere(&closed));
     }
 }

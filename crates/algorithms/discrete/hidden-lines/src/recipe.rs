@@ -62,6 +62,20 @@ impl Constraint {
         Self { kind, strict }
     }
 
+    /// Whether `L` is zero at `at` by vertex identity alone: the image point
+    /// is a vertex of the line, or the point is a vertex of the plane it is
+    /// lifted to (its own depth). The same vertex has equal coordinates, so
+    /// the determinant has a repeated row. Exact, never a tolerance.
+    pub(crate) fn zero_by_identity(&self, at: u32) -> bool {
+        match self.kind {
+            Kind::ImageSide { p, q, .. } => at == p || at == q,
+            Kind::PlaneAbove {
+                t, lift: Lift::Own, ..
+            } => t.contains(&at),
+            _ => false,
+        }
+    }
+
     /// `L(P)` for the vertex `at`.
     pub(crate) fn value<T: Arith>(&self, verts: &[Vert], at: u32) -> T {
         let c = |vertex: u32, axis: usize| T::from_dyadic(&verts[vertex as usize].exact[axis]);
@@ -164,6 +178,9 @@ pub(crate) struct ValueSign<'a> {
 
 impl SignExpr for ValueSign<'_> {
     fn sign_in<T: Arith>(&self) -> Option<Sign> {
+        if self.constraint.zero_by_identity(self.at) {
+            return Some(Sign::Zero);
+        }
         self.constraint.value::<T>(self.verts, self.at).sign()
     }
 }
@@ -203,6 +220,9 @@ pub(crate) struct Orient2<'a> {
 
 impl SignExpr for Orient2<'_> {
     fn sign_in<T: Arith>(&self) -> Option<Sign> {
+        if self.c == self.a || self.c == self.b {
+            return Some(Sign::Zero);
+        }
         let c = |vertex: u32, axis: usize| T::from_dyadic(&self.verts[vertex as usize].exact[axis]);
         c(self.b, 0)
             .sub(&c(self.a, 0))
@@ -226,6 +246,9 @@ pub(crate) struct Delta<'a> {
 
 impl SignExpr for Delta<'_> {
     fn sign_in<T: Arith>(&self) -> Option<Sign> {
+        if self.from == self.to {
+            return Some(Sign::Zero);
+        }
         T::from_dyadic(&self.verts[self.to as usize].exact[self.axis])
             .sub(&T::from_dyadic(
                 &self.verts[self.from as usize].exact[self.axis],
