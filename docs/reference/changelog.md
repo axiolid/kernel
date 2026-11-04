@@ -4296,6 +4296,16 @@ Every publishable crate versions and publishes independently ([ADR 0067](/adr/00
   referee refused: {reason}"; an unsettled but valid mesh result is
   returned as before. Mesh operands are never refereed.
 
+- An edge curve without a p-curve is sampled at its derivative breaks first
+  (#342): a polyline's corners, a B-spline's full-multiplicity knots and a
+  closed curve's seam are samples, with uniform power-of-two spans inside
+  each piece between them, shared by the faces using the edge. A straight
+  polyline piece is one span with a chord bound of zero, so a sharp polyline
+  edge no longer exhausts the segment cap and fails with `BudgetExceeded`
+  at a tight budget (a closed square compiles at 1e-4 and 1e-6 with its
+  four corners and its vertex, and a zero bound). An edge some use runs
+  through a p-curve is sampled whole, uniformly, as before.
+
 ### Fixed
 
 - A station-placed spine whose section planes fold is refused as invalid
