@@ -220,7 +220,8 @@ fn assert_bounded(
         .iter()
         .map(|p| grid.distance(*p))
         .fold(0.0, Scalar::max);
-    let ratio = bound / worst;
+    // A straight-edged outline has a bound of exactly zero (#342).
+    let ratio = if bound == 0.0 { 1.0 } else { bound / worst };
     eprintln!(
         "{name}: reported {bound:e}, measured {worst:e}, ratio {ratio:.2}, {} triangles, {} samples",
         mesh.indices.len() / 3,
@@ -1169,7 +1170,9 @@ fn polygon_samples(corners: &[Point3], per_side: usize) -> Vec<Point3> {
 /// A planar face whose top edge is a zigzag polyline trimmed at two
 /// vertices inside its end segments (#333), closed by straight edges: the
 /// vertices are located on their segments exactly, and the edge is the
-/// zigzag between them, its corners included within its bound.
+/// zigzag between them. Its corners are samples (#342): every span is
+/// straight, so the bound is exactly zero and no more than the four
+/// vertices and three corners are meshed.
 #[test]
 fn an_open_polyline_edge_is_trimmed_at_interior_vertices() {
     let p = |x: Scalar, y: Scalar| Point3::new(x, y, 0.0);
@@ -1183,80 +1186,127 @@ fn an_open_polyline_edge_is_trimmed_at_interior_vertices() {
         ],
         closed: false,
     });
-    let (a, b) = (p(0.025, 0.15), p(0.975, 0.15));
-    let (c, d) = (p(0.975, -0.5), p(0.025, -0.5));
-    let mut face = OneFace::new();
-    let [va, vb, vc, vd] = [a, b, c, d].map(|q| face.vertex(q));
-    let top = face.edge(va, vb, Some(zigzag));
-    let down = face.edge(va, vd, None);
-    let bottom = face.edge(vd, vc, None);
-    let up = face.edge(vc, vb, None);
-    face.use_edge(down, Orientation::Forward);
-    face.use_edge(bottom, Orientation::Forward);
-    face.use_edge(up, Orientation::Forward);
-    face.use_edge(top, Orientation::Reversed);
-    let plane = Surface::Plane(Plane {
-        frame: frame_at(0.0),
-    });
-    let (mesh, report) = face
-        .compile(&plane, &options(1e-4))
-        .expect("a face bounded by a trimmed polyline compiles");
-    let exact = [a, d, c, b, p(0.75, 0.3), p(0.5, 0.0), p(0.25, 0.3)];
-    let shoelace: Scalar = (0..exact.len())
-        .map(|i| {
-            let (u, v) = (exact[i], exact[(i + 1) % exact.len()]);
-            0.5 * (u.x * v.y - v.x * u.y)
-        })
-        .sum();
-    let bound = report.bound.expect("a certified bound");
-    let perimeter: Scalar = (0..exact.len())
-        .map(|i| (exact[(i + 1) % exact.len()] - exact[i]).length())
-        .sum();
-    let area = mesh_area(&mesh);
-    eprintln!("trimmed polyline: area {area}, exact {shoelace}, bound {bound:e}");
-    assert!(
-        (area - shoelace).abs() <= bound * perimeter,
-        "area {area} misses {shoelace} by more than the bound allows"
-    );
-    for q in &mesh.positions {
+    for budget in [1e-4, 1e-6] {
+        let (a, b) = (p(0.025, 0.15), p(0.975, 0.15));
+        let (c, d) = (p(0.975, -0.5), p(0.025, -0.5));
+        let mut face = OneFace::new();
+        let [va, vb, vc, vd] = [a, b, c, d].map(|q| face.vertex(q));
+        let top = face.edge(va, vb, Some(zigzag.clone()));
+        let down = face.edge(va, vd, None);
+        let bottom = face.edge(vd, vc, None);
+        let up = face.edge(vc, vb, None);
+        face.use_edge(down, Orientation::Forward);
+        face.use_edge(bottom, Orientation::Forward);
+        face.use_edge(up, Orientation::Forward);
+        face.use_edge(top, Orientation::Reversed);
+        let plane = Surface::Plane(Plane {
+            frame: frame_at(0.0),
+        });
+        let (mesh, report) = face
+            .compile(&plane, &options(budget))
+            .expect("a face bounded by a trimmed polyline compiles");
+        let exact = [a, d, c, b, p(0.75, 0.3), p(0.5, 0.0), p(0.25, 0.3)];
+        let shoelace: Scalar = (0..exact.len())
+            .map(|i| {
+                let (u, v) = (exact[i], exact[(i + 1) % exact.len()]);
+                0.5 * (u.x * v.y - v.x * u.y)
+            })
+            .sum();
+        let bound = report.bound.expect("a certified bound");
+        assert_eq!(bound, 0.0, "a polygon's spans are all exact");
+        assert_eq!(mesh.positions.len(), 7, "the vertices and the corners only");
+        let perimeter: Scalar = (0..exact.len())
+            .map(|i| (exact[(i + 1) % exact.len()] - exact[i]).length())
+            .sum();
+        let area = mesh_area(&mesh);
+        eprintln!("trimmed polyline: area {area}, exact {shoelace}, bound {bound:e}");
         assert!(
-            q.x >= 0.025 - 1e-12 && q.x <= 0.975 + 1e-12,
-            "{q:?} past a vertex"
+            (area - shoelace).abs() <= bound * perimeter + 1e-12,
+            "area {area} misses {shoelace} by more than the bound allows"
         );
+        for q in &mesh.positions {
+            assert!(
+                q.x >= 0.025 - 1e-12 && q.x <= 0.975 + 1e-12,
+                "{q:?} past a vertex"
+            );
+        }
+        let samples = polygon_samples(&exact, 4_000);
+        assert_bounded("trimmed polyline", &mesh, &samples, &report, 6.0);
     }
-    let samples = polygon_samples(&exact, 4_000);
-    assert_bounded("trimmed polyline", &mesh, &samples, &report, 6.0);
 }
 
 /// A planar face bounded by one closed polyline edge whose one vertex lies
-/// inside a side (#333): the edge is the whole square from it, its corners
-/// between samples and within its bound.
+/// inside a side (#333): the edge is the whole square from it. Its corners
+/// are samples (#342), so each side is one exact span at any budget: the
+/// square's four corners and its vertex are all that is meshed, and the
+/// bound is zero.
 #[test]
 fn a_closed_polyline_edge_is_the_whole_loop_from_its_one_vertex() {
     let p = |x: Scalar, y: Scalar| Point3::new(x, y, 0.0);
     let corners = [p(0.0, 0.0), p(1.0, 0.0), p(1.0, 1.0), p(0.0, 1.0)];
-    let square = Curve3::Polyline(axiolid_curve::Polyline3 {
-        points: corners.to_vec(),
+    for budget in [1e-4, 1e-6] {
+        let square = Curve3::Polyline(axiolid_curve::Polyline3 {
+            points: corners.to_vec(),
+            closed: true,
+        });
+        let mut face = OneFace::new();
+        let start = face.vertex(p(0.3, 0.0));
+        let edge = face.edge(start, start, Some(square));
+        face.use_edge(edge, Orientation::Forward);
+        let plane = Surface::Plane(Plane {
+            frame: frame_at(0.0),
+        });
+        let (mesh, report) = face
+            .compile(&plane, &options(budget))
+            .expect("a face bounded by a closed polyline compiles");
+        assert_eq!(report.bound, Some(0.0), "budget {budget:e}");
+        assert_eq!(
+            mesh.positions.len(),
+            5,
+            "budget {budget:e}: four corners and the vertex"
+        );
+        assert!((mesh_area(&mesh) - 1.0).abs() <= 1e-12, "budget {budget:e}");
+        assert_bounded(
+            "closed polyline",
+            &mesh,
+            &polygon_samples(&corners, 4_000),
+            &report,
+            6.0,
+        );
+    }
+}
+
+/// A polyline with more corners than the segment cap allows is not cut at
+/// them: it is sampled uniformly and still compiles, certified (#342).
+#[test]
+fn a_polygon_of_more_sides_than_the_cap_compiles_certified() {
+    let sides = 5_000;
+    let corners: Vec<Point3> = (0..sides)
+        .map(|i| {
+            let t = TAU * i as Scalar / sides as Scalar;
+            Point3::new(0.5 * t.cos(), 0.5 * t.sin(), 0.0)
+        })
+        .collect();
+    let polygon = Curve3::Polyline(axiolid_curve::Polyline3 {
+        points: corners.clone(),
         closed: true,
     });
     let mut face = OneFace::new();
-    let start = face.vertex(p(0.3, 0.0));
-    let edge = face.edge(start, start, Some(square));
+    let start = face.vertex(Point3::new(0.5, 0.0, 0.0));
+    let edge = face.edge(start, start, Some(polygon));
     face.use_edge(edge, Orientation::Forward);
     let plane = Surface::Plane(Plane {
         frame: frame_at(0.0),
     });
     let (mesh, report) = face
         .compile(&plane, &options(1e-3))
-        .expect("a face bounded by a closed polyline compiles");
-    let area = mesh_area(&mesh);
+        .expect("a 5000-gon edge compiles");
     let bound = report.bound.expect("a certified bound");
-    eprintln!("closed polyline: area {area}, bound {bound:e}");
-    assert!((area - 1.0).abs() <= 4.0 * bound, "area {area}");
+    assert!(bound <= 1e-3 * 6.0, "bound {bound:e}");
     assert_bounded(
-        "closed polyline",
+        "5000-gon",
         &mesh,
-        &polygon_samples(&corners, 4_000),
+        &polygon_samples(&corners, 4),
         &report,
         6.0,
     );
@@ -1601,5 +1651,167 @@ fn a_d_shaped_half_cylinder_compiles_as_a_watertight_solid_in_any_face_order() {
     for &(budget, positions, indices) in &counts {
         let first = counts.iter().find(|c| c.0 == budget).unwrap();
         assert_eq!((positions, indices), (first.1, first.2), "{budget:e}");
+    }
+}
+
+/// A closed rational B-spline circle crosses its seam at a double knot, a
+/// break of its derivative (#342): the seam is a sample of each rim, so
+/// the knot is a mesh vertex exactly. The angles are asymmetric, so the
+/// knot is no midpoint of a uniform sampling, and each side of it is
+/// refined only as far as its own length needs.
+#[test]
+fn a_bspline_knot_of_full_multiplicity_is_a_vertex() {
+    let angles = (-TAU / 16.0, TAU / 8.0);
+    let (mesh, report, samples) = trimmed_patch(
+        closed_circle_spline(0.0, 0.3),
+        closed_circle_spline(0.5, 0.3),
+        angles,
+    );
+    assert_bounded("knot as vertex", &mesh, &samples, &report, 4.0);
+    for z in [0.0, 0.5] {
+        let knot = Point3::new(0.3, 0.0, z);
+        assert!(
+            mesh.positions.iter().any(|p| (*p - knot).length() <= 1e-12),
+            "the knot {knot:?} is not a mesh vertex"
+        );
+    }
+    let side = |before: bool| {
+        mesh.positions
+            .iter()
+            .filter(|p| p.z == 0.0 && (p.y < 0.0) == before && p.y != 0.0)
+            .count()
+    };
+    // The piece twice as long takes twice the spans, not more.
+    assert_eq!((side(true), side(false)), (16, 32), "rim vertices per side");
+}
+
+/// A unit cube, its faces listed rotated left by `rotate` and then, with
+/// `reverse`, backwards, whose front bottom edge is a polyline through a
+/// point `m` between its ends (#342): both faces on that edge take its
+/// samples, the polyline's break among them, whichever comes first.
+fn cube_with_polyline_edge(rotate: usize, reverse: bool) -> (TriMesh, MeshClosure, Point3) {
+    let corner = |i: usize| {
+        Point3::new(
+            ((i & 1) ^ ((i >> 1) & 1)) as Scalar,
+            ((i >> 1) & 1) as Scalar,
+            ((i >> 2) & 1) as Scalar,
+        )
+    };
+    let mut solid = OneFace::new();
+    let v: Vec<VertexId> = (0..8).map(|i| solid.vertex(corner(i))).collect();
+    let m = corner(0) + (corner(1) - corner(0)) * 0.3;
+    let mut edges: HashMap<(usize, usize), EdgeId> = HashMap::new();
+    for i in 0..8 {
+        for j in i + 1..8 {
+            if (corner(i) - corner(j)).length() == 1.0 {
+                let curve = (i == 0 && j == 1).then(|| {
+                    Curve3::Polyline(axiolid_curve::Polyline3 {
+                        points: vec![corner(0), m, corner(1)],
+                        closed: false,
+                    })
+                });
+                edges.insert((i, j), solid.edge(v[i], v[j], curve));
+            }
+        }
+    }
+    type Face = ([usize; 4], [Scalar; 3], [Scalar; 3], [Scalar; 3]);
+    let faces: [Face; 6] = [
+        (
+            [0, 3, 2, 1],
+            [0.0, 1.0, 0.0],
+            [1.0, 0.0, 0.0],
+            [0.0, 0.0, -1.0],
+        ),
+        (
+            [4, 5, 6, 7],
+            [1.0, 0.0, 0.0],
+            [0.0, 1.0, 0.0],
+            [0.0, 0.0, 1.0],
+        ),
+        (
+            [0, 1, 5, 4],
+            [1.0, 0.0, 0.0],
+            [0.0, 0.0, 1.0],
+            [0.0, -1.0, 0.0],
+        ),
+        (
+            [3, 7, 6, 2],
+            [0.0, 0.0, 1.0],
+            [1.0, 0.0, 0.0],
+            [0.0, 1.0, 0.0],
+        ),
+        (
+            [0, 4, 7, 3],
+            [0.0, 0.0, 1.0],
+            [0.0, 1.0, 0.0],
+            [-1.0, 0.0, 0.0],
+        ),
+        (
+            [1, 2, 6, 5],
+            [0.0, 1.0, 0.0],
+            [0.0, 0.0, 1.0],
+            [1.0, 0.0, 0.0],
+        ),
+    ];
+    for (ring, x, y, z) in faces {
+        for k in 0..4 {
+            let (from, to) = (ring[k], ring[(k + 1) % 4]);
+            let (edge, orientation) = match edges.get(&(from, to)) {
+                Some(&edge) => (edge, Orientation::Forward),
+                None => (edges[&(to, from)], Orientation::Reversed),
+            };
+            solid.use_edge(edge, orientation);
+        }
+        let [x, y, z] = [x, y, z].map(|a| Vec3::new(a[0], a[1], a[2]));
+        solid.close_face(&Surface::Plane(Plane {
+            frame: Frame3 {
+                origin: corner(ring[0]),
+                x,
+                y,
+                z,
+            },
+        }));
+    }
+    solid.faces.rotate_left(rotate);
+    if reverse {
+        solid.faces.reverse();
+    }
+    let (mesh, closure, _) = solid
+        .compile_shell(true, &options(1e-4))
+        .expect("a cube with a polyline edge compiles");
+    (mesh, closure, m)
+}
+
+#[test]
+fn a_polyline_edge_shared_by_two_faces_is_cut_at_its_break_in_any_face_order() {
+    let sorted = |mesh: &TriMesh| {
+        let mut positions: Vec<[Scalar; 3]> =
+            mesh.positions.iter().map(|p| [p.x, p.y, p.z]).collect();
+        positions.sort_by(|a, b| {
+            a.iter()
+                .zip(b)
+                .map(|(a, b)| a.total_cmp(b))
+                .find(|o| o.is_ne())
+                .unwrap_or(core::cmp::Ordering::Equal)
+        });
+        positions
+    };
+    let mut first: Option<(Vec<[Scalar; 3]>, usize)> = None;
+    for rotate in 0..6 {
+        for reverse in [false, true] {
+            let (mesh, closure, m) = cube_with_polyline_edge(rotate, reverse);
+            let name = format!("cube rotated {rotate}, reversed {reverse}");
+            assert_eq!(closure, MeshClosure::Solid, "{name}");
+            assert_watertight(&name, &mesh);
+            assert!(
+                mesh.positions.contains(&m),
+                "{name}: the polyline's break is not a mesh vertex"
+            );
+            let got = (sorted(&mesh), mesh.indices.len());
+            match &first {
+                None => first = Some(got),
+                Some(first) => assert_eq!(&got, first, "{name}"),
+            }
+        }
     }
 }

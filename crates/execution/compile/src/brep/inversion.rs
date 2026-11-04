@@ -8,6 +8,11 @@
 //! edge pass ([`super::edges`], #336) samples its 3D curve as finely as the
 //! strictest face using it asks, by [`sample_edge`] run for each face, and
 //! every face inverts the same points, so shared vertices stay shared.
+//! The edge is sampled in pieces between the derivative breaks of its 3D
+//! curve (#342, [`EdgeTrace::breaks`]): each break is a sample, so no span
+//! crosses a corner, and inside a piece the spans are uniform, a power of
+//! two of them, refined per piece. The pieces' counts together stay within
+//! the segment cap.
 //!
 //! - Analytic surfaces invert in closed form
 //!   ([`axiolid_reference::surface::invert`]), which checks the residual
@@ -378,6 +383,24 @@ impl EdgeTrace<'_> {
         }
     }
 
+    /// The fractions of the edge's span where its curve has a derivative
+    /// break (#342): strictly inside, ascending. An edge with more pieces
+    /// than the segment cap allows is not cut: it is sampled uniformly, its
+    /// span bounds still split at the breaks.
+    pub(super) fn breaks(&self) -> Vec<Scalar> {
+        match self {
+            Self::Straight(..) => Vec::new(),
+            Self::Curve(curve, span) => {
+                let breaks = span.break_fractions(curve);
+                if breaks.len() + 1 > MAX_CURVED_EDGE_SEGMENTS {
+                    Vec::new()
+                } else {
+                    breaks
+                }
+            }
+        }
+    }
+
     /// The certified bounds of the span between fractions `a` and `b`,
     /// whose ends are the points `pa` and `pb`.
     fn span(&self, a: Scalar, b: Scalar, pa: Vec3, pb: Vec3) -> Option<SpanBound> {
@@ -582,7 +605,8 @@ pub(super) fn inverted_edge_use(
             (points, params, spans)
         }
         None => {
-            let (mut points, mut params, spans) = sample_edge(&trace, inverter, bound, ctx)?;
+            let (mut points, mut params, spans, _) =
+                sample_edge(&trace, inverter, bound, ctx, &trace.breaks())?;
             let mut spans = spans.ok_or(NO_CHORD_BOUND);
             if use_.orientation == Orientation::Reversed {
                 points.reverse();
@@ -654,107 +678,226 @@ pub(super) fn straight_curve(curve: &axiolid_curve::Curve3) -> bool {
     }
 }
 
-/// Sample a new edge in its own direction: uniform spans of its parameter,
-/// doubled until every span's 3D midpoint is within the budget of its chord
-/// and its parameters turn less than a quarter period, then while the
-/// span's certified terms miss the budget, up to the segment cap.
+/// Sample a new edge in its own direction, cut at its derivative breaks
+/// (#342): uniform spans inside each piece between breaks, a power of two
+/// of them, each piece doubled until every one of its spans' 3D midpoints is
+/// within the budget of its chord and its parameters turn less than a
+/// quarter period, then while the spans' certified terms miss the budget.
+/// A break is a sample, so a straight piece (a polyline segment) is one
+/// span with a chord bound of zero. The pieces' span counts together stay
+/// within the segment cap. Returns the points, their parameters, the span
+/// bounds and the span count of each piece.
 #[allow(clippy::type_complexity)]
 pub(super) fn sample_edge(
     trace: &EdgeTrace<'_>,
     inverter: &SurfaceInverter<'_>,
     bound: &FaceBound<'_>,
     ctx: &FaceContext<'_>,
-) -> GeomResult<(Vec<Vec3>, Vec<Point2>, Option<Vec<SpanBound>>)> {
+    breaks: &[Scalar],
+) -> GeomResult<(Vec<Vec3>, Vec<Point2>, Option<Vec<SpanBound>>, Vec<usize>)> {
     let budget = ctx.chord_error;
     if !(budget.is_finite() && budget > 0.0) {
         return Err(GeomError::InvalidInput(
             "curved-edge chord tolerance must be positive and finite".to_owned(),
         ));
     }
-    let mut points = vec![trace.at(0.0)?, trace.at(1.0)?];
-    let mut raw = points
+    if breaks.len() >= MAX_CURVED_EDGE_SEGMENTS {
+        return Err(GeomError::BudgetExceeded {
+            resource: "curved edge samples",
+        });
+    }
+    let ends: Vec<Scalar> = core::iter::once(0.0)
+        .chain(breaks.iter().copied())
+        .chain(core::iter::once(1.0))
+        .collect();
+    let corners = ends
+        .iter()
+        .map(|&s| trace.at(s))
+        .collect::<GeomResult<Vec<_>>>()?;
+    let corner_params = corners
         .iter()
         .map(|&point| inverter.invert(point))
         .collect::<GeomResult<Vec<_>>>()?;
-    // The coarsest sampling meeting the midpoint and quarter-turn tests,
-    // kept as a stride into the finer samples should the certified terms
-    // never fit.
-    let mut basic: Option<usize> = None;
-    let mut n = 1usize;
+    // Each piece's points and their raw parameters, both ends included.
+    let mut pieces: Vec<Piece> = (0..ends.len() - 1)
+        .map(|k| Piece {
+            points: vec![corners[k], corners[k + 1]],
+            raw: vec![corner_params[k], corner_params[k + 1]],
+        })
+        .collect();
+    // Per piece, the coarsest sampling meeting the midpoint and quarter-turn
+    // tests, kept as a stride into the finer samples should the certified
+    // terms never fit.
+    let mut basic: Vec<Option<usize>> = vec![None; pieces.len()];
     loop {
-        let mut params = raw.clone();
+        let counts: Vec<usize> = pieces.iter().map(Piece::spans).collect();
+        let fractions = piece_fractions(breaks, &counts);
+        let (points, mut params) = joined(&pieces);
         unwrap(inverter, &mut params);
-        let fraction = |i: usize| i as Scalar / n as Scalar;
-        let mut mids = Vec::with_capacity(n);
-        let mut measured: Scalar = 0.0;
-        for i in 0..n {
-            let mid = trace.at(0.5 * (fraction(i) + fraction(i + 1)))?;
-            measured = measured.max((mid - 0.5 * (points[i] + points[i + 1])).length());
-            mids.push(mid);
-        }
-        let quarter = turns_within_quarter(inverter, &params);
-        let spans = spans_of(trace, &points);
-        if measured <= budget && quarter {
-            basic.get_or_insert(n);
-            let certified = spans.as_ref().and_then(|spans| {
-                (0..n)
-                    .map(|i| {
-                        let (a, b) = (params[i], params[i + 1]);
-                        let near = spans[i].chord + bound.chord_image(a, b)?;
-                        // A span too long to show the surface invertible
-                        // along it is split like one that misses the budget.
-                        let lens = bound
-                            .lens(a, b, spans[i].arc, near)
-                            .unwrap_or(Scalar::INFINITY);
-                        Some(near + lens)
-                    })
-                    .try_fold(0.0, |worst: Scalar, term| term.map(|t| worst.max(t)))
-            });
-            // No certified term to steer by: the report names it.
-            if certified.is_none_or(|worst| worst <= budget) {
-                return Ok((points, params, spans));
+        let spans = spans_of(trace, &fractions, &points);
+        // The new midpoints, at the odd fractions of the doubled sampling, so
+        // the samples and the bounds name the same fractions.
+        let doubled: Vec<usize> = counts.iter().map(|n| 2 * n).collect();
+        let fine = piece_fractions(breaks, &doubled);
+        let mut mids = Vec::with_capacity(points.len() - 1);
+        let mut unfinished: Vec<usize> = Vec::new();
+        let mut midpoint_failed = vec![false; pieces.len()];
+        let mut offset = 0;
+        for (k, &n) in counts.iter().enumerate() {
+            let mut measured: Scalar = 0.0;
+            for i in offset..offset + n {
+                let mid = trace.at(fine[2 * i + 1])?;
+                measured = measured.max((mid - 0.5 * (points[i] + points[i + 1])).length());
+                mids.push(mid);
             }
+            midpoint_failed[k] = measured > budget;
+            let quarter = turns_within_quarter(inverter, &params[offset..=offset + n]);
+            let mut fits = false;
+            if !midpoint_failed[k] && quarter {
+                basic[k].get_or_insert(n);
+                let certified = spans.as_ref().and_then(|spans| {
+                    (offset..offset + n)
+                        .map(|i| {
+                            let (a, b) = (params[i], params[i + 1]);
+                            let near = spans[i].chord + bound.chord_image(a, b)?;
+                            // A span too long to show the surface invertible
+                            // along it is split like one that misses the
+                            // budget.
+                            let lens = bound
+                                .lens(a, b, spans[i].arc, near)
+                                .unwrap_or(Scalar::INFINITY);
+                            Some(near + lens)
+                        })
+                        .try_fold(0.0, |worst: Scalar, term| term.map(|t| worst.max(t)))
+                });
+                // No certified term to steer by: the report names it.
+                fits = certified.is_none_or(|worst| worst <= budget);
+            }
+            if !fits {
+                unfinished.push(k);
+            }
+            offset += n;
         }
-        if n >= MAX_CURVED_EDGE_SEGMENTS {
-            let Some(coarse) = basic else {
-                if measured > budget {
-                    return Err(GeomError::BudgetExceeded {
-                        resource: "curved edge samples",
-                    });
-                }
-                return Err(singular_between_samples());
-            };
-            let stride = n / coarse;
-            let keep = |i: &usize| i.is_multiple_of(stride);
-            let points: Vec<Vec3> = (0..=n).filter(keep).map(|i| points[i]).collect();
-            let params: Vec<Point2> = (0..=n).filter(keep).map(|i| params[i]).collect();
-            let spans = spans_of(trace, &points);
-            return Ok((points, params, spans));
+        if unfinished.is_empty() {
+            return Ok((points, params, spans, counts));
         }
-        // Halve every span, inverting only the new midpoints.
-        let mut next_points = Vec::with_capacity(2 * n + 1);
-        let mut next_raw = Vec::with_capacity(2 * n + 1);
-        for i in 0..n {
-            next_points.push(points[i]);
-            next_raw.push(raw[i]);
-            next_points.push(mids[i]);
-            next_raw.push(inverter.invert(mids[i])?);
+        let added: usize = unfinished.iter().map(|&k| counts[k]).sum();
+        if points.len() - 1 + added > MAX_CURVED_EDGE_SEGMENTS {
+            // Out of segments: each unfinished piece falls back to its
+            // coarsest passing sampling, or the edge is refused.
+            for &k in &unfinished {
+                let Some(coarse) = basic[k] else {
+                    if midpoint_failed[k] {
+                        return Err(GeomError::BudgetExceeded {
+                            resource: "curved edge samples",
+                        });
+                    }
+                    return Err(singular_between_samples());
+                };
+                pieces[k].coarsen(counts[k] / coarse);
+            }
+            let counts: Vec<usize> = pieces.iter().map(Piece::spans).collect();
+            let fractions = piece_fractions(breaks, &counts);
+            let (points, mut params) = joined(&pieces);
+            unwrap(inverter, &mut params);
+            let spans = spans_of(trace, &fractions, &points);
+            return Ok((points, params, spans, counts));
         }
-        next_points.push(points[n]);
-        next_raw.push(raw[n]);
-        points = next_points;
-        raw = next_raw;
-        n *= 2;
+        // Halve every span of the unfinished pieces, inverting only the new
+        // midpoints.
+        let mut start = 0;
+        let mut starts = Vec::with_capacity(counts.len());
+        for &n in &counts {
+            starts.push(start);
+            start += n;
+        }
+        for &k in &unfinished {
+            pieces[k].halve(&mids[starts[k]..starts[k] + counts[k]], inverter)?;
+        }
     }
 }
 
-/// The bounds of the uniform spans between `points`, sampled at equal
-/// fractions of the edge's parameter; `None` where a family has none.
-pub(super) fn spans_of(trace: &EdgeTrace<'_>, points: &[Vec3]) -> Option<Vec<SpanBound>> {
-    let n = points.len().checked_sub(1)?;
-    let fraction = |i: usize| i as Scalar / n as Scalar;
-    (0..n)
-        .map(|i| trace.span(fraction(i), fraction(i + 1), points[i], points[i + 1]))
+/// The samples of one piece of an edge between breaks.
+struct Piece {
+    /// Both ends included.
+    points: Vec<Vec3>,
+    /// The points' parameters on the face's surface, before unwrapping.
+    raw: Vec<Point2>,
+}
+
+impl Piece {
+    fn spans(&self) -> usize {
+        self.points.len() - 1
+    }
+
+    /// Keep every `stride`-th sample.
+    fn coarsen(&mut self, stride: usize) {
+        let keep = |i: &usize| i.is_multiple_of(stride);
+        let kept = |len: usize| (0..len).filter(keep).collect::<Vec<_>>();
+        self.points = kept(self.points.len())
+            .iter()
+            .map(|&i| self.points[i])
+            .collect();
+        self.raw = kept(self.raw.len()).iter().map(|&i| self.raw[i]).collect();
+    }
+
+    /// Insert the `mids` of its spans.
+    fn halve(&mut self, mids: &[Vec3], inverter: &SurfaceInverter<'_>) -> GeomResult<()> {
+        let n = self.spans();
+        let mut points = Vec::with_capacity(2 * n + 1);
+        let mut raw = Vec::with_capacity(2 * n + 1);
+        for (i, &mid) in mids.iter().enumerate() {
+            points.push(self.points[i]);
+            raw.push(self.raw[i]);
+            points.push(mid);
+            raw.push(inverter.invert(mid)?);
+        }
+        points.push(self.points[n]);
+        raw.push(self.raw[n]);
+        self.points = points;
+        self.raw = raw;
+        Ok(())
+    }
+}
+
+/// The points and raw parameters of `pieces`, a shared end once.
+fn joined(pieces: &[Piece]) -> (Vec<Vec3>, Vec<Point2>) {
+    let (mut points, mut raw) = (Vec::new(), Vec::new());
+    for (k, piece) in pieces.iter().enumerate() {
+        let skip = usize::from(k > 0);
+        points.extend_from_slice(&piece.points[skip..]);
+        raw.extend_from_slice(&piece.raw[skip..]);
+    }
+    (points, raw)
+}
+
+/// The fractions of an edge's samples when it is cut at `breaks` into pieces
+/// of `counts` uniform spans: every break exactly, and the ends 0 and 1.
+pub(super) fn piece_fractions(breaks: &[Scalar], counts: &[usize]) -> Vec<Scalar> {
+    debug_assert_eq!(counts.len(), breaks.len() + 1);
+    let end = |k: usize| match k {
+        0 => 0.0,
+        _ => breaks.get(k - 1).copied().unwrap_or(1.0),
+    };
+    let mut fractions = Vec::with_capacity(counts.iter().sum::<usize>() + 1);
+    for (k, &n) in counts.iter().enumerate() {
+        let (from, to) = (end(k), end(k + 1));
+        fractions.extend((0..n).map(|i| from + (to - from) * (i as Scalar / n as Scalar)));
+    }
+    fractions.push(1.0);
+    fractions
+}
+
+/// The bounds of the spans between `points`, sampled at `fractions` of the
+/// edge's parameter; `None` where a family has none.
+pub(super) fn spans_of(
+    trace: &EdgeTrace<'_>,
+    fractions: &[Scalar],
+    points: &[Vec3],
+) -> Option<Vec<SpanBound>> {
+    debug_assert_eq!(fractions.len(), points.len());
+    (0..points.len().checked_sub(1)?)
+        .map(|i| trace.span(fractions[i], fractions[i + 1], points[i], points[i + 1]))
         .collect()
 }
 
@@ -830,6 +973,22 @@ impl SurfaceInverter<'_> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// Pieces of power-of-two counts between breaks put a sample on every
+    /// break, bit for bit, and on the ends.
+    #[test]
+    fn piece_fractions_land_on_the_breaks() {
+        let breaks = [0.1, 0.35];
+        let fractions = piece_fractions(&breaks, &[1, 4, 2]);
+        assert_eq!(fractions.len(), 8);
+        assert_eq!(fractions[0], 0.0);
+        assert_eq!(fractions[1], 0.1);
+        assert_eq!(fractions[5], 0.35);
+        assert_eq!(fractions[7], 1.0);
+        assert!(fractions.windows(2).all(|w| w[0] < w[1]));
+        // No breaks is the plain uniform sampling.
+        assert_eq!(piece_fractions(&[], &[4]), vec![0.0, 0.25, 0.5, 0.75, 1.0]);
+    }
 
     /// Continuity reads an edge only while each span turns less than a
     /// quarter period.

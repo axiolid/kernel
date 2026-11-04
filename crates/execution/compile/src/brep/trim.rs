@@ -49,6 +49,11 @@
 //! from the span's chord, of the span's chord (the distance to a segment is
 //! convex along a segment), so the span is within `max d_i + h` of its chord,
 //! and its length is at most the sum of its pieces'.
+//!
+//! The same breaks tell the edge pass where to sample (#342):
+//! [`CurveSpan::break_fractions`] gives them as fractions of the span, each
+//! the float whose parameter is the break's own, so a sample there is the
+//! break exactly and no span between samples crosses one.
 
 use axiolid_contracts::{GeomError, GeomResult};
 use axiolid_core::{Interval, Scalar, Tolerance, Vec3};
@@ -104,6 +109,62 @@ impl CurveSpan {
         axiolid_reference::curve::evaluate3(curve, self.native(t, t))
     }
 
+    /// The unwrapped parameters strictly between `lo` and `hi` where the
+    /// curve has a derivative break: its own breaks, their copies one
+    /// period on, and a closed curve's seam.
+    fn cuts(&self, curve: &Curve3, lo: Scalar, hi: Scalar) -> Vec<Scalar> {
+        let breaks = axiolid_reference::bound::continuity_breaks3(curve, 1);
+        let mut cuts: Vec<Scalar> = breaks.clone();
+        if let Some(domain) = self.period {
+            let period = domain.end - domain.start;
+            cuts.extend(breaks.iter().map(|t| t + period));
+            cuts.push(domain.end);
+        }
+        cuts.retain(|&t| lo < t && t < hi);
+        cuts.sort_by(Scalar::total_cmp);
+        cuts.dedup();
+        cuts
+    }
+
+    /// The fractions of the span at which the curve has a derivative break
+    /// (#342): strictly between 0 and 1, ascending, without repeats. Each
+    /// is the fraction whose parameter is the break's own, so that a sample
+    /// there is the break exactly and no piece between them spans one.
+    pub(super) fn break_fractions(&self, curve: &Curve3) -> Vec<Scalar> {
+        let length = self.span.end - self.span.start;
+        let (lo, hi) = if length >= 0.0 {
+            (self.span.start, self.span.end)
+        } else {
+            (self.span.end, self.span.start)
+        };
+        let mut fractions: Vec<Scalar> = self
+            .cuts(curve, lo, hi)
+            .into_iter()
+            .map(|t| self.exact_fraction(t, (t - self.span.start) / length))
+            .filter(|&s| 0.0 < s && s < 1.0)
+            .collect();
+        fractions.sort_by(Scalar::total_cmp);
+        fractions.dedup();
+        fractions
+    }
+
+    /// The float next to `guess`, within a few steps, whose parameter is
+    /// `t` exactly; `guess` itself where none is.
+    fn exact_fraction(&self, t: Scalar, guess: Scalar) -> Scalar {
+        let (mut down, mut up) = (guess, guess);
+        for _ in 0..4 {
+            if self.parameter(down) == t {
+                return down;
+            }
+            if self.parameter(up) == t {
+                return up;
+            }
+            down = down.next_down();
+            up = up.next_up();
+        }
+        guess
+    }
+
     /// The certified bounds of the piece between fractions `a` and `b`,
     /// whose ends are `pa` and `pb`, split at the curve's breaks (the module
     /// notes give the argument); `None` where the family has no bound.
@@ -117,16 +178,7 @@ impl CurveSpan {
     ) -> Option<SpanBound> {
         let (ta, tb) = (self.parameter(a), self.parameter(b));
         let (lo, hi) = if ta <= tb { (ta, tb) } else { (tb, ta) };
-        let breaks = axiolid_reference::bound::continuity_breaks3(curve, 1);
-        let mut cuts: Vec<Scalar> = breaks.clone();
-        if let Some(domain) = self.period {
-            let period = domain.end - domain.start;
-            cuts.extend(breaks.iter().map(|t| t + period));
-            cuts.push(domain.end);
-        }
-        cuts.retain(|&t| lo < t && t < hi);
-        cuts.sort_by(Scalar::total_cmp);
-        cuts.dedup();
+        let cuts = self.cuts(curve, lo, hi);
         let ends: Vec<Scalar> = core::iter::once(lo)
             .chain(cuts.iter().copied())
             .chain(core::iter::once(hi))
@@ -520,6 +572,94 @@ mod tests {
 
     fn error_text(result: GeomResult<impl core::fmt::Debug>) -> String {
         format!("{:?}", result.expect_err("refused"))
+    }
+
+    /// A closed square from one vertex a third of the way along its first
+    /// side breaks at its corners, seam included, each fraction naming its
+    /// corner's parameter exactly (#342).
+    #[test]
+    fn a_closed_polyline_breaks_at_its_corners_and_its_seam() {
+        let p = |x: Scalar, y: Scalar| Point3::new(x, y, 0.0);
+        let square = Curve3::Polyline(Polyline3 {
+            points: vec![p(0.0, 0.0), p(1.0, 0.0), p(1.0, 1.0), p(0.0, 1.0)],
+            closed: true,
+        });
+        let [a] = vertices(1)[..] else { unreachable!() };
+        let start = (a, p(0.3, 0.0));
+        let span = vertex_span(&square, start, start, Tolerance::MILLIMETRE).unwrap();
+        let fractions = span.break_fractions(&square);
+        assert_eq!(fractions.len(), 4, "{fractions:?}");
+        for (s, corner) in fractions.iter().zip([1.0, 2.0, 3.0, 4.0]) {
+            assert_eq!(span.parameter(*s), corner);
+            assert!(0.0 < *s && *s < 1.0);
+        }
+        assert!(fractions.windows(2).all(|w| w[0] < w[1]));
+    }
+
+    /// The fraction naming a break is nudged to the float whose parameter is
+    /// the break's own where plain division misses it by a rounding.
+    #[test]
+    fn a_break_fraction_names_its_parameter_exactly() {
+        let p = |x: Scalar, y: Scalar| Point3::new(x, y, 0.0);
+        let bent = Curve3::Polyline(Polyline3 {
+            points: vec![p(0.0, 0.0), p(1.0, 1.0), p(2.0, 0.0)],
+            closed: false,
+        });
+        let span = CurveSpan {
+            span: Interval {
+                start: 0.05808157514973589,
+                end: 1.501464907695806,
+            },
+            period: None,
+        };
+        let plain = (1.0 - span.span.start) / (span.span.end - span.span.start);
+        assert_ne!(
+            span.parameter(plain),
+            1.0,
+            "the fixture needs a rounding miss"
+        );
+        let fractions = span.break_fractions(&bent);
+        assert_eq!(fractions.len(), 1);
+        assert_eq!(span.parameter(fractions[0]), 1.0);
+    }
+
+    /// An open polyline run backwards between two interior vertices has its
+    /// fractions counted along the edge, ascending.
+    #[test]
+    fn a_reversed_polyline_span_breaks_in_edge_order() {
+        let p = |x: Scalar, y: Scalar| Point3::new(x, y, 0.0);
+        let zigzag = Curve3::Polyline(Polyline3 {
+            points: vec![p(0.0, 0.0), p(1.0, 1.0), p(2.0, 0.0), p(3.0, 1.0)],
+            closed: false,
+        });
+        let [a, b] = vertices(2)[..] else {
+            unreachable!()
+        };
+        let span = vertex_span(
+            &zigzag,
+            (a, p(2.5, 0.5)),
+            (b, p(0.5, 0.5)),
+            Tolerance::MILLIMETRE,
+        )
+        .unwrap();
+        let fractions = span.break_fractions(&zigzag);
+        assert_eq!(fractions.len(), 2, "{fractions:?}");
+        assert_eq!(span.parameter(fractions[0]), 2.0);
+        assert_eq!(span.parameter(fractions[1]), 1.0);
+        assert!(fractions[0] < fractions[1]);
+        // A line has none.
+        let line = Curve3::Polyline(Polyline3 {
+            points: vec![p(0.0, 0.0), p(1.0, 0.0)],
+            closed: false,
+        });
+        let span = vertex_span(
+            &line,
+            (a, p(0.0, 0.0)),
+            (b, p(1.0, 0.0)),
+            Tolerance::MILLIMETRE,
+        )
+        .unwrap();
+        assert!(span.break_fractions(&line).is_empty());
     }
 
     /// Two segments crossing at the vertex: the parameter is not unique.
