@@ -1,7 +1,7 @@
 """Mutation probe for the #170 closed-mesh fix: edge splitting and closure.
 
 Each mutant weakens one decision in `planar::split_invented_edges`,
-`planar::split_triangle`, `planar::strictly_between`, `planar::collinear_band`
+the planar split (`axiolid_mesh::split_triangle_at_side_corners`), `planar::strictly_between`, `planar::collinear_band`
 or `compiler::authored_mesh_is_closed`. The compile crate's planar unit
 tests plus `authored_polygons` and `surface_models` must fail on it. A build
 error also counts as killed.

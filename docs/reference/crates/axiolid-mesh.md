@@ -27,7 +27,9 @@ editable surface mesh for algorithms that rewrite connectivity in place:
 O(1) adjacency, vertex circulators, boundary loops, and edge flip, split and
 collapse (with the link condition) and face split that keep it a valid
 oriented 2-manifold; non-manifold input is refused by name. `MeshView` and
-`TriangleMeshView` let a foreign mesh be read without copying it. Mesh
+`TriangleMeshView` let a foreign mesh be read without copying it.
+`split_triangle_at_side_corners` re-triangulates a triangle whose sides
+carry extra corners, on indices alone. Mesh
 operations such as booleans, sections and repair live in other crates.
 
 The optional `serde` feature (off by default) derives `Serialize` and

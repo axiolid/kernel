@@ -14,6 +14,7 @@ pub mod component;
 pub mod error;
 pub mod halfedge;
 pub mod polygon;
+mod split;
 pub mod triangle;
 pub mod view;
 
@@ -30,6 +31,7 @@ pub use halfedge::{
     HalfedgeMesh, HalfedgeRemap, VertexId,
 };
 pub use polygon::{PolygonFace, PolygonMesh};
+pub use split::split_triangle_at_side_corners;
 pub use triangle::{NormalAttribute, TriMesh};
 pub use view::{MeshView, TriangleMeshView};
 

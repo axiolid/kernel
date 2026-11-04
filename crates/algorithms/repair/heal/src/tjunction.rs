@@ -28,7 +28,7 @@ use std::collections::{BTreeMap, BTreeSet};
 use std::ops::ControlFlow;
 
 use axiolid_core::{Aabb, Point3, Tolerance};
-use axiolid_mesh::TriMesh;
+use axiolid_mesh::{split_triangle_at_side_corners, TriMesh};
 use axiolid_spatial::{Bvh, SpatialIndex, SpatialItem};
 
 use crate::carry;
@@ -285,7 +285,7 @@ fn triangulate(
         }
     }
     let mut tokens = Vec::new();
-    if !split_triangle([0, 1, 2], &side_tokens, &mut tokens) || tokens.len() <= 3 {
+    if !split_triangle_at_side_corners([0, 1, 2], &side_tokens, &mut tokens) || tokens.len() <= 3 {
         return None;
     }
     let point = |token: usize| mesh.positions[vertices[token] as usize];
@@ -299,44 +299,4 @@ fn triangulate(
         corners,
         tokens,
     })
-}
-
-/// Triangulate a proper triangle `t` whose side `i` (from `t[i]` to
-/// `t[i+1]`) carries the corners `sides[i]` in order, into proper triangles
-/// with the same winding.
-///
-/// A private copy of `split_triangle` in
-/// `crates/execution/compile/src/planar.rs`, which is not reachable from an
-/// algorithm crate (TODO(#422): hoist it into `axiolid-mesh`); its doc comment holds the argument for the side-bitmask
-/// ear clipping. It differs only in returning `false` instead of emitting
-/// the triangle unsplit, so the caller can decline.
-fn split_triangle(t: [usize; 3], sides: &[Vec<usize>; 3], out: &mut Vec<usize>) -> bool {
-    let mut ring: Vec<(usize, u8)> =
-        Vec::with_capacity(3 + sides.iter().map(Vec::len).sum::<usize>());
-    for i in 0..3 {
-        ring.push((t[i], (1 << i) | (1 << ((i + 2) % 3))));
-        ring.extend(sides[i].iter().map(|&c| (c, 1u8 << i)));
-    }
-    let collinear =
-        |masks: &mut dyn Iterator<Item = u8>| masks.fold(0b111u8, |acc, m| acc & m) != 0;
-    while ring.len() > 3 {
-        let n = ring.len();
-        let ear = (0..n).find(|&k| {
-            !collinear(
-                &mut ring
-                    .iter()
-                    .enumerate()
-                    .filter(|&(j, _)| j != k)
-                    .map(|(_, p)| p.1),
-            )
-        });
-        let Some(k) = ear else {
-            return false;
-        };
-        let (prev, next) = ((k + n - 1) % n, (k + 1) % n);
-        out.extend_from_slice(&[ring[prev].0, ring[k].0, ring[next].0]);
-        ring.remove(k);
-    }
-    out.extend_from_slice(&[ring[0].0, ring[1].0, ring[2].0]);
-    true
 }

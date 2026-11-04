@@ -110,5 +110,5 @@ sits in `axiolid-inspect` because `axiolid-measure` cannot depend on it;
 - `cycle_volume_properties` returns the winding-number integral, which equals
   the enclosed volume only for non-overlapping shells; callers who cannot
   exclude overlap use `certify_unit_winding` (D6).
-- The ear clipping is a private copy of the one in `axiolid-mesh-compile`
-  until it moves to `axiolid-mesh` (TODO(#422)).
+- The ear clipping is shared with `axiolid-mesh-compile` as
+  `axiolid_mesh::split_triangle_at_side_corners` (#422).

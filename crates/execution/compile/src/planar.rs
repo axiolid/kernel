@@ -126,6 +126,7 @@ use axiolid_construct::profile::{
 use axiolid_contracts::{GeomError, GeomResult};
 use axiolid_core::{Point2, Scalar, Vec3};
 use axiolid_guarantees::Sign;
+use axiolid_mesh::split_triangle_at_side_corners;
 use axiolid_reference::{orient2d, orient3d};
 
 /// Newell normal of a closed ring: correct for concave rings and rings that
@@ -530,7 +531,7 @@ pub(crate) fn collinear_band(linear: Scalar) -> Scalar {
 ///    invented edge takes the corners strictly inside it, found once per
 ///    undirected edge, so the two triangles sharing it insert the same
 ///    corners and still pair up. A triangle whose sides gained corners is
-///    re-triangulated by [`split_triangle`] into proper triangles only.
+///    re-triangulated by [`split_triangle_at_side_corners`] into proper triangles only.
 /// 3. The result is checked against the clipper's certified cover (#278):
 ///    every triangle wound as the cover's, every ring edge used once in
 ///    its direction, every other edge once each way. A split that fails
@@ -689,7 +690,12 @@ fn split_invented_edges_over(
         if sides.iter().all(Vec::is_empty) {
             out.extend_from_slice(t);
         } else {
-            split_triangle([t[0], t[1], t[2]], &sides, &mut out);
+            // `false` only reports a triangle that is not proper, which is
+            // this caller's precondition; keep it rather than emit a
+            // degenerate piece.
+            if !split_triangle_at_side_corners([t[0], t[1], t[2]], &sides, &mut out) {
+                out.extend_from_slice(t);
+            }
         }
     }
     // Step 3 (#278): keep the split only when it is a cover of the same
@@ -776,59 +782,6 @@ fn same_cover(flat: &[[Scalar; 2]], cover: &[usize], split: &[usize]) -> bool {
         .iter()
         .all(|t| doubled_area(t) * winding > 0.0);
     wound && net(cover) == net(split)
-}
-
-/// Triangulate a proper triangle `t` whose side `i` (from `t[i]` to
-/// `t[i+1]`) carries the corners `sides[i]` in order, into proper
-/// triangles with the same winding.
-///
-/// The triangle plus its side corners is a convex polygon whose points all
-/// lie on three lines. Collinearity is decided from which sides a point is
-/// on, not from coordinates: `t[i]` is on sides `i` and `i-1`, a side
-/// corner only on its own side, and three points are collinear exactly when
-/// they share a side. Ears are clipped while one exists whose three points
-/// are not collinear and whose removal leaves a polygon that is not
-/// collinear either; clipping such an ear from a convex polygon leaves a
-/// convex polygon, so the loop always finds the next one and ends at a
-/// proper triangle. `O(k^2)` for `k` points, and `k` is small.
-fn split_triangle(t: [usize; 3], sides: &[Vec<usize>; 3], out: &mut Vec<usize>) {
-    // (index, side-membership bitmask)
-    let mut ring: Vec<(usize, u8)> =
-        Vec::with_capacity(3 + sides.iter().map(Vec::len).sum::<usize>());
-    for i in 0..3 {
-        ring.push((t[i], (1 << i) | (1 << ((i + 2) % 3))));
-        ring.extend(sides[i].iter().map(|&c| (c, 1u8 << i)));
-    }
-    let collinear =
-        |masks: &mut dyn Iterator<Item = u8>| masks.fold(0b111u8, |acc, m| acc & m) != 0;
-    while ring.len() > 3 {
-        let n = ring.len();
-        // Clip the first corner whose removal leaves a ring that is not
-        // all on one line. That alone keeps every emitted ear proper: the
-        // ring is a triangle with corners on its sides, so the first such
-        // corner always joins two different lines (checked exhaustively
-        // for up to four corners per side; see
-        // `scripts/probe_closed_mesh_mutants.py`).
-        let ear = (0..n).find(|&k| {
-            !collinear(
-                &mut ring
-                    .iter()
-                    .enumerate()
-                    .filter(|&(j, _)| j != k)
-                    .map(|(_, p)| p.1),
-            )
-        });
-        let Some(k) = ear else {
-            // Only reachable if the input was not a proper triangle; keep
-            // the triangle unsplit rather than emit a degenerate piece.
-            out.extend_from_slice(&t);
-            return;
-        };
-        let (prev, next) = ((k + n - 1) % n, (k + 1) % n);
-        out.extend_from_slice(&[ring[prev].0, ring[k].0, ring[next].0]);
-        ring.remove(k);
-    }
-    out.extend_from_slice(&[ring[0].0, ring[1].0, ring[2].0]);
 }
 
 /// Where `c` lies along `a-b` (as `along / length`, in (0, 1)) if it is on
