@@ -234,7 +234,7 @@ fn checked_slope(slope: Option<Scalar>, what: &'static str) -> GeomResult<Scalar
 /// A circle profile, and its bore when it has a wall thickness, as exact
 /// contours of four quarter arcs each (#111).
 ///
-/// Four quarters, not one full turn: a contour needs at least two segments,
+/// Four quarters, not one full turn: a contour needs at least two ring vertices,
 /// and a quarter keeps every arc's endpoints on the axes, where the seams of
 /// revolved and extruded walls sit.
 pub fn circle_contour(circle: &CircleProfile) -> GeomResult<ContourProfile> {

@@ -8,6 +8,9 @@
 //! `Line2` becomes a planar wall, `Circle2` becomes a cylindrical one -- so
 //! lowering a contour to an [`ArcRing`] is a translation, not a construction.
 //!
+//! A `Polyline2` segment is exact too: one straight vertex per polyline
+//! vertex it passes (see `lower_polyline`).
+//!
 //! Anything else is REFUSED rather than sampled. Tessellating an ellipse or a
 //! spline into short chords would produce a solid that looks right, passes
 //! every closure check, and silently is not the requested shape.
@@ -40,7 +43,7 @@
 
 use axiolid_contracts::{GeomError, GeomResult, Operation};
 use axiolid_core::{Point2, Scalar, Tolerance};
-use axiolid_curve::{Circle2, Curve2};
+use axiolid_curve::{Circle2, Curve2, Polyline2};
 use axiolid_overlay::{ArcRing, ArcVertex};
 use axiolid_profile::{Contour, ProfileSegment};
 
@@ -72,8 +75,10 @@ pub(crate) struct LoweredContour {
 /// Why a contour does not lower, with the segment at fault.
 #[derive(Debug, Clone, PartialEq)]
 pub(crate) enum ContourFault {
+    /// A ring needs two vertices; `count` segments lowered to `vertices`.
     TooFewSegments {
         count: usize,
+        vertices: usize,
     },
     UnsupportedSegment {
         segment: usize,
@@ -97,8 +102,8 @@ impl ContourFault {
     /// The error `contour_to_arc_ring` has always returned for this fault.
     fn into_geom_error(self) -> GeomError {
         match self {
-            Self::TooFewSegments { count } => GeomError::InvalidInput(format!(
-                "a closed contour needs at least two segments, got {count}"
+            Self::TooFewSegments { count, vertices } => GeomError::InvalidInput(format!(
+                "a closed contour needs at least two ring vertices, its {count} segment(s) give {vertices}"
             )),
             Self::UnsupportedSegment { kind, .. } => GeomError::UnsupportedInput {
                 backend: crate::BACKEND_ID,
@@ -128,9 +133,10 @@ pub(crate) fn lower_contour(
     contour: &Contour,
     tolerance: Tolerance,
 ) -> Result<LoweredContour, ContourFault> {
-    if contour.segments.len() < 2 {
+    if contour.segments.is_empty() {
         return Err(ContourFault::TooFewSegments {
-            count: contour.segments.len(),
+            count: 0,
+            vertices: 0,
         });
     }
 
@@ -160,6 +166,15 @@ pub(crate) fn lower_contour(
         segment_of_edge.extend(std::iter::repeat_n(index, lowered.vertices.len()));
         vertices.extend(lowered.vertices);
         previous_end = Some((lowered.end, lowered.end_scale));
+    }
+
+    // A ring is a cycle of at least two vertices. Segments are not counted:
+    // one closed polyline or one full circle is a whole ring by itself.
+    if vertices.len() < 2 {
+        return Err(ContourFault::TooFewSegments {
+            count: contour.segments.len(),
+            vertices: vertices.len(),
+        });
     }
 
     // The contour must close back onto its own first vertex.
@@ -268,11 +283,105 @@ fn lower_segment(segment: &ProfileSegment, index: usize) -> Result<LoweredSegmen
                 end_scale: scale,
             })
         }
+        Curve2::Polyline(polyline) => lower_polyline(polyline, from, to, index),
         other => Err(ContourFault::UnsupportedSegment {
             segment: index,
             kind: unsupported_curve_name(other),
         }),
     }
+}
+
+/// A polyline segment as one straight ring vertex per polyline vertex it
+/// passes, and its end point.
+///
+/// The parameter is one unit per polyline segment, as in the evaluator: the
+/// domain is `[0, segments]` with `segments` the point count (closed) or one
+/// less (open). At an integer parameter the stored point is taken bit for
+/// bit, so a ring built from a polyline carries exactly its points; between
+/// two integers the point is interpolated. The segment emits its start, then
+/// every integer parameter strictly between `from` and `to` in traversal
+/// order, all with bulge zero. A domain outside the points is refused, not
+/// clamped.
+fn lower_polyline(
+    polyline: &Polyline2,
+    from: Scalar,
+    to: Scalar,
+    index: usize,
+) -> Result<LoweredSegment, ContourFault> {
+    let degenerate = |reason: &'static str| ContourFault::DegenerateSegment {
+        segment: index,
+        reason,
+    };
+    let points = &polyline.points;
+    let count = points.len();
+    if count < 2 || points.iter().any(|p| !p.x.is_finite() || !p.y.is_finite()) {
+        return Err(degenerate(
+            "polyline profile segment has fewer than two finite points",
+        ));
+    }
+    if from == to {
+        return Err(degenerate(
+            "polyline profile segment has an empty parameter range",
+        ));
+    }
+    let segments = if polyline.closed { count } else { count - 1 } as Scalar;
+    let inside = |t: Scalar| (0.0..=segments).contains(&t);
+    if !inside(from) || !inside(to) {
+        return Err(degenerate(
+            "polyline profile segment's domain lies outside its points",
+        ));
+    }
+
+    let evaluate = |t: Scalar| {
+        let i = t.floor();
+        if i == t {
+            return points[i as usize % count];
+        }
+        let (a, b) = (points[i as usize], points[(i as usize + 1) % count]);
+        a + (b - a) * (t - i)
+    };
+    let start = evaluate(from);
+    let end = evaluate(to);
+
+    let mut vertices = vec![ArcVertex {
+        point: start,
+        bulge: 0.0,
+    }];
+    let mut push = |t: Scalar| {
+        let point = evaluate(t);
+        let last = vertices[vertices.len() - 1].point;
+        if point.x.to_bits() != last.x.to_bits() || point.y.to_bits() != last.y.to_bits() {
+            vertices.push(ArcVertex { point, bulge: 0.0 });
+        }
+    };
+    if from < to {
+        let mut k = from.floor() + 1.0;
+        while k < to {
+            push(k);
+            k += 1.0;
+        }
+    } else {
+        let mut k = from.ceil() - 1.0;
+        while k > to {
+            push(k);
+            k -= 1.0;
+        }
+    }
+    // A closed polyline may repeat its first point; the segment's end then
+    // equals its last interior vertex, and the next segment supplies it.
+    if vertices.len() > 1 {
+        let last = vertices[vertices.len() - 1].point;
+        if last.x.to_bits() == end.x.to_bits() && last.y.to_bits() == end.y.to_bits() {
+            vertices.pop();
+        }
+    }
+
+    Ok(LoweredSegment {
+        vertices,
+        end,
+        start_scale: start.x.abs() + start.y.abs(),
+        end_scale: end.x.abs() + end.y.abs(),
+    })
 }
 
 /// A circular segment as ring vertices with the bulges the extruder
@@ -346,7 +455,6 @@ fn lower_arc(
 fn unsupported_curve_name(curve: &Curve2) -> &'static str {
     match curve {
         Curve2::Ellipse(_) => "elliptical contour segment",
-        Curve2::Polyline(_) => "polyline contour segment",
         Curve2::BSpline(_) => "B-spline contour segment",
         Curve2::Intrinsic(_) => "intrinsic contour segment",
         Curve2::Chain(_) => "arc-length chain contour segment",

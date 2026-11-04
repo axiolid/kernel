@@ -1,11 +1,14 @@
 use std::f64::consts::TAU;
 
+use axiolid_construct::contour_lower::contour_to_arc_ring;
 use axiolid_construct::extrude::extrude_profile_exact;
 use axiolid_contracts::{GeomError, Operation};
-use axiolid_core::{Tolerance, Vec2, Vec3};
-use axiolid_curve::Curve2;
+use axiolid_core::{Frame2, Interval, Point2, Tolerance, Vec2, Vec3};
+use axiolid_curve::{Circle2, Curve2, Line2, Polyline2};
 use axiolid_evaluate::{evaluate2, evaluate3};
-use axiolid_profile::{CircleProfile, Profile, RectangleProfile};
+use axiolid_profile::{
+    CircleProfile, Contour, ContourProfile, Profile, ProfileSegment, RectangleProfile,
+};
 use axiolid_surface::Surface;
 use axiolid_topology::{audit_brep, Orientation};
 
@@ -304,4 +307,259 @@ fn invalid_exact_extrusion_inputs_are_not_reclassified_as_unsupported() {
     )
     .expect_err("zero direction");
     assert!(matches!(error, GeomError::InvalidInput(_)));
+}
+
+// ----------------------------------------------------------- polylines (#389)
+
+fn pt(x: f64, y: f64) -> Point2 {
+    Point2::new(x, y)
+}
+
+/// A rectangle with coordinates that are not dyadic, so a ring vertex that
+/// was recomputed rather than copied would differ in the last bit.
+fn rect_points() -> Vec<Point2> {
+    vec![pt(0.1, 0.2), pt(2.3, 0.2), pt(2.3, 1.7), pt(0.1, 1.7)]
+}
+
+fn polyline_segment(
+    points: &[Point2],
+    closed: bool,
+    domain: (f64, f64),
+    same_sense: bool,
+) -> ProfileSegment {
+    ProfileSegment {
+        curve: Curve2::Polyline(Polyline2 {
+            points: points.to_vec(),
+            closed,
+        }),
+        domain: Interval::new(domain.0, domain.1),
+        same_sense,
+    }
+}
+
+fn line_segment(from: Point2, to: Point2) -> ProfileSegment {
+    ProfileSegment {
+        curve: Curve2::Line(Line2 {
+            origin: from,
+            direction: to - from,
+        }),
+        domain: Interval::UNIT,
+        same_sense: true,
+    }
+}
+
+fn contour_profile(segments: Vec<ProfileSegment>) -> Profile {
+    Profile::Contour(ContourProfile {
+        outer: Contour::new(segments),
+        holes: Vec::new(),
+    })
+}
+
+fn shoelace(points: &[Point2]) -> f64 {
+    let n = points.len();
+    (0..n)
+        .map(|i| points[i].perp_dot(points[(i + 1) % n]))
+        .sum::<f64>()
+        / 2.0
+}
+
+/// Extrude exactly, require a closed B-rep, and return its volume.
+fn extruded_volume(profile: &Profile, depth: f64) -> f64 {
+    let value = extrude_profile_exact(profile, Vec3::Z, depth, Tolerance::METRE)
+        .expect("the polyline contour extrudes exactly");
+    assert_complete_and_closed(&value);
+    axiolid_measure::exact_properties(&value, Tolerance::METRE)
+        .expect("measurable")
+        .signed_volume
+}
+
+fn ring_points(segments: Vec<ProfileSegment>) -> Vec<(Point2, f64)> {
+    contour_to_arc_ring(&Contour::new(segments), Tolerance::METRE)
+        .expect("lowers")
+        .vertices
+        .iter()
+        .map(|v| (v.point, v.bulge))
+        .collect()
+}
+
+fn assert_bit_equal(found: Point2, expected: Point2) {
+    assert_eq!(found.x.to_bits(), expected.x.to_bits(), "{found:?}");
+    assert_eq!(found.y.to_bits(), expected.y.to_bits(), "{found:?}");
+}
+
+#[test]
+fn an_open_polyline_and_a_closing_line_extrude_to_the_shoelace_volume() {
+    let points = rect_points();
+    let depth = 1.5;
+    let expected = shoelace(&points) * depth;
+    let volume = extruded_volume(
+        &contour_profile(vec![
+            polyline_segment(&points, false, (0.0, 3.0), true),
+            line_segment(points[3], points[0]),
+        ]),
+        depth,
+    );
+    assert!((volume - expected).abs() < 1e-12, "{volume} vs {expected}");
+}
+
+#[test]
+fn one_closed_polyline_is_a_whole_contour_of_straight_edges() {
+    let points = rect_points();
+    let segment = polyline_segment(&points, true, (0.0, 4.0), true);
+    let ring = ring_points(vec![segment.clone()]);
+    assert_eq!(ring.len(), 4);
+    for ((point, bulge), expected) in ring.iter().zip(&points) {
+        assert_bit_equal(*point, *expected);
+        assert_eq!(*bulge, 0.0);
+    }
+    let depth = 2.0;
+    let volume = extruded_volume(&contour_profile(vec![segment]), depth);
+    assert!(
+        (volume - shoelace(&points) * depth).abs() < 1e-12,
+        "{volume}"
+    );
+}
+
+#[test]
+fn a_reversed_polyline_is_the_same_solid() {
+    let points = rect_points();
+    let forward = extruded_volume(
+        &contour_profile(vec![polyline_segment(&points, true, (0.0, 4.0), true)]),
+        1.0,
+    );
+    let backward_segment = polyline_segment(&points, true, (0.0, 4.0), false);
+    let backward = extruded_volume(&contour_profile(vec![backward_segment.clone()]), 1.0);
+    assert!(
+        (forward - backward).abs() < 1e-12,
+        "{forward} vs {backward}"
+    );
+
+    // Traversed from the end: the points in reverse order, closing on the
+    // first.
+    let ring = ring_points(vec![backward_segment]);
+    let order = [0, 3, 2, 1];
+    assert_eq!(ring.len(), 4);
+    for ((point, _), index) in ring.iter().zip(order) {
+        assert_bit_equal(*point, points[index]);
+    }
+}
+
+#[test]
+fn a_partial_domain_starts_and_ends_between_vertices() {
+    let points = vec![pt(0.0, 0.0), pt(2.0, 0.0), pt(2.0, 2.0), pt(0.0, 2.0)];
+    let ring = ring_points(vec![
+        polyline_segment(&points, true, (0.5, 2.5), true),
+        line_segment(pt(1.0, 2.0), pt(1.0, 0.0)),
+    ]);
+    let expected = [pt(1.0, 0.0), pt(2.0, 0.0), pt(2.0, 2.0), pt(1.0, 2.0)];
+    assert_eq!(ring.len(), expected.len());
+    for ((point, bulge), expected) in ring.iter().zip(expected) {
+        assert_bit_equal(*point, expected);
+        assert_eq!(*bulge, 0.0);
+    }
+}
+
+#[test]
+fn a_polyline_and_an_arc_make_a_mixed_contour() {
+    // The upper half of the unit circle, then the other three sides of a
+    // rectangle below it.
+    let arch = ProfileSegment {
+        curve: Curve2::Circle(Circle2 {
+            frame: Frame2 {
+                origin: pt(0.0, 0.0),
+                x: Vec2::X,
+                y: Vec2::Y,
+            },
+            radius: 1.0,
+        }),
+        domain: Interval::new(0.0, core::f64::consts::PI),
+        same_sense: true,
+    };
+    let base = [pt(-1.0, 0.0), pt(-1.0, -1.0), pt(1.0, -1.0), pt(1.0, 0.0)];
+    let depth = 1.0;
+    let volume = extruded_volume(
+        &contour_profile(vec![arch, polyline_segment(&base, false, (0.0, 3.0), true)]),
+        depth,
+    );
+    let expected = (2.0 + core::f64::consts::FRAC_PI_2) * depth;
+    assert!((volume - expected).abs() < 1e-9, "{volume} vs {expected}");
+}
+
+#[test]
+fn a_polyline_domain_ends_at_its_last_point_and_no_further() {
+    let points = rect_points();
+    let too_far = contour_profile(vec![polyline_segment(&points, true, (0.0, 5.0), true)]);
+    let error = extrude_profile_exact(&too_far, Vec3::Z, 1.0, Tolerance::METRE)
+        .expect_err("past the closing point");
+    assert!(matches!(error, GeomError::Degenerate(_)), "{error:?}");
+}
+
+fn square_points() -> Vec<Point2> {
+    vec![pt(0.0, 0.0), pt(2.0, 0.0), pt(2.0, 2.0), pt(0.0, 2.0)]
+}
+
+#[test]
+fn a_closed_polyline_repeating_its_first_point_is_the_same_square_in_both_senses() {
+    let mut points = square_points();
+    points.push(points[0]);
+    for same_sense in [true, false] {
+        let segment = polyline_segment(&points, true, (0.0, 5.0), same_sense);
+        assert_eq!(ring_points(vec![segment.clone()]).len(), 4, "{same_sense}");
+        let volume = extruded_volume(&contour_profile(vec![segment]), 1.5);
+        assert!((volume - 6.0).abs() < 1e-12, "{same_sense}: {volume}");
+    }
+}
+
+#[test]
+fn a_backward_partial_domain_starts_below_its_first_vertex() {
+    // Opposite sense on 0.5..3.5, so from 3.5 down to 0.5: the vertices 3, 2 and 1 lie between.
+    let points = square_points();
+    let segment = polyline_segment(&points, true, (0.5, 3.5), false);
+    let closing = line_segment(pt(1.0, 0.0), pt(0.0, 1.0));
+    let ring = ring_points(vec![segment.clone(), closing.clone()]);
+    let expected = [
+        pt(0.0, 1.0),
+        pt(0.0, 2.0),
+        pt(2.0, 2.0),
+        pt(2.0, 0.0),
+        pt(1.0, 0.0),
+    ];
+    assert_eq!(ring.len(), expected.len());
+    for ((point, _), expected) in ring.iter().zip(expected) {
+        assert_bit_equal(*point, expected);
+    }
+    let volume = extruded_volume(&contour_profile(vec![segment, closing]), 1.0);
+    assert!((volume - 3.5).abs() < 1e-12, "{volume}");
+}
+
+#[test]
+fn a_domain_crossing_the_seam_ends_on_the_first_point() {
+    let points = square_points();
+    let segment = polyline_segment(&points, true, (2.5, 4.0), true);
+    let volume = extruded_volume(
+        &contour_profile(vec![segment, line_segment(pt(0.0, 0.0), pt(1.0, 2.0))]),
+        1.0,
+    );
+    assert!((volume - 1.0).abs() < 1e-12, "{volume}");
+}
+
+#[test]
+fn a_single_full_circle_contour_extrudes() {
+    let circle = ProfileSegment {
+        curve: Curve2::Circle(Circle2 {
+            frame: Frame2 {
+                origin: pt(0.0, 0.0),
+                x: Vec2::X,
+                y: Vec2::Y,
+            },
+            radius: 1.0,
+        }),
+        domain: Interval::new(0.0, core::f64::consts::TAU),
+        same_sense: true,
+    };
+    let volume = extruded_volume(&contour_profile(vec![circle]), 2.0);
+    assert!(
+        (volume - 2.0 * core::f64::consts::PI).abs() < 1e-9,
+        "{volume}"
+    );
 }

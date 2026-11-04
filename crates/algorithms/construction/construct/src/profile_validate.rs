@@ -71,12 +71,13 @@
 //! # Refused and reported
 //!
 //! Refused with a finding, checking nothing more of that contour: too few
-//! segments, a segment family the lowering refuses (ellipse, B-spline,
-//! chains, ...), a degenerate frame, an empty parameter range, more than a
-//! whole turn, and an open joint. A contour that does not lower makes the
-//! profile report only those findings, because nesting against a missing
-//! ring would be a wrong answer. TODO(#389): polyline segments are refused
-//! like the other families although they lower exactly.
+//! ring vertices (a polyline segment lowers exactly, to one vertex per
+//! polyline vertex it passes), a segment family the lowering refuses
+//! (ellipse, B-spline, chains, ...), a degenerate frame, an empty parameter
+//! range, a polyline domain outside its points, fewer than two finite
+//! polyline points, more than a whole turn, and an open joint. A contour
+//! that does not lower makes the profile report only those findings,
+//! because nesting against a missing ring would be a wrong answer.
 //!
 //! Reported, with the segments involved: a self-contact (crossing, pinch,
 //! tangency or fold-back), a shared stretch of boundary between contours, a
@@ -122,12 +123,11 @@ pub enum ProfileFinding {
     /// The profile does not lower to a contour (family or dimensions);
     /// nothing else was checked.
     NotLowered(GeomError),
-    TooFewSegments {
-        contour: ContourRef,
-        count: usize,
-    },
-    /// A segment family the exact lowering refuses (ellipse, polyline,
-    /// B-spline, ...), or an arc of more than a whole turn: `kind` names it.
+    /// The segments lower to fewer than two ring vertices (a polyline or a
+    /// full circle is a whole ring by itself); `count` is the segments.
+    TooFewSegments { contour: ContourRef, count: usize },
+    /// A segment family the exact lowering refuses (ellipse, B-spline, ...),
+    /// or an arc of more than a whole turn: `kind` names it.
     UnsupportedSegment {
         contour: ContourRef,
         segment: usize,
@@ -161,26 +161,18 @@ pub enum ProfileFinding {
         at: Point2,
     },
     /// Two contours share a stretch of boundary. `contours` ascending.
-    BoundaryOverlap {
-        contours: [ContourRef; 2],
-    },
+    BoundaryOverlap { contours: [ContourRef; 2] },
     /// Part of a hole lies outside the outer contour.
-    HoleOutsideOuter {
-        hole: usize,
-    },
+    HoleOutsideOuter { hole: usize },
     /// Contacts between contours cut the interior into separate pieces.
     /// `contours` ascending, every contour of the cut component.
-    DisconnectedInterior {
-        contours: Vec<ContourRef>,
-    },
+    DisconnectedInterior { contours: Vec<ContourRef> },
     /// A defect of the arc polygon check this version does not map to a
     /// finding of its own, such as `NestingUndecided`: nesting could not be
     /// decided, so the profile is not valid.
     Polygon(ArcPolygonDefect),
     /// Two holes' interiors meet. `holes` ascending.
-    HolesOverlap {
-        holes: [usize; 2],
-    },
+    HolesOverlap { holes: [usize; 2] },
     /// Two segments are closer than the requested clearance
     /// ([`ExactProfileValidator::validate_with`]): their distance has a
     /// local minimum strictly between zero and it away from their meeting
@@ -400,7 +392,9 @@ fn validate_contours_with(
 
 fn finding_of(contour: ContourRef, fault: ContourFault) -> ProfileFinding {
     match fault {
-        ContourFault::TooFewSegments { count } => ProfileFinding::TooFewSegments { contour, count },
+        ContourFault::TooFewSegments { count, .. } => {
+            ProfileFinding::TooFewSegments { contour, count }
+        }
         ContourFault::UnsupportedSegment { segment, kind } => ProfileFinding::UnsupportedSegment {
             contour,
             segment,

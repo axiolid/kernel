@@ -417,26 +417,116 @@ fn unsupported_segment_families_are_named() {
             kind: "elliptical contour segment",
         }]
     );
+}
 
-    let polyline = ProfileSegment {
+fn polyline(points: &[Point2], closed: bool, from: f64, to: f64) -> ProfileSegment {
+    ProfileSegment {
         curve: Curve2::Polyline(Polyline2 {
-            points: vec![p(1.0, 0.0), p(1.0, 1.0)],
-            closed: false,
+            points: points.to_vec(),
+            closed,
         }),
-        domain: Interval::UNIT,
+        domain: Interval::new(from, to),
         same_sense: true,
-    };
-    let outer = Contour::new(vec![line(p(0.0, 0.0), p(1.0, 0.0)), polyline]);
-    let report = validate(&contours(outer, vec![]));
+    }
+}
+
+const SQUARE: [(f64, f64); 4] = [(0.0, 0.0), (2.0, 0.0), (2.0, 2.0), (0.0, 2.0)];
+
+fn square_points() -> Vec<Point2> {
+    SQUARE.iter().map(|&(x, y)| p(x, y)).collect()
+}
+
+#[test]
+fn polyline_segments_lower_exactly_and_are_valid() {
+    let points = square_points();
+    // An open polyline for three sides, a line for the fourth.
+    let open = Contour::new(vec![
+        polyline(&points, false, 0.0, 3.0),
+        line(points[3], points[0]),
+    ]);
+    let report = validate(&contours(open, vec![]));
+    assert!(report.is_valid(), "{report:?}");
+
+    // One closed polyline is a whole contour by itself.
+    let closed = Contour::new(vec![polyline(&points, true, 0.0, 4.0)]);
+    let report = validate(&contours(closed, vec![]));
+    assert!(report.is_valid(), "{report:?}");
+    extrude_profile_exact(
+        &Profile::Contour(ContourProfile {
+            outer: Contour::new(vec![polyline(&points, true, 0.0, 4.0)]),
+            holes: vec![],
+        }),
+        Vec3::Z,
+        1.0,
+        tol(),
+    )
+    .expect("the exact path builds it");
+}
+
+#[test]
+fn a_closed_polyline_repeating_its_first_point_is_valid_in_both_senses() {
+    let mut points = square_points();
+    points.push(points[0]);
+    for (from, to) in [(0.0, 5.0), (5.0, 0.0)] {
+        let report = validate(&contours(
+            Contour::new(vec![polyline(&points, true, from, to)]),
+            vec![],
+        ));
+        assert!(report.is_valid(), "{from}..{to}: {report:?}");
+    }
+}
+
+#[test]
+fn a_single_full_circle_contour_is_valid() {
+    let circle = arc(p(0.0, 0.0), 1.0, 0.0, core::f64::consts::TAU);
+    let report = validate(&contours(Contour::new(vec![circle]), vec![]));
+    assert!(report.is_valid(), "{report:?}");
+}
+
+#[test]
+fn a_polyline_with_an_empty_range_or_out_of_range_domain_is_refused() {
+    let points = square_points();
+    let cases = [
+        (polyline(&points, true, 1.0, 1.0), "empty parameter range"),
+        // Off by one: a closed ring has `n` segments, so `n` is the last
+        // parameter and `n + 1` is outside.
+        (polyline(&points, true, 0.0, 5.0), "outside its points"),
+        (polyline(&points, true, -0.5, 4.0), "outside its points"),
+        // An open polyline has `n - 1` segments.
+        (polyline(&points, false, 0.0, 4.0), "outside its points"),
+        (polyline(&points[..1], false, 0.0, 1.0), "fewer than two"),
+    ];
+    for (segment, expected) in cases {
+        let report = validate(&contours(Contour::new(vec![segment]), vec![]));
+        match report.findings.as_slice() {
+            [ProfileFinding::DegenerateSegment {
+                segment: 0, reason, ..
+            }] => assert!(reason.contains(expected), "{reason}"),
+            other => panic!("{expected}: {other:?}"),
+        }
+    }
+    // The last parameter of a closed ring is accepted.
+    let ok = polyline(&points, true, 0.0, 4.0);
+    assert!(validate(&contours(Contour::new(vec![ok]), vec![])).is_valid());
+}
+
+#[test]
+fn a_self_touching_polyline_names_its_one_segment_twice() {
+    // A bow tie in one closed polyline.
+    let bow = [p(0.0, 0.0), p(2.0, 2.0), p(2.0, 0.0), p(0.0, 2.0)];
+    let report = validate(&contours(
+        Contour::new(vec![polyline(&bow, true, 0.0, 4.0)]),
+        vec![],
+    ));
     assert!(
-        matches!(
-            report.findings.as_slice(),
-            [ProfileFinding::UnsupportedSegment {
-                segment: 1,
-                kind: "polyline contour segment",
+        report.findings.iter().any(|f| matches!(
+            f,
+            ProfileFinding::SelfContact {
+                contour: ContourRef::Outer,
+                segments: [0, 0],
                 ..
-            }]
-        ),
+            }
+        )),
         "{report:?}"
     );
 }

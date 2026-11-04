@@ -100,13 +100,12 @@ Validation runs on the lowered ring, exactly, and reports what it finds.
 - Exact `crossings` on tangencies reaches big integers; cost is
   `O(n log n + k)` pairs through a box tree, not constant per edge.
 - Closeness within the tolerance but without touching is not reported
-  (#388), and polyline segments are refused like other families although
-  they lower exactly (#389).
+  (#388). Polyline segments lower exactly, one straight vertex per polyline
+  vertex (#389).
 
 **Follow-ups / risks to watch**
 
 - #388: report near-contacts closer than the linear tolerance.
-- #389: lower polyline contour segments.
 
 ## Relation to existing code
 
