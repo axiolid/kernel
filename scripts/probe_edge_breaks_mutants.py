@@ -6,13 +6,17 @@ curve has a derivative break, their exactness, and the per-piece requirement
 the edge pass keeps. `tests/edge_inversion.rs` or the modules' unit tests
 must fail on it. A build error also counts as killed.
 
-Not listed, as equivalent at test resolution:
-- only the unfinished pieces of an edge being halved, not all of them:
-  every fixture's pieces fit or fail together (a polyline's all fit at one
-  span; a circle spline's four quarters are alike), so no fixture has a
-  piece that finishes before its neighbour.
+First run: 10 / 10 killed.
+
+Not listed, as untested at test resolution (no fixture, not equivalent):
 - the segment cap counted over all pieces of an edge, not per piece: no
   fixture reaches the cap with more than one piece.
+- the merged per-piece requirement of an edge checked against the cap: no
+  fixture has faces whose per-piece maxima sum past it.
+- the Uniform arm of the requirement merge keeping the first face's count:
+  no fixture shares a pcurve edge between faces asking for different counts.
+- the midpoints of a halving taken at the plain mean of the fractions, not
+  the doubled sampling's odd fractions: they differ by an ulp.
 """
 import probe_lib
 
@@ -47,6 +51,12 @@ MUTANTS = [
     ("the certified terms of a piece are ignored", I,
      "                fits = certified.is_none_or(|worst| worst <= budget);\n",
      "                fits = certified.is_none_or(|worst| worst <= budget) || true;\n"),
+    ("an edge with more pieces than the cap allows is still cut", I,
+     "                if breaks.len() + 1 > MAX_CURVED_EDGE_SEGMENTS {\n",
+     "                if breaks.len() + 1 > usize::MAX {\n"),
+    ("every piece is halved, not only the unfinished ones", I,
+     "        for &k in &unfinished {\n            pieces[k].halve(",
+     "        for k in 0..counts.len() {\n            pieces[k].halve("),
     ("pieces are joined with their shared end twice", I,
      "        let skip = usize::from(k > 0);\n",
      "        let skip = usize::from(k > usize::MAX);\n"),

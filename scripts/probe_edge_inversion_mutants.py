@@ -41,6 +41,9 @@ added eleven: 33 / 34 on the first run, the seam cut surviving (every
 fixture's seam span is matched by an equal one elsewhere); a unit test on
 a span across a square's seam corner kills it: 34 / 34.
 
+Sampling at the edge curve's breaks (#342) moved the requirement mutant to its
+per-piece merge: 38 / 38 killed.
+
 The early off-surface exit and the overrun retry (#320) added four mutants: 38 / 38 killed.
 
 Not listed for #320, as equivalent: the model pass, run after a strict
@@ -57,6 +60,10 @@ Not listed for the edge pass, as equivalent at test resolution:
 - a planar face's bound without its samples' distance off their edge: the
   fixtures' straight edges are sampled on their segments, so the term is
   rounding.
+- the uniform requirement of an edge some use runs through a pcurve being the
+  last face's, not the largest (#342): no fixture shares such an edge between
+  faces asking for different counts. The per-piece requirement of an edge
+  without pcurves is listed.
 - the pcurve use the samples are taken through: every pcurve use must
   agree with them within the budget, and no fixture shares an edge between
   two pcurve uses that differ.
@@ -203,8 +210,8 @@ MUTANTS = [
      "    let mut rings = planar_rings(brep, face, Some((cache, &mesh.positions)))?;",
      "    let mut rings = planar_rings(brep, face, None)?;"),
     ("the last face's requirement wins, not the strictest", E,
-     "            (Self::Uniform(kept), Self::Uniform(n)) => *kept = (*kept).max(n),\n",
-     "            (Self::Uniform(kept), Self::Uniform(n)) => *kept = n,\n"),
+     "                    *kept = (*kept).max(n);\n",
+     "                    *kept = n;\n"),
     ("a planar face takes a reversed use's samples forwards", B,
      "            let (indices, _) = shared.in_direction(use_.orientation);",
      "            let (indices, _) = shared.in_direction(Orientation::Forward);"),
