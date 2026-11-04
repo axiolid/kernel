@@ -23,7 +23,7 @@ Every page here is generated from the crate itself: its manifest, its crate docu
 | [`axiolid-field`](./crates/axiolid-field) | `representation.sampled` | 0.3.3 | Frame-neutral layered spatial-field values and validated sampling configuration. |
 | [`axiolid-fixtures`](./crates/axiolid-fixtures) | `representation.fixtures` | 0.3.2 | Shared adversarial and degenerate geometry fixtures with provenance |
 | [`axiolid-linear`](./crates/axiolid-linear) | `representation.atomic` | 0.3.4 | Format-neutral line, ray, segment, and polyline representations |
-| [`axiolid-mesh`](./crates/axiolid-mesh) | `representation.discrete` | 0.3.5 | Triangle meshes: the discrete representation every backend consumes. |
+| [`axiolid-mesh`](./crates/axiolid-mesh) | `representation.discrete` | 0.3.6 | Triangle meshes: the discrete representation every backend consumes. |
 | [`axiolid-model`](./crates/axiolid-model) | `representation.graph` | 0.3.18 | Format-neutral geometry item tree. The currency between a format reader and a kernel. |
 | [`axiolid-pointcloud`](./crates/axiolid-pointcloud) | `representation.discrete` | 0.3.3 | Portable point-sampled geometry values with optional per-point channels. |
 | [`axiolid-primitive`](./crates/axiolid-primitive) | `representation.atomic` | 0.3.4 | Exact parametric primitive solids used as CSG leaves |
@@ -63,12 +63,12 @@ Every page here is generated from the crate itself: its manifest, its crate docu
 | [`axiolid-exact`](./crates/axiolid-exact) | `algorithm.reference` | 0.1.3 | Filtered exact arithmetic: interval filter, dyadic big integers, a + b*sqrt(c) |
 | [`axiolid-exact-arrangement`](./crates/axiolid-exact-arrangement) | `algorithm.planar` | 0.1.0 | Exact arrangement of straight segments on rational points, with face tracing |
 | [`axiolid-field-ops`](./crates/axiolid-field-ops) | `algorithm.sampled` | 0.3.3 | Sampling, morphology, clearance, and navigation over Axiolid layered fields. |
-| [`axiolid-heal`](./crates/axiolid-heal) | `algorithm.repair` | 0.3.3 | Explicit diagnosis and opt-in repair contracts for dirty geometry |
+| [`axiolid-heal`](./crates/axiolid-heal) | `algorithm.repair` | 0.3.4 | Explicit diagnosis and opt-in repair contracts for dirty geometry |
 | [`axiolid-hidden-lines`](./crates/axiolid-hidden-lines) | `algorithm.discrete` | 0.1.3 | Exact scalar hidden-line drawings of triangle meshes in orthographic views |
 | [`axiolid-inspect`](./crates/axiolid-inspect) | `algorithm.query` | 0.3.9 | Mesh queries: clearance, containment, ray casting, and genus |
 | [`axiolid-levelset`](./crates/axiolid-levelset) | `algorithm.sampled` | 0.3.2 | Level-set extraction: a closed manifold mesh from a sampled scalar field |
 | [`axiolid-linear-intersection`](./crates/axiolid-linear-intersection) | `algorithm.query` | 0.3.2 | Portable, deterministic intersections for linear geometry |
-| [`axiolid-measure`](./crates/axiolid-measure) | `algorithm.query` | 0.3.13 | Metric properties: area, volume, centroid, moments of inertia. |
+| [`axiolid-measure`](./crates/axiolid-measure) | `algorithm.query` | 0.3.14 | Metric properties: area, volume, centroid, moments of inertia. |
 | [`axiolid-minkowski`](./crates/axiolid-minkowski) | `algorithm.discrete` | 0.3.2 | Minkowski sum and difference of planar-faced solids |
 | [`axiolid-numeric`](./crates/axiolid-numeric) | `algorithm.numeric` | 0.1.3 | Numeric substrate: bracketed and polynomial root finding, adaptive quadrature, dense least squares, and minimisation, each with error estimates |
 | [`axiolid-nurbs`](./crates/axiolid-nurbs) | `algorithm.parametric` | 0.3.8 | General polynomial and rational B-spline analysis and transformation algorithms |

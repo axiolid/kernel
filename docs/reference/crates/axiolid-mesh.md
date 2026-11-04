@@ -8,7 +8,7 @@ Triangle meshes: the discrete representation every backend consumes.
 
 | | |
 | --- | --- |
-| Latest release | 0.3.5 (2026-10-28) |
+| Latest release | 0.3.6 (2026-11-04) |
 | crates.io | [`axiolid-mesh`](https://crates.io/crates/axiolid-mesh) |
 | Facade | [`axiolid`](./axiolid) feature `mesh` |
 | Layer | representations (`representation.discrete`) |
@@ -55,11 +55,16 @@ Default: none.
 
 ## Changes
 
-Latest release, 0.3.5 (2026-10-28):
+Latest release, 0.3.6 (2026-11-04):
 
-### Changed
+### Added
 
-- The package metadata names rheonda UG (haftungsbeschränkt) as author, and commercial
-  licences are available from rheonda UG (haftungsbeschränkt) (`LICENSE-COMMERCIAL`, ADR 0089).
+- `audit_mesh_cycle` and `try_audit_mesh_cycle` return `MeshCycleHealth`: the
+  `MeshHealth` plus the number of unbalanced edges and the first one, so a
+  mesh closed up to edge-touching shells can be told from an open one. A
+  closed oriented cycle is weaker than a closed two-manifold (#416).
+
+- The package now ships `LICENSE` and `LICENSE-COMMERCIAL` (symlinks to the
+  repository root), so the licence texts travel with the archive (#358).
 
 Full history: [`crates/representations/discrete/mesh/CHANGELOG.md`](https://github.com/axiolid/kernel/blob/main/crates/representations/discrete/mesh/CHANGELOG.md)

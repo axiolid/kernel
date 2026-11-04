@@ -3210,6 +3210,15 @@ Every publishable crate versions and publishes independently ([ADR 0067](/adr/00
 
 ## axiolid-heal
 
+### 0.3.4 - 2026-11-04
+
+### Added
+
+- `RepairAction::SplitTJunctions` and `split_t_junctions` split triangle
+  edges at vertices lying on them within tolerance, so a mesh closed up to
+  T-junctions becomes a closed oriented cycle. It adds no vertex and reports
+  the deviation it accepted and the triangles it declined to split (#416).
+
 ### 0.3.3 - 2026-11-03
 
 ### Fixed
@@ -3524,6 +3533,24 @@ Every publishable crate versions and publishes independently ([ADR 0067](/adr/00
 
 
 ## axiolid-measure
+
+### 0.3.14 - 2026-11-04
+
+### Added
+
+- `cycle_volume_properties` measures the signed volume and centroid of a mesh
+  that is a closed oriented cycle (every edge used equally often in each
+  direction), such as shells that share an edge. It is bit-identical to
+  `volume_properties` on two-manifold input and refuses anything open with
+  `CycleVolumeError` (#416).
+- `select_by_normal` and `extent_along` select the faces of a mesh whose normal
+  lies in a `NormalCone` (the tolerance's angular part is slack on the
+  half-angle) and measure their area and their extent along a direction.
+  Selecting every face reproduces `surface_properties` area bit for bit
+  (#417).
+
+- The package now ships `LICENSE` and `LICENSE-COMMERCIAL` (symlinks to the
+  repository root), so the licence texts travel with the archive (#358).
 
 ### 0.3.13 - 2026-10-28
 
@@ -3870,6 +3897,18 @@ Every publishable crate versions and publishes independently ([ADR 0067](/adr/00
 
 
 ## axiolid-mesh
+
+### 0.3.6 - 2026-11-04
+
+### Added
+
+- `audit_mesh_cycle` and `try_audit_mesh_cycle` return `MeshCycleHealth`: the
+  `MeshHealth` plus the number of unbalanced edges and the first one, so a
+  mesh closed up to edge-touching shells can be told from an open one. A
+  closed oriented cycle is weaker than a closed two-manifold (#416).
+
+- The package now ships `LICENSE` and `LICENSE-COMMERCIAL` (symlinks to the
+  repository root), so the licence texts travel with the archive (#358).
 
 ### 0.3.5 - 2026-10-28
 

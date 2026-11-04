@@ -9,6 +9,8 @@ caret rule for `0.x` versions.
 
 ## [Unreleased]
 
+## [0.3.14] - 2026-11-04
+
 ### Added
 
 - `cycle_volume_properties` measures the signed volume and centroid of a mesh

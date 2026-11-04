@@ -238,10 +238,10 @@
       "description": "Explicit diagnosis and opt-in repair contracts for dirty geometry",
       "layer": "algorithms",
       "path": "crates/algorithms/repair/heal",
-      "released": "0.3.3",
-      "released_date": "2026-11-03",
+      "released": "0.3.4",
+      "released_date": "2026-11-04",
       "role": "algorithm.repair",
-      "version": "0.3.3"
+      "version": "0.3.4"
     },
     "axiolid-hidden-lines": {
       "description": "Exact scalar hidden-line drawings of triangle meshes in orthographic views",
@@ -292,19 +292,19 @@
       "description": "Metric properties: area, volume, centroid, moments of inertia.",
       "layer": "algorithms",
       "path": "crates/algorithms/query/measure",
-      "released": "0.3.13",
-      "released_date": "2026-10-28",
+      "released": "0.3.14",
+      "released_date": "2026-11-04",
       "role": "algorithm.query",
-      "version": "0.3.13"
+      "version": "0.3.14"
     },
     "axiolid-mesh": {
       "description": "Triangle meshes: the discrete representation every backend consumes.",
       "layer": "representations",
       "path": "crates/representations/discrete/mesh",
-      "released": "0.3.5",
-      "released_date": "2026-10-28",
+      "released": "0.3.6",
+      "released_date": "2026-11-04",
       "role": "representation.discrete",
-      "version": "0.3.5"
+      "version": "0.3.6"
     },
     "axiolid-mesh-boolean-boolmesh": {
       "description": "boolmesh-backed MeshBoolean provider",

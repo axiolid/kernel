@@ -9,6 +9,8 @@ caret rule for `0.x` versions.
 
 ## [Unreleased]
 
+## [0.3.6] - 2026-11-04
+
 ### Added
 
 - `audit_mesh_cycle` and `try_audit_mesh_cycle` return `MeshCycleHealth`: the

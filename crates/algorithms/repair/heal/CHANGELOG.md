@@ -9,6 +9,8 @@ caret rule for `0.x` versions.
 
 ## [Unreleased]
 
+## [0.3.4] - 2026-11-04
+
 ### Added
 
 - `RepairAction::SplitTJunctions` and `split_t_junctions` split triangle
