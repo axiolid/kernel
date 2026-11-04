@@ -64,6 +64,29 @@ the same tolerance.
 exhaustive public types and stay untouched; every change is an addition, so
 each crate takes a patch release.
 
+## Amendment
+
+**D6. Certificate of w in {0, 1}** (#420). `axiolid-inspect` gains
+`certify_unit_winding`, `WindingError` and, for the check, reuses
+`VolumeInterval`. The prism decomposition of `overlap` needs only a closed
+oriented 2-cycle, and over the faces as given (no inward flip, which would
+change the sign of `w`) it yields both moments of the winding number:
+the integral of `w` is the signed volume, the integral of `w^2` is the
+unclamped pair sum of the mesh against itself. As `w` is an integer,
+`w^2 - w >= 2` where `w` is not 0 or 1, so the volume of that set is at
+most the winding excess `E = (int w^2 - int w) / 2 = int w(w-1)/2`. `E` is
+an upper bound on that volume and equals it where `w` is in {-1..2} (a
+triple-welded cube has `E` = 3 over a bad volume of 1); it is zero exactly
+when `w` is 0 or 1 almost everywhere. The certificate refuses a mesh that is not a closed
+oriented cycle (with the boxed audit) or not finite, takes a caller budget
+`max_excess` (finite and positive, since outward rounding can never meet 0),
+and returns the outward-rounded bracket of `E` (a `VolumeInterval` of `E`) when its upper
+end is within the budget, `Exceeds` when its lower end is over, and
+`Undecided` when the bracket straddles it. It accepts edge-touching shells
+and cavities and refuses duplicated, overlapping and inverted shells. It
+sits in `axiolid-inspect` because `axiolid-measure` cannot depend on it;
+`overlap.rs` only extracts the shared loops, so its results are unchanged.
+
 ## Alternatives considered
 
 | Option | Why not |
@@ -86,7 +109,6 @@ each crate takes a patch release.
 
 - `cycle_volume_properties` returns the winding-number integral, which equals
   the enclosed volume only for non-overlapping shells; callers who cannot
-  exclude overlap must check `self_intersections`, which skips pairs sharing a
-  vertex.
+  exclude overlap use `certify_unit_winding` (D6).
 - The ear clipping is a private copy of the one in `axiolid-mesh-compile`
   until it moves to `axiolid-mesh` (TODO(#422)).

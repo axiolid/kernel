@@ -146,8 +146,8 @@ impl std::error::Error for CycleVolumeError {}
 /// The result is the enclosed volume only when `w` is 0 or 1 everywhere,
 /// which is the contract [`volume_properties`] has always had: overlapping or
 /// duplicated shells count twice and an inverted shell subtracts. No edge
-/// audit can see that; `axiolid_heal::self_intersections` can find crossing
-/// shells, but it skips triangle pairs sharing a vertex.
+/// audit can see that; `axiolid_inspect::certify_unit_winding` certifies it
+/// (ADR 0099 D6), bounding the volume where `w` is neither 0 nor 1 by the winding excess.
 ///
 /// A T-junction leaves three unbalanced edges and is refused. Run
 /// `axiolid_heal::split_t_junctions` (or `RepairAction::SplitTJunctions`)
