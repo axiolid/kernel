@@ -377,13 +377,13 @@ fn distance_of(readings: impl IntoIterator<Item = (Scalar, Scalar)>, extent: Sca
 
 /// Whether the mesh has more connected components than the exact result
 /// has shells (#392). One-sided: touching shells may share a component.
-fn extra_shells(exact: &ExactBRep, mesh: &TriMesh) -> bool {
+pub(crate) fn extra_shells(exact: &ExactBRep, mesh: &TriMesh) -> bool {
     geometric_components(mesh) > exact.topology().shells().len()
 }
 
 /// The mesh's components with bit-equal positions as one vertex (-0.0 as
 /// 0.0), as the provider's output is not welded.
-fn geometric_components(mesh: &TriMesh) -> usize {
+pub(crate) fn geometric_components(mesh: &TriMesh) -> usize {
     let mut ids: BTreeMap<[u64; 3], u32> = BTreeMap::new();
     let map: Vec<u32> = mesh
         .positions

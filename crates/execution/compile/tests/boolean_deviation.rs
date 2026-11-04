@@ -360,6 +360,30 @@ fn assert_measured(
     (bound, worst)
 }
 
+/// The exact compiler decided the boolean (#423, ADR 0098): the report
+/// carries its tessellation's certified bound under the operator's
+/// referee detail, and nothing unbounded. Returns the bound.
+fn assert_refereed(name: &str, report: &DeviationReport, operator: &str) -> Scalar {
+    assert!(
+        report
+            .contributions
+            .iter()
+            .all(|c| matches!(c.bound, DeviationBound::Certified(_))),
+        "{name}: {report:?}"
+    );
+    let prefix = format!("tessellated from the exact compiler's {operator}, ");
+    assert_eq!(
+        report
+            .contributions
+            .iter()
+            .filter(|c| c.detail.starts_with(&prefix))
+            .count(),
+        1,
+        "{name}: {report:?}"
+    );
+    report.bound.unwrap_or_else(|| panic!("{name}: {report:?}"))
+}
+
 /// A wall `6 x 0.3 x 3` with a round window of radius `0.4` cut across it,
 /// both under a building placement.
 fn wall_with_round_window(g: &mut Graph) -> NodeId {
@@ -429,18 +453,14 @@ fn an_all_planar_boolean_is_bounded_near_rounding() {
     ] {
         let options = options(1e-3);
         let case = compile(|g| wall_with_two_doors(g, world), &options);
-        // Placed, the mesh keeps the cut-out door slug as a shell of its
-        // own (#423), which the one-sided distance cannot see: unbounded
-        // by name (#392).
+        // Placed, the doors' faces meet the wall's only up to rounding, and
+        // the mesh boolean would keep a cut-out door slug as a shell of its
+        // own (#423): the exact compiler decides, and the mesh is its
+        // tessellation.
         if name == "two doors, placed" {
-            let report = &case.3;
-            assert!(
-                report.contributions.iter().any(|c| matches!(
-                    c.bound,
-                    DeviationBound::Unbounded(reason) if reason.contains("more shells")
-                )),
-                "{report:?}"
-            );
+            let bound = assert_refereed(name, &case.3, "difference");
+            assert!(bound <= 1e-3, "{name}: {bound:e}");
+            assert_eq!(axiolid_mesh::component_count(&case.2), 1, "{name}");
             continue;
         }
         let (bound, _) = assert_measured(name, case, &options, Scalar::INFINITY);
@@ -511,6 +531,8 @@ fn an_i_beam_with_a_hole_touching_its_flange_is_certified_against_its_exact_resu
     let budget = 1e-3;
     let options = options(budget);
     let case = compile(beam_with_a_hole_touching_its_flange, &options);
+    // A hole within the tolerance of the flange leaves one shell: the mesh
+    // stands and is measured, not refereed (ADR 0096, D7).
     let (bound, _) = assert_measured("I-beam, hole touching the flange", case, &options, 2.0);
     assert!(bound <= 2.0 * budget, "{bound}");
 }
@@ -1029,7 +1051,8 @@ fn the_detail_says_when_the_bound_holds_for_the_given_operands() {
         );
     }
     // Turned from sines and cosines under a building placement, the caps
-    // meet the faces only up to rounding: read within tolerance.
+    // meet the faces only up to rounding: read within tolerance. The mesh
+    // keeps one shell, so it stands and is measured.
     assert_eq!(
         flush_window_detail(
             building(),

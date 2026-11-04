@@ -9,14 +9,6 @@ caret rule for `0.x` versions.
 
 ## [Unreleased]
 
-### Changed
-
-- A measured boolean is `Unbounded` ("boolean: the mesh has more shells
-  than the exact result") when its mesh has more connected components,
-  with bit-equal positions taken as one vertex, than the exact result has
-  shells (#392). The measured distance is one-sided and cannot see an extra
-  shell; fewer components are no refusal.
-
 ## [0.3.44] - 2026-11-03
 
 ### Added
@@ -64,6 +56,9 @@ caret rule for `0.x` versions.
   (#421): the details under which a boolean measured against its exact
   result names the furthest any kind of reading within tolerance moved a
   feature, and the report's rounding floor.
+- `deviation::REFEREED_DIFFERENCE`, `REFEREED_DIFFERENCE_EXACT`,
+  `REFEREED_INTERSECTION` and `REFEREED_INTERSECTION_EXACT` (#423): the
+  details of a difference or an intersection the exact compiler decided.
 
 ### Changed
 
@@ -115,6 +110,24 @@ caret rule for `0.x` versions.
   at a tight budget (a closed square compiles at 1e-4 and 1e-6 with its
   four corners and its vertex, and a zero bound). An edge some use runs
   through a p-curve is sampled whole, uniformly, as before.
+- The exact referee decides a difference or an intersection whose mesh
+  holds a void the exact result lacks, bounded by skins within rounding of
+  each other (#423, ADR 0098): a flush door cutter placed with its wall no
+  longer leaves the cut-out void. It fires only when faces of the operands
+  nearly share a plane within the linear tolerance, the mesh has more
+  than one component and more shells than the exact result, and the exact
+  compiler read the operands' faces no further than their rounding. The
+  mesh is then the tessellation of the exact result, accepted only as a
+  closed solid, or empty, with no pinch and no two bodies within the
+  tolerance. Otherwise the mesh result stands and a measured deviation
+  names the extra shell as unbounded (#392). A skin or void thinner than
+  the tolerance but above rounding stays as authored (ADR 0096, D7, #291),
+  and a half-space tool is not refereed. Unions keep their trigger.
+- A measured boolean is `Unbounded` ("boolean: the mesh has more shells
+  than the exact result") when its mesh has more connected components,
+  with bit-equal positions taken as one vertex, than the exact result has
+  shells (#392). The measured distance is one-sided and cannot see an extra
+  shell; fewer components are no refusal.
 
 ### Fixed
 

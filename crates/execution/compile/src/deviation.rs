@@ -253,7 +253,9 @@ use axiolid_core::{Point3, Scalar, Transform3};
 mod boolean;
 mod mitre;
 mod paths;
-pub(crate) use boolean::{emitted_booleans, of_boolean, with_readings};
+pub(crate) use boolean::{
+    emitted_booleans, extra_shells, geometric_components, of_boolean, with_readings,
+};
 pub(crate) use paths::{
     of_curve_bounded, of_primitive, of_sectioned_surface, of_solid, stationed_spine,
 };
@@ -338,6 +340,28 @@ pub const REFEREED_UNION: &str =
 /// is the tessellation of the exact union of the operands as given.
 pub const REFEREED_UNION_EXACT: &str =
     "tessellated from the exact compiler's union, the exact union of the given operands";
+
+/// [`REFEREED_UNION`] for a difference whose mesh held a void the exact
+/// result lacks, bounded by skins within rounding where the cutter met its
+/// host, and which the exact compiler decided (#423, ADR 0098). A
+/// difference with no extra shell, or whose faces the exact compiler read
+/// further than rounding, is never refereed: a skin or void thinner than
+/// the tolerance stays as authored (ADR 0096, D7).
+pub const REFEREED_DIFFERENCE: &str =
+    "tessellated from the exact compiler's difference, operands within tolerance";
+
+/// [`REFEREED_DIFFERENCE`] when no decision within the tolerance fired.
+pub const REFEREED_DIFFERENCE_EXACT: &str =
+    "tessellated from the exact compiler's difference, the exact difference of the given operands";
+
+/// [`REFEREED_DIFFERENCE`] for an intersection, on the same trigger: its
+/// mesh held a shell the exact result lacks (#423, ADR 0098).
+pub const REFEREED_INTERSECTION: &str =
+    "tessellated from the exact compiler's intersection, operands within tolerance";
+
+/// [`REFEREED_INTERSECTION`] when no decision within the tolerance fired.
+pub const REFEREED_INTERSECTION_EXACT: &str =
+    "tessellated from the exact compiler's intersection, the exact intersection of the given operands";
 
 /// The [`DeviationContribution::detail`] of [`DeviationPath::Placement`]:
 /// the rounding of applying an instance's transform to its source's

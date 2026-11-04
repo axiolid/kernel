@@ -153,3 +153,63 @@ box and dowel, a patch with reversed spans, an uncertified family),
   (`build_boolean`, `boolean_of`, `cut`), `src/brep.rs` (`tessellate_exact`),
   `src/brep/view.rs` (`from_exact`), `src/deviation.rs`.
 - `crates/algorithms/query/inspect/src/coplanar.rs`.
+
+## Amendment 2026-11-04: the referee decides differences and intersections too (#423)
+
+This lifts the union-only scope of [ADR 0096](./0096-a-union-decides-operand-contact-at-the-linear-tolerance.md)
+D7 for one defect, and keeps the rest of D7: a skin thinner than the
+tolerance in a difference or an intersection stays as authored (#291).
+
+**Why.** A door cutter as thick as its wall, placed with the wall under a
+building placement, meets the wall's faces up to rounding. The mesh boolean,
+which has no tolerance, returned the wall with the opening and a closed
+void bounded by skins a rounding thick (the cut-out slug): a shell the exact
+result lacks. The snap acts on axis-aligned planes only, so it could not
+close the turn. An authored void bounded by skins `e` thick, with `e`
+thinner than the tolerance but far above rounding, has the same shell
+count, so the shell count alone cannot tell the two apart; the size of the
+exact compiler's reading can (about `1e-15` for the door, `e` for the
+authored void).
+
+**Decision.**
+
+- The trigger for a difference or an intersection is narrower than the
+  union's. Faces of the operands nearly share a plane within the linear
+  tolerance (`axiolid_inspect::near_coplanar`), and the mesh has more than
+  one component. Then the referee compiles the node exactly and decides
+  only if the mesh has more shells than the exact result (`extra_shells`,
+  the guard of #392) and the exact compiler's reading of the operands'
+  faces is within the rounding reach (`crate::snap::reach`, through
+  `referee::within_reach`). Near contact alone never calls the referee,
+  and a reading beyond rounding is an authored thin feature, which stays.
+  A pinched difference or intersection keeps its refusal: there is no mesh
+  result to hold a void. Unions keep the trigger above.
+- The cheap conditions come first, as the exact compile of the whole
+  subtree is dear: a chain of flush openings compiled it once per cut.
+- The referee compiles the boolean node exactly and tessellates it. It
+  accepts the result only as a closed solid, or empty, with no pinch and no
+  two bodies within the tolerance (`contact::unmerged`); the union's
+  unmerged-contact guard on the mesh cut itself stays union-only. Otherwise
+  the mesh result stands, and the measured deviation reports the extra shell
+  as `Unbounded` by name (#392): never worse than the mesh path. The
+  authored void and a detached sliver are reported so, the skins lying up to
+  the wall's thickness from the exact result.
+- The deviation mirrors the union's, under details naming the operator
+  (`REFEREED_DIFFERENCE`, `REFEREED_INTERSECTION` and their `_EXACT` forms).
+  The operands' channels are `Dropped(ProviderLimitation)`.
+- A half-space tool, clipped to the subject and never a node of its own, is
+  not refereed.
+
+**Consequence.** A flush opening in a placed wall leaves no void, as before
+the mesh path gained it, and the report is certified. An opening whose caps
+lie a few readings inside the wall (`coincident_wall_openings`, `e > 0`) is
+an authored void: it stays, and its report is unbounded by name.
+
+**Tests.** `tests/exact_difference_referee.rs` (the placed flush door; an
+authored void that survives, in the wall's frame and in a shared one; a
+sliver; a half-space tool; sixteen flush openings against a time guard; an
+intersection in near contact with one shell; a refused referee), the
+`referee` unit test (the extra-shell gate, an intersection),
+`tests/coincident_wall_openings.rs`, and
+`scripts/probe_exact_union_referee_mutants.py` (the operator gate, the
+half-space guard, the trigger, the reading gate, the component check).

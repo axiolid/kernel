@@ -943,8 +943,8 @@ impl<B: MeshBoolean> ReferenceMeshCompiler<B> {
     /// worse: where it is refused, for any reason (the unmerged-contact
     /// guard included), the operands are cut in the world frame as before.
     ///
-    /// A union the world-frame mesh cut cannot settle is decided by the
-    /// exact compiler (#391, [`crate::referee`]): when faces of its operands
+    /// A boolean the world-frame mesh cut cannot settle is decided by the
+    /// exact compiler (#391, #423, [`crate::referee`]): when faces of its operands
     /// nearly share a plane within the linear tolerance, or when the cut is
     /// refused as a pinch or as unmerged contact. The referee is never
     /// worse than the mesh path: where it refuses, a valid mesh result is
@@ -993,19 +993,22 @@ impl<B: MeshBoolean> ReferenceMeshCompiler<B> {
             options,
             budget.placed,
         );
-        if operator != axiolid_core::BooleanOperator::Union {
-            return cut
-                .map(|cut| (cut.built, Decided::Mesh))
-                .map_err(CutRefusal::into_error);
-        }
-        // A union the mesh cut cannot settle is decided by the exact
-        // compiler (#391, ADR 0098). It is never worse than the mesh path:
+        // A boolean the mesh cut cannot settle is decided by the exact
+        // compiler (#391, #423, ADR 0098). It is never worse than the mesh path:
         // where the referee refuses, an unsettled but valid mesh result is
         // returned as before, and a contact refusal keeps its message and
         // names the referee's reason.
-        let referee = |reason: &mut Option<String>| {
+        let referee = |reason: &mut Option<String>,
+                       against: Option<crate::referee::Against<'_>>| {
+            // A half-space is clipped to the subject here and never built as
+            // a node of its own: there is nothing to compile exactly beside
+            // it, so the mesh result stands.
+            if bounded_tool.is_some() {
+                *reason = Some("the tool is a half-space clipped to the subject".to_owned());
+                return Ok(None);
+            }
             let tool = self.cached(cache, right, budget)?;
-            match crate::referee::union(graph, id, options, subject, tool) {
+            match crate::referee::boolean(graph, id, operator, options, (subject, tool), against) {
                 Ok(built) => Ok::<_, GeomError>(Some(built)),
                 Err(why) => {
                     *reason = Some(why);
@@ -1016,11 +1019,31 @@ impl<B: MeshBoolean> ReferenceMeshCompiler<B> {
         let mut reason = None;
         match cut {
             Ok(cut) if !cut.unsettled => Ok((cut.built, Decided::Mesh)),
-            Ok(cut) => Ok(match referee(&mut reason)? {
-                Some(built) => (built, Decided::Referee),
-                None => (cut.built, Decided::Mesh),
-            }),
-            Err(CutRefusal::Contact(error)) => match referee(&mut reason)? {
+            Ok(cut) => Ok(
+                match referee(
+                    &mut reason,
+                    (operator != axiolid_core::BooleanOperator::Union).then(|| {
+                        crate::referee::Against {
+                            mesh: &cut.built.mesh,
+                            reach: crate::snap::reach(
+                                &subject.mesh,
+                                tool,
+                                options.tolerance(),
+                                budget.placed,
+                            ),
+                        }
+                    }),
+                )? {
+                    Some(built) => (built, Decided::Referee),
+                    None => (cut.built, Decided::Mesh),
+                },
+            ),
+            // A pinched difference or an intersection has no mesh result to
+            // hold a void: its refusal stands (ADR 0096, D7).
+            Err(CutRefusal::Contact(error)) if operator != axiolid_core::BooleanOperator::Union => {
+                Err(error)
+            }
+            Err(CutRefusal::Contact(error)) => match referee(&mut reason, None)? {
                 Some(built) => Ok((built, Decided::Referee)),
                 None => Err(match error {
                     GeomError::Degenerate(text) => GeomError::Degenerate(format!(
@@ -1239,8 +1262,15 @@ impl<B: MeshBoolean> ReferenceMeshCompiler<B> {
             .filter(|_| snapped_pair)
             .unwrap_or(tool);
         let eps = options.tolerance().linear();
-        let unsettled = operator == axiolid_core::BooleanOperator::Union
-            && eps > 0.0
+        // Near contact calls the referee. A union is decided by the exact
+        // compiler then; a difference or an intersection only where its mesh
+        // holds a shell the exact result lacks (#423), as a skin thinner
+        // than the tolerance stays as authored (ADR 0096, D7, #291).
+        // The cheap conditions come first: the exact compile of the whole
+        // subtree is dear, and a mesh of one component holds no void.
+        let unsettled = eps > 0.0
+            && (operator == axiolid_core::BooleanOperator::Union
+                || crate::deviation::geometric_components(&outcome.mesh) > 1)
             && axiolid_inspect::near_coplanar(cut_subject, cut_tool, eps).is_some();
         let mut built = channels::after_boolean(
             outcome.mesh,

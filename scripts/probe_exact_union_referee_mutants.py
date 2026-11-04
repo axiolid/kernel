@@ -1,4 +1,4 @@
-"""Mutation probe for the exact referee of unions (#391, ADR 0098).
+"""Mutation probe for the exact referee of booleans (#391, #423, ADR 0098).
 
 Each mutant reintroduces a way the referee could fail -- never asked, asked
 always or for contact it need not decide, its refusal turned into the
@@ -7,7 +7,9 @@ reading dropped, its channels kept, its result measured again, the exact
 B-rep read by the graph's domains or against its intervals' direction, and
 `near_coplanar` blind to the exactness test, to one of the two planes or to
 the distance -- and must turn a test red. `exact_union_referee.rs` checks
-the routing and the reports, `union_contact.rs` the flipped refusal, the
+the routing and the reports of unions, `exact_difference_referee.rs` those
+of differences and intersections (their trigger: an extra shell, never near
+contact alone), `union_contact.rs` the flipped refusal, the
 `referee` unit test the channels, `brep/exact_tests.rs` the tessellator,
 and the `axiolid-inspect` tests `near_coplanar`. `--only NAME` runs only the
 mutants whose names contain NAME.
@@ -16,7 +18,10 @@ Not probed: the referee's closed-solid and unmerged-contact guards. They are
 defence in depth: the exact compiler reads contact at the same tolerance the
 guard measures, so no exact union that tessellates open, or holds two bodies
 within the tolerance, exists to reach them. The pinch guard is probed: an
-edge contact is exactly what it refuses.
+edge contact is exactly what it refuses. Nor is the extra-shell guard
+of a difference on its own: the reading gate refuses every fixture with an
+authored void, and no fixture holds two components, near contact and no
+extra shell together.
 """
 import probe_lib
 
@@ -27,6 +32,7 @@ VIEW = "crates/execution/compile/src/brep/view.rs"
 COPLANAR = "crates/algorithms/query/inspect/src/coplanar.rs"
 
 E = ["-p", "axiolid-mesh-compile", "--test", "exact_union_referee"]
+D = ["-p", "axiolid-mesh-compile", "--test", "exact_difference_referee"]
 U = ["-p", "axiolid-mesh-compile", "--test", "union_contact"]
 L = ["-p", "axiolid-mesh-compile", "--lib"]
 I = ["-p", "axiolid-inspect", "--test", "coplanar"]
@@ -37,13 +43,37 @@ MUTANTS = [
      "with_readings(detail, tessellation.worst_bound(), &Default::default())",
      [E]),
     ("referee never asked", COMPILER,
-     "        if operator != axiolid_core::BooleanOperator::Union {\n            return cut",
-     "        if true {\n            return cut",
-     [E, U]),
+     "            if bounded_tool.is_some() {",
+     "            if true {",
+     [E, U, D]),
+    ("referee decides unions only", COMPILER,
+     "            if bounded_tool.is_some() {",
+     "            if bounded_tool.is_some() || operator != axiolid_core::BooleanOperator::Union {",
+     [D]),
+    ("referee is asked of a half-space tool", COMPILER,
+     "            if bounded_tool.is_some() {",
+     "            if false && bounded_tool.is_some() {",
+     [D]),
+    ("a difference is refereed whatever its reading", REFEREE,
+     "        if !within_reach(report.linear(), against.reach) {",
+     "        if false && !within_reach(report.linear(), against.reach) {",
+     [D]),
+    ("a difference with one component is compiled exactly", COMPILER,
+     "                || crate::deviation::geometric_components(&outcome.mesh) > 1)",
+     "                || crate::deviation::geometric_components(&outcome.mesh) > 0)",
+     [D]),
+    ("a difference is never refereed", REFEREE,
+     "        if !crate::deviation::extra_shells(&exact, against.mesh) {",
+     "        if true {",
+     [D]),
+    ("referee swaps the difference's and the intersection's details", REFEREE,
+     "        BooleanOperator::Difference => (REFEREED_DIFFERENCE, REFEREED_DIFFERENCE_EXACT),",
+     "        BooleanOperator::Difference => (REFEREED_INTERSECTION, REFEREED_INTERSECTION_EXACT),",
+     [D]),
     ("unsettled contact never read", COMPILER,
      "            && axiolid_inspect::near_coplanar(cut_subject, cut_tool, eps).is_some();",
      "            && false;",
-     [E]),
+     [E, D]),
     ("every union is unsettled", COMPILER,
      "            && axiolid_inspect::near_coplanar(cut_subject, cut_tool, eps).is_some();",
      "            && (axiolid_inspect::near_coplanar(cut_subject, cut_tool, eps).is_some() || true);",
@@ -57,7 +87,7 @@ MUTANTS = [
      "            if false && !crate::frame::shared_linear(a, b) {",
      [E]),
     ("contact refusals never reach the referee", COMPILER,
-     "            Err(CutRefusal::Contact(error)) => match referee(&mut reason)? {",
+     "            Err(CutRefusal::Contact(error)) => match referee(&mut reason, None)? {",
      "            Err(CutRefusal::Contact(error)) => match { let _ = &referee; None::<Built> } {",
      [E, U]),
     ("a refused referee turns a valid mesh result into an error", COMPILER,
