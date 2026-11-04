@@ -23,6 +23,7 @@ use std::f64::consts::{FRAC_PI_2, PI};
 use std::time::Instant;
 
 use axiolid_brep::ExactBRep;
+use axiolid_brep_boolean::ToleranceDecisionKind;
 use axiolid_contracts::ExecutionOptions;
 use axiolid_core::{
     BooleanOperator, Frame3, Plane3, Point2, Point3, Scalar, Tolerance, Transform2, Transform3,
@@ -33,7 +34,9 @@ use axiolid_exact_compile_contract::ExactCompiler;
 use axiolid_measure::FaceDomain;
 use axiolid_mesh::TriMesh;
 use axiolid_mesh_boolean_boolmesh::BoolmeshBoolean;
-use axiolid_mesh_compile::deviation::{COINCIDENT_OPERANDS, SNAPPED_OPERANDS};
+use axiolid_mesh_compile::deviation::{
+    BOOLEAN_ROUNDING_FLOOR, COINCIDENT_OPERANDS, SNAPPED_OPERANDS, TOLERANCE_READINGS,
+};
 use axiolid_mesh_compile::{
     DeviationBound, DeviationContribution, DeviationPath, DeviationReport, ReferenceExactCompiler,
     ReferenceMeshCompiler,
@@ -266,6 +269,11 @@ fn exact_samples(exact: &ExactBRep, n: usize) -> Vec<Point3> {
     out
 }
 
+/// What an all-planar boolean's bound stays within: its measurement at
+/// rounding, `1e-11`, plus the report's rounding floor (#421), about
+/// `6e-11` at these walls' extent.
+const NEAR_ROUNDING: Scalar = 1e-10;
+
 /// Assert the report is certified, measured against the exact result, and
 /// that no exact sample lies further from the mesh than it says. Returns
 /// `(reported, measured)`.
@@ -280,10 +288,16 @@ fn assert_measured(
     // an operand (#324), within the tolerance; a union's operands snapped
     // onto each other within it name the move of a vertex, at most
     // `sqrt 3` times that (#357); the rest is the boolean's own measurement.
-    let (named, measured): (Vec<&DeviationContribution>, Vec<_>) = report
-        .contributions
-        .iter()
-        .partition(|c| c.detail == COINCIDENT_OPERANDS || c.detail == SNAPPED_OPERANDS);
+    let (named, measured): (Vec<&DeviationContribution>, Vec<_>) =
+        report.contributions.iter().partition(|c| {
+            [
+                COINCIDENT_OPERANDS,
+                SNAPPED_OPERANDS,
+                TOLERANCE_READINGS,
+                BOOLEAN_ROUNDING_FLOOR,
+            ]
+            .contains(&c.detail)
+        });
     for c in &named {
         let eps = options.tolerance().linear();
         let reach = if c.detail == SNAPPED_OPERANDS {
@@ -309,6 +323,14 @@ fn assert_measured(
     let DeviationBound::Certified(bound) = contribution.bound else {
         panic!("{name}: expected a certified bound, got {report:?}");
     };
+    // The measurement is widened by the readings and the rounding floor
+    // (#421): their sum is below it, and it is the report's bound.
+    let readings: Scalar = named
+        .iter()
+        .filter(|c| [TOLERANCE_READINGS, BOOLEAN_ROUNDING_FLOOR].contains(&c.detail))
+        .filter_map(|c| c.bound.value())
+        .sum();
+    assert!(bound >= readings, "{name}: {bound:e} below {readings:e}");
     assert_eq!(report.bound, Some(bound));
     let exact = ReferenceExactCompiler::new()
         .compile_exact(&graph, root, options)
@@ -408,7 +430,7 @@ fn an_all_planar_boolean_is_bounded_near_rounding() {
         let options = options(1e-3);
         let case = compile(|g| wall_with_two_doors(g, world), &options);
         let (bound, _) = assert_measured(name, case, &options, Scalar::INFINITY);
-        assert!(bound <= 1e-11, "{name}: {bound:e}");
+        assert!(bound <= NEAR_ROUNDING, "{name}: {bound:e}");
     }
 }
 
@@ -721,7 +743,7 @@ fn two_overlapping_walls_united_are_certified_against_their_exact_result() {
         &options,
     );
     let (bound, _) = assert_measured("walls union", case, &options, Scalar::INFINITY);
-    assert!(bound <= 1e-11, "{bound:e}");
+    assert!(bound <= NEAR_ROUNDING, "{bound:e}");
 }
 
 #[test]
@@ -732,7 +754,7 @@ fn two_overlapping_walls_intersected_are_certified_against_their_exact_result() 
         &options,
     );
     let (bound, _) = assert_measured("walls intersection", case, &options, Scalar::INFINITY);
-    assert!(bound <= 1e-11, "{bound:e}");
+    assert!(bound <= NEAR_ROUNDING, "{bound:e}");
 }
 
 #[test]
@@ -743,7 +765,7 @@ fn two_disjoint_walls_united_are_certified_against_their_exact_result() {
         &options,
     );
     let (bound, _) = assert_measured("walls disjoint union", case, &options, Scalar::INFINITY);
-    assert!(bound <= 1e-11, "{bound:e}");
+    assert!(bound <= NEAR_ROUNDING, "{bound:e}");
 }
 
 #[test]
@@ -1001,5 +1023,110 @@ fn the_detail_says_when_the_bound_holds_for_the_given_operands() {
             Tolerance::METRE
         ),
         "measured against the exact compiler's result, operands within tolerance"
+    );
+}
+
+#[test]
+fn every_reading_within_tolerance_is_named_not_only_coincident_supports() {
+    // The round window's cylinder meets the wall's faces perpendicular to
+    // its axis within the angular tolerance (#421): a reading that is no
+    // coincident supports'.
+    let options = options(1e-3);
+    let mut g = Graph(GeometryGraphBuilder::new());
+    let root = wall_with_round_window(&mut g);
+    let graph = g.0.finish(vec![root]).expect("a valid graph");
+    let (_, readings) = ReferenceExactCompiler::new()
+        .compile_exact_with_report(&graph, root, &options)
+        .expect("exact at a micrometre");
+    let reading = |kind| {
+        readings
+            .decisions()
+            .iter()
+            .find(|d| d.kind == kind)
+            .map_or(0.0, |d| d.linear)
+    };
+    let perpendicular = reading(ToleranceDecisionKind::PlanePerpendicularToAxis);
+    let coincident = reading(ToleranceDecisionKind::CoincidentSupports);
+    assert!(
+        perpendicular > 0.0 && perpendicular > coincident,
+        "{readings:?}"
+    );
+    let (_, _, _, report, _) = compile(wall_with_round_window, &options);
+    let named = |detail| {
+        report
+            .contributions
+            .iter()
+            .find(|c| c.detail == detail)
+            .map(|c| c.bound)
+    };
+    assert_eq!(
+        named(TOLERANCE_READINGS),
+        Some(DeviationBound::Certified(readings.linear())),
+        "{report:?}"
+    );
+    assert!(readings.linear() >= perpendicular);
+    assert_eq!(
+        named(BOOLEAN_ROUNDING_FLOOR),
+        Some(DeviationBound::Certified(readings.rounding_floor())),
+        "{report:?}"
+    );
+    // The coincident supports keep their own, smaller, name.
+    match named(COINCIDENT_OPERANDS) {
+        None => assert_eq!(coincident, 0.0),
+        Some(DeviationBound::Certified(moved)) => assert_eq!(moved, coincident),
+        other => panic!("{other:?}"),
+    }
+    // The boolean's own bound is the sum, not the worst: it covers the
+    // boolean of the given operands (#421).
+    let (Some(DeviationBound::Certified(reading)), Some(DeviationBound::Certified(floor))) =
+        (named(TOLERANCE_READINGS), named(BOOLEAN_ROUNDING_FLOOR))
+    else {
+        panic!("{report:?}");
+    };
+    let bound = report.bound.expect("certified");
+    assert!(bound >= reading + floor, "{bound:e} {reading:e} {floor:e}");
+}
+
+#[test]
+fn a_boolean_whose_merged_points_moved_further_than_its_coincident_supports_is_covered() {
+    // The second wall lies `3e-8` above the first: every face pair of the
+    // two walls' tops and bottoms is read as one surface, and the cuts
+    // along them as merged points, a little further (#421).
+    let options = options(1e-3);
+    let build = |g: &mut Graph| two_walls(g, Vec3::new(1.5, 1.8, 3e-8), BooleanOperator::Union);
+    let mut g = Graph(GeometryGraphBuilder::new());
+    let root = build(&mut g);
+    let graph = g.0.finish(vec![root]).expect("a valid graph");
+    let (_, readings) = ReferenceExactCompiler::new()
+        .compile_exact_with_report(&graph, root, &options)
+        .expect("exact");
+    let reading = |kind| {
+        readings
+            .decisions()
+            .iter()
+            .find(|d| d.kind == kind)
+            .map_or(0.0, |d| d.linear)
+    };
+    let merged = reading(ToleranceDecisionKind::MergedPoints);
+    let coincident = reading(ToleranceDecisionKind::CoincidentSupports);
+    assert!(merged > coincident && coincident > 0.0, "{readings:?}");
+    let case = compile(build, &options);
+    let report = case.3.clone();
+    let (bound, _) = assert_measured("walls, 3e-8 apart", case, &options, Scalar::INFINITY);
+    // The bound covers the furthest reading, merged points' included, on
+    // top of the measurement and the floor.
+    assert!(
+        bound >= merged + readings.rounding_floor(),
+        "{bound:e} {merged:e}"
+    );
+    let named = report
+        .contributions
+        .iter()
+        .find(|c| c.detail == TOLERANCE_READINGS)
+        .map(|c| c.bound);
+    assert_eq!(
+        named,
+        Some(DeviationBound::Certified(readings.linear())),
+        "{report:?}"
     );
 }

@@ -117,7 +117,8 @@
 //! tolerance; only a larger residue is a decision within tolerance. That
 //! rounding floor is [`BooleanReport::rounding_floor`] (#244):
 //! [`ROUNDING_FACTOR`] times [`BooleanReport::extent`], which defines the
-//! extent exactly.
+//! extent exactly, plus the move of an angular residue of that factor
+//! (radians) over the same extent.
 //!
 //! **Guarantee.** [`boolean_with_report`] returns a [`BooleanReport`] of the
 //! within-tolerance decisions that fired, by kind, with the furthest each

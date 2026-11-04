@@ -24,17 +24,13 @@
 //! Mesh operands are not refereed: the exact compiler refuses them, and
 //! flattening them is reserved for the deviation report (ADR 0080, #266).
 
-use axiolid_brep_boolean::ToleranceDecisionKind;
 use axiolid_contracts::ExecutionOptions;
 use axiolid_mesh::{AttributeFate, DropReason};
 use axiolid_mesh_compile_contract::MeshClosure;
 use axiolid_model::{GeometryGraph, NodeId};
 
 use crate::channels::{self, Built};
-use crate::deviation::{
-    Deviation, DeviationBound, DeviationPath, COINCIDENT_OPERANDS, REFEREED_UNION,
-    REFEREED_UNION_EXACT,
-};
+use crate::deviation::{with_readings, REFEREED_UNION, REFEREED_UNION_EXACT};
 use crate::ReferenceExactCompiler;
 
 /// The union node `id` of `graph`, compiled exactly and tessellated, or
@@ -80,19 +76,7 @@ pub(crate) fn union(
     } else {
         REFEREED_UNION
     };
-    let mut deviation = Deviation::one(DeviationPath::Boolean, detail, tessellation.worst_bound());
-    if let Some(moved) = report
-        .decisions()
-        .iter()
-        .find(|decision| decision.kind == ToleranceDecisionKind::CoincidentSupports)
-        .map(|decision| decision.linear)
-    {
-        deviation.add(
-            DeviationPath::Boolean,
-            COINCIDENT_OPERANDS,
-            DeviationBound::Certified(moved),
-        );
-    }
+    let mut deviation = with_readings(detail, tessellation.worst_bound(), &report);
     deviation.carry_perturbations(&subject.deviation);
     deviation.carry_perturbations(&tool.deviation);
     built.deviation = deviation;

@@ -269,7 +269,10 @@ fn the_report_carries_the_rounding_floor_of_its_operands() {
             );
             assert!(report.is_exact(), "{report:?}");
             assert_eq!(report.extent(), extent, "{report:?}");
-            assert_eq!(report.rounding_floor(), ROUNDING_FACTOR * extent);
+            assert_eq!(
+                report.rounding_floor(),
+                ROUNDING_FACTOR * extent * (1.0 + 2.0 * 3.0_f64.sqrt())
+            );
         }
     }
     // The larger operand sets the extent: an opening reaching `y = -10`.
@@ -282,7 +285,10 @@ fn the_report_carries_the_rounding_floor_of_its_operands() {
         0.0,
     );
     assert_eq!(report.extent(), 10.0, "{report:?}");
-    assert_eq!(report.rounding_floor(), 10.0 * ROUNDING_FACTOR);
+    assert_eq!(
+        report.rounding_floor(),
+        ROUNDING_FACTOR * 10.0 * (1.0 + 2.0 * 3.0_f64.sqrt())
+    );
 }
 
 const R_HOLE: f64 = 0.5;

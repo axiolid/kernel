@@ -38,7 +38,9 @@ use axiolid_measure::proximity::closest_point_on_triangle;
 use axiolid_measure::{exact_properties, FaceDomain};
 use axiolid_mesh::TriMesh;
 use axiolid_mesh_boolean_boolmesh::BoolmeshBoolean;
-use axiolid_mesh_compile::deviation::COINCIDENT_OPERANDS;
+use axiolid_mesh_compile::deviation::{
+    BOOLEAN_ROUNDING_FLOOR, COINCIDENT_OPERANDS, TOLERANCE_READINGS,
+};
 use axiolid_mesh_compile::{
     DeviationBound, DeviationPath, ReferenceExactCompiler, ReferenceMeshCompiler,
 };
@@ -433,7 +435,14 @@ fn the_mesh_deviation_is_certified_and_holds_under_dense_sampling() {
                 let measured: Vec<_> = report
                     .contributions
                     .iter()
-                    .filter(|c| c.detail != COINCIDENT_OPERANDS)
+                    .filter(|c| {
+                        ![
+                            COINCIDENT_OPERANDS,
+                            TOLERANCE_READINGS,
+                            BOOLEAN_ROUNDING_FLOOR,
+                        ]
+                        .contains(&c.detail)
+                    })
                     .collect();
                 assert_eq!(measured.len(), 1, "{report:?}");
                 let contribution = *measured[0];

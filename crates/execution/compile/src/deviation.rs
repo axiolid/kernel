@@ -204,6 +204,16 @@
 //!   next to the boolean's measured one. Like a snap's move, it names the
 //!   perturbation the exact result stands for; it is not carried through
 //!   enclosing booleans, whose exact result merges the reading's report.
+//! - Every reading within tolerance (#421): the furthest any kind of reading
+//!   (merged points, contact, an incident point, coincident supports, ...)
+//!   moved a feature is a [`DeviationBound::Certified`] contribution of
+//!   [`DeviationPath::Boolean`] under [`TOLERANCE_READINGS`], and the
+//!   report's rounding floor under [`BOOLEAN_ROUNDING_FLOOR`]. The
+//!   boolean's own contribution is widened by their sum: the bound covers
+//!   the boolean of the operands as read, each moved by at most the named
+//!   readings, so they add to the measured distance rather than being the
+//!   worst of it and them. A reading may change the topology against the
+//!   operands as given; the named readings are what say so.
 //!
 //! # Placement rounding
 //!
@@ -243,7 +253,7 @@ use axiolid_core::{Point3, Scalar, Transform3};
 mod boolean;
 mod mitre;
 mod paths;
-pub(crate) use boolean::{emitted_booleans, of_boolean};
+pub(crate) use boolean::{emitted_booleans, of_boolean, with_readings};
 pub(crate) use paths::{
     of_curve_bounded, of_primitive, of_sectioned_surface, of_solid, stationed_spine,
 };
@@ -295,6 +305,25 @@ pub const SNAPPED_OPERANDS: &str = "operands snapped onto each other within tole
 /// the boolean's own contribution bounds the mesh's distance to that
 /// result.
 pub const COINCIDENT_OPERANDS: &str = "operand faces read as one surface within tolerance";
+
+/// The [`DeviationContribution::detail`] of a boolean measured against an
+/// exact result whose report holds readings within tolerance (#421): its
+/// bound is the largest distance any kind of reading moved a feature
+/// (`BooleanReport::linear`: merged points, an incident point, coincident
+/// supports, ..., or an angle turned, as a distance over the operands'
+/// extent), so the exact result the mesh is measured against is the boolean
+/// of operands perturbed by at most that much (a reading may change the
+/// topology against the operands as given: this contribution is what says
+/// so). The boolean's own bound is widened by it. [`COINCIDENT_OPERANDS`] names the coincident supports'
+/// share.
+pub const TOLERANCE_READINGS: &str = "operands moved by readings within tolerance";
+
+/// The [`DeviationContribution::detail`] of a boolean measured against an
+/// exact result: the rounding floor of its report (#244, #421), within
+/// which constructed points were read as one without a decision. Present
+/// whenever the floor is not zero, exact result or not. The boolean's own
+/// bound is widened by it.
+pub const BOOLEAN_ROUNDING_FLOOR: &str = "constructed points read as one within the rounding floor";
 
 /// The [`DeviationContribution::detail`] of a union the mesh cut could not
 /// settle and the exact compiler decided (#391, ADR 0098): the mesh is

@@ -20,6 +20,8 @@ FLAT = "crates/execution/compile/src/certify/flat.rs"
 BOOL = "crates/execution/compile/src/deviation/boolean.rs"
 MEASURED = ["-p", "axiolid-mesh-compile", "--test", "boolean_deviation"]
 UNIT = ["-p", "axiolid-mesh-compile", "--lib"]
+REFEREE = ["-p", "axiolid-mesh-compile", "--test", "exact_union_referee"]
+WALLS = ["-p", "axiolid-mesh-compile", "--test", "coincident_wall_openings"]
 
 MUTANTS = [
     ('flat region off-plane term dropped', FLAT,
@@ -46,6 +48,41 @@ MUTANTS = [
     ('detail never claims the given operands', BOOL,
      '    } else if report.is_exact() {',
      '    } else if false {', [MEASURED]),
+    # #421: every kind of reading and the rounding floor are named, and
+    # widen the boolean's own bound by their sum.
+    ('readings of other kinds than coincident supports dropped', BOOL,
+     '    let reading = reading_distance(report);',
+     '    let reading = report\n        .decisions()\n        .iter()\n        .filter(|d| d.kind == ToleranceDecisionKind::CoincidentSupports)\n        .map(|d| d.linear)\n        .fold(0.0, Scalar::max);', [MEASURED]),
+    ('readings not named', BOOL,
+     '        (TOLERANCE_READINGS, reading),',
+     '        (TOLERANCE_READINGS, 0.0),', [MEASURED]),
+    ('rounding floor not named', BOOL,
+     '        (BOOLEAN_ROUNDING_FLOOR, floor),',
+     '        (BOOLEAN_ROUNDING_FLOOR, 0.0),', [MEASURED]),
+    ('bound not widened by the rounding floor', BOOL,
+     '            DeviationBound::Certified(widened(widened(value, floor), reading))',
+     '            DeviationBound::Certified(widened(value, reading))', [MEASURED]),
+    ('bound not widened by the readings', BOOL,
+     '            DeviationBound::Certified(widened(widened(value, floor), reading))',
+     '            DeviationBound::Certified(widened(value, floor))', [UNIT, MEASURED, WALLS]),
+    ('bound the worst of the measurement and the readings', BOOL,
+     '            DeviationBound::Certified(widened(widened(value, floor), reading))',
+     '            DeviationBound::Certified(value.max(floor).max(reading))', [UNIT, MEASURED, WALLS]),
+    ('angular readings not turned into a distance', BOOL,
+     '        .map(|(linear, angular)| widened(linear, angular * lever))',
+     '        .map(|(linear, _)| linear)', [UNIT]),
+    ('angular readings turned by half the lever', BOOL,
+     '        .map(|(linear, angular)| widened(linear, angular * lever))',
+     '        .map(|(linear, angular)| widened(linear, angular * 0.5 * lever))', [UNIT]),
+    ('a reading that moved and turned counts the larger only', BOOL,
+     '        .map(|(linear, angular)| widened(linear, angular * lever))',
+     '        .map(|(linear, angular)| linear.max(angular * lever))', [UNIT]),
+    ('decisions summed across kinds', BOOL,
+     '        .fold(0.0, Scalar::max)\n}',
+     '        .sum()\n}', [UNIT]),
+    ('a proven bound left unwidened', BOOL,
+     '        DeviationBound::Certified(value) | DeviationBound::Proven(value) => {',
+     '        DeviationBound::Certified(value) => {', [REFEREE]),
 ]
 
 probe_lib.main(MUTANTS, timeout=1800)

@@ -22,6 +22,7 @@ import probe_lib
 
 COMPILER = "crates/execution/compile/src/compiler.rs"
 REFEREE = "crates/execution/compile/src/referee.rs"
+BOOLEAN = "crates/execution/compile/src/deviation/boolean.rs"
 VIEW = "crates/execution/compile/src/brep/view.rs"
 COPLANAR = "crates/algorithms/query/inspect/src/coplanar.rs"
 
@@ -31,6 +32,10 @@ L = ["-p", "axiolid-mesh-compile", "--lib"]
 I = ["-p", "axiolid-inspect", "--test", "coplanar"]
 
 MUTANTS = [
+    ("referee names no reading within tolerance", REFEREE,
+     "with_readings(detail, tessellation.worst_bound(), &report)",
+     "with_readings(detail, tessellation.worst_bound(), &Default::default())",
+     [E]),
     ("referee never asked", COMPILER,
      "        if operator != axiolid_core::BooleanOperator::Union {\n            return cut",
      "        if true {\n            return cut",
@@ -71,8 +76,8 @@ MUTANTS = [
      "Measure::Deviation(_) | Measure::Skip if decided == Decided::Referee => built,",
      "Measure::Deviation(_) | Measure::Skip if decided == Decided::Mesh && false => built,",
      [E]),
-    ("referee drops the coincident reading", REFEREE,
-     "        .find(|decision| decision.kind == ToleranceDecisionKind::CoincidentSupports)",
+    ("readings helper drops the coincident reading", BOOLEAN,
+     "        .find(|d| d.kind == ToleranceDecisionKind::CoincidentSupports)",
      "        .find(|_| false)",
      [E]),
     ("referee swaps its two details", REFEREE,
@@ -80,8 +85,8 @@ MUTANTS = [
      "    let detail = if !report.is_exact() {",
      [E]),
     ("referee reports no bound of its own", REFEREE,
-     "Deviation::one(DeviationPath::Boolean, detail, tessellation.worst_bound())",
-     "Deviation::one(DeviationPath::Boolean, detail, DeviationBound::Certified(0.0))",
+     "with_readings(detail, tessellation.worst_bound(), &report)",
+     "with_readings(detail, crate::deviation::DeviationBound::Certified(0.0), &report)",
      [E, L]),
     ("referee keeps its operands' channels", REFEREE,
      "AttributeFate::Dropped(DropReason::ProviderLimitation)))",

@@ -44,8 +44,8 @@ use axiolid_measure::exact_properties;
 use axiolid_mesh::TriMesh;
 use axiolid_mesh_boolean_boolmesh::BoolmeshBoolean;
 use axiolid_mesh_compile::{
-    deviation::COINCIDENT_OPERANDS, DeviationBound, DeviationPath, ReferenceExactCompiler,
-    ReferenceMeshCompiler,
+    deviation::{BOOLEAN_ROUNDING_FLOOR, COINCIDENT_OPERANDS, TOLERANCE_READINGS},
+    DeviationBound, DeviationPath, ReferenceExactCompiler, ReferenceMeshCompiler,
 };
 use axiolid_mesh_compile_contract::MeshCompiler;
 use axiolid_model::{
@@ -539,7 +539,14 @@ fn an_oblique_prism_with_arcs_is_exact_and_the_mesh_is_certified_against_it() {
             let measured: Vec<_> = report
                 .contributions
                 .iter()
-                .filter(|c| c.detail != COINCIDENT_OPERANDS)
+                .filter(|c| {
+                    ![
+                        COINCIDENT_OPERANDS,
+                        TOLERANCE_READINGS,
+                        BOOLEAN_ROUNDING_FLOOR,
+                    ]
+                    .contains(&c.detail)
+                })
                 .collect();
             assert_eq!(measured.len(), 1, "{report:?}");
             assert!(report.meets_requested(), "{report:?}");

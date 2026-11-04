@@ -9,12 +9,34 @@ caret rule for `0.x` versions.
 
 ## [Unreleased]
 
+### Added
+
+- `deviation::TOLERANCE_READINGS` and `deviation::BOOLEAN_ROUNDING_FLOOR`
+  (#421): the details under which a boolean measured against its exact
+  result names the furthest any kind of reading within tolerance moved a
+  feature, and the report's rounding floor.
+
 ### Fixed
 
 - A run of sections along a curve that is itself placed at a station whose
   frame is not exact is unbounded by name (#408), where it was certified
-  against the read placement rather than the exact one. Requires
-  `axiolid-evaluate` with `FrameLaw::atomic_placed`.
+  against the read placement rather than the exact one, a run of 130 or
+  more sections included. Its folds are still decided, on the frames as
+  read, and refused. Requires
+  `axiolid-evaluate` with `FrameLaw::atomic_placed` and
+  `FrameLaw::with_placements_read_as_exact`.
+- A boolean's deviation report (and the exact union referee's, #391) covers
+  the boolean of the operands as read (#421), each moved by at most the
+  named readings, which may change the topology against the operands as
+  given: the furthest any kind of
+  reading within tolerance moved a feature (an angle turned counts as a
+  distance over the operands' extent) and the report's rounding floor are
+  added to the measured distance, not combined with it by worst, and are
+  named as contributions of their own next to the coincident supports'. A
+  report whose merged points, contacts or incident points moved further
+  than its coincident supports no longer yields a bound below the move.
+  The bound of a boolean measured against an exact result grows by those
+  two terms.
 
 ## [0.3.44] - 2026-11-03
 

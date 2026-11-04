@@ -153,7 +153,10 @@ impl BooleanReport {
 
     /// The absolute rounding floor that applied to this result (#244), in
     /// the operands' length unit: [`ROUNDING_FACTOR`] times
-    /// [`Self::extent`].
+    /// [`Self::extent`], plus what an angular residue of that factor
+    /// (radians, read without a decision) moves a point of the operands by,
+    /// at most `2 sqrt(3)` times [`Self::extent`] (a turn about any point
+    /// of the operands' box).
     ///
     /// A residue between constructed points (cuts, vertices, a point on an
     /// edge) up to this floor was read as one exact point evaluated twice,
@@ -164,7 +167,7 @@ impl BooleanReport {
     /// report (the default report).
     #[must_use]
     pub fn rounding_floor(&self) -> Scalar {
-        ROUNDING_FACTOR * self.extent
+        ROUNDING_FACTOR * self.extent * (1.0 + 2.0 * 3.0_f64.sqrt())
     }
 
     /// The extent [`Self::rounding_floor`] was scaled from (#244): the
@@ -244,9 +247,10 @@ impl BooleanReport {
 /// #244).
 ///
 /// The absolute linear floor of a boolean is this factor times the
-/// operands' extent; [`BooleanReport::rounding_floor`] returns it and
-/// [`BooleanReport::extent`] defines the extent. Angular residues have a
-/// floor of this factor itself, in radians, unscaled.
+/// operands' extent; [`BooleanReport::rounding_floor`] returns it, with
+/// what the angular floor adds, and [`BooleanReport::extent`] defines the
+/// extent. Angular residues have a floor of this factor itself, in
+/// radians, unscaled.
 pub const ROUNDING_FACTOR: Scalar = 1.0 / 1_099_511_627_776.0;
 
 /// The ratio of the tolerance a refused boolean is cut again at to the
@@ -638,7 +642,10 @@ mod tests {
         };
         for merged in [small.clone().merged(&large), large.clone().merged(&small)] {
             assert_eq!(merged.extent(), 10.0);
-            assert_eq!(merged.rounding_floor(), ROUNDING_FACTOR * 10.0);
+            assert_eq!(
+                merged.rounding_floor(),
+                ROUNDING_FACTOR * 10.0 * (1.0 + 2.0 * 3.0_f64.sqrt())
+            );
             assert!(merged.is_exact());
         }
         assert_eq!(BooleanReport::default().rounding_floor(), 0.0);

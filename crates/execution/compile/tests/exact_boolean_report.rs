@@ -430,9 +430,15 @@ fn a_body_reports_the_largest_rounding_floor_beneath_it() {
     let expected = L * T * H - 2.0 * W * OH * T;
     assert!((volume(&reports[0].0) - expected).abs() <= 1e-12 * expected);
     assert_eq!(reports[0].1.extent(), 10.0, "{:?}", reports[0].1);
-    assert_eq!(reports[0].1.rounding_floor(), 10.0 * ROUNDING_FACTOR);
+    assert_eq!(
+        reports[0].1.rounding_floor(),
+        10.0 * ROUNDING_FACTOR * (1.0 + 2.0 * 3.0_f64.sqrt())
+    );
     assert_eq!(reports[1].1, reports[0].1);
     // The flush cut alone: the wall's own extent.
     assert_eq!(reports[2].1.extent(), L / 2.0, "{:?}", reports[2].1);
-    assert_eq!(reports[2].1.rounding_floor(), L / 2.0 * ROUNDING_FACTOR);
+    assert_eq!(
+        reports[2].1.rounding_floor(),
+        L / 2.0 * ROUNDING_FACTOR * (1.0 + 2.0 * 3.0_f64.sqrt())
+    );
 }

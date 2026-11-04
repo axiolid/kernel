@@ -71,6 +71,23 @@
 //! how far the operands the exact result is the boolean of lie from the
 //! given ones, not how far the mesh lies from that boolean.
 //!
+//! Every other reading within tolerance counts too (#421): a merged point,
+//! a contact, an incident point move a feature as the coincident supports
+//! do. The furthest any kind of reading moved one (`BooleanReport::linear`,
+//! or the angle turned as a distance over the operands' extent where that
+//! is larger) is a certified contribution under [`TOLERANCE_READINGS`], and
+//! the report's rounding floor (#244), within which constructed points were
+//! read as one without a decision, under [`BOOLEAN_ROUNDING_FLOOR`]. The
+//! boolean's own bound is widened by both: it covers the boolean of the
+//! operands as read, each moved by at most the named readings, so they add
+//! to the measured distance and are not combined with it by worst. A
+//! reading may change the topology against the unperturbed operands (two
+//! boxes half a tolerance apart read as one body, a face of the mesh then
+//! lies far from the faces of the operands as given): the named readings
+//! are what say so, and the bound does not cover that difference. The
+//! exact union referee (#391) names them the same way, through
+//! [`with_readings`].
+//!
 //! # Warped mesh operands (#266)
 //!
 //! The exact result is compiled with
@@ -164,7 +181,10 @@ use axiolid_surface::Surface;
 
 use axiolid_brep_boolean::{BooleanReport, ToleranceDecisionKind};
 
-use super::{Deviation, DeviationBound, DeviationPath, COINCIDENT_OPERANDS};
+use super::{
+    Deviation, DeviationBound, DeviationPath, BOOLEAN_ROUNDING_FLOOR, COINCIDENT_OPERANDS,
+    TOLERANCE_READINGS,
+};
 use crate::certify::{certify_affine, certify_within, Cell, Coverage, Patch};
 use crate::ReferenceExactCompiler;
 
@@ -241,10 +261,32 @@ pub(crate) fn of_boolean(
         Ok(value) => DeviationBound::Certified(widened(value, flattened)),
         Err(reason) => DeviationBound::Unbounded(reason),
     };
-    let mut deviation = Deviation::one(DeviationPath::Boolean, detail, bound);
-    // Faces of the operands read as one surface within tolerance (#324):
-    // the exact result is the boolean of operands moved by up to that much
-    // onto each other, and the move is named, as a snap's is.
+    with_readings(detail, bound, &report)
+}
+
+/// The deviation of a boolean whose mesh lies `bound` from the exact
+/// result of `report` (#421): the bound covers the boolean of the operands
+/// as read, each moved by at most the named readings, so the exact
+/// result's perturbation is added to it, not combined by worst; a reading
+/// may change the topology against the operands as given, and the named
+/// readings are what say so. The distance is widened by the rounding floor
+/// ([`BOOLEAN_ROUNDING_FLOOR`]) and by the furthest any kind of reading
+/// moved a feature ([`TOLERANCE_READINGS`]), as the flattening widens it.
+/// Both are also named as contributions of their own, each when not zero,
+/// with the furthest the coincident supports moved an operand
+/// ([`COINCIDENT_OPERANDS`], #324).
+pub(crate) fn with_readings(
+    detail: &'static str,
+    bound: DeviationBound,
+    report: &BooleanReport,
+) -> Deviation {
+    let reading = reading_distance(report);
+    let floor = report.rounding_floor();
+    let mut deviation = Deviation::one(
+        DeviationPath::Boolean,
+        detail,
+        covered(bound, floor, reading),
+    );
     if let Some(moved) = report
         .decisions()
         .iter()
@@ -257,7 +299,60 @@ pub(crate) fn of_boolean(
             DeviationBound::Certified(moved),
         );
     }
+    for (detail, value) in [
+        (TOLERANCE_READINGS, reading),
+        (BOOLEAN_ROUNDING_FLOOR, floor),
+    ] {
+        if value > 0.0 {
+            deviation.add(
+                DeviationPath::Boolean,
+                detail,
+                DeviationBound::Certified(value),
+            );
+        }
+    }
     deviation
+}
+
+/// `bound` widened by the rounding `floor` and the `reading` distance: their
+/// sum, as the flattening's, so never below the real one. A proven bound
+/// stays proven only where both terms are zero.
+fn covered(bound: DeviationBound, floor: Scalar, reading: Scalar) -> DeviationBound {
+    match bound {
+        DeviationBound::Proven(value) if floor == 0.0 && reading == 0.0 => {
+            DeviationBound::Proven(value)
+        }
+        DeviationBound::Certified(value) | DeviationBound::Proven(value) => {
+            DeviationBound::Certified(widened(widened(value, floor), reading))
+        }
+        other => other,
+    }
+}
+
+/// The furthest any reading of `report` moved a feature, as a distance:
+/// per decision, the distance it moved one plus the angle it turned one
+/// times the largest distance a point of the operands lies from where a
+/// turn may be about, `2 sqrt(3)` times their extent; the largest over the
+/// decisions.
+fn reading_distance(report: &BooleanReport) -> Scalar {
+    distance_of(
+        report.decisions().iter().map(|d| (d.linear, d.angular)),
+        report.extent(),
+    )
+}
+
+/// [`reading_distance`] of readings that moved a feature by up to `linear`
+/// and turned a direction by up to `angular` radians (the pairs), over
+/// operands within `extent` of the origin on each axis: a turn about any
+/// point moves one of them by at most the angle times twice its distance
+/// from the point, itself at most `sqrt(3) extent` from the origin. A
+/// reading both moved and turned adds the two, rounded up.
+fn distance_of(readings: impl IntoIterator<Item = (Scalar, Scalar)>, extent: Scalar) -> Scalar {
+    let lever = 2.0 * 3.0_f64.sqrt() * extent;
+    readings
+        .into_iter()
+        .map(|(linear, angular)| widened(linear, angular * lever))
+        .fold(0.0, Scalar::max)
 }
 
 /// The gap within which an exact face's loops may close beyond rounding
@@ -887,6 +982,51 @@ mod tests {
     use axiolid_mesh_compile_contract::MeshCompiler;
     use axiolid_model::{GeometryGraphBuilder, Instance};
     use axiolid_profile::{CircleProfile, Profile, RectangleProfile, SectionProfile};
+
+    #[test]
+    fn a_bound_is_widened_by_the_floor_and_the_readings_not_combined_by_worst() {
+        let DeviationBound::Certified(sum) = covered(DeviationBound::Certified(1e-12), 1e-11, 1e-8)
+        else {
+            panic!("certified");
+        };
+        assert!(sum >= 1e-12 + 1e-11 + 1e-8, "{sum:e}");
+        assert!(sum <= 1.0001 * (1e-12 + 1e-11 + 1e-8), "{sum:e}");
+        // A proven bound is widened too; it stays proven when nothing is added.
+        let DeviationBound::Certified(sum) = covered(DeviationBound::Proven(0.0), 1e-11, 1e-8)
+        else {
+            panic!("certified");
+        };
+        assert!(sum >= 1e-11 + 1e-8, "{sum:e}");
+        assert_eq!(
+            covered(DeviationBound::Proven(0.0), 0.0, 0.0),
+            DeviationBound::Proven(0.0)
+        );
+        let unbounded = DeviationBound::Unbounded("no");
+        assert_eq!(covered(unbounded, 1e-11, 1e-8), unbounded);
+    }
+
+    #[test]
+    fn a_purely_angular_reading_moves_a_feature_by_the_angle_over_the_extent() {
+        let (angle, extent) = (1e-9, 10.0);
+        let distance = distance_of([(0.0, angle)], extent);
+        assert!(distance >= angle * 3.0_f64.sqrt() * extent, "{distance}");
+        assert!((distance - angle * 2.0 * 3.0_f64.sqrt() * extent).abs() < 1e-24);
+        assert_eq!(distance_of([(0.0, 0.0)], extent), 0.0);
+        assert_eq!(distance_of([], extent), 0.0);
+    }
+
+    #[test]
+    fn a_reading_that_moved_and_turned_adds_both_and_the_worst_decision_stands() {
+        let (angle, extent) = (1e-9, 10.0);
+        let turned = distance_of([(0.0, angle)], extent);
+        // One decision moving and turning: the sum, not the larger.
+        let both = distance_of([(1e-9, angle)], extent);
+        assert!(both >= 1e-9 + turned, "{both:e}");
+        assert!(both <= 1.0001 * (1e-9 + turned), "{both:e}");
+        // Across decisions, the largest.
+        assert_eq!(distance_of([(1.0, 0.0), (0.0, angle)], extent), 1.0);
+        assert_eq!(distance_of([(1e-12, 0.0), (0.0, angle)], extent), turned);
+    }
 
     /// Tightened to the sampled maximum (no budget stop), the bound still
     /// covers the exact result's trim curves, where the cut lies and an

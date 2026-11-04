@@ -11,6 +11,10 @@ caret rule for `0.x` versions.
 
 ### Fixed
 
+- `BooleanReport::rounding_floor` adds the move of an angular residue at
+  the rounding floor (`2^-40` rad, read without a decision) over the
+  operands' extent, `2 sqrt(3)` times it (#421): a consumer widening by the
+  floor now covers the unrecorded angular residues too.
 - A floor-standing door `3e-7` to `9e-7` short of a wall's face under a
   millimetre tolerance is cut, not refused as "the kept faces did not sew
   into a valid exact B-rep" (#409). The door's end face is read as the

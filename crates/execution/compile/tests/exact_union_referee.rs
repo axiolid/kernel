@@ -19,7 +19,8 @@ use axiolid_mesh::{component_count, TriMesh};
 use axiolid_mesh_boolean_boolmesh::BoolmeshBoolean;
 use axiolid_mesh_boolean_contract::MeshBoolean;
 use axiolid_mesh_compile::deviation::{
-    COINCIDENT_OPERANDS, REFEREED_UNION, REFEREED_UNION_EXACT, SNAPPED_OPERANDS,
+    BOOLEAN_ROUNDING_FLOOR, COINCIDENT_OPERANDS, REFEREED_UNION, REFEREED_UNION_EXACT,
+    SNAPPED_OPERANDS, TOLERANCE_READINGS,
 };
 use axiolid_mesh_compile::{
     DeviationBound, DeviationReport, ReferenceMeshCompiler, UNMERGED_UNION_CONTACT,
@@ -335,6 +336,33 @@ fn a_gap_of_twice_the_tolerance_stays_two_bodies() {
 }
 
 #[test]
+fn a_referee_bound_is_widened_by_the_readings_and_the_floor_not_combined_by_worst() {
+    // Two unit prisms overlapping by half a tolerance, at the origin: the
+    // referee's own tessellation bound is proven, and the reading it takes
+    // is added to it (#421), not the larger of the two.
+    let mut g = Graph::new();
+    let first = g.prism([1.0, 1.0], 1.0);
+    let second = g.prism([1.0, 1.0], 1.0);
+    let second = g.placed(
+        second,
+        Transform3::from_translation(Vec3::new(1.0 - 0.5 * EPS, 0.0, 0.0)),
+    );
+    let root = g.union(first, second, BooleanOperator::Union);
+    let (graph, root) = g.finish(root);
+    let report = report(&graph, root);
+    let number = |detail| detail_bound(&report, detail).and_then(|b| b.value());
+    let reading = number(TOLERANCE_READINGS).expect("the reading is named");
+    let floor = number(BOOLEAN_ROUNDING_FLOOR).unwrap_or(0.0);
+    assert!(reading > 0.0, "{report:?}");
+    let referee =
+        detail_bound(&report, REFEREED_UNION).unwrap_or_else(|| panic!("referee: {report:?}"));
+    assert!(
+        matches!(referee, DeviationBound::Certified(v) if v >= reading + floor),
+        "{referee:?} {reading:e} {floor:e}"
+    );
+}
+
+#[test]
 fn a_gap_within_the_tolerance_is_read_as_contact_and_says_so() {
     let (graph, root) = boxes(0.5 * EPS, FAR);
     let (mesh, closure) = compile(&graph, root).expect("fused");
@@ -349,6 +377,15 @@ fn a_gap_within_the_tolerance_is_read_as_contact_and_says_so() {
         matches!(moved, DeviationBound::Certified(m) if m > 0.0 && m <= EPS),
         "{moved:?}"
     );
+    // The largest reading of every kind and the rounding floor are named
+    // too (#421), the reading covering the coincident supports' move.
+    let readings = detail_bound(&report, TOLERANCE_READINGS).expect("every reading is named");
+    assert!(
+        matches!((moved, readings),
+            (DeviationBound::Certified(m), DeviationBound::Certified(r)) if r >= m && r <= EPS),
+        "{moved:?} {readings:?}"
+    );
+    assert!(detail_bound(&report, BOOLEAN_ROUNDING_FLOOR).is_some());
     assert!(detail_bound(&report, REFEREED_UNION).is_some());
     assert!(detail_bound(&report, REFEREED_UNION_EXACT).is_none());
     assert!(detail_bound(&report, SNAPPED_OPERANDS).is_none());

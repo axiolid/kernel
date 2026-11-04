@@ -192,13 +192,27 @@ fn a_flat_wall_with_openings_coinciding_within_readings_is_certified() {
                 .unwrap_or_else(|| panic!("{what}: {deviation:?}"));
             eprintln!("{what}: reading {reading:e}, bound {bound:e}, volume {volume}");
             assert!(bound <= 1e-3, "{what}: {deviation:?}");
+            // The bound covers the boolean of the given operands: the readings
+            // and the rounding floor add to the measurement (#421).
+            assert!(
+                bound >= reading + report.rounding_floor(),
+                "{what}: {deviation:?}"
+            );
             if e == 0.0 {
-                // The loops close exactly: the bound stays at rounding.
-                assert!(bound <= 1e-11, "{what}: {deviation:?}");
+                // The loops close exactly: the bound stays at rounding, the
+                // measurement widened by the report's rounding floor and
+                // reading (#421).
+                assert!(
+                    bound <= 1e-11 + report.rounding_floor() + reading,
+                    "{what}: {deviation:?}"
+                );
             } else {
                 // Within a few readings of the exact result: the slack holds
                 // the gaps, no more.
-                assert!(bound <= 10.0 * reading, "{what}: {deviation:?}");
+                assert!(
+                    bound <= 10.0 * reading + report.rounding_floor(),
+                    "{what}: {deviation:?}"
+                );
             }
         }
     }
