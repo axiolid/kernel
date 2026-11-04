@@ -262,7 +262,12 @@ impl<'g> Basis<'g> {
     /// `bounds` are `None` where they are not certified.
     pub(super) fn frame_law(&self, tolerance: Scalar) -> GeomResult<FrameLaw<'_, 'g>> {
         match self {
-            Self::Atomic { curve, placed, .. } => FrameLaw::atomic(*curve, *placed, tolerance),
+            Self::Atomic {
+                curve,
+                placed,
+                placed_exactly,
+                ..
+            } => FrameLaw::atomic_placed(*curve, *placed, *placed_exactly, tolerance),
             Self::Composite(composite) => composite.frame_law(tolerance),
         }
     }

@@ -103,6 +103,42 @@ fn arc_slack(distance: Scalar) -> Scalar {
 }
 
 #[test]
+fn a_curve_placed_inexactly_has_no_frame_bounds_and_no_error() {
+    // The placement is read, not exact (#408): nothing is certified against
+    // it, whatever the curve, while the same placement stated exact is.
+    let circle = Curve2::Circle(Circle2 {
+        frame: frame(),
+        radius: 30.0,
+    });
+    let rigid = Transform3::from_translation(Vec3::new(1.0, 2.0, 3.0));
+    let s = 40.0;
+    for reading in READINGS {
+        let exact =
+            FrameLaw::atomic_placed(StationCurve::Two(&circle), Some(rigid), true, TOLERANCE)
+                .unwrap();
+        assert!(exact.bounds(s, s + 1.0, reading).is_some());
+        assert!(exact.error_at(s, SeamSide::Outgoing, reading).is_some());
+        let read =
+            FrameLaw::atomic_placed(StationCurve::Two(&circle), Some(rigid), false, TOLERANCE)
+                .unwrap();
+        assert!(read.bounds(s, s + 1.0, reading).is_none());
+        assert!(read.bend(s, s + 1.0, reading).is_none());
+        assert!(exact.has_bend(s, s + 1.0) && !read.has_bend(s, s + 1.0));
+        assert!(read.error_at(s, SeamSide::Outgoing, reading).is_none());
+        // Read as exact, the same law bounds the frames as read (a fold is
+        // decided on them), and still gives no error against the exact ones.
+        let trusted =
+            FrameLaw::atomic_placed(StationCurve::Two(&circle), Some(rigid), false, TOLERANCE)
+                .unwrap()
+                .with_placements_read_as_exact();
+        assert!(trusted.bounds(s, s + 1.0, reading).is_some());
+        assert!(trusted.bend(s, s + 1.0, reading).is_some());
+        assert!(trusted.has_bend(s, s + 1.0));
+        assert!(trusted.error_at(s, SeamSide::Outgoing, reading).is_none());
+    }
+}
+
+#[test]
 fn a_circle_station_is_charged_its_distance_resolution() {
     let (r, s) = (30.0, 150.0);
     let f = frame();

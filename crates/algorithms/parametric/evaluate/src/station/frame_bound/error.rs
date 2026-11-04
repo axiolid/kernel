@@ -96,6 +96,7 @@ impl<'c> FrameLaw<'_, 'c> {
             LawBasis::Atomic {
                 curve,
                 placement,
+                placement_exact,
                 whole,
             } => {
                 let owned;
@@ -115,12 +116,15 @@ impl<'c> FrameLaw<'_, 'c> {
                             }
                         };
                         if let Some(rigid) = placement {
-                            piece = piece.placed(*rigid, true);
+                            piece = piece.placed(*rigid, *placement_exact);
                         }
                         owned = piece;
                         (&owned, length)
                     }
                 };
+                if !piece.placement_exact {
+                    return None;
+                }
                 let at = admitted(distance, length).ok()?;
                 let stand = Stand {
                     at,

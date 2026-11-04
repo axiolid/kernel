@@ -9,6 +9,13 @@ caret rule for `0.x` versions.
 
 ## [Unreleased]
 
+### Fixed
+
+- A run of sections along a curve that is itself placed at a station whose
+  frame is not exact is unbounded by name (#408), where it was certified
+  against the read placement rather than the exact one. Requires
+  `axiolid-evaluate` with `FrameLaw::atomic_placed`.
+
 ## [0.3.44] - 2026-11-03
 
 ### Added

@@ -1731,7 +1731,9 @@ one placement.
   plans, intrinsic space curves with torsion or tilted, a stretched or
   skewed start frame, elevated curves with an intrinsic profile or another
   plan, a skewed circle, a steep tangent, a roll reaching a quarter turn, a
-  basis placed at a station whose frame is not exact, and a station within
+  basis placed at a station whose frame is not exact (a run of sections
+  along it too, #408: `FrameLaw::bounds` reads the placement's exactness),
+  and a station within
   its distance's resolution of a seam it is not read on.
 
 | Option | Why not |

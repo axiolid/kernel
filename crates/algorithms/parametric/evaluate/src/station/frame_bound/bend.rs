@@ -182,12 +182,18 @@ impl FrameLaw<'_, '_> {
     /// can stay `None` however narrow the span (a vertical tangent under the
     /// plan reading, joints after a piece read by quadrature that cannot be
     /// certified, a placement whose columns are not orthogonal). `false` for
-    /// frames read by quadrature and every frame without a closed form.
+    /// frames read by quadrature, every frame without a closed form and a
+    /// piece placed at a station whose frame is not exact (unless the law
+    /// reads placements as exact, [`FrameLaw::with_placements_read_as_exact`]).
     #[must_use]
     pub fn has_bend(&self, a: Scalar, b: Scalar) -> bool {
         let Some(at) = self.locate(a, b) else {
             return false;
         };
+        // A piece placed inexactly bounds nothing (#408), whatever its jet.
+        if !at.piece.placement_exact && !self.placements_read_as_exact {
+            return false;
+        }
         // Builds the piece's slot, whatever the span's bounds are.
         let _ = self.read(
             at.slot,

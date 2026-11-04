@@ -717,6 +717,8 @@ enum LawBasis<'b, 'c> {
     Atomic {
         curve: StationCurve<'c>,
         placement: Option<Transform3>,
+        /// Whether the placement is exact (#408).
+        placement_exact: bool,
         whole: Option<StationPiece<'c>>,
     },
     Composite(&'b CompositeBasis<'c>),
@@ -749,7 +751,7 @@ enum LawBasis<'b, 'c> {
 /// an offset beside a curve parameterised by its plan length or beside a
 /// banked curve, a skewed circle, a steep tangent), a curve read by
 /// quadrature placed in a frame that tilts `+Z`, a placed offset piece,
-/// and a piece after joints whose distances are not certified at the
+/// a curve placed at a station whose frame is not exact, and a piece after joints whose distances are not certified at the
 /// tolerance.
 pub struct FrameLaw<'b, 'c> {
     basis: LawBasis<'b, 'c>,
@@ -757,6 +759,8 @@ pub struct FrameLaw<'b, 'c> {
     /// Each joint's distance from where it truly lies, built when first
     /// needed; `None` where the joints are not certified.
     joints: OnceCell<Option<Vec<Scalar>>>,
+    /// Whether a piece placed inexactly is bounded as read (#408).
+    placements_read_as_exact: bool,
     slots: Vec<OnceCell<Slot<'c>>>,
 }
 
@@ -806,11 +810,31 @@ impl<'b, 'c> FrameLaw<'b, 'c> {
         placement: Option<Transform3>,
         tolerance: Scalar,
     ) -> GeomResult<Self> {
+        Self::atomic_placed(curve, placement, true, tolerance)
+    }
+
+    /// As [`atomic`](Self::atomic), the placement `placement_exact` when
+    /// the curve is placed at a station whose frame is exact. A law
+    /// placed inexactly bounds nothing: the run is certified against the
+    /// frame read there, not the exact one (#408).
+    ///
+    /// `placement_exact = false` with `placement = None` is meaningless (no
+    /// placement is inexact): pass `true` there.
+    ///
+    /// # Errors
+    ///
+    /// As [`atomic`](Self::atomic).
+    pub fn atomic_placed(
+        curve: StationCurve<'c>,
+        placement: Option<Transform3>,
+        placement_exact: bool,
+        tolerance: Scalar,
+    ) -> GeomResult<Self> {
         let tolerance = checked_tolerance(tolerance)?;
         let whole = if needs_reader(curve) {
             let piece = StationPiece::whole(curve)?;
             Some(match placement {
-                Some(rigid) => piece.placed(rigid, true),
+                Some(rigid) => piece.placed(rigid, placement_exact),
                 None => piece,
             })
         } else {
@@ -820,10 +844,12 @@ impl<'b, 'c> FrameLaw<'b, 'c> {
             basis: LawBasis::Atomic {
                 curve,
                 placement,
+                placement_exact,
                 whole,
             },
             tolerance,
             joints: OnceCell::new(),
+            placements_read_as_exact: false,
             slots: vec![OnceCell::new()],
         })
     }
@@ -840,8 +866,21 @@ impl<'b, 'c> FrameLaw<'b, 'c> {
             basis: LawBasis::Composite(basis),
             tolerance,
             joints: OnceCell::new(),
+            placements_read_as_exact: false,
             slots: basis.pieces().iter().map(|_| OnceCell::new()).collect(),
         })
+    }
+
+    /// This law bounding the frames of a piece placed inexactly as read,
+    /// its placement taken as exact (#408). The bounds then hold for the
+    /// frames the mesh is built from, not for the exact ones: a consumer
+    /// may decide what depends on the read frames alone (a fold of the
+    /// section planes), never certify a deviation from the exact surface.
+    /// [`Self::error_at`] stays `None` for such a piece.
+    #[must_use]
+    pub fn with_placements_read_as_exact(mut self) -> Self {
+        self.placements_read_as_exact = true;
+        self
     }
 
     /// Certified bounds of the frame law over the distances `[a, b]` along
@@ -850,6 +889,9 @@ impl<'b, 'c> FrameLaw<'b, 'c> {
     #[must_use]
     pub fn bounds(&self, a: Scalar, b: Scalar, reading: FrameReading) -> Option<FrameLawBounds> {
         let at = self.locate(a, b)?;
+        if !at.piece.placement_exact && !self.placements_read_as_exact {
+            return None;
+        }
         let mut bounds = self.read(at.slot, &at.piece, at.from, at.to, at.table, reading)?;
         if let Some(composite) = at.composite {
             bounds.measure += self.joint_error(composite, at.slot)?;
@@ -864,6 +906,7 @@ impl<'b, 'c> FrameLaw<'b, 'c> {
             LawBasis::Atomic {
                 curve,
                 placement,
+                placement_exact,
                 whole,
             } => match whole {
                 Some(whole) => Some(Located {
@@ -877,7 +920,7 @@ impl<'b, 'c> FrameLaw<'b, 'c> {
                 None => {
                     let mut piece = StationPiece::between(*curve, a, b).ok()?;
                     if let Some(rigid) = placement {
-                        piece = piece.placed(*rigid, true);
+                        piece = piece.placed(*rigid, *placement_exact);
                     }
                     Some(Located {
                         slot: 0,

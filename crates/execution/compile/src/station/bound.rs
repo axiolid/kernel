@@ -122,7 +122,8 @@ pub(crate) const UNCERTIFIED_FRAMES: &str =
      with a stretched or skewed start frame, or on an intrinsic space curve with torsion or \
      tilted, an offset beside an intrinsic curve, a chain or an elevated or banked curve, a \
      skewed circle, a steep tangent, a curve read by quadrature placed in a frame that tilts \
-     +Z, or a piece after joints whose distances cannot be certified)";
+     +Z, a curve placed at a station whose frame is not exact, or a piece after joints whose \
+     distances cannot be certified)";
 
 /// Why an orientation that turns too far between stations is not bounded.
 pub(crate) const UNBOUNDED_TURN: &str =
@@ -159,6 +160,9 @@ pub(super) struct SectionLaw<'r, 'g> {
     pub(super) edges: &'r [(usize, usize)],
     reading: Option<FrameReading>,
     frames: FrameLaw<'r, 'g>,
+    /// The same law with a placement read inexactly taken as exact: it
+    /// decides folds on the frames the mesh is built from (#408).
+    fold_frames: FrameLaw<'r, 'g>,
     seams: Vec<Scalar>,
 }
 
@@ -253,6 +257,10 @@ impl<'r, 'g> SectionLaw<'r, 'g> {
         Ok(Self {
             reading: reading(run.frame),
             frames: run.basis.frame_law(CERTIFICATION_SHARE * budget)?,
+            fold_frames: run
+                .basis
+                .frame_law(CERTIFICATION_SHARE * budget)?
+                .with_placements_read_as_exact(),
             run,
             distances,
             offsets,

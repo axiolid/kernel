@@ -20,8 +20,10 @@ use axiolid_mesh_compile::{
     DeviationBound, DeviationPath, DeviationReport, ReferenceExactCompiler, ReferenceMeshCompiler,
 };
 use axiolid_model::{
-    GeometryGraph, GeometryGraphBuilder, GeometryNode, NodeId, OpenProfile, SectionAtStation,
-    SolidOperation, Station, StationFrame, StationOffsets, StationOrientation, SurfaceRelation,
+    CurveRelation, CurveSegment, CurveStation, GeometryGraph, GeometryGraphBuilder, GeometryNode,
+    InstanceAtStation, NodeId, OpenProfile, SectionAtStation, SolidOperation, Station,
+    StationFrame, StationOffsets, StationOrientation, SurfaceRelation, Transition, TrimSelector,
+    TrimmingPreference,
 };
 use axiolid_profile::{
     CircleProfile, Contour, ContourProfile, Profile, ProfileSegment, RectangleProfile,
@@ -850,6 +852,151 @@ fn a_numerical_frame_and_a_curved_taper_are_unbounded_by_name() {
         .compile_mesh_with_deviation(&graph, one_disk, &options())
         .unwrap();
     assert!(report.meets_requested(), "{report:?}");
+}
+
+/// A spine along `source` placed at a station of `base`, with `count`
+/// sections tapering from one rectangle to another along 10 m, `wide`
+/// times as wide as a metre.
+fn run_along_placed(
+    base: Curve2,
+    source: impl FnOnce(&mut GeometryGraphBuilder) -> NodeId,
+    count: usize,
+    wide: Scalar,
+) -> (GeometryGraph, NodeId) {
+    let mut b = GeometryGraphBuilder::new();
+    let base = b.push_value(base).unwrap();
+    let source = source(&mut b);
+    let placed = b
+        .push_value(InstanceAtStation::new(
+            source,
+            CurveStation {
+                basis: base,
+                station: Station::at(3.0),
+                frame: StationFrame::Section,
+            }
+            .into(),
+        ))
+        .unwrap();
+    let sections = (0..count)
+        .map(|k| {
+            let t = k as Scalar / (count - 1) as Scalar;
+            let profile = rectangle(&mut b, wide * (1.0 + 0.5 * t), 0.5);
+            section(profile, 10.0 * t, StationOffsets::ZERO)
+        })
+        .collect();
+    let root = spine(&mut b, placed, sections, StationFrame::Section);
+    (b.finish(vec![root]).unwrap(), root)
+}
+
+/// A circle spine placed at a station of `base`, with a tapered run along
+/// it.
+fn run_along_placed_circle(base: Curve2) -> (GeometryGraph, NodeId) {
+    run_along_placed(base, |b| b.push_value(plan_circle(5.0)).unwrap(), 2, 1.0)
+}
+
+/// A line then a quarter arc, as a composite curve.
+fn line_then_arc(b: &mut GeometryGraphBuilder) -> NodeId {
+    let line = b
+        .push_value(Curve2::Line(Line2 {
+            origin: Point2::ZERO,
+            direction: Vec2::X,
+        }))
+        .unwrap();
+    let circle = b
+        .push_value(Curve2::Circle(Circle2 {
+            frame: Frame2 {
+                origin: Point2::new(8.0, 0.0),
+                x: Vec2::X,
+                y: Vec2::Y,
+            },
+            radius: 5.0,
+        }))
+        .unwrap();
+    let pi = core::f64::consts::PI;
+    let mut pieces = Vec::new();
+    for (basis, start, end) in [(line, 0.0, 3.0), (circle, pi, 1.5 * pi)] {
+        let trimmed = b
+            .push(GeometryNode::CurveRelation(CurveRelation::Trimmed {
+                basis,
+                start: vec![TrimSelector::Parameter(start)],
+                end: vec![TrimSelector::Parameter(end)],
+                sense_agreement: true,
+                preference: TrimmingPreference::Parameter,
+            }))
+            .unwrap();
+        pieces.push(CurveSegment {
+            curve: trimmed,
+            same_sense: true,
+            transition: Transition::Continuous,
+        });
+    }
+    b.push(GeometryNode::CurveRelation(CurveRelation::Composite {
+        segments: pieces,
+    }))
+    .unwrap()
+}
+
+#[test]
+fn a_run_along_a_curve_placed_inexactly_is_unbounded_by_name() {
+    // A station on an arc: the placement's frame is not exact (#408), so
+    // the frames of the run read along it are not the exact ones.
+    let (graph, root) = run_along_placed_circle(plan_circle(25.0));
+    assert!(unbounded_reason(&graph, root)
+        .contains("a curve placed at a station whose frame is not exact"),);
+}
+
+#[test]
+fn a_composite_placed_inexactly_and_a_long_run_are_unbounded_by_name() {
+    let reason = "a curve placed at a station whose frame is not exact";
+    // The pieces of a composite carry the placement too.
+    let (graph, root) = run_along_placed(plan_circle(25.0), line_then_arc, 2, 1.0);
+    assert!(unbounded_reason(&graph, root).contains(reason));
+    // A run of many sections is no budget failure: the fold search is not
+    // run on a frame that bounds nothing.
+    let (graph, root) = run_along_placed(
+        plan_circle(25.0),
+        |b| b.push_value(plan_circle(5.0)).unwrap(),
+        130,
+        1.0,
+    );
+    assert!(unbounded_reason(&graph, root).contains(reason));
+}
+
+#[test]
+fn a_fold_on_a_curve_placed_inexactly_is_refused_not_compiled() {
+    // Sections wider than the circle's radius fold: the read frames decide
+    // that, whether or not the placement is exact (#408). Unbounded is not
+    // an answer for a body whose section planes cross.
+    for (source, count) in [
+        (
+            Box::new(|b: &mut GeometryGraphBuilder| b.push_value(plan_circle(5.0)).unwrap())
+                as Box<dyn FnOnce(&mut GeometryGraphBuilder) -> NodeId>,
+            2,
+        ),
+        (Box::new(|b| b.push_value(plan_circle(5.0)).unwrap()), 130),
+        (Box::new(line_then_arc), 2),
+    ] {
+        let (graph, root) = run_along_placed(plan_circle(25.0), source, count, 12.0);
+        let error = compiler()
+            .compile_mesh_with_deviation(&graph, root, &options())
+            .err()
+            .unwrap_or_else(|| panic!("a fold is refused at {count} sections"));
+        assert!(error.to_string().contains("sections fold"), "{error}");
+    }
+}
+
+#[test]
+fn a_run_along_a_curve_placed_exactly_stays_certified() {
+    let line = Curve2::Line(Line2 {
+        origin: Point2::new(2.0, 1.0),
+        direction: Vec2::new(0.0, 2.0),
+    });
+    let (graph, root) = run_along_placed_circle(line);
+    let (_, report) = compiler()
+        .compile_mesh_with_deviation(&graph, root, &options())
+        .unwrap();
+    assert!(report.meets_requested(), "{report:?}");
+    certified(&report, DeviationPath::StationedSpine);
 }
 
 // --- exact bodies -----------------------------------------------------------

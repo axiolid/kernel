@@ -38,10 +38,14 @@ FB = "crates/algorithms/parametric/evaluate/src/station/frame_bound.rs"
 BK = "crates/algorithms/parametric/evaluate/src/banked.rs"
 SB = "crates/execution/compile/src/station/bound.rs"
 SC = "crates/execution/compile/src/station.rs"
+SBA = "crates/execution/compile/src/station/basis.rs"
+FLD = "crates/execution/compile/src/station/bound/fold.rs"
+BND = "crates/algorithms/parametric/evaluate/src/station/frame_bound/bend.rs"
 SX = "crates/execution/compile/src/station/exact.rs"
 LX = "crates/algorithms/construction/construct/src/loft_exact.rs"
 FRAMES = ["-p", "axiolid-evaluate", "--lib", "frame_bound"]
 BOUND = ["-p", "axiolid-mesh-compile", "--test", "station_bound"]
+PLACED = ["-p", "axiolid-evaluate", "--test", "station_frame_error"]
 
 MUTANTS = [
     # --- the frame law's derivative bounds ---------------------------------
@@ -70,6 +74,22 @@ MUTANTS = [
     ('plan frame not normalised', FB,
      '            let flat = normalised(k1, k2, rho);',
      '            let flat = [k1, k2];', [FRAMES, BOUND]),
+    # --- a curve placed inexactly (#408) -------------------------------------
+    ('inexact placement bounded', FB,
+     '        if !at.piece.placement_exact && !self.placements_read_as_exact {\n            return None;\n        }\n        let mut bounds',
+     '        let mut bounds', [BOUND, PLACED]),
+    ('inexact placement checked on an atomic basis only', FB,
+     '        if !at.piece.placement_exact && !self.placements_read_as_exact {\n            return None;\n        }\n        let mut bounds',
+     '        if matches!(\n            &self.basis,\n            LawBasis::Atomic {\n                placement_exact: false,\n                ..\n            }\n        ) {\n            return None;\n        }\n        let mut bounds', [BOUND]),
+    ('a bend searched on an inexactly placed piece', BND,
+     '        if !at.piece.placement_exact && !self.placements_read_as_exact {\n            return false;\n        }\n        // Builds',
+     '        // Builds', [BOUND, PLACED]),
+    ('a fold decided on the frames bounded as exact', FLD,
+     '        let verdict = if plain && self.fold_frames.has_bend(span.lo, span.hi) {',
+     '        let verdict = if plain && self.frames.has_bend(span.lo, span.hi) {', [BOUND]),
+    ('atomic basis placed exactly whatever its placement', SBA,
+     '            } => FrameLaw::atomic_placed(*curve, *placed, *placed_exactly, tolerance),',
+     '            } => FrameLaw::atomic_placed(*curve, *placed, true, tolerance),', [BOUND]),
     # --- the bound per cell ------------------------------------------------
     ('chord term dropped', SB,
      '                chord[k] = chord[k].max(0.125 * span * span * second);',

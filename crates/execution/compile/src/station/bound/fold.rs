@@ -208,11 +208,18 @@ impl<'r, 'g> SectionLaw<'r, 'g> {
         // A frame with a closed-form bend is bisected even where its bend
         // is not bounded over the whole span (a span longer than twice the
         // bend's radius); only a frame without one is checked conservatively.
-        if plain && self.frames.has_bend(span.lo, span.hi) {
-            let first = self.frames.bend(span.lo, span.hi, reading);
-            return self.bisect(span, first, reading, margin, visited);
-        }
-        self.conservative(span, reading, margin, identity)
+        let verdict = if plain && self.fold_frames.has_bend(span.lo, span.hi) {
+            let first = self.fold_frames.bend(span.lo, span.hi, reading);
+            self.bisect(span, first, reading, margin, visited)?
+        } else {
+            self.conservative(span, reading, margin, identity)?
+        };
+        // The fold is decided on the frames as read, which a placement
+        // read inexactly does not change in their section planes (#408);
+        // that run is certified against the exact surface by no cell
+        // (`SectionLaw::cell` bounds the frames strictly), never refused
+        // as a fold nor cleared to a bound.
+        Ok(verdict)
     }
 
     /// The vertices' section coordinates `(a, b)` (lateral, up in the
@@ -259,7 +266,7 @@ impl<'r, 'g> SectionLaw<'r, 'g> {
                     resource: "station fold check",
                 });
             }
-            let Some(bend) = known.or_else(|| self.frames.bend(lo, hi, reading)) else {
+            let Some(bend) = known.or_else(|| self.fold_frames.bend(lo, hi, reading)) else {
                 // Not bounded over this width: halve it, and where it stays
                 // so (a vertical tangent) leave it undecided, the other
                 // spans still decided.
@@ -332,7 +339,7 @@ impl<'r, 'g> SectionLaw<'r, 'g> {
         identity: &SectionFrame,
     ) -> GeomResult<Result<bool, &'static str>> {
         let Span { i, lo, hi } = span;
-        let Some(bounds) = self.frames.bounds(lo, hi, reading) else {
+        let Some(bounds) = self.fold_frames.bounds(lo, hi, reading) else {
             return Ok(Err(UNCERTIFIED_FRAMES));
         };
         let (d0, d1) = (self.distances[i], self.distances[i + 1]);
