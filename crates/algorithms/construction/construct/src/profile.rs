@@ -9,11 +9,19 @@
 //! 0015 after it left T-junctions between holes in one band, #253).
 //! `axiolid_reference::triangulate_simple` stays the differential oracle for
 //! the hole-free case.
+//!
+//! [`profile_rings`] flattens each profile on its own. Profiles that change
+//! between stations and pair segment for segment are flattened together by
+//! [`paired_profile_rings`] (#361, `paired`), which also reports the
+//! deviation of every section interpolated between them.
 
 use axiolid_contracts::{GeomError, GeomResult};
 use axiolid_core::{Point2, Scalar, Tolerance};
 use axiolid_curve::Curve2;
 use axiolid_profile::{CircleProfile, EllipseProfile, Profile, RectangleProfile};
+
+mod paired;
+pub use paired::{paired_profile_rings, PairedRings};
 
 /// Outer ring plus holes, all CCW/CW normalised by the caller's contract:
 /// outer counter-clockwise, holes clockwise.
