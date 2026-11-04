@@ -86,6 +86,14 @@ Latest release, 0.3.29 (2026-11-03):
   could not clear. `ValidateProfile::validate` and the extruder are unchanged
   (#388, ADR 0095).
 
+- `profile::paired_profile_rings` and `PairedRings` (#361): profiles whose
+  rings pair segment for segment (lines, circular and elliptic arcs, matched
+  by ring and segment index after orientation, a derived profile's
+  transform applied after the snap) are flattened together, each segment
+  into one common number of equal parameter steps, with the deviation of
+  every section interpolated between them. A polyline or B-spline segment,
+  another family or a different segment structure returns `None`.
+
 ### Fixed
 
 - `extrude_profile_exact` ran no profile check and built a solid from a

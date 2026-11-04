@@ -9,19 +9,6 @@ caret rule for `0.x` versions.
 
 ## [Unreleased]
 
-### Added
-
-- A stationed spine whose sections are different curved profiles that pair
-  segment for segment (lines, circular and elliptic arcs: a disk growing, a
-  rounded rectangle whose corners grow, an ellipse becoming a disk) reports
-  a `Certified` deviation instead of `Unbounded` (#361, ADR 0082): the
-  profiles are flattened together by `paired_profile_rings`, so the bound of
-  the flattening holds for every interpolated section, and it is the
-  profile's share and the fold margin. A polyline or B-spline segment or a
-  different segment structure stays unbounded by name, and the exact
-  compiler still refuses a curved section that changes. Requires
-  `axiolid-construct` with `paired_profile_rings`.
-
 ## [0.3.44] - 2026-11-03
 
 ### Added
@@ -53,6 +40,17 @@ caret rule for `0.x` versions.
   `COINCIDENT_OPERANDS` where the exact compiler read a feature within the
   tolerance. Its operands' attribute channels are dropped by name,
   `ProviderLimitation`.
+
+- A stationed spine whose sections are different curved profiles that pair
+  segment for segment (lines, circular and elliptic arcs: a disk growing, a
+  rounded rectangle whose corners grow, an ellipse becoming a disk) reports
+  a `Certified` deviation instead of `Unbounded` (#361, ADR 0082): the
+  profiles are flattened together by `paired_profile_rings`, so the bound of
+  the flattening holds for every interpolated section, and it is the
+  profile's share and the fold margin. A polyline or B-spline segment or a
+  different segment structure stays unbounded by name, and the exact
+  compiler still refuses a curved section that changes. Requires
+  `axiolid-construct` with `paired_profile_rings`.
 
 ### Changed
 

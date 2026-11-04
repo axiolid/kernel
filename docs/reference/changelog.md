@@ -750,6 +750,14 @@ Every publishable crate versions and publishes independently ([ADR 0067](/adr/00
   could not clear. `ValidateProfile::validate` and the extruder are unchanged
   (#388, ADR 0095).
 
+- `profile::paired_profile_rings` and `PairedRings` (#361): profiles whose
+  rings pair segment for segment (lines, circular and elliptic arcs, matched
+  by ring and segment index after orientation, a derived profile's
+  transform applied after the snap) are flattened together, each segment
+  into one common number of equal parameter steps, with the deviation of
+  every section interpolated between them. A polyline or B-spline segment,
+  another family or a different segment structure returns `None`.
+
 ### Fixed
 
 - `extrude_profile_exact` ran no profile check and built a solid from a
@@ -4235,6 +4243,17 @@ Every publishable crate versions and publishes independently ([ADR 0067](/adr/00
   `COINCIDENT_OPERANDS` where the exact compiler read a feature within the
   tolerance. Its operands' attribute channels are dropped by name,
   `ProviderLimitation`.
+
+- A stationed spine whose sections are different curved profiles that pair
+  segment for segment (lines, circular and elliptic arcs: a disk growing, a
+  rounded rectangle whose corners grow, an ellipse becoming a disk) reports
+  a `Certified` deviation instead of `Unbounded` (#361, ADR 0082): the
+  profiles are flattened together by `paired_profile_rings`, so the bound of
+  the flattening holds for every interpolated section, and it is the
+  profile's share and the fold margin. A polyline or B-spline segment or a
+  different segment structure stays unbounded by name, and the exact
+  compiler still refuses a curved section that changes. Requires
+  `axiolid-construct` with `paired_profile_rings`.
 
 ### Changed
 
