@@ -9,6 +9,24 @@ caret rule for `0.x` versions.
 
 ## [Unreleased]
 
+### Fixed
+
+- A floor-standing door `3e-7` to `9e-7` short of a wall's face under a
+  millimetre tolerance is cut, not refused as "the kept faces did not sew
+  into a valid exact B-rep" (#409). The door's end face is read as the
+  wall's, but its floor edge stops short of the wall's floor edge by more
+  than the splitter's fixed relative slack (`1e-7`), so the wall's floor
+  did not split round the door's footprint. A boolean refused at the
+  caller's tolerance and at the finer one is now cut a last time at the
+  caller's tolerance with such a line edge extended to the boundary it
+  falls short of, as the door past the face already meets it; the move is
+  reported (`MergedPoints`, at least the gap). The extension is tested for
+  a difference at `3e-7`, `7e-7` and `9e-7` short and `3e-7` and `7e-7`
+  past a straight wall, for a union and an intersection at `3e-7` either
+  side, and for a curved wall at `9e-7`. A door `1e-6` or more short is
+  past the finer tolerance (`9.8e-7`) and is cut exactly at it, its skin
+  kept.
+
 ## [0.1.13] - 2026-11-03
 
 ### Added

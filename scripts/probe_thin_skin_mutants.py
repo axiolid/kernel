@@ -1,4 +1,4 @@
-"""Mutation probe for skins at the rounding scale (#276, #291, #312).
+"""Mutation probe for skins at the rounding scale (#276, #291, #312, #409).
 
 A difference whose tool stops a rounding error short of its host's face
 (or reaches that far past it) leaves a skin or sliver that thin. The mesh
@@ -12,7 +12,10 @@ The exact boolean cuts an imprinted edge at its own end where the other
 operand's boundary crosses it within the tolerance (`imprint_cuts` in
 `axiolid-brep-boolean`'s `section.rs`), and retries a boolean that merge
 left refused with ends merged only within the rounding floor (`lib.rs`,
-`report.rs`). Each mutant breaks the resolution, its reach, its exact
+`report.rs`). A door a fraction of a micrometre short of the face, whose
+edge the splitter's fixed slack leaves apart from the face's, is cut by a
+last retry that extends the imprinted line edge to the face's boundary
+(`imprint_cuts`, `retry_extending`, #409). Each mutant breaks the resolution, its reach, its exact
 landing, the never-worse guard, or the report, and must turn the
 regression tests red.
 
@@ -29,6 +32,18 @@ Equivalent mutants, deliberately not listed:
   the triangle distance it precedes is never smaller than the residue.
 - Which refusal is returned when the snapped and the given operands are
   both refused: the tests' refusing boolean refuses both alike.
+- Not recording the extension of a short edge (`report::near` replaced
+  by the bare comparison, with the extension kept): the extension is made
+  only where the door's end face is read as the wall's, by the same
+  distance, and the vertices it leaves apart are welded and recorded by
+  the sewing, so the report already bounds the move.
+- The extension reaching an arc edge (the `Curve3::Line` guard of
+  `imprint_cuts` dropped): no practical boolean reaches it. A cut within
+  the tolerance of an arc's end needs the arc edge cut by a face a
+  fraction of a micrometre from its end, and such a curved wall with a
+  door short of its end face is cut by the first attempt, or by the last
+  retry without an arc cut near its ends (the curved-wall test of #409
+  reaches the last retry, and passes with and without the guard).
 - The exact end merge reaching a thousand tolerances (`gap / 1e3`):
   killed before #291 by the door ten tolerances past the face, which it
   left unsewn; now masked by the retry, which cuts that door with ends
@@ -79,7 +94,7 @@ MUTANTS = [
      '        if before != after && after.dot(before) <= 0.0 {',
      '        if before != after && after.dot(before) < 0.0 {', [MESH]),
     ('exact imprint keeps cuts next to the edge\'s ends', SECTION,
-     '        let cuts = imprint_cuts(&curve, span, cuts, tolerance)?;',
+     '        let (cuts, span) = imprint_cuts(&curve, span, cuts, tolerance)?;',
      '        let _ = imprint_cuts;', [EXACT]),
     # Reach: the rounding scale, not the tolerance.
     ('the reach is the tolerance', SNAP,
@@ -160,6 +175,19 @@ MUTANTS = [
     ('exact end merge not noted', SECTION,
      '            report::merged_an_end();',
      '            {}', [EXACT]),
+    # A line edge short of the face it ends on (#409).
+    ('exact line edge short of the face is not extended', SECTION,
+     '            if matches!(curve, Curve3::Line(_)) && report::extends_ends() {',
+     '            if matches!(curve, Curve3::Line(_)) && report::extends_ends() && false {', [EXACT]),
+    ('exact extension retry not made', BB_LIB,
+     '        && session.retry_extending(tolerance)\n',
+     '        && session.retry_extending(tolerance)\n        && false\n', [EXACT]),
+    ('exact extension made before the finer cut', BB_REPORT,
+     '                extends_ends: false,\n',
+     '                extends_ends: true,\n', [EXACT]),
+    ('exact extension cut reported as the finer one', BB_REPORT,
+     '                s.finer = false;\n                s.extends_ends = true;',
+     '                s.finer = true;\n                s.extends_ends = true;', [EXACT]),
     # Report.
     ('the snap is not reported', COMPILER,
      '        if moved > 0.0 {\n            built.deviation.add(',

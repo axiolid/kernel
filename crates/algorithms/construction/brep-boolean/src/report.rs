@@ -286,6 +286,9 @@ struct Session {
     merged_an_end: bool,
     /// Whether the session was started over at the finer tolerance (#332).
     finer: bool,
+    /// Whether an imprinted line edge short of the other face's boundary
+    /// by less than the tolerance is extended to it (#409): the last retry.
+    extends_ends: bool,
 }
 
 thread_local! {
@@ -363,6 +366,27 @@ impl Guard {
         true
     }
 
+    /// Start this guard's own session over at the caller's `tolerance`, its
+    /// decisions dropped, with an imprinted line edge short of the other
+    /// face's boundary extended to it (#409). `false` for a joined session.
+    pub(crate) fn retry_extending(&self, tolerance: Tolerance) -> bool {
+        if !self.owner {
+            return false;
+        }
+        SESSION.with(|s| {
+            if let Some(s) = s.borrow_mut().as_mut() {
+                s.tolerance = tolerance;
+                s.report = BooleanReport::default();
+                s.exceeded = false;
+                s.ends_within_tolerance = true;
+                s.merged_an_end = false;
+                s.finer = false;
+                s.extends_ends = true;
+            }
+        });
+        true
+    }
+
     /// Start this guard's own session over, its decisions dropped, with
     /// imprinted edges' ends merged only within the rounding floor (#291).
     pub(crate) fn retry_with_rounding_ends(&self) {
@@ -392,6 +416,12 @@ pub(crate) fn imprint_end_tolerance(tolerance: Tolerance) -> Tolerance {
     }
 }
 
+/// Whether an imprinted line edge short of the other face's boundary is
+/// extended to it (#409).
+pub(crate) fn extends_ends() -> bool {
+    SESSION.with(|s| s.borrow().as_ref().is_some_and(|s| s.extends_ends))
+}
+
 /// Note a merge into an imprinted edge's end above the rounding floor.
 pub(crate) fn merged_an_end() {
     SESSION.with(|s| {
@@ -417,6 +447,7 @@ pub(crate) fn open(operands: &[&ExactBRep], tolerance: Tolerance) -> Guard {
                 ends_within_tolerance: true,
                 merged_an_end: false,
                 finer: false,
+                extends_ends: false,
             });
         });
     }

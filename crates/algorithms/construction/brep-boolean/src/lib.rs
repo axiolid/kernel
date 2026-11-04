@@ -159,6 +159,19 @@
 //! both returns the refusal at the caller's tolerance. A boolean that
 //! succeeds at the caller's tolerance is never cut again.
 //!
+//! **A line edge short of the face it ends on (#409).** A door stopping
+//! `3e-7` short of a wall's face has its end face read as the wall's, but
+//! the edge of its floor along that face ends that short of the wall
+//! floor's edge, further than the fixed slack with which a split face
+//! welds piece ends, so the wall's floor does not split round the door's
+//! footprint. A boolean still refused at the finer tolerance is cut a last
+//! time at the caller's, with an imprinted line edge extended to the
+//! crossing with the other face's boundary where that lies within `eps` of
+//! the edge's end (`imprint_cuts`), mirroring the door past the face,
+//! whose edge the crossing falls inside. The move is a merge of points
+//! above the rounding floor, so the report is not exact; a boolean the
+//! finer tolerance cuts is never cut so.
+//!
 //! **A point near a support it is not read on (#332, #327).** A region is
 //! classified at a point inside it by ray parity, and a point within `eps`
 //! of any face's support is first not trusted: a reading may have moved
@@ -259,19 +272,31 @@ pub fn boolean_with_report(
     // [`FINER_FACTOR`]. Nothing is retried where nothing is left, at a
     // tolerance with a zero part, or at or below the rounding floor.
     let finer = Tolerance::new(tolerance.linear() * FINER_FACTOR, tolerance.angular());
-    match finer {
-        Ok(finer)
-            if refused != BooleanError::EmptyResult
-                && finer.linear() > report::rounding()
-                && finer.angular() > 0.0
-                && session.retry_at(finer) =>
+    if let Ok(finer) = finer {
+        if refused != BooleanError::EmptyResult
+            && finer.linear() > report::rounding()
+            && finer.angular() > 0.0
+            && session.retry_at(finer)
         {
-            attempt(&session, a, b, operator, finer)
-                .map_err(|_| refused)
-                .and_then(|result| Ok((result, session.finish()?)))
+            if let Ok(result) = attempt(&session, a, b, operator, finer) {
+                return Ok((result, session.finish()?));
+            }
         }
-        _ => Err(refused),
     }
+    // Last, a line edge a fraction of the tolerance short of the face it
+    // ends on is extended to it (#409): at the caller's tolerance, so the
+    // exact finer cut above is preferred where it succeeds.
+    if refused != BooleanError::EmptyResult
+        && tolerance.linear() > report::rounding()
+        && session.retry_extending(tolerance)
+    {
+        // Not `attempt`: its fallback to ends merged only within the
+        // rounding floor is the cut the first attempt already made.
+        return run(a, b, operator, tolerance)
+            .map_err(|_| refused)
+            .and_then(|result| Ok((result, session.finish()?)));
+    }
+    Err(refused)
 }
 
 /// [`run`] in the open session, cut again with imprinted edges' ends

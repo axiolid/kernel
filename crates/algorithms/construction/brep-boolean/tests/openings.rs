@@ -350,3 +350,119 @@ fn a_floor_standing_door_below_the_finer_tolerance_past_the_face_is_cut_with_end
         );
     }
 }
+
+/// The door a fraction of a micrometre short of the wall's face under a
+/// millimetre tolerance (#409). The door's floor edge along its end stops
+/// short of the wall's floor edge by more than the splitter's fixed slack,
+/// and the wall's floor does not split round the door's footprint. The
+/// door's edge is extended to the wall's floor edge, within the tolerance,
+/// and reported; a door further off (past the finer tolerance) is still cut
+/// exactly, its skin kept.
+#[test]
+fn a_floor_standing_door_a_fraction_of_a_micrometre_short_of_the_face_is_cut() {
+    let wall = solid(square(0.0, 0.0, 4.0, 0.25), 0.0, 3.0);
+    let millimetre = Tolerance::MILLIMETRE;
+    for gap in [3e-7, 7e-7, 9e-7, -3e-7, -7e-7] {
+        let door = solid(square(1.0, gap, 2.0, 0.5), 0.0, 2.0);
+        let (cut, report) = axiolid_brep_boolean::boolean_with_report(
+            &wall,
+            &door,
+            BooleanOperator::Difference,
+            millimetre,
+        )
+        .unwrap_or_else(|e| panic!("gap {gap}: {e}"));
+        let topology = axiolid_topology::audit_brep(cut.topology());
+        assert!(topology.is_closed_manifold(), "gap {gap}: {topology:?}");
+        assert!(
+            geometric_audit(&cut, millimetre).is_consistent(),
+            "gap {gap}"
+        );
+        assert!(!report.is_exact(), "gap {gap}: {report:?}");
+        assert!(!report.finer(), "gap {gap}: {report:?}");
+        let moved = report
+            .decisions()
+            .iter()
+            .map(|d| d.linear)
+            .fold(0.0, f64::max);
+        // The door's end moved onto the wall's face, by the gap at least.
+        assert!(moved >= gap.abs() * 0.99, "gap {gap}: {report:?}");
+        assert!(moved <= millimetre.linear(), "gap {gap}: {report:?}");
+        // The door's end face is 1 wide and 2 high.
+        let got = volume(&cut);
+        assert!(
+            (got - (3.0 - 0.5)).abs() <= moved * 2.0 + 1e-12,
+            "gap {gap}: {got}"
+        );
+    }
+    let door = solid(square(1.0, 1e-4, 2.0, 0.5), 0.0, 2.0);
+    let (cut, report) = axiolid_brep_boolean::boolean_with_report(
+        &wall,
+        &door,
+        BooleanOperator::Difference,
+        millimetre,
+    )
+    .expect("short by a tenth of the tolerance");
+    assert!(report.finer() && report.is_exact(), "{report:?}");
+    close("skin", volume(&cut), 3.0 - 0.5 + 1e-4 * 2.0);
+}
+
+/// A door `1e-6` short of the wall's face is past the finer tolerance
+/// (`9.8e-7`): the finer cut succeeds, exactly and flagged (#409).
+#[test]
+fn a_floor_standing_door_a_micrometre_short_of_the_face_is_cut_at_the_finer_tolerance() {
+    let wall = solid(square(0.0, 0.0, 4.0, 0.25), 0.0, 3.0);
+    let millimetre = Tolerance::MILLIMETRE;
+    let door = solid(square(1.0, 1e-6, 2.0, 0.5), 0.0, 2.0);
+    let (cut, report) = axiolid_brep_boolean::boolean_with_report(
+        &wall,
+        &door,
+        BooleanOperator::Difference,
+        millimetre,
+    )
+    .expect("short by a micrometre");
+    assert!(report.finer() && report.is_exact(), "{report:?}");
+    assert!(
+        geometric_audit(&cut, millimetre).is_consistent(),
+        "{report:?}"
+    );
+    close("skin", volume(&cut), 3.0 - 0.5 + 1e-6 * 2.0);
+}
+
+/// The same door, a fraction of a micrometre short or past, in a union and
+/// an intersection with the wall (#409).
+#[test]
+fn a_door_a_fraction_of_a_micrometre_off_the_face_is_united_and_intersected() {
+    let wall = solid(square(0.0, 0.0, 4.0, 0.25), 0.0, 3.0);
+    let millimetre = Tolerance::MILLIMETRE;
+    for gap in [3e-7, -3e-7] {
+        let door = solid(square(1.0, gap, 2.0, 0.5), 0.0, 2.0);
+        for (operator, want) in [
+            (BooleanOperator::Union, 3.0 + 1.0 - 0.5),
+            (BooleanOperator::Intersection, 0.5),
+        ] {
+            let (result, report) =
+                axiolid_brep_boolean::boolean_with_report(&wall, &door, operator, millimetre)
+                    .unwrap_or_else(|e| panic!("{operator:?} gap {gap}: {e}"));
+            let topology = axiolid_topology::audit_brep(result.topology());
+            assert!(
+                topology.is_closed_manifold(),
+                "{operator:?} gap {gap}: {topology:?}"
+            );
+            assert!(
+                geometric_audit(&result, millimetre).is_consistent(),
+                "{operator:?} gap {gap}"
+            );
+            let moved = report
+                .decisions()
+                .iter()
+                .map(|d| d.linear)
+                .fold(0.0, f64::max);
+            assert!(moved <= millimetre.linear(), "{operator:?} gap {gap}");
+            assert!(
+                (volume(&result) - want).abs() <= moved * 2.0 + 1e-6,
+                "{operator:?} gap {gap}: {}",
+                volume(&result)
+            );
+        }
+    }
+}

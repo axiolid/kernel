@@ -288,3 +288,33 @@ fn a_box_tangent_to_the_inner_face_is_cut() {
         assert!(report.linear() <= 1e-14, "back at {back}: {report:?}");
     }
 }
+
+/// A floor-standing door in a curved wall's end face, its side face a
+/// fraction of a micrometre short of or past that face (#409). The wall's
+/// floor arcs end there. At `9e-7` the boolean is refused at the tolerance
+/// and at the finer one, and cut by the last retry.
+#[test]
+fn a_door_a_fraction_of_a_micrometre_from_the_end_of_a_curved_wall_is_cut() {
+    for gap in [3e-7, 7e-7, 9e-7, -3e-7, -7e-7] {
+        let profile = quad([
+            Point2::new(6.05, gap),
+            Point2::new(6.2, gap),
+            Point2::new(6.2, 0.5),
+            Point2::new(6.05, 0.5),
+        ]);
+        let door = extruded(&profile, 0.0, 1.0);
+        let wall = extruded(&sector(OUTER, INNER, 0.0, SWEEP), 0.0, HEIGHT);
+        let (result, report) =
+            boolean_with_report(&wall, &door, BooleanOperator::Difference, tol())
+                .unwrap_or_else(|e| panic!("gap {gap}: {e}"));
+        sound(&result, &format!("gap {gap}"));
+        let want = sector_volume(OUTER, INNER, SWEEP, HEIGHT) - 0.15 * (0.5 - gap);
+        let got = volume(&result);
+        assert!(
+            (got - want).abs() <= 1e-6,
+            "gap {gap}: expected {want}, got {got}"
+        );
+        assert!(!report.finer(), "gap {gap}: {report:?}");
+        assert!(report.linear() <= tol().linear(), "gap {gap}: {report:?}");
+    }
+}

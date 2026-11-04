@@ -33,14 +33,26 @@ TESTS = [BREP, MESH, FILLET]
 
 MUTANTS = [
     ("no retry at the finer tolerance", L,
-     "                && session.retry_at(finer) =>",
-     "                && false && session.retry_at(finer) =>"),
+     "            && session.retry_at(finer)\n",
+     "            && false\n            && session.retry_at(finer)\n"),
     ("the retry at the caller's tolerance", L,
      "Tolerance::new(tolerance.linear() * FINER_FACTOR, tolerance.angular())",
      "Tolerance::new(tolerance.linear(), tolerance.angular())"),
     ("the retry keeps the refused attempt's readings", R,
+     "    pub(crate) fn retry_at(&self, tolerance: Tolerance) -> bool {\n"
+     "        if !self.owner {\n"
+     "            return false;\n"
+     "        }\n"
+     "        SESSION.with(|s| {\n"
+     "            if let Some(s) = s.borrow_mut().as_mut() {\n"
      "                s.tolerance = tolerance;\n"
      "                s.report = BooleanReport::default();",
+     "    pub(crate) fn retry_at(&self, tolerance: Tolerance) -> bool {\n"
+     "        if !self.owner {\n"
+     "            return false;\n"
+     "        }\n"
+     "        SESSION.with(|s| {\n"
+     "            if let Some(s) = s.borrow_mut().as_mut() {\n"
      "                s.tolerance = tolerance;"),
     ("a finer result not flagged", R,
      "                s.finer = true;",

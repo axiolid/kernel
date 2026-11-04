@@ -715,7 +715,7 @@ fn imprint(
         // together with the shared surface it defines the edge's curve.
         let bounding = from.cutter(face, edge, &curve, span, tolerance, false)?;
         let (cuts, along) = onto.cuts(other, &curve, &bounding, None, contacts, tolerance)?;
-        let cuts = imprint_cuts(&curve, span, cuts, tolerance)?;
+        let (cuts, span) = imprint_cuts(&curve, span, cuts, tolerance)?;
         let shared = onto.surface(other)?;
         for piece in pieces_within(&curve, span, cuts) {
             let mid = sample(&curve, piece, [shared, &bounding], contacts)?;
@@ -944,15 +944,22 @@ fn merge_close(
 /// tolerance); the boolean is then cut again with ends merged only within
 /// the rounding floor, as before #276 (#291, `report::imprint_end_tolerance`,
 /// [`crate::boolean_with_report`]).
+///
+/// A line edge that ends short of the other face's boundary, by a cut
+/// within tolerance outside its span, is where the door past the face has
+/// its edge cross the boundary: in the last retry (#409,
+/// `report::extends_ends`) the span reaches that cut, so the piece ends on
+/// the boundary and welds there, not the splitter's fixed slack away.
 fn imprint_cuts(
     curve: &Curve3,
     span: Interval,
     cuts: Vec<Scalar>,
     tolerance: Tolerance,
-) -> Result<Vec<Scalar>, BooleanError> {
+) -> Result<(Vec<Scalar>, Interval), BooleanError> {
     let cuts = merge_close(curve, cuts, tolerance)?;
     let at = |t: Scalar| evaluate3(curve, t).map_err(|_| BooleanError::Evaluation);
     let ends = [at(span.start)?, at(span.end)?];
+    let (mut lo, mut hi) = (span.start.min(span.end), span.start.max(span.end));
     let mut out = Vec::with_capacity(cuts.len());
     for cut in cuts {
         let point = at(cut)?;
@@ -965,9 +972,21 @@ fn imprint_cuts(
             out.push(cut);
         } else if gap > report::rounding() {
             report::merged_an_end();
+            // A line's end short of the other face's boundary: the edge
+            // reaches the crossing, so its piece ends on the boundary and
+            // not a fraction of the tolerance before it (#409).
+            if matches!(curve, Curve3::Line(_)) && report::extends_ends() {
+                lo = lo.min(cut);
+                hi = hi.max(cut);
+            }
         }
     }
-    Ok(out)
+    let span = if span.start <= span.end {
+        Interval::new(lo, hi)
+    } else {
+        Interval::new(hi, lo)
+    };
+    Ok((out, span))
 }
 
 /// The pieces of a bounded edge span between the cuts inside it.
