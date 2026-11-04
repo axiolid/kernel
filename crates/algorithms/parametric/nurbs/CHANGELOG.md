@@ -9,6 +9,14 @@ caret rule for `0.x` versions.
 
 ## [Unreleased]
 
+### Fixed
+
+- A traced section against a surface that touches it reports the double root
+  once, with multiplicity 2, instead of the root plus two spurious sign
+  changes about 2.4e-8 either side: a stretch whose second derivative along
+  the curve is enclosed away from zero is settled by a Rolle certificate
+  before it is bisected (#397).
+
 ## [0.3.8] - 2026-11-03
 
 ### Added

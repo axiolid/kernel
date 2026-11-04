@@ -302,6 +302,28 @@ is carried on both: `Curve3::PairSection` (`PairSection3`).
   `-pi` (and past a face's own seam angle), so a symmetric section's
   special points never sit on the window's edge.
 
+### Certified multiplicity of touching roots (#397)
+
+A second field that only touches a traced curve has a double root, and
+bisecting its stretch on the sign of the field alone read f64 noise at the
+touch as a pair of spurious sign changes about 2.4e-8 either side of it. A
+stretch whose slope bound straddles zero is now settled by a Rolle
+certificate before it is bisected: the second derivative of the field along
+the curve is enclosed over the stretch's hull, from the second partials of
+both fields and the solved parameter's first and second derivatives. When
+that enclosure excludes zero the field has at most one critical point there,
+so at most two roots counting multiplicity. Ends of opposite sign hold one
+simple root. Ends of one sign hold none, two simple roots either side of the
+critical point, or one root of multiplicity 2 at it, according to an
+enclosure of the field at the critical point (found by bisecting the sign of
+its slope); a touch, where that enclosure (which carries its own rounding margin)
+straddles zero, is reported once with multiplicity 2 and never as sign
+changes. No absolute tolerance decides it: a minimum 1e-9 away from zero
+is two crossings or none. A stretch whose second
+derivative straddles zero continues to bisect as before. The caller's merge
+of close cuts (#381) stays, as the tolerance reading for cuts that are not
+one root.
+
 ## Alternatives considered
 
 | Option | Why not |
