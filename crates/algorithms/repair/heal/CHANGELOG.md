@@ -9,14 +9,6 @@ caret rule for `0.x` versions.
 
 ## [Unreleased]
 
-### Fixed
-
-- `self_intersections` decides coplanar triangle pairs exactly at any finite
-  coordinate scale: at about 1e154 and above an overlapping pair was
-  reported as disjoint (and panicked in a debug build), because the
-  `orient2d` it relies on overflowed. The fix is in `axiolid-predicates`
-  (#404).
-
 ## [0.3.4] - 2026-11-04
 
 ### Added
@@ -25,6 +17,14 @@ caret rule for `0.x` versions.
   edges at vertices lying on them within tolerance, so a mesh closed up to
   T-junctions becomes a closed oriented cycle. It adds no vertex and reports
   the deviation it accepted and the triangles it declined to split (#416).
+
+### Fixed
+
+- `self_intersections` decides coplanar triangle pairs exactly at any finite
+  coordinate scale: at about 1e154 and above an overlapping pair was
+  reported as disjoint (and panicked in a debug build), because the
+  `orient2d` it relies on overflowed. The fix is in `axiolid-predicates`
+  (#404).
 
 ## [0.3.3] - 2026-11-03
 

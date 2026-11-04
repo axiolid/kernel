@@ -3227,6 +3227,14 @@ Every publishable crate versions and publishes independently ([ADR 0067](/adr/00
   T-junctions becomes a closed oriented cycle. It adds no vertex and reports
   the deviation it accepted and the triangles it declined to split (#416).
 
+### Fixed
+
+- `self_intersections` decides coplanar triangle pairs exactly at any finite
+  coordinate scale: at about 1e154 and above an overlapping pair was
+  reported as disjoint (and panicked in a debug build), because the
+  `orient2d` it relies on overflowed. The fix is in `axiolid-predicates`
+  (#404).
+
 ### 0.3.3 - 2026-11-03
 
 ### Fixed
@@ -3926,6 +3934,11 @@ Every publishable crate versions and publishes independently ([ADR 0067](/adr/00
 
 - The package now ships `LICENSE` and `LICENSE-COMMERCIAL` (symlinks to the
   repository root), so the licence texts travel with the archive (#358).
+
+- `split_triangle_at_side_corners` re-triangulates a triangle whose sides
+  carry extra corners into proper triangles of the same winding, by side
+  bitmask ear clipping on indices alone. `axiolid-mesh-compile` and
+  `axiolid-heal` shared it as two private copies before (#422).
 
 ### 0.3.5 - 2026-10-28
 
@@ -7877,6 +7890,15 @@ Every publishable crate versions and publishes independently ([ADR 0067](/adr/00
   54.1, footprint on a grid 51.4 and 51.0, skew grids 44.9 and 46.7, box on a
   slab 0.015 and 0.018. Single runs of one build spread from 53 to 192 ms, so
   this is unchanged within noise.
+
+### Fixed
+
+- `triangulate_simple` and `retriangulate_face` refuse a NaN or infinite
+  coordinate with `GeomError::InvalidInput`. `orient2d` now reports such a
+  coordinate as uncertain instead of a certain zero (#404), and these
+  entry points would otherwise panic on it. `coplanar_overlap` keeps its
+  signature and panics on a non-finite coordinate, documented under
+  `# Panics`.
 
 ### 0.3.15 - 2026-11-03
 

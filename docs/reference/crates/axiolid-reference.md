@@ -72,4 +72,13 @@ Latest release, 0.3.16 (2026-11-03):
   slab 0.015 and 0.018. Single runs of one build spread from 53 to 192 ms, so
   this is unchanged within noise.
 
+### Fixed
+
+- `triangulate_simple` and `retriangulate_face` refuse a NaN or infinite
+  coordinate with `GeomError::InvalidInput`. `orient2d` now reports such a
+  coordinate as uncertain instead of a certain zero (#404), and these
+  entry points would otherwise panic on it. `coplanar_overlap` keeps its
+  signature and panics on a non-finite coordinate, documented under
+  `# Panics`.
+
 Full history: [`crates/algorithms/reference/CHANGELOG.md`](https://github.com/axiolid/kernel/blob/main/crates/algorithms/reference/CHANGELOG.md)

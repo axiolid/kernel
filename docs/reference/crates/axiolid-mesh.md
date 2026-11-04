@@ -69,4 +69,9 @@ Latest release, 0.3.6 (2026-11-04):
 - The package now ships `LICENSE` and `LICENSE-COMMERCIAL` (symlinks to the
   repository root), so the licence texts travel with the archive (#358).
 
+- `split_triangle_at_side_corners` re-triangulates a triangle whose sides
+  carry extra corners into proper triangles of the same winding, by side
+  bitmask ear clipping on indices alone. `axiolid-mesh-compile` and
+  `axiolid-heal` shared it as two private copies before (#422).
+
 Full history: [`crates/representations/discrete/mesh/CHANGELOG.md`](https://github.com/axiolid/kernel/blob/main/crates/representations/discrete/mesh/CHANGELOG.md)
