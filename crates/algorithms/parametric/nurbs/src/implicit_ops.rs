@@ -373,6 +373,16 @@ pub(crate) fn roots_along(own: &ImplicitCurve2, other: &Field2) -> Vec<(Scalar, 
     let d_v = partial(&own.field, false);
     let h_u = partial(other, true);
     let h_v = partial(other, false);
+    let d2 = [
+        partial(&d_u, true),
+        partial(&d_u, false),
+        partial(&d_v, false),
+    ];
+    let h2 = [
+        partial(&h_u, true),
+        partial(&h_u, false),
+        partial(&h_v, false),
+    ];
     let mut roots: Vec<(Scalar, usize)> = Vec::new();
     for (index, cell) in own.cells.iter().enumerate() {
         let job = CellRoots {
@@ -383,6 +393,8 @@ pub(crate) fn roots_along(own: &ImplicitCurve2, other: &Field2) -> Vec<(Scalar, 
             d_v: &d_v,
             h_u: &h_u,
             h_v: &h_v,
+            d2: &d2,
+            h2: &h2,
         };
         let mut found = Vec::new();
         job.roots(0.0, 1.0, 0, &mut found);
@@ -407,6 +419,25 @@ fn nearest_turn(x: Scalar, span: Interval) -> Scalar {
     x
 }
 
+fn interval_add(a: Range, b: Range) -> Range {
+    Range {
+        lo: a.lo + b.lo,
+        hi: a.hi + b.hi,
+    }
+}
+
+fn interval_mul(a: Range, b: Range) -> Range {
+    let p = [a.lo * b.lo, a.lo * b.hi, a.hi * b.lo, a.hi * b.hi];
+    Range {
+        lo: p.iter().copied().fold(Scalar::INFINITY, Scalar::min),
+        hi: p.iter().copied().fold(Scalar::NEG_INFINITY, Scalar::max),
+    }
+}
+
+fn interval_scale(a: Range, c: Scalar) -> Range {
+    Range::new(a.lo * c, a.hi * c)
+}
+
 /// The roots of a second field along one cell of an implicit curve.
 struct CellRoots<'a> {
     curve: &'a ImplicitCurve2,
@@ -416,6 +447,10 @@ struct CellRoots<'a> {
     d_v: &'a Field2,
     h_u: &'a Field2,
     h_v: &'a Field2,
+    /// Second partials `[uu, uv, vv]` of the curve's field and of the second
+    /// field, for the Rolle certificate.
+    d2: &'a [Field2; 3],
+    h2: &'a [Field2; 3],
 }
 
 impl CellRoots<'_> {
@@ -555,6 +590,9 @@ impl CellRoots<'_> {
             }
             return;
         }
+        if self.rolle(s0, s1, &hull, slope, a, b, out) {
+            return;
+        }
         if depth >= 44 || s1 - s0 <= 1e-13 {
             if (a < 0.0) != (b < 0.0) {
                 out.push((self.bisect(s0, s1, a), 1));
@@ -570,6 +608,138 @@ impl CellRoots<'_> {
         let m = 0.5 * (s0 + s1);
         self.roots(s0, m, depth + 1, out);
         self.roots(m, s1, depth + 1, out);
+    }
+
+    /// The second derivative of `h` along the free parameter, enclosed over
+    /// `hull`, given the solved parameter's slope bounds there:
+    /// `h'' = H_ff + 2 H_fw w' + H_ww w'^2 + H_w w''` with
+    /// `w'' = -(F_ff + 2 F_fw w' + F_ww w'^2) / F_w`.
+    fn second_derivative(&self, hull: &Cell, slope: Range) -> Range {
+        // Second partials as (free-free, free-solved, solved-solved).
+        let (d_solved, h_solved) = match self.cell.axis {
+            Axis::U => (self.d_v, self.h_v),
+            Axis::V => (self.d_u, self.h_u),
+        };
+        let quad = |t: &[Field2; 3]| {
+            let [ff, fw, ww] = match self.cell.axis {
+                Axis::U => [&t[0], &t[1], &t[2]],
+                Axis::V => [&t[2], &t[1], &t[0]],
+            }
+            .map(|f| bound_simple(f, hull));
+            let w = slope;
+            let terms = [
+                ff,
+                interval_scale(interval_mul(fw, w), 2.0),
+                interval_mul(ww, interval_mul(w, w)),
+            ];
+            terms.into_iter().fold(Range::point(0.0), interval_add)
+        };
+        let f_solved = bound_simple(d_solved, hull);
+        let h_w = bound_simple(h_solved, hull);
+        let numerator = quad(self.d2);
+        // `hull` was built with the solved partial away from zero.
+        let inverse = Range::new(1.0 / f_solved.lo, 1.0 / f_solved.hi);
+        let w2 = interval_scale(interval_mul(numerator, inverse), -1.0);
+        let direct = quad(self.h2);
+        let carried = interval_mul(h_w, w2);
+        let total = interval_add(direct, carried);
+        // The sums above are rounded: widen by the size of the terms.
+        let size = direct.lo.abs().max(direct.hi.abs()) + carried.lo.abs().max(carried.hi.abs());
+        let by = 16.0 * Scalar::EPSILON * size;
+        Range {
+            lo: total.lo - by,
+            hi: total.hi + by,
+        }
+    }
+
+    /// `d h / d free` at `s`, along the curve.
+    fn slope_at(&self, s: Scalar) -> Option<Scalar> {
+        let free = self.free(s);
+        let p = self.place(free, self.solved(free)?);
+        let (d_free, d_solved, h_free, h_solved) = match self.cell.axis {
+            Axis::U => (self.d_u, self.d_v, self.h_u, self.h_v),
+            Axis::V => (self.d_v, self.d_u, self.h_v, self.h_u),
+        };
+        let w = -d_free.value(p) / d_solved.value(p);
+        Some(h_free.value(p) + h_solved.value(p) * w)
+    }
+
+    /// A Rolle certificate for a stretch whose slope of `h` straddles zero.
+    /// When the second derivative of `h` has one sign over the hull, `h`
+    /// has at most one critical point there and so at most two roots
+    /// counting multiplicity: ends of opposite sign hold exactly one simple
+    /// root; ends of one sign hold none, two simple roots on either side of
+    /// the critical point, or a root of multiplicity 2 at it, decided by an
+    /// enclosure of `h` there. Returns whether the stretch is settled; if
+    /// not, the caller bisects.
+    #[allow(clippy::too_many_arguments)]
+    fn rolle(
+        &self,
+        s0: Scalar,
+        s1: Scalar,
+        hull: &Cell,
+        slope: Range,
+        a: Scalar,
+        b: Scalar,
+        out: &mut Vec<(Scalar, usize)>,
+    ) -> bool {
+        let second = self.second_derivative(hull, slope);
+        if !second.lo.is_finite() || !second.hi.is_finite() || second.straddles_zero() {
+            return false;
+        }
+        if a == 0.0 || b == 0.0 {
+            return false;
+        }
+        if (a < 0.0) != (b < 0.0) {
+            out.push((self.bisect(s0, s1, a), 1));
+            return true;
+        }
+        let (Some(da), Some(db)) = (self.slope_at(s0), self.slope_at(s1)) else {
+            return false;
+        };
+        if da != 0.0 && db != 0.0 && (da < 0.0) == (db < 0.0) {
+            // `h` is monotone across the stretch and its ends agree: no root.
+            return true;
+        }
+        // The critical point, by the sign of the slope.
+        let (mut lo, mut hi) = (s0, s1);
+        let rising = da > 0.0 || (da == 0.0 && db < 0.0);
+        for _ in 0..100 {
+            let m = 0.5 * (lo + hi);
+            if m <= lo || m >= hi {
+                break;
+            }
+            let Some(d) = self.slope_at(m) else {
+                return false;
+            };
+            if (d > 0.0) == rising {
+                lo = m;
+            } else {
+                hi = m;
+            }
+        }
+        let sc = 0.5 * (lo + hi);
+        let free = self.free(sc);
+        let Some(solved) = self.solved(free) else {
+            return false;
+        };
+        let at = self.place(free, solved);
+        let enclosure = bound_simple(self.other, &Cell { lo: at, hi: at });
+        let Some(hc) = self.h(sc) else {
+            return false;
+        };
+        if enclosure.straddles_zero() {
+            // Touching, once, doubly: never sign changes from this stretch.
+            out.push((sc, 2));
+            return true;
+        }
+        if (hc < 0.0) == (a < 0.0) {
+            // The extremum keeps the ends' sign: the curve misses.
+            return true;
+        }
+        out.push((self.bisect(s0, sc, a), 1));
+        out.push((self.bisect(sc, s1, hc), 1));
+        true
     }
 
     fn bisect(&self, mut s0: Scalar, mut s1: Scalar, a: Scalar) -> Scalar {

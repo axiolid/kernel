@@ -601,7 +601,7 @@ fn box_less_a_torus_through_its_top(g: &mut Graph) -> NodeId {
 #[test]
 fn a_box_less_a_torus_through_its_top_face_is_exact_within_a_micrometre() {
     // The top face touches the latitude circles where the tube's quarter
-    // faces meet; the section's double root there is read within tolerance.
+    // faces meet; the section's double root there is one cut.
     let mut g = Graph::new();
     let cut = box_less_a_torus_through_its_top(&mut g);
     let graph = g.finish(vec![cut]);
@@ -621,17 +621,16 @@ fn a_box_less_a_torus_through_its_top_face_is_exact_within_a_micrometre() {
         );
     }
     assert!(report.linear() <= 1e-7, "{}", report.linear());
-    // The reading is a decision, so an exact tolerance refuses.
+    // The double root is a certified root of multiplicity 2 (#397), so an
+    // exact tolerance cuts too.
     let mut g = Graph::new();
     let cut = box_less_a_torus_through_its_top(&mut g);
     let graph = g.finish(vec![cut]);
-    let error = ReferenceExactCompiler::new()
+    let exact = ReferenceExactCompiler::new()
         .compile_exact(&graph, cut, &ExecutionOptions::new(Tolerance::ZERO))
-        .expect_err("refused at zero");
-    assert!(
-        error.to_string().contains("too close to a face boundary"),
-        "{error}"
-    );
+        .expect("exact at zero");
+    audited(&exact);
+    assert!((volume(&exact) - want).abs() <= 1e-9, "{}", volume(&exact));
 }
 
 #[test]

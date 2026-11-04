@@ -187,8 +187,8 @@ const BOX_AND_TUBE: f64 = 0.024_084_318_409_872_973;
 fn a_box_less_a_torus_whose_tube_leaves_through_the_top() {
     // #381. The top face z = 1 lies at the ring radius from the axis, so it
     // touches the latitude circles where the tube's quarter faces meet. The
-    // trace's double root there splits in two roots 2e-8 apart; they are one
-    // cut within tolerance, a reading, so ZERO refuses.
+    // trace's double root there split in two roots 2e-8 apart (#397): they
+    // are one cut within tolerance, and at ZERO the root is certified.
     let torus = ring(1.0, 0.1);
     let column = block((-0.5, 0.5), (-0.5, 0.5), (0.0, 1.0));
     check(&column, &torus, Some(BOX_AND_TUBE), 1e-9);
@@ -205,13 +205,18 @@ fn a_box_less_a_torus_whose_tube_leaves_through_the_top() {
         );
     }
     assert!(report.linear() <= 1e-7, "{}", report.linear());
+    // The double root is one certified root of multiplicity 2 (#397), so the
+    // boolean cuts at ZERO too.
     let exact = boolean(
         &column,
         &torus,
         BooleanOperator::Difference,
         Tolerance::ZERO,
-    );
-    assert!(matches!(exact, Err(BooleanError::Undecided)), "{exact:?}");
+    )
+    .expect("cuts at zero tolerance");
+    let topology = axiolid_topology::audit_brep(exact.topology());
+    assert!(topology.is_closed_manifold(), "{topology:?}");
+    close("difference", volume(&exact), 1.0 - BOX_AND_TUBE, 1e-9);
 }
 
 /// A column `0.4 x 0.5 x 6` on `z = 0`, and a disk of radius `0.1` revolved a
