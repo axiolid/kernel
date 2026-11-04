@@ -13,15 +13,18 @@
 //!
 //! Step 1 succeeds for almost all real inputs, so the exact path is rare.
 //!
-//! The exact path first tries two-term expansions, which are exact when the
-//! coordinate differences carry no rounding error (grid-aligned collinear
-//! points, the common degenerate case), and otherwise runs a fixed-size dyadic
-//! evaluation over the original
-//! coordinates, as `orient3d`'s fallback is (#404): it forms no difference and
-//! no rounded product, so it is exact for every finite input. An earlier
-//! expansion-based evaluation overflowed beyond about 1e154, lost error terms
-//! to underflow, and could misjudge coordinates of very different magnitudes,
-//! so it was removed rather than guarded. The filter itself declines an input
+//! The exact path first tries an expansion: each coordinate difference is
+//! split into its rounded head and its exact rounding tail, and the products
+//! of heads and tails are summed exactly (four terms when no difference
+//! rounds, as on grid-aligned collinear points, the common degenerate case,
+//! and up to sixteen otherwise). It runs only where none of its products can
+//! overflow or underflow: every difference in [1e-90, 1e90] and every
+//! nonzero tail at least 1e-120. Any other input goes to a fixed-size dyadic
+//! evaluation over the original coordinates, as `orient3d`'s fallback does
+//! (#404): it forms no difference and no rounded product, so it is exact for
+//! every finite input. An earlier expansion evaluation had no such guard; it
+//! overflowed beyond about 1e154, lost error terms to underflow, and could
+//! misjudge coordinates of very different magnitudes. The filter itself declines an input
 //! whose differences are outside [1e-90, 1e90], where its products may
 //! overflow or underflow, and so hands it to the exact path.
 
