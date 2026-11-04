@@ -6955,6 +6955,22 @@ Every publishable crate versions and publishes independently ([ADR 0067](/adr/00
 - `OverlayRefusal`'s message uses the wrapped `OverlayError`'s own wording,
   and `Error::source` returns it (#354).
 
+### Fixed
+
+- `MorphologyMode::Fast` fills the notches between needles. Its chord
+  proposals reached only `t / 16` from the chord's line (0.0125 m for a
+  disc of radius 0.4 m, `t` 0.2 m), so a wall of needles 0.05 m deep kept
+  every notch and the sum kept its quadratic cost. Proposals now reach `t`.
+  A notch whose spanned vertices all project onto its chord, of length
+  `g`, also has the excess `sqrt(t^2 + g^2 / 4) - t`, which joins the
+  least of its depth and its gap bound; proved in `src/fill.rs`. Fast
+  still keeps a needle deeper than `t`: nothing proposes a chord over it.
+  The deviation and side promises are unchanged (`src/fill.rs`, #340,
+  ADR 0087). Results on #330's toothed rooms are bit for bit the same;
+  hole dilations take longer than before (see the research note).
+  `scripts/probe_fast_morphology_mutants.py` lists the faults its tests
+  must catch.
+
 ### 0.3.21 - 2026-11-03
 
 ### Added
