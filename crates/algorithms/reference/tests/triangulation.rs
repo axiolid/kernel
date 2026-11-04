@@ -85,3 +85,16 @@ fn a_degenerate_ring_is_refused_not_silently_empty() {
     let collinear = vec![p(0.0, 0.0), p(1.0, 0.0), p(2.0, 0.0)];
     assert!(triangulate_simple(&collinear).is_err());
 }
+
+/// A NaN or infinite coordinate is refused with a typed error: no orientation
+/// predicate can decide it, and the triangulation must not panic or guess.
+#[test]
+fn non_finite_coordinates_are_refused_not_panicked() {
+    for bad in [f64::NAN, f64::INFINITY, f64::NEG_INFINITY] {
+        let ring = [p(0.0, 0.0), p(4.0, 0.0), p(4.0, bad), p(0.0, 4.0)];
+        match triangulate_simple(&ring) {
+            Err(axiolid_contracts::GeomError::InvalidInput(_)) => {}
+            other => panic!("expected InvalidInput for {bad}, got {other:?}"),
+        }
+    }
+}

@@ -21,6 +21,8 @@ fn main() {
     println!();
     bench_orient2d();
     println!();
+    bench_orient2d_collinear_grid();
+    println!();
     bench_orient3d();
     println!();
     bench_static_filter();
@@ -55,6 +57,45 @@ fn bench_orient2d() {
             black_box(orient2d(black_box(c[0]), black_box(c[1]), black_box(c[2])));
         }
         row(rate.label(), start.elapsed().as_nanos() as f64, escalated);
+    }
+}
+
+/// Exactly collinear triples with full-mantissa coordinates on the line
+/// `y = 2x`. Every call escalates past the filter, so this prices the exact
+/// stage that the common degenerate case lands in. Two scenes: a millimetre
+/// grid in [100, 190] m, whose coordinate differences are all exact, and one
+/// in [0, 200) m, which crosses binades so that many differences round.
+fn bench_orient2d_collinear_grid() {
+    println!("orient2d (exactly collinear, full-mantissa millimetre grid)");
+    for (label, offset, count) in [("exact", 100.0, 90_000_u64), ("binades", 0.0, 200_000)] {
+        let mut state = 0x51ED_2702_u64;
+        let mut next = move || {
+            state ^= state << 13;
+            state ^= state >> 7;
+            state ^= state << 17;
+            state
+        };
+        let scene: Vec<[axiolid_core::Point2; 3]> = (0..SAMPLES)
+            .map(|_| {
+                let mut vertex = || {
+                    let x = offset + (next() % count) as f64 * 0.001;
+                    axiolid_core::Point2::new(x, 2.0 * x)
+                };
+                [vertex(), vertex(), vertex()]
+            })
+            .collect();
+        let escalated = scene
+            .iter()
+            .filter(|c| !orient2d_filter(c[0], c[1], c[2]).is_certain())
+            .count();
+        for c in &scene {
+            black_box(orient2d(c[0], c[1], c[2]));
+        }
+        let start = Instant::now();
+        for c in &scene {
+            black_box(orient2d(black_box(c[0]), black_box(c[1]), black_box(c[2])));
+        }
+        row(label, start.elapsed().as_nanos() as f64, escalated);
     }
 }
 

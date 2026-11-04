@@ -9,6 +9,15 @@ caret rule for `0.x` versions.
 
 ## [Unreleased]
 
+### Fixed
+
+- `triangulate_simple` and `retriangulate_face` refuse a NaN or infinite
+  coordinate with `GeomError::InvalidInput`. `orient2d` now reports such a
+  coordinate as uncertain instead of a certain zero (#404), and these
+  entry points would otherwise panic on it. `coplanar_overlap` keeps its
+  signature and panics on a non-finite coordinate, documented under
+  `# Panics`.
+
 ## [0.3.16] - 2026-11-03
 
 ### Added

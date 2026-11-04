@@ -21,6 +21,7 @@
 
 pub mod arithmetic;
 pub mod expansion;
+mod orient2_dyadic;
 pub mod orient3;
 mod orient3_dyadic;
 pub mod orientation;

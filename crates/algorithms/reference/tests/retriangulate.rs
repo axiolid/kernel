@@ -309,3 +309,24 @@ fn two_cuts_on_one_face_both_survive() {
         .sum();
     assert!((whole - parts).abs() < 1e-9, "pieces must tile the face");
 }
+
+/// A non-finite corner or node position is refused with a typed error, not a
+/// panic inside an orientation decision.
+#[test]
+fn non_finite_input_is_invalid_input() {
+    let flat = |x: f64, y: f64| Point3::new(x, y, 0.0);
+    let corners = [flat(0.0, 0.0), flat(4.0, 0.0), flat(0.0, 4.0)];
+    let bad_corners = [flat(0.0, 0.0), flat(f64::NAN, 0.0), flat(0.0, 4.0)];
+    let mut positions = BTreeMap::new();
+    positions.insert(node(0, flat(1.0, 1.0)), flat(f64::INFINITY, 1.0));
+
+    for result in [
+        retriangulate_face(bad_corners, &[], &BTreeMap::new()),
+        retriangulate_face(corners, &[], &positions),
+    ] {
+        assert!(
+            matches!(result, Err(axiolid_contracts::GeomError::InvalidInput(_))),
+            "{result:?}"
+        );
+    }
+}

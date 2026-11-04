@@ -31,14 +31,15 @@ pub fn ring_orientation(ring: &[Point2]) -> Option<Sign> {
     }
 }
 
-/// Certified orientation sign.
+/// Certified orientation sign of a finite triple.
 ///
-/// `orient2d` escalates to exact arithmetic, so it always certifies; this
-/// helper documents that invariant instead of scattering `expect` calls.
+/// `orient2d` is exact for every finite input and only a non-finite
+/// coordinate leaves it uncertain, so [`triangulate_simple`] refuses such a
+/// ring before any triple reaches this helper.
 fn sign_of(a: Point2, b: Point2, c: Point2) -> Sign {
     orient2d(a, b, c)
         .sign()
-        .expect("orient2d escalates to exact arithmetic and always certifies")
+        .expect("orient2d is certain for finite coordinates, which the caller checked")
 }
 
 /// Whether `p` lies in or on the boundary of counter-clockwise triangle
@@ -88,7 +89,18 @@ fn is_ear(ring: &[Point2], indices: &[usize], at: usize) -> bool {
 ///
 /// Returns index triples into `ring`. Fails rather than emitting a partial fan:
 /// a caller that receives triangles must be able to trust they cover the input.
+///
+/// # Errors
+///
+/// [`GeomError::InvalidInput`] for a NaN or infinite coordinate, which no
+/// orientation predicate can decide; [`GeomError::Degenerate`] for a ring that
+/// is too short, self-intersecting or without area.
 pub fn triangulate_simple(ring: &[Point2]) -> GeomResult<Vec<[u32; 3]>> {
+    if ring.iter().any(|p| !(p.x.is_finite() && p.y.is_finite())) {
+        return Err(GeomError::InvalidInput(
+            "ring has a non-finite coordinate".to_owned(),
+        ));
+    }
     if ring.len() < 3 {
         return Err(GeomError::Degenerate(format!(
             "ring has {} vertices, need at least 3",

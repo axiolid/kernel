@@ -100,8 +100,19 @@ fn lift(flat: Point2, axis: usize, reference: [Point3; 3]) -> Point3 {
 /// A result with fewer than three vertices is returned empty. Such a polygon
 /// has no area -- the triangles meet along an edge or at a point -- and
 /// reporting it as an overlap would create degenerate faces downstream.
+///
+/// # Panics
+///
+/// When a coordinate is NaN or infinite. The signature has no error channel
+/// and an empty result would claim "no shared area", so a non-finite input is
+/// a violated precondition; [`intersection_segments`](crate::intersection_segments)
+/// refuses such a pair with a typed error before calling this.
 #[must_use]
 pub fn coplanar_overlap(subject: [Point3; 3], clip: [Point3; 3]) -> Vec<Point3> {
+    assert!(
+        subject.iter().chain(&clip).all(|p| p.is_finite()),
+        "coplanar_overlap requires finite coordinates"
+    );
     let normal = (clip[1] - clip[0]).cross(clip[2] - clip[0]);
     let axis = dominant_axis(normal);
 
@@ -170,14 +181,14 @@ fn clip_to_halfplane(polygon: &[Point2], a: Point2, b: Point2) -> Vec<Point2> {
 fn side_of(a: Point2, b: Point2, point: Point2) -> Sign {
     orient2d(a, b, point)
         .sign()
-        .expect("certified predicates are total")
+        .expect("orient2d is certain for the finite coordinates asserted on entry")
 }
 
 /// Winding of a triangle, as an exact sign.
 fn orientation([a, b, c]: [Point2; 3]) -> Sign {
     orient2d(a, b, c)
         .sign()
-        .expect("certified predicates are total")
+        .expect("orient2d is certain for the finite coordinates asserted on entry")
 }
 
 /// Where segment `start`->`end` crosses the line a->b.

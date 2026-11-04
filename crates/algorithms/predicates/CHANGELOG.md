@@ -9,6 +9,32 @@ caret rule for `0.x` versions.
 
 ## [Unreleased]
 
+### Fixed
+
+- `orient2d` returned a wrong sign, certified as exact, for four classes of
+  input, in every published release; it now returns the exact sign for every
+  finite input (#404):
+  - Coordinate differences of about 1e154 or more: the products overflowed
+    (a debug build panicked, a release build returned a wrong sign).
+  - Coordinates of very different magnitudes (a ratio of about 1e32 or
+    more, e.g. `(1e-100, 1e-100)`, `(1.5e-100, 1e-100)`, `(-4.5e50, -1)`
+    gave Zero for a Negative triple): the expansion path lost error terms.
+  - Differences near 1e-155: the filter's products underflowed and it
+    proved a wrong sign (a Negative for a truly Positive triple).
+  - A NaN or infinite coordinate was reported as a certain Zero; it now
+    returns `Uncertain`, as `orient3d` does.
+
+  The exact path now evaluates the determinant over the original coordinates,
+  as an exact sum of expansions of the coordinate differences and their
+  rounding tails when those are in range (the usual exactly collinear case),
+  otherwise in a fixed-size dyadic accumulator. `orient2d_filter` declines
+  differences outside [1e-90, 1e90] as `Uncertain`. The cost is real for
+  exactly collinear triples: per call, 24 ns on a full-mantissa millimetre
+  grid whose differences are exact (12 ns before) and 50 ns on one crossing
+  binades, where 45% of the triples have a rounding difference (12 ns
+  before); measured with the committed `predicates` bench. Non-degenerate
+  input is unaffected (about 15 ns).
+
 ### Added
 
 - The package now ships `LICENSE` and `LICENSE-COMMERCIAL` (symlinks to the

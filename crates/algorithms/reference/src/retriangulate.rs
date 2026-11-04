@@ -89,6 +89,17 @@ pub fn retriangulate_face(
     segments: &[IntersectionSegment],
     positions: &BTreeMap<NodeKey, Point3>,
 ) -> GeomResult<FacePatch> {
+    // No orientation predicate can decide a NaN or infinite coordinate, and
+    // `sign` below relies on every predicate being certain.
+    if corners
+        .iter()
+        .chain(positions.values())
+        .any(|point| !point.is_finite())
+    {
+        return Err(GeomError::InvalidInput(
+            "face corners and node positions must be finite".into(),
+        ));
+    }
     let normal = (corners[1] - corners[0]).cross(corners[2] - corners[0]);
     if normal.length_squared() == 0.0 {
         return Err(GeomError::Degenerate(
@@ -391,7 +402,9 @@ fn centroid([a, b, c]: [Point2; 3]) -> Point2 {
 }
 
 fn sign(value: axiolid_contracts::Certified) -> Sign {
-    value.sign().expect("certified predicates are total")
+    value
+        .sign()
+        .expect("predicates are certain for the finite coordinates checked on entry")
 }
 
 /// Whether `point` lies exactly on one of the face's three edges.

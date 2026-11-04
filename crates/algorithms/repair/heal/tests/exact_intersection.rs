@@ -503,3 +503,31 @@ fn the_narrow_phase_agrees_with_an_exact_rational_oracle() {
     }
     assert!(hits > 500 && misses > 500, "{hits} hits, {misses} misses");
 }
+
+/// Coplanar triangles at coordinates whose `orient2d` products overflow
+/// (1e154 and above) are decided exactly, not dropped or panicking (#404).
+#[test]
+fn coplanar_triangles_at_overflowing_scale_are_decided_exactly() {
+    let overlapping: [P; 6] = [
+        [0.0, 0.0, 0.0],
+        [2.0, 0.0, 0.0],
+        [0.0, 2.0, 0.0],
+        [0.5, 0.5, 0.0],
+        [3.0, 0.5, 0.0],
+        [0.5, 3.0, 0.0],
+    ];
+    let disjoint: [P; 6] = [
+        [0.0, 0.0, 0.0],
+        [1.0, 0.0, 0.0],
+        [0.0, 1.0, 0.0],
+        [2.0, 2.0, 0.0],
+        [3.0, 2.0, 0.0],
+        [2.0, 3.0, 0.0],
+    ];
+    for scale in [1.0, 1.0e160, 1.0e200, 1.0e300] {
+        let scaled = |points: [P; 6]| points.map(|[x, y, z]| [x * scale, y * scale, z]);
+        let indices = [0, 1, 2, 3, 4, 5];
+        assert_eq!(pairs(&scaled(overlapping), &indices), 1, "scale {scale}");
+        assert_eq!(pairs(&scaled(disjoint), &indices), 0, "scale {scale}");
+    }
+}

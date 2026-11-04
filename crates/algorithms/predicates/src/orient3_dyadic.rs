@@ -1,4 +1,5 @@
-//! Fixed-size exact dyadic fallback for `orient3d`.
+//! Fixed-size exact dyadic fallback for `orient3d`, and the accumulator that
+//! `orient2d`'s fallback shares.
 //!
 //! This path is used only when binary64 expansion arithmetic cannot normalize
 //! finite inputs without overflow or underflow. It performs bounded stack-only
@@ -10,51 +11,48 @@ use axiolid_guarantees::Sign;
 const DYADIC_LIMBS: usize = 100;
 const MIN_TRIPLE_EXPONENT: i32 = -3222;
 
-struct ExactMagnitude {
+pub(super) struct ExactMagnitude {
     limbs: [u64; DYADIC_LIMBS],
 }
 
 impl ExactMagnitude {
-    fn zero() -> Self {
+    pub(super) fn zero() -> Self {
         Self {
             limbs: [0; DYADIC_LIMBS],
         }
     }
 
-    fn add_shifted_product(&mut self, product: [u64; 3], offset: usize) -> bool {
-        for (word_index, mut word) in product.into_iter().enumerate() {
-            while word != 0 {
-                let bit = word.trailing_zeros() as usize;
-                if !self.add_bit(offset + word_index * 64 + bit) {
-                    return false;
-                }
-                word &= word - 1;
+    /// Adds `product << offset` (little-endian words) whole words at a time,
+    /// or returns `false` when a set bit would land beyond the accumulator.
+    pub(super) fn add_shifted_product(&mut self, product: [u64; 3], offset: usize) -> bool {
+        let base = offset / 64;
+        let shift = offset % 64;
+        for (word_index, word) in product.into_iter().enumerate() {
+            if !self.add_limb(base + word_index, word << shift) {
+                return false;
+            }
+            if shift != 0 && !self.add_limb(base + word_index + 1, word >> (64 - shift)) {
+                return false;
             }
         }
         true
     }
 
-    fn add_bit(&mut self, bit: usize) -> bool {
-        let mut word_index = bit / 64;
-        if word_index >= DYADIC_LIMBS {
-            return false;
-        }
-        let mut addend = 1_u64 << (bit % 64);
-        loop {
-            let (sum, carry) = self.limbs[word_index].overflowing_add(addend);
-            self.limbs[word_index] = sum;
-            if !carry {
-                return true;
-            }
-            word_index += 1;
-            if word_index >= DYADIC_LIMBS {
+    /// Adds `value` at limb `index` and propagates the carry upward.
+    fn add_limb(&mut self, mut index: usize, mut value: u64) -> bool {
+        while value != 0 {
+            if index >= DYADIC_LIMBS {
                 return false;
             }
-            addend = 1;
+            let (sum, carry) = self.limbs[index].overflowing_add(value);
+            self.limbs[index] = sum;
+            value = u64::from(carry);
+            index += 1;
         }
+        true
     }
 
-    fn compare(&self, other: &Self) -> std::cmp::Ordering {
+    pub(super) fn compare(&self, other: &Self) -> std::cmp::Ordering {
         for index in (0..DYADIC_LIMBS).rev() {
             match self.limbs[index].cmp(&other.limbs[index]) {
                 std::cmp::Ordering::Equal => {}
@@ -132,7 +130,7 @@ pub(super) fn orient3d_exact_dyadic(a: Point3, b: Point3, c: Point3, d: Point3) 
 }
 
 #[must_use]
-fn binary64_parts(value: f64) -> Option<(bool, u64, i32)> {
+pub(super) fn binary64_parts(value: f64) -> Option<(bool, u64, i32)> {
     if !value.is_finite() {
         return None;
     }

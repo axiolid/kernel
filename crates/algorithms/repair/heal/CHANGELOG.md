@@ -9,6 +9,14 @@ caret rule for `0.x` versions.
 
 ## [Unreleased]
 
+### Fixed
+
+- `self_intersections` decides coplanar triangle pairs exactly at any finite
+  coordinate scale: at about 1e154 and above an overlapping pair was
+  reported as disjoint (and panicked in a debug build), because the
+  `orient2d` it relies on overflowed. The fix is in `axiolid-predicates`
+  (#404).
+
 ## [0.3.4] - 2026-11-04
 
 ### Added

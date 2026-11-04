@@ -17,9 +17,8 @@
 //! Exact end to end: every decision is the sign of a certified `orient3d` or
 //! `orient2d`, so near-parallel planes (a rotation rounds vertices slightly
 //! off their common plane) are decided as the inputs stand, not by a float
-//! direction (#399). `triangles_intersect` gives the method and the contact
-//! rule. The coplanar branch's `orient2d` has no exact fallback once its
-//! products overflow (coordinates near 1e154 and above); TODO(#404).
+//! direction (#399), at any finite coordinate scale (#404).
+//! `triangles_intersect` gives the method and the contact rule.
 //!
 //! # Broad phase
 //!

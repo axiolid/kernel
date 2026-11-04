@@ -161,3 +161,14 @@ fn a_contained_triangle_clips_to_its_own_area() {
         area(&overlap)
     );
 }
+
+/// `coplanar_overlap` has no error channel, so a non-finite coordinate is a
+/// violated precondition and panics instead of reporting "no overlap".
+#[test]
+#[should_panic(expected = "finite coordinates")]
+fn non_finite_coordinates_violate_the_precondition() {
+    let flat = |x: f64, y: f64| Point3::new(x, y, 0.0);
+    let good = [flat(0.0, 0.0), flat(4.0, 0.0), flat(0.0, 4.0)];
+    let bad = [flat(0.0, 0.0), flat(f64::NAN, 0.0), flat(0.0, 4.0)];
+    let _ = coplanar_overlap(good, bad);
+}
