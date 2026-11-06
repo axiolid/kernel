@@ -105,7 +105,6 @@ use axiolid_model::{
 };
 use axiolid_reference::bound;
 use axiolid_reference::curve::{domain2, domain3, evaluate2, evaluate3};
-use axiolid_reference::station::StationCurve;
 
 /// Nesting of placements, relations and open profiles a root may hold.
 const MAX_DEPTH: usize = 256;
@@ -123,10 +122,6 @@ const DOMAIN_SLACK: Scalar = 1e-9;
 /// Why a composite whose segments do not meet is refused.
 const COMPOSITE_GAP: &str = "a composite curve whose consecutive segments do not meet within the \
                              tolerance: a polyline is one connected curve";
-
-/// Why a trim of a relation or a placement is refused.
-const TRIM_OF_RELATION: &str = "a trim of a curve relation or of a placed curve: only an atomic \
-                                curve's parameters are trimmed to a polyline";
 
 /// Why an offset across a corner of its basis is refused.
 const OFFSET_ACROSS_CORNER: &str = "an offset curve across a vertex or corner of its basis: the \
@@ -264,9 +259,10 @@ fn curve_relation(
             graph,
             *basis,
             (start, end),
-            *sense_agreement,
-            *preference,
-            chord,
+            (*sense_agreement, *preference),
+            window,
+            (chord, options),
+            depth,
             offset,
         ),
         CurveRelation::Composite { segments } => {
@@ -315,42 +311,38 @@ fn curve_relation(
     }
 }
 
-/// A trim of an atomic curve: the basis flattened between the trim
-/// parameters, in the trim's sense.
+/// A trim: its basis flattened over the span of its parameter the trim
+/// keeps (narrowed to the `window` of a trim above it), in the trim's
+/// sense.
+#[allow(clippy::too_many_arguments)]
 fn trimmed(
     graph: &GeometryGraph,
     basis: NodeId,
-    (start, end): (&[TrimSelector], &[TrimSelector]),
-    sense: bool,
-    preference: TrimmingPreference,
-    chord: Scalar,
+    selectors: (&[TrimSelector], &[TrimSelector]),
+    (sense, preference): (bool, TrimmingPreference),
+    window: Option<(Scalar, Scalar)>,
+    (chord, options): (Scalar, &ExecutionOptions),
+    depth: usize,
     offset: Option<Offset>,
 ) -> GeomResult<(Vec<Point3>, Scalar)> {
-    let offset = sensed(offset, sense);
-    let (mut points, bound) = match graph.get(basis) {
-        Some(GeometryNode::Curve2(curve)) => {
-            let window = crate::station::trim_parameters(
-                StationCurve::Two(curve),
-                start,
-                end,
-                sense,
-                preference,
-            )?;
-            atomic2(curve, Some(window), chord, offset)?
-        }
-        Some(GeometryNode::Curve3(curve)) => {
-            let window = crate::station::trim_parameters(
-                StationCurve::Three(curve),
-                start,
-                end,
-                sense,
-                preference,
-            )?;
-            atomic3(curve, Some(window), chord, offset)?
-        }
-        Some(_) => return Err(refused(TRIM_OF_RELATION)),
-        None => return Err(not_a_curve(basis, false)),
-    };
+    let span = crate::station::trimmed_span(
+        graph,
+        basis,
+        selectors,
+        (sense, preference),
+        window,
+        options.tolerance().linear(),
+        depth + 1,
+    )?;
+    let (mut points, bound) = node(
+        graph,
+        basis,
+        Some(span),
+        chord,
+        options,
+        depth + 1,
+        sensed(offset, sense),
+    )?;
     if !sense {
         points.reverse();
     }

@@ -996,28 +996,6 @@ fn the_remaining_relations_and_families_are_refused_by_name() {
     });
     refused(polyline(&graph, root), "an offset of a placed curve");
 
-    // A trim of a placed curve.
-    let (graph, root) = graph_of(|b| {
-        let source = b.push_value(circle.clone()).unwrap();
-        let placed = b
-            .push(GeometryNode::Instance(Instance {
-                source,
-                transform: Transform3::from_translation(Vec3::X),
-            }))
-            .unwrap();
-        trim(
-            b,
-            placed,
-            TrimSelector::Parameter(0.0),
-            TrimSelector::Parameter(1.0),
-            true,
-        )
-    });
-    refused(
-        polyline(&graph, root),
-        "a trim of a curve relation or of a placed curve",
-    );
-
     // An offset across a polyline's corner.
     let (graph, root) = graph_of(|b| {
         let basis = b

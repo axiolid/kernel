@@ -260,6 +260,7 @@ mod accuracy;
 mod basis;
 mod bound;
 mod exact;
+mod trim;
 
 pub(crate) use accuracy::UNCERTIFIED_STATION_FRAME;
 pub use accuracy::{placement_accuracy, PlacementAccuracy, PlacementBound};
@@ -267,6 +268,7 @@ pub use basis::curve_path;
 pub(crate) use basis::{trim_parameters, Basis};
 pub(crate) use bound::CERTIFICATION_SHARE;
 pub(crate) use exact::stationed_spine_exact;
+pub(crate) use trim::trimmed_span;
 
 /// Most sections one interval between two stations is bisected into.
 const MAX_DEPTH: u32 = 12;
