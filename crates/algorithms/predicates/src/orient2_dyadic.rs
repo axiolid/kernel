@@ -9,7 +9,7 @@
 use axiolid_core::Point2;
 use axiolid_guarantees::Sign;
 
-use crate::orient3_dyadic::{binary64_parts, ExactMagnitude};
+use crate::orient3_dyadic::{binary64_parts, OrientMagnitude};
 
 /// Smallest exponent of a product of two binary64 values: `2 * -1074`.
 const MIN_PAIR_EXPONENT: i32 = -2148;
@@ -29,8 +29,8 @@ pub(super) fn orient2d_exact_dyadic(a: Point2, b: Point2, c: Point2) -> Option<S
         (false, a.y, c.x),
         (false, c.y, b.x),
     ];
-    let mut positive = ExactMagnitude::zero();
-    let mut negative = ExactMagnitude::zero();
+    let mut positive = OrientMagnitude::zero();
+    let mut negative = OrientMagnitude::zero();
     for (subtract, first, second) in terms {
         let (first_negative, first_mantissa, first_exponent) = binary64_parts(first)?;
         let (second_negative, second_mantissa, second_exponent) = binary64_parts(second)?;
@@ -44,7 +44,7 @@ pub(super) fn orient2d_exact_dyadic(a: Point2, b: Point2, c: Point2) -> Option<S
         } else {
             &mut positive
         };
-        if !target.add_shifted_product([product as u64, (product >> 64) as u64, 0], offset) {
+        if !target.add_shifted_product(&[product as u64, (product >> 64) as u64, 0], offset) {
             return None;
         }
     }

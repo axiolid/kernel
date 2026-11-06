@@ -11,6 +11,32 @@ caret rule for `0.x` versions.
 
 ### Fixed
 
+- `incircle` and `insphere` returned a wrong sign, certified as exact, for
+  three classes of input, in every published release; each now returns the
+  exact sign for every finite input (#430):
+  - Coordinate differences of about 1e77 or more (`incircle`) or 1e61
+    (`insphere`): the exact path's degree-4 and degree-5 products
+    overflowed, and a point clearly inside or outside the circle was
+    reported as a certain Zero (`(s, 0)`, `(0, s)`, `(-s, 0)` against
+    `(0, 0)` and `(2s, 2s)` for s = 1e80, 1e100, 1e160).
+  - Very small differences (s = 1e-100 and 1e-160 failed, 1e-80 did
+    not): the products underflowed and the same Zero was reported.
+  - A NaN or infinite coordinate: it returned a certain sign; it now
+    returns `Uncertain`, as `orient3d` does.
+
+  The filters decline when their permanent is outside [1e-250, 1e300]. The
+  expansion stage of the exact path runs only where every difference lies in
+  [1e-60, 1e60] (`incircle`) or [1e-45, 1e45] (`insphere`) and every nonzero
+  rounding tail is at least as large as the lower bound; anything else goes
+  to a fixed-size dyadic evaluation over the original coordinates (133 and
+  166 words, the accumulator `orient2d` and `orient3d` share), which forms
+  no difference and no rounded product. Cost, measured with the committed
+  `predicates` bench (three runs each, ns per call; before the change, the
+  "huge" scene is the wrong Zero of the overflowing path): random points
+  15.6 to 16.1 before, 16.1 to 16.9 after; exactly cocircular lattice points
+  (2^-10 grid, every call escalates) 911 to 951 before, 923 to 1027 after;
+  the same points scaled to about 1e80 1196 to 1209 before, 5330 to 5440
+  after, now exact.
 - `StaticFilter::orient3d` certified a wrong sign when the declared range was
   below about 1e-103, in every published release: the precomputed error bound
   underflowed to zero, so every nonzero rounded determinant was accepted

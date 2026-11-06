@@ -1,5 +1,5 @@
 //! Fixed-size exact dyadic fallback for `orient3d`, and the accumulator that
-//! `orient2d`'s fallback shares.
+//! the `orient2d`, `incircle` and `insphere` fallbacks share.
 //!
 //! This path is used only when binary64 expansion arithmetic cannot normalize
 //! finite inputs without overflow or underflow. It performs bounded stack-only
@@ -11,23 +11,25 @@ use axiolid_guarantees::Sign;
 const DYADIC_LIMBS: usize = 100;
 const MIN_TRIPLE_EXPONENT: i32 = -3222;
 
-pub(super) struct ExactMagnitude {
-    limbs: [u64; DYADIC_LIMBS],
+/// The accumulator the `orient2d` and `orient3d` fallbacks use.
+pub(super) type OrientMagnitude = ExactMagnitude<DYADIC_LIMBS>;
+
+/// A non-negative integer of `LIMBS` 64-bit words, little-endian.
+pub(super) struct ExactMagnitude<const LIMBS: usize> {
+    limbs: [u64; LIMBS],
 }
 
-impl ExactMagnitude {
+impl<const LIMBS: usize> ExactMagnitude<LIMBS> {
     pub(super) fn zero() -> Self {
-        Self {
-            limbs: [0; DYADIC_LIMBS],
-        }
+        Self { limbs: [0; LIMBS] }
     }
 
     /// Adds `product << offset` (little-endian words) whole words at a time,
     /// or returns `false` when a set bit would land beyond the accumulator.
-    pub(super) fn add_shifted_product(&mut self, product: [u64; 3], offset: usize) -> bool {
+    pub(super) fn add_shifted_product(&mut self, product: &[u64], offset: usize) -> bool {
         let base = offset / 64;
         let shift = offset % 64;
-        for (word_index, word) in product.into_iter().enumerate() {
+        for (word_index, word) in product.iter().copied().enumerate() {
             if !self.add_limb(base + word_index, word << shift) {
                 return false;
             }
@@ -41,7 +43,7 @@ impl ExactMagnitude {
     /// Adds `value` at limb `index` and propagates the carry upward.
     fn add_limb(&mut self, mut index: usize, mut value: u64) -> bool {
         while value != 0 {
-            if index >= DYADIC_LIMBS {
+            if index >= LIMBS {
                 return false;
             }
             let (sum, carry) = self.limbs[index].overflowing_add(value);
@@ -53,7 +55,7 @@ impl ExactMagnitude {
     }
 
     pub(super) fn compare(&self, other: &Self) -> std::cmp::Ordering {
-        for index in (0..DYADIC_LIMBS).rev() {
+        for index in (0..LIMBS).rev() {
             match self.limbs[index].cmp(&other.limbs[index]) {
                 std::cmp::Ordering::Equal => {}
                 ordering => return ordering,
@@ -84,8 +86,8 @@ pub(super) fn orient3d_exact_dyadic(a: Point3, b: Point3, c: Point3, d: Point3) 
         (false, [(0, 0), (1, 1), (2, 2)]),
         (true, [(1, 0), (0, 1), (2, 2)]),
     ];
-    let mut positive = ExactMagnitude::zero();
-    let mut negative = ExactMagnitude::zero();
+    let mut positive = OrientMagnitude::zero();
+    let mut negative = OrientMagnitude::zero();
 
     for (subtract, factors) in monomials {
         for choices in 0_u8..8 {
@@ -116,7 +118,7 @@ pub(super) fn orient3d_exact_dyadic(a: Point3, b: Point3, c: Point3, d: Point3) 
             } else {
                 &mut positive
             };
-            if !target.add_shifted_product(product, offset) {
+            if !target.add_shifted_product(&product, offset) {
                 return None;
             }
         }

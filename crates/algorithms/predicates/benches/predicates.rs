@@ -10,8 +10,11 @@
 use std::hint::black_box;
 use std::time::Instant;
 
+use axiolid_core::Point2;
 use axiolid_predicates::scene::{orient2_scene, orient3_scene, DegeneracyRate};
-use axiolid_predicates::{orient2d, orient2d_filter, orient3d, orient3d_filter, StaticFilter};
+use axiolid_predicates::{
+    incircle, incircle_filter, orient2d, orient2d_filter, orient3d, orient3d_filter, StaticFilter,
+};
 
 const SAMPLES: usize = 200_000;
 
@@ -24,6 +27,8 @@ fn main() {
     bench_orient2d_collinear_grid();
     println!();
     bench_orient3d();
+    println!();
+    bench_incircle();
     println!();
     bench_static_filter();
 }
@@ -122,6 +127,74 @@ fn bench_orient3d() {
         }
         row(rate.label(), start.elapsed().as_nanos() as f64, escalated);
     }
+}
+
+/// `incircle` on random points (the filter settles every call) and on exactly
+/// cocircular lattice points, where every call escalates past the filter. The
+/// lattice points of the circle of radius 5525 are scaled by a power of two,
+/// so they stay exactly cocircular: 2^-10 keeps every difference exact and in
+/// range (the expansion stage), 2^266 (about 1e80) puts the differences out
+/// of the filter's range (the dyadic stage).
+fn bench_incircle() {
+    println!("incircle");
+    let mut state = 0x51ED_2703_u64;
+    let mut next = move || {
+        state ^= state << 13;
+        state ^= state >> 7;
+        state ^= state << 17;
+        state
+    };
+    let random: Vec<[Point2; 4]> = (0..SAMPLES)
+        .map(|_| {
+            let mut vertex = || {
+                Point2::new(
+                    (next() % 2_000_001) as f64 - 1_000_000.0,
+                    (next() % 2_000_001) as f64 - 1_000_000.0,
+                )
+            };
+            [vertex(), vertex(), vertex(), vertex()]
+        })
+        .collect();
+    time_incircle("random", &random);
+
+    const RADIUS: i64 = 5525;
+    let lattice: Vec<(f64, f64)> = (-RADIUS..=RADIUS)
+        .flat_map(|x| (-RADIUS..=RADIUS).map(move |y| (x, y)))
+        .filter(|(x, y)| x * x + y * y == RADIUS * RADIUS)
+        .map(|(x, y)| (x as f64, y as f64))
+        .collect();
+    for (label, scale) in [("grid", 2f64.powi(-10)), ("huge", 2f64.powi(266))] {
+        let scene: Vec<[Point2; 4]> = (0..SAMPLES)
+            .map(|_| {
+                let mut vertex = || {
+                    let (x, y) = lattice[(next() % lattice.len() as u64) as usize];
+                    Point2::new(x * scale, y * scale)
+                };
+                [vertex(), vertex(), vertex(), vertex()]
+            })
+            .collect();
+        time_incircle(label, &scene);
+    }
+}
+
+fn time_incircle(label: &str, scene: &[[Point2; 4]]) {
+    let escalated = scene
+        .iter()
+        .filter(|c| !incircle_filter(c[0], c[1], c[2], c[3]).is_certain())
+        .count();
+    for c in scene {
+        black_box(incircle(c[0], c[1], c[2], c[3]));
+    }
+    let start = Instant::now();
+    for c in scene {
+        black_box(incircle(
+            black_box(c[0]),
+            black_box(c[1]),
+            black_box(c[2]),
+            black_box(c[3]),
+        ));
+    }
+    row(label, start.elapsed().as_nanos() as f64, escalated);
 }
 
 /// The static filter's whole justification is skipping the per-call permanent.

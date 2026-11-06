@@ -27,6 +27,7 @@ mod orient3_dyadic;
 pub mod orientation;
 pub mod scene;
 pub mod sphere;
+mod sphere_dyadic;
 pub mod static_filter;
 
 pub use expansion::{two_diff, two_product, two_sum};

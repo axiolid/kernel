@@ -11,6 +11,19 @@
 //! That lift squares the operand magnitudes, so the error bound grows faster
 //! than `orient*`'s and the filter fails sooner -- which is why the escalation
 //! rate is measured rather than assumed.
+//!
+//! The determinants have degree 4 (`incircle`) and 5 (`insphere`) in the
+//! coordinate differences, so their products leave binary64's range much
+//! sooner than `orient*`'s (#430). The filter therefore declines when its
+//! permanent is outside [1e-250, 1e300]. The expansion stage of the exact path
+//! runs only where every nonzero difference lies in a range that keeps all of
+//! its products normal: [1e-60, 1e60] for `incircle` and [1e-45, 1e45] for
+//! `insphere`, with every nonzero rounding tail of a difference at least as
+//! large as the range's lower bound. Any
+//! other finite input goes to a fixed-size dyadic evaluation over the original
+//! coordinates (`sphere_dyadic`), which forms no difference and no rounded
+//! product and is exact for every finite input. A non-finite coordinate returns
+//! [`Certified::Uncertain`].
 
 use axiolid_core::{Point2, Point3};
 use axiolid_guarantees::{Certified, Precision, Sign};
@@ -18,6 +31,7 @@ use axiolid_guarantees::{Certified, Precision, Sign};
 use crate::arithmetic::{expansion_product, expansion_sign, expansion_sum, negate_expansion};
 use crate::expansion::two_diff;
 use crate::orient3::{highest_bit_exponent, least_significant_bit_exponent};
+use crate::sphere_dyadic::{incircle_exact_dyadic, insphere_exact_dyadic};
 
 /// Machine epsilon for binary64.
 const EPSILON: f64 = f64::EPSILON / 2.0;
@@ -28,28 +42,77 @@ const INCIRCLE_ERROR_FACTOR: f64 = (10.0 + 96.0 * EPSILON) * EPSILON;
 /// Relative error bound for the lifted 4x4 `insphere` determinant.
 const INSPHERE_ERROR_FACTOR: f64 = (16.0 + 224.0 * EPSILON) * EPSILON;
 
+/// Differences of `incircle` must be zero or within `[INCIRCLE_MIN, INCIRCLE_MAX]`
+/// in magnitude for the expansion stage: a product of four of them then lies in
+/// `[1e-240, 1e240]`.
+const INCIRCLE_MIN: f64 = 1.0e-60;
+const INCIRCLE_MAX: f64 = 1.0e60;
+
+/// The same range for `insphere`, degree 5: products in `[1e-225, 1e225]`.
+const INSPHERE_MIN: f64 = 1.0e-45;
+const INSPHERE_MAX: f64 = 1.0e45;
+
+/// The filter's error bound is relative to the permanent, which assumes no
+/// product overflowed and none lost bits to underflow. A finite permanent of at
+/// most `PERMANENT_MAX` excludes overflow (it sums the absolute value of every
+/// product). One of at least `PERMANENT_MIN` makes the bound at least 1e-266,
+/// far above the few units of 2^-1074 that underflowing products can add to the
+/// error, so the bound still holds. A NaN is outside the range.
+const PERMANENT_MIN: f64 = 1.0e-250;
+const PERMANENT_MAX: f64 = 1.0e300;
+
+fn permanent_in_range(permanent: f64) -> bool {
+    (PERMANENT_MIN..=PERMANENT_MAX).contains(&permanent)
+}
+
+/// Whether every value is zero or has a magnitude in `[min, max]`; a NaN or
+/// an infinity is not.
+fn all_in_range(values: &[f64], min: f64, max: f64) -> bool {
+    values
+        .iter()
+        .all(|v| *v == 0.0 || (min..=max).contains(&v.abs()))
+}
+
+/// Whether every `p - q` is in range for the expansion stage: its head is
+/// zero or in `[min, max]` and its rounding tail is zero or at least `min`,
+/// so that no product of parts, nor its own error term, underflows.
+fn differences_expandable(pairs: &[(f64, f64)], min: f64, max: f64) -> bool {
+    pairs.iter().all(|&(p, q)| {
+        let (head, tail) = two_diff(p, q);
+        all_in_range(&[head], min, max) && (tail == 0.0 || tail.abs() >= min)
+    })
+}
+
 /// Is `d` inside the circle through `a`, `b`, `c`?
 ///
 /// [`Sign::Positive`] means inside when `a, b, c` are counter-clockwise.
 /// Callers that cannot guarantee that orientation must normalise it first with
 /// `orient2d`, because the sign of this determinant flips with it.
 ///
-/// Always [`Certified::Certain`].
+/// [`Certified::Certain`] for every finite input, exactly (#430); a
+/// non-finite coordinate returns [`Certified::Uncertain`].
 #[must_use]
 pub fn incircle(a: Point2, b: Point2, c: Point2, d: Point2) -> Certified {
     match incircle_filter(a, b, c, d) {
         Certified::Certain { sign, .. } => Certified::exact_sign(sign),
-        _ => Certified::exact_sign(incircle_exact(a, b, c, d)),
+        _ => incircle_exact(a, b, c, d).map_or(
+            Certified::Uncertain {
+                attempted: Precision::Exact,
+            },
+            Certified::exact_sign,
+        ),
     }
 }
 
 /// The fast filter alone, exposed so escalation can be measured.
+///
+/// Returns [`Certified::Uncertain`] when the permanent is outside
+/// [1e-250, 1e300], where products may overflow or underflow.
 #[must_use]
 pub fn incircle_filter(a: Point2, b: Point2, c: Point2, d: Point2) -> Certified {
     let (adx, ady) = (a.x - d.x, a.y - d.y);
     let (bdx, bdy) = (b.x - d.x, b.y - d.y);
     let (cdx, cdy) = (c.x - d.x, c.y - d.y);
-
     let bdxcdy = bdx * cdy;
     let cdxbdy = cdx * bdy;
     let alift = adx * adx + ady * ady;
@@ -69,6 +132,11 @@ pub fn incircle_filter(a: Point2, b: Point2, c: Point2, d: Point2) -> Certified 
         + (cdxady.abs() + adxcdy.abs()) * blift
         + (adxbdy.abs() + bdxady.abs()) * clift;
 
+    if !permanent_in_range(permanent) {
+        return Certified::Uncertain {
+            attempted: Precision::F64,
+        };
+    }
     Certified::from_filter(
         determinant,
         INCIRCLE_ERROR_FACTOR * permanent,
@@ -84,8 +152,32 @@ pub fn incircle_filter(a: Point2, b: Point2, c: Point2, d: Point2) -> Certified 
 /// wrong exactly where the filter hands over -- nearly cocircular points
 /// whose differences do not fit an `f64` -- and Delaunay flips driven by it
 /// could cycle for ever (#190).
+///
+/// Only where every difference and rounding tail is in range; elsewhere, and
+/// for every finite input beyond it, the dyadic evaluation decides (#430).
+/// `None` for a non-finite coordinate.
 #[must_use]
-fn incircle_exact(a: Point2, b: Point2, c: Point2, d: Point2) -> Sign {
+fn incircle_exact(a: Point2, b: Point2, c: Point2, d: Point2) -> Option<Sign> {
+    // A non-finite coordinate makes a head NaN or infinite, so it is never
+    // expandable, and the dyadic evaluation refuses it.
+    let pairs = [
+        (a.x, d.x),
+        (a.y, d.y),
+        (b.x, d.x),
+        (b.y, d.y),
+        (c.x, d.x),
+        (c.y, d.y),
+    ];
+    if differences_expandable(&pairs, INCIRCLE_MIN, INCIRCLE_MAX) {
+        Some(incircle_expansion(a, b, c, d))
+    } else {
+        incircle_exact_dyadic(a, b, c, d)
+    }
+}
+
+/// The expansion-arithmetic tier of [`incircle_exact`].
+#[must_use]
+fn incircle_expansion(a: Point2, b: Point2, c: Point2, d: Point2) -> Sign {
     let (adx, ady) = (diff(a.x, d.x), diff(a.y, d.y));
     let (bdx, bdy) = (diff(b.x, d.x), diff(b.y, d.y));
     let (cdx, cdy) = (diff(c.x, d.x), diff(c.y, d.y));
@@ -137,16 +229,25 @@ fn lift(e: &[f64], x: &[f64], y: &[f64]) -> Vec<f64> {
 /// (`orient3d(a, b, c, d) > 0`). As with [`incircle`], the sign flips with the
 /// base orientation, so a caller must normalise it.
 ///
-/// Always [`Certified::Certain`].
+/// [`Certified::Certain`] for every finite input, exactly (#430); a
+/// non-finite coordinate returns [`Certified::Uncertain`].
 #[must_use]
 pub fn insphere(a: Point3, b: Point3, c: Point3, d: Point3, e: Point3) -> Certified {
     match insphere_filter(a, b, c, d, e) {
         Certified::Certain { sign, .. } => Certified::exact_sign(sign),
-        _ => Certified::exact_sign(insphere_exact(a, b, c, d, e)),
+        _ => insphere_exact(a, b, c, d, e).map_or(
+            Certified::Uncertain {
+                attempted: Precision::Exact,
+            },
+            Certified::exact_sign,
+        ),
     }
 }
 
 /// The fast filter alone, exposed so escalation can be measured.
+///
+/// Returns [`Certified::Uncertain`] when the permanent is outside
+/// [1e-250, 1e300], where products may overflow or underflow.
 #[must_use]
 pub fn insphere_filter(a: Point3, b: Point3, c: Point3, d: Point3, e: Point3) -> Certified {
     let v = |p: Point3| (p.x - e.x, p.y - e.y, p.z - e.z);
@@ -154,7 +255,6 @@ pub fn insphere_filter(a: Point3, b: Point3, c: Point3, d: Point3, e: Point3) ->
     let (bx, by, bz) = v(b);
     let (cx, cy, cz) = v(c);
     let (dx, dy, dz) = v(d);
-
     let (axby, bxay) = (ax * by, bx * ay);
     let (bxcy, cxby) = (bx * cy, cx * by);
     let (cxdy, dxcy) = (cx * dy, dx * cy);
@@ -197,6 +297,11 @@ pub fn insphere_filter(a: Point3, b: Point3, c: Point3, d: Point3, e: Point3) ->
         + (ab_plus * dz + bd_plus * az + da_plus * bz) * clift
         + (bc_plus * az + ac_plus * bz + ab_plus * cz) * dlift;
 
+    if !permanent_in_range(permanent) {
+        return Certified::Uncertain {
+            attempted: Precision::F64,
+        };
+    }
     Certified::from_filter(
         determinant,
         INSPHERE_ERROR_FACTOR * permanent,
@@ -209,12 +314,23 @@ pub fn insphere_filter(a: Point3, b: Point3, c: Point3, d: Point3, e: Point3) ->
 /// Expands along the lifted column: each 3x3 minor is built from exact 2x2
 /// cofactors, scaled by the remaining z difference, then by the squared
 /// distance. Nothing is rounded between those steps.
+///
+/// The expansion stage runs only where every difference and rounding tail is
+/// in range; elsewhere the dyadic evaluation decides (#430). `None` for a
+/// non-finite coordinate.
 #[must_use]
-fn insphere_exact(a: Point3, b: Point3, c: Point3, d: Point3, e: Point3) -> Sign {
+fn insphere_exact(a: Point3, b: Point3, c: Point3, d: Point3, e: Point3) -> Option<Sign> {
+    // As for `incircle_exact`, a non-finite coordinate is neither a small
+    // integer nor expandable, and the dyadic evaluation refuses it.
     if let Some(sign) = insphere_small_integer(a, b, c, d, e) {
-        return sign;
+        return Some(sign);
     }
-    insphere_expansion(a, b, c, d, e)
+    let pairs = [a, b, c, d].map(|p| [(p.x, e.x), (p.y, e.y), (p.z, e.z)]);
+    if differences_expandable(pairs.as_flattened(), INSPHERE_MIN, INSPHERE_MAX) {
+        Some(insphere_expansion(a, b, c, d, e))
+    } else {
+        insphere_exact_dyadic(a, b, c, d, e)
+    }
 }
 
 /// The expansion-arithmetic tier of [`insphere_exact`].
