@@ -127,9 +127,9 @@ MUTANTS = [
      "        let (u_lo, u_hi) = (u_lo, u_hi);"),
     # Edge curves trimmed at their vertices (#319), now in `trim.rs`.
     ("edge curve taken whole, not trimmed at its vertices", T,
-     "    Ok(CurveSpan { span, period })",
+     "    Ok(CurveSpan::new(curve, span, period))",
      "    let _ = span;\n"
-     "    Ok(CurveSpan { span: axiolid_reference::curve::domain3(curve), period })"),
+     "    Ok(CurveSpan::new(curve, axiolid_reference::curve::domain3(curve), period))"),
     ("a one-vertex edge is half a turn", T,
      "            let sweep = if start_id == end_id {\n                turn\n",
      "            let sweep = if start_id == end_id {\n                0.5 * turn\n"),

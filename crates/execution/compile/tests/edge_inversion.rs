@@ -992,6 +992,12 @@ fn a_section_edge_not_ending_at_its_vertices_is_refused_by_name() {
 /// A whole circle as one closed rational B-spline of four quarter arcs,
 /// starting at angle zero.
 fn closed_circle_spline(z: Scalar, radius: Scalar) -> Curve3 {
+    closed_circle_spline_on(z, radius, vec![0.0, 0.25, 0.5, 0.75, 1.0])
+}
+
+/// [`closed_circle_spline`] with its five knots at `knots`: the same circle,
+/// parametrised unevenly.
+fn closed_circle_spline_on(z: Scalar, radius: Scalar, knots: Vec<Scalar>) -> Curve3 {
     let w = std::f64::consts::FRAC_1_SQRT_2;
     let p = |x: Scalar, y: Scalar| Point3::new(x * radius, y * radius, z);
     Curve3::BSpline(BSplineCurve3 {
@@ -1007,7 +1013,7 @@ fn closed_circle_spline(z: Scalar, radius: Scalar) -> Curve3 {
             p(1.0, -1.0),
             p(1.0, 0.0),
         ],
-        knots: vec![0.0, 0.25, 0.5, 0.75, 1.0],
+        knots,
         multiplicities: vec![3, 2, 2, 2, 3],
         weights: Some(vec![1.0, w, 1.0, w, 1.0, w, 1.0, w, 1.0]),
         closed: true,
@@ -1683,6 +1689,36 @@ fn a_bspline_knot_of_full_multiplicity_is_a_vertex() {
     };
     // The piece twice as long takes twice the spans, not more.
     assert_eq!((side(true), side(false)), (16, 32), "rim vertices per side");
+}
+
+/// A closed B-spline circle whose C0 knots are non-dyadic (0.1, 0.2, 1/3),
+/// trimmed from before its seam to past all three: their copies lie one
+/// period past the domain, where shifting back with `(t + 1) - 1` misses
+/// the knot by an ulp. The span still has its certified bound, and every
+/// knot is a mesh vertex (#426).
+#[test]
+fn non_dyadic_knots_past_a_seam_keep_the_bound() {
+    let knots = vec![0.0, 0.1, 0.2, 1.0 / 3.0, 1.0];
+    let angles = (-TAU / 8.0, 0.8 * TAU);
+    let (mesh, report, samples) = trimmed_patch(
+        closed_circle_spline_on(0.0, 0.3, knots.clone()),
+        closed_circle_spline_on(0.5, 0.3, knots),
+        angles,
+    );
+    assert_bounded("non-dyadic knots", &mesh, &samples, &report, 4.0);
+    for z in [0.0, 0.5] {
+        for knot in [
+            Point3::new(0.3, 0.0, z),
+            Point3::new(0.0, 0.3, z),
+            Point3::new(-0.3, 0.0, z),
+            Point3::new(0.0, -0.3, z),
+        ] {
+            assert!(
+                mesh.positions.iter().any(|p| (*p - knot).length() <= 1e-12),
+                "the knot {knot:?} is not a mesh vertex"
+            );
+        }
+    }
 }
 
 /// A unit cube, its faces listed rotated left by `rotate` and then, with

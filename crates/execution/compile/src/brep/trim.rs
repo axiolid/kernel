@@ -80,40 +80,108 @@ const CURVE_COVER_WORK: usize = 100_000;
 const POLISH_STEPS: usize = 8;
 
 /// The part of an edge curve its vertices bound.
-#[derive(Debug, Clone, Copy)]
+#[derive(Debug, Clone)]
 pub(super) struct CurveSpan {
     /// From the start vertex's parameter to the end vertex's, unwrapped: on
     /// a closed curve the end may lie up to one period past the domain.
     span: Interval,
     /// A closed curve's native domain, into which parameters past it wrap.
     period: Option<Interval>,
+    /// The curve's own derivative breaks, ascending: found once here, as
+    /// the edge pass asks for a point and a bound many times.
+    breaks: Vec<Scalar>,
 }
 
 impl CurveSpan {
+    /// `span` of `curve`, wrapping into `period` on a closed curve.
+    pub(super) fn new(curve: &Curve3, span: Interval, period: Option<Interval>) -> Self {
+        let mut breaks = axiolid_reference::bound::continuity_breaks3(curve, 1);
+        breaks.sort_by(Scalar::total_cmp);
+        breaks.dedup();
+        Self {
+            span,
+            period,
+            breaks,
+        }
+    }
+
     /// The unwrapped parameter at fraction `s` of the span.
     fn parameter(&self, s: Scalar) -> Scalar {
         self.span.start + (self.span.end - self.span.start) * s
     }
 
-    /// `t` moved into the native domain of a piece whose midpoint is `mid`.
+    /// The parameter whose copy one period on is `t`, where that is exact:
+    /// a break `b` with `b + period == t`, or the domain start for the
+    /// seam `domain.end`.
+    fn exact_native(&self, t: Scalar) -> Option<Scalar> {
+        let domain = self.period?;
+        if t == domain.end {
+            return Some(domain.start);
+        }
+        let period = domain.end - domain.start;
+        let i = self.breaks.partition_point(|b| b + period < t);
+        self.breaks.get(i).copied().filter(|b| b + period == t)
+    }
+
+    /// `t` moved into the native domain, as the end of a piece whose
+    /// midpoint is `mid`.
+    ///
+    /// Shifting by `t - period` is inexact for a non-dyadic parameter, and a
+    /// piece that then ends past an interior C0 knot hides the knot inside
+    /// it (#426). The cuts are the only parameters whose native value is
+    /// known: a copy `b + period` of a break `b` maps back to `b`, and the
+    /// seam `domain.end` to `domain.start`. Each is recognised by float
+    /// equality with the very value `cuts` produced, so the decision is
+    /// exact; any other parameter is shifted.
     fn native(&self, t: Scalar, mid: Scalar) -> Scalar {
         match self.period {
-            Some(domain) if mid > domain.end => t - (domain.end - domain.start),
+            Some(domain) if mid > domain.end => self
+                .exact_native(t)
+                .unwrap_or(t - (domain.end - domain.start)),
             _ => t,
         }
+    }
+
+    /// The native parameter of the sample at unwrapped `t`, inside the
+    /// native interval of the piece [`CurveSpan::bound`] bounds around it.
+    ///
+    /// A sample between two cuts shifts by `t - period`, which may land a
+    /// ulp outside that piece, past the knot it follows or precedes, where
+    /// the piece's bound does not reach. The piece's ends are exact (as
+    /// [`CurveSpan::native`] gives them) and rounding is monotone, so
+    /// clamping the shift into them is exact and the bound covers the sample.
+    fn sample(&self, t: Scalar) -> Scalar {
+        let Some(domain) = self.period.filter(|domain| t > domain.end) else {
+            return t;
+        };
+        if let Some(exact) = self.exact_native(t) {
+            return exact;
+        }
+        let period = domain.end - domain.start;
+        let hi = self.span.start.max(self.span.end);
+        let i = self.breaks.partition_point(|b| b + period < t);
+        let lower = match i.checked_sub(1).map(|j| self.breaks[j]) {
+            Some(b) if b + period > domain.end => b,
+            _ => domain.start,
+        };
+        let upper = match self.breaks.get(i) {
+            Some(&b) if b + period < hi => b,
+            _ => self.native(hi, hi),
+        };
+        (t - period).max(lower).min(upper)
     }
 
     /// The point at fraction `s` of the span.
     pub(super) fn evaluate(&self, curve: &Curve3, s: Scalar) -> GeomResult<Vec3> {
         let t = self.parameter(s);
-        axiolid_reference::curve::evaluate3(curve, self.native(t, t))
+        axiolid_reference::curve::evaluate3(curve, self.sample(t))
     }
 
     /// The unwrapped parameters strictly between `lo` and `hi` where the
     /// curve has a derivative break: its own breaks, their copies one
     /// period on, and a closed curve's seam.
-    fn cuts(&self, curve: &Curve3, lo: Scalar, hi: Scalar) -> Vec<Scalar> {
-        let breaks = axiolid_reference::bound::continuity_breaks3(curve, 1);
+    fn cuts(&self, lo: Scalar, hi: Scalar) -> Vec<Scalar> {
+        let breaks = &self.breaks;
         let mut cuts: Vec<Scalar> = breaks.clone();
         if let Some(domain) = self.period {
             let period = domain.end - domain.start;
@@ -130,7 +198,7 @@ impl CurveSpan {
     /// (#342): strictly between 0 and 1, ascending, without repeats. Each
     /// is the fraction whose parameter is the break's own, so that a sample
     /// there is the break exactly and no piece between them spans one.
-    pub(super) fn break_fractions(&self, curve: &Curve3) -> Vec<Scalar> {
+    pub(super) fn break_fractions(&self) -> Vec<Scalar> {
         let length = self.span.end - self.span.start;
         let (lo, hi) = if length >= 0.0 {
             (self.span.start, self.span.end)
@@ -138,7 +206,7 @@ impl CurveSpan {
             (self.span.end, self.span.start)
         };
         let mut fractions: Vec<Scalar> = self
-            .cuts(curve, lo, hi)
+            .cuts(lo, hi)
             .into_iter()
             .map(|t| self.exact_fraction(t, (t - self.span.start) / length))
             .filter(|&s| 0.0 < s && s < 1.0)
@@ -178,7 +246,7 @@ impl CurveSpan {
     ) -> Option<SpanBound> {
         let (ta, tb) = (self.parameter(a), self.parameter(b));
         let (lo, hi) = if ta <= tb { (ta, tb) } else { (tb, ta) };
-        let cuts = self.cuts(curve, lo, hi);
+        let cuts = self.cuts(lo, hi);
         let ends: Vec<Scalar> = core::iter::once(lo)
             .chain(cuts.iter().copied())
             .chain(core::iter::once(hi))
@@ -252,10 +320,7 @@ pub(super) fn vertex_span(
             let bounded =
                 domain.start.is_finite() && domain.end.is_finite() && domain.end > domain.start;
             if bounded && gap(domain.start, start)? <= linear && gap(domain.end, end)? <= linear {
-                return Ok(CurveSpan {
-                    span: domain,
-                    period: None,
-                });
+                return Ok(CurveSpan::new(curve, domain, None));
             }
             match curve {
                 Curve3::BSpline(spline) => {
@@ -316,7 +381,7 @@ pub(super) fn vertex_span(
     }
     // A circle or ellipse evaluates past its turn by itself.
     let period = period.filter(|_| !matches!(curve, Curve3::Circle(_) | Curve3::Ellipse(_)));
-    Ok(CurveSpan { span, period })
+    Ok(CurveSpan::new(curve, span, period))
 }
 
 fn off_curve(which: &str, distance: Scalar) -> GeomError {
@@ -587,7 +652,7 @@ mod tests {
         let [a] = vertices(1)[..] else { unreachable!() };
         let start = (a, p(0.3, 0.0));
         let span = vertex_span(&square, start, start, Tolerance::MILLIMETRE).unwrap();
-        let fractions = span.break_fractions(&square);
+        let fractions = span.break_fractions();
         assert_eq!(fractions.len(), 4, "{fractions:?}");
         for (s, corner) in fractions.iter().zip([1.0, 2.0, 3.0, 4.0]) {
             assert_eq!(span.parameter(*s), corner);
@@ -605,20 +670,21 @@ mod tests {
             points: vec![p(0.0, 0.0), p(1.0, 1.0), p(2.0, 0.0)],
             closed: false,
         });
-        let span = CurveSpan {
-            span: Interval {
+        let span = CurveSpan::new(
+            &bent,
+            Interval {
                 start: 0.05808157514973589,
                 end: 1.501464907695806,
             },
-            period: None,
-        };
+            None,
+        );
         let plain = (1.0 - span.span.start) / (span.span.end - span.span.start);
         assert_ne!(
             span.parameter(plain),
             1.0,
             "the fixture needs a rounding miss"
         );
-        let fractions = span.break_fractions(&bent);
+        let fractions = span.break_fractions();
         assert_eq!(fractions.len(), 1);
         assert_eq!(span.parameter(fractions[0]), 1.0);
     }
@@ -642,7 +708,7 @@ mod tests {
             Tolerance::MILLIMETRE,
         )
         .unwrap();
-        let fractions = span.break_fractions(&zigzag);
+        let fractions = span.break_fractions();
         assert_eq!(fractions.len(), 2, "{fractions:?}");
         assert_eq!(span.parameter(fractions[0]), 2.0);
         assert_eq!(span.parameter(fractions[1]), 1.0);
@@ -659,7 +725,7 @@ mod tests {
             Tolerance::MILLIMETRE,
         )
         .unwrap();
-        assert!(span.break_fractions(&line).is_empty());
+        assert!(span.break_fractions().is_empty());
     }
 
     /// Two segments crossing at the vertex: the parameter is not unique.
@@ -767,6 +833,49 @@ mod tests {
         assert!(text.contains("is not on its curve"), "{text}");
     }
 
+    /// A sample past the seam lies on its own side of every knot copy, and
+    /// a knot copy itself is the knot exactly (#426).
+    #[test]
+    fn a_sample_past_the_seam_stays_in_its_piece() {
+        let knots = [0.1, 0.2, 1.0 / 3.0];
+        let span = CurveSpan {
+            span: Interval {
+                start: 0.9,
+                end: 1.9,
+            },
+            period: Some(Interval {
+                start: 0.0,
+                end: 1.0,
+            }),
+            breaks: knots.to_vec(),
+        };
+        for knot in knots {
+            let copy = knot + 1.0;
+            assert_ne!(copy - 1.0, knot, "the fixture needs an inexact shift");
+            assert_eq!(span.sample(copy), knot, "the copy of {knot}");
+            let (mut below, mut above) = (copy, copy);
+            for _ in 0..4 {
+                below = below.next_down();
+                above = above.next_up();
+                assert!(
+                    span.sample(below) <= knot,
+                    "{below} before the copy of {knot}"
+                );
+                assert!(
+                    span.sample(above) >= knot,
+                    "{above} after the copy of {knot}"
+                );
+            }
+        }
+        let mut t = 1.0;
+        assert_eq!(span.sample(t), 1.0, "the seam is the domain end itself");
+        for _ in 0..4 {
+            t = t.next_up();
+            assert!(span.sample(t) >= 0.0, "{t} after the seam");
+        }
+        assert_eq!(span.sample(0.9), 0.9, "before the seam");
+    }
+
     /// A span across a closed polyline's seam is split there: the corner
     /// at the seam bounds how far the span strays from its chord.
     #[test]
@@ -780,16 +889,17 @@ mod tests {
             ],
             closed: true,
         });
-        let span = CurveSpan {
-            span: Interval {
+        let span = CurveSpan::new(
+            &square,
+            Interval {
                 start: 3.5,
                 end: 4.5,
             },
-            period: Some(Interval {
+            Some(Interval {
                 start: 0.0,
                 end: 4.0,
             }),
-        };
+        );
         let (a, b) = (
             span.evaluate(&square, 0.0).unwrap(),
             span.evaluate(&square, 1.0).unwrap(),

@@ -6,9 +6,16 @@ curve has a derivative break, their exactness, and the per-piece requirement
 the edge pass keeps. `tests/edge_inversion.rs` or the modules' unit tests
 must fail on it. A build error also counts as killed.
 
-First run: 10 / 10 killed.
+First run: 12 / 12 killed.
 
 Not listed, as untested at test resolution (no fixture, not equivalent):
+- the clamp of a sample's shifted parameter into its piece's native
+  ends (#426): rounding is monotone, so the plain shift never leaves them
+  (a sample past a knot copy maps to at least the knot, one before it to at
+  most the knot; none was found across the seam), and the clamp is a
+  guarantee by construction, not an observable.
+- the seam mapped to the domain start by subtraction, not by identity: a
+  piece starting a hair below the domain start is harmless to the bounds.
 - the segment cap counted over all pieces of an edge, not per piece: no
   fixture reaches the cap with more than one piece.
 - the merged per-piece requirement of an edge checked against the cap: no
@@ -31,14 +38,20 @@ TARGETS = [
 
 MUTANTS = [
     ("an edge curve has no breaks", T,
-     "            .cuts(curve, lo, hi)\n            .into_iter()\n",
-     "            .cuts(curve, lo, hi)\n            .into_iter()\n            .take(0)\n"),
+     "            .cuts(lo, hi)\n            .into_iter()\n",
+     "            .cuts(lo, hi)\n            .into_iter()\n            .take(0)\n"),
     ("a break fraction is not nudged to its parameter", T,
      "            .map(|t| self.exact_fraction(t, (t - self.span.start) / length))\n",
      "            .map(|t| (t - self.span.start) / length)\n"),
     ("break fractions rounded through single precision", T,
      "            .map(|t| self.exact_fraction(t, (t - self.span.start) / length))\n",
      "            .map(|t| ((t - self.span.start) / length) as f32 as Scalar)\n"),
+    ("a break's copy past the seam is shifted back inexactly (#426)", T,
+     "        self.breaks.get(i).copied().filter(|b| b + period == t)\n",
+     "        self.breaks.get(i).copied().filter(|b| b + period == t && false)\n"),
+    ("a sample at a break's copy is shifted back inexactly (#426)", T,
+     "        if let Some(exact) = self.exact_native(t) {\n            return exact;\n        }\n",
+     ""),
     ("a piece's requirement on an edge is the first face's, not the strictest", E,
      "                    *kept = (*kept).max(n);\n",
      "                    let _ = n;\n"),

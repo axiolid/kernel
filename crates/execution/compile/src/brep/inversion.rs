@@ -390,8 +390,8 @@ impl EdgeTrace<'_> {
     pub(super) fn breaks(&self) -> Vec<Scalar> {
         match self {
             Self::Straight(..) => Vec::new(),
-            Self::Curve(curve, span) => {
-                let breaks = span.break_fractions(curve);
+            Self::Curve(_, span) => {
+                let breaks = span.break_fractions();
                 if breaks.len() + 1 > MAX_CURVED_EDGE_SEGMENTS {
                     Vec::new()
                 } else {
