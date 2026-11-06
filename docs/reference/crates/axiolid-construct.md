@@ -94,6 +94,16 @@ Latest release, 0.3.29 (2026-11-03):
   every section interpolated between them. A polyline or B-spline segment,
   another family or a different segment structure returns `None`.
 
+### Changed
+
+- `contour_to_arc_ring` and the profile validator lower `Curve2::Polyline`
+  contour segments exactly: one straight ring vertex per polyline vertex the
+  segment passes, stored points taken bit for bit, a domain outside
+  `[0, segments]` refused as degenerate rather than clamped. A contour now
+  needs two ring vertices, not two segments, so one closed polyline or one
+  full circle is a whole contour; the `TooFewSegments` message says so
+  (#389).
+
 ### Fixed
 
 - `extrude_profile_exact` ran no profile check and built a solid from a
