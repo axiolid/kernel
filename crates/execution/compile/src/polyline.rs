@@ -139,7 +139,7 @@ pub(crate) fn compile(
     options: &ExecutionOptions,
 ) -> GeomResult<PolylineOutcome> {
     let requested = crate::compiler::chord_error(options);
-    let (points, bound) = resolve(graph, root, requested, options, 0)?;
+    let (points, bound) = node(graph, root, None, requested, options, 0, None)?;
     Ok(PolylineOutcome::new(
         points,
         ChordDeviation::new(requested, bound),
@@ -175,27 +175,44 @@ fn sensed(offset: Option<Offset>, forward: bool) -> Option<Offset> {
     }
 }
 
-/// A node's polyline and its bound, within `chord` in its own units.
-fn resolve(
+/// A node's polyline and its bound, within `chord` in its own units: the
+/// node over its `window` of its own parameter (`None`: all of it), under
+/// `offset` when one of its ancestors is an offset (#317): an atomic curve
+/// or a relation of them is offset piece by piece.
+fn node(
     graph: &GeometryGraph,
     id: NodeId,
+    window: Option<(Scalar, Scalar)>,
     chord: Scalar,
     options: &ExecutionOptions,
     depth: usize,
+    offset: Option<Offset>,
 ) -> GeomResult<(Vec<Point3>, Scalar)> {
     if depth > MAX_DEPTH {
         return Err(too_deep());
     }
     match graph.get(id) {
-        Some(GeometryNode::Curve3(curve)) => atomic3(curve, None, chord, None),
-        Some(GeometryNode::Curve2(curve)) => atomic2(curve, None, chord, None),
-        Some(GeometryNode::OpenProfile(profile)) => {
-            resolve(graph, profile.path, chord, options, depth + 1)
+        Some(GeometryNode::Curve3(curve)) => atomic3(curve, window, chord, offset),
+        Some(GeometryNode::Curve2(curve)) => atomic2(curve, window, chord, offset),
+        Some(GeometryNode::CurveRelation(relation)) => {
+            curve_relation(graph, relation, window, chord, options, depth, offset)
+        }
+        Some(GeometryNode::Instance(_) | GeometryNode::InstanceAtStation(_))
+            if offset.is_some() =>
+        {
+            Err(refused(
+                "an offset of a placed curve: only atomic curves and their trims and composites \
+                 are offset to a polyline",
+            ))
+        }
+        Some(GeometryNode::OpenProfile(profile)) if offset.is_none() => {
+            node(graph, profile.path, window, chord, options, depth + 1, None)
         }
         Some(GeometryNode::Instance(instance)) => placed(
             graph,
             instance.source,
             instance.transform,
+            window,
             chord,
             options,
             depth,
@@ -208,43 +225,18 @@ fn resolve(
                      resolved distance: the placement has no certified bound",
                 ));
             }
-            placed(graph, at.source, placement.transform, chord, options, depth)
+            placed(
+                graph,
+                at.source,
+                placement.transform,
+                window,
+                chord,
+                options,
+                depth,
+            )
         }
-        Some(GeometryNode::CurveRelation(relation)) => {
-            curve_relation(graph, relation, chord, options, depth, None)
-        }
-        Some(GeometryNode::Collection(_)) => Err(refused(
+        Some(GeometryNode::Collection(_)) if offset.is_none() => Err(refused(
             "a collection: a polyline is one curve, so compile each member on its own",
-        )),
-        other => Err(not_a_curve(id, other.is_some())),
-    }
-}
-
-/// A child of a relation: resolved as any root, or, under an offset, an
-/// atomic curve or a relation of them offset piece by piece.
-fn under(
-    graph: &GeometryGraph,
-    id: NodeId,
-    chord: Scalar,
-    options: &ExecutionOptions,
-    depth: usize,
-    offset: Option<Offset>,
-) -> GeomResult<(Vec<Point3>, Scalar)> {
-    let Some(offset) = offset else {
-        return resolve(graph, id, chord, options, depth);
-    };
-    if depth > MAX_DEPTH {
-        return Err(too_deep());
-    }
-    match graph.get(id) {
-        Some(GeometryNode::Curve2(curve)) => atomic2(curve, None, chord, Some(offset)),
-        Some(GeometryNode::Curve3(curve)) => atomic3(curve, None, chord, Some(offset)),
-        Some(GeometryNode::CurveRelation(relation)) => {
-            curve_relation(graph, relation, chord, options, depth, Some(offset))
-        }
-        Some(GeometryNode::Instance(_) | GeometryNode::InstanceAtStation(_)) => Err(refused(
-            "an offset of a placed curve: only atomic curves and their trims and composites \
-             are offset to a polyline",
         )),
         other => Err(not_a_curve(id, other.is_some())),
     }
@@ -255,6 +247,7 @@ fn under(
 fn curve_relation(
     graph: &GeometryGraph,
     relation: &CurveRelation,
+    window: Option<(Scalar, Scalar)>,
     chord: Scalar,
     options: &ExecutionOptions,
     depth: usize,
@@ -299,7 +292,15 @@ fn curve_relation(
                 distance: *distance,
                 reference: *reference_direction,
             };
-            under(graph, *basis, chord, options, depth + 1, Some(offset))
+            node(
+                graph,
+                *basis,
+                window,
+                chord,
+                options,
+                depth + 1,
+                Some(offset),
+            )
         }
         CurveRelation::OffsetByStations { .. } | CurveRelation::OffsetsAtStations { .. } => {
             Err(refused(
@@ -377,7 +378,8 @@ fn composite(
         let (mut worst, mut gap): (Scalar, Scalar) = (0.0, 0.0);
         for segment in segments {
             let law = sensed(offset, segment.same_sense);
-            let (mut child, bound) = under(graph, segment.curve, budget, options, depth + 1, law)?;
+            let (mut child, bound) =
+                node(graph, segment.curve, None, budget, options, depth + 1, law)?;
             if !segment.same_sense {
                 child.reverse();
             }
@@ -427,16 +429,30 @@ fn placed(
     graph: &GeometryGraph,
     source: NodeId,
     transform: Transform3,
+    window: Option<(Scalar, Scalar)>,
     chord: Scalar,
     options: &ExecutionOptions,
     depth: usize,
+) -> GeomResult<(Vec<Point3>, Scalar)> {
+    placed_with(transform, chord, options, |local| {
+        node(graph, source, window, local, options, depth + 1, None)
+    })
+}
+
+/// [`placed`] over whatever `compile` makes of the source within the
+/// budget it is given.
+fn placed_with(
+    transform: Transform3,
+    chord: Scalar,
+    options: &ExecutionOptions,
+    mut compile: impl FnMut(Scalar) -> GeomResult<(Vec<Point3>, Scalar)>,
 ) -> GeomResult<(Vec<Point3>, Scalar)> {
     let (_, stretch) = crate::compiler::instance_local_tolerance(transform, options.tolerance())?;
     let mut room = crate::compiler::placement_room(transform, chord, 0.0)?;
     let mut retried = false;
     loop {
         let local = crate::deviation::shrunk_budget_within(chord, stretch, room);
-        let (points, bound) = resolve(graph, source, local, options, depth + 1)?;
+        let (points, bound) = compile(local)?;
         let rounding = crate::deviation::placement_rounding(&points, transform);
         crate::compiler::refuse_below_rounding(chord, rounding)?;
         let grown = crate::deviation::grown(bound, stretch, rounding);

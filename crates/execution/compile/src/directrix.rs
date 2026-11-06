@@ -320,7 +320,7 @@ pub(crate) fn parameter(
 
 /// Whether a selector names a position by a measure along the curve
 /// (a parameter or an arc length) rather than by a point.
-fn is_parameter_kind(selector: &TrimSelector) -> bool {
+pub(crate) fn is_parameter_kind(selector: &TrimSelector) -> bool {
     matches!(
         selector,
         TrimSelector::Parameter(_) | TrimSelector::ArcLength(_)
@@ -519,6 +519,17 @@ pub(crate) fn periodic_trim_interval(
     range: Option<(Scalar, Scalar)>,
     options: &ExecutionOptions,
 ) -> GeomResult<(Scalar, Scalar)> {
+    let arc = periodic_arc(period, a, b, sense);
+    match range {
+        None => Ok(arc),
+        Some(range) => range_on_periodic_arc(arc, period, range, options.tolerance().linear()),
+    }
+}
+
+/// The unwrapped basis interval `[lo, hi]` a trim of a periodic basis runs
+/// over: from `a` the way `sense` says to the next occurrence of `b`,
+/// wrapping if it must (see [`sample_periodic_trim`]).
+pub(crate) fn periodic_arc(period: Scalar, a: Scalar, b: Scalar, sense: bool) -> (Scalar, Scalar) {
     let travelled = if sense { b - a } else { a - b };
     let span = if travelled > 0.0 && travelled <= period * (1.0 + PERIOD_SLACK) {
         travelled
@@ -529,44 +540,53 @@ pub(crate) fn periodic_trim_interval(
             wrapped => wrapped,
         }
     };
-    let (lo, hi) = if sense { (a, a + span) } else { (a - span, a) };
-    match range {
-        None => Ok((lo, hi)),
-        Some((start, end)) => {
-            if !(start.is_finite() && end.is_finite()) {
-                return Err(GeomError::InvalidInput(
-                    "sweep parameter range must be finite".into(),
-                ));
-            }
-            if start == end {
-                return Err(GeomError::Degenerate(
-                    "sweep parameter range is empty".into(),
-                ));
-            }
-            let slack = options.tolerance().linear();
-            let into_arc = |value: Scalar| -> GeomResult<Scalar> {
-                let shifted = lo + (value - lo).rem_euclid(period);
-                // Just below `lo`, a value wraps to just below `lo + period`:
-                // read it as `lo` rather than refuse a rounding residue.
-                let shifted = if shifted > lo + period - slack {
-                    lo
-                } else {
-                    shifted
-                };
-                if shifted > hi + slack {
-                    return Err(GeomError::InvalidInput(
-                        "sweep range exceeds trimmed directrix".into(),
-                    ));
-                }
-                Ok(shifted.min(hi))
-            };
-            let (s, e) = (into_arc(start)?, into_arc(end)?);
-            // An end ON the trim's far end maps back to `lo` when the arc is
-            // a full turn; a range is never empty by that accident.
-            let (s, e) = if s == e { (lo, hi) } else { (s, e) };
-            Ok((s.min(e), s.max(e)))
-        }
+    if sense {
+        (a, a + span)
+    } else {
+        (a - span, a)
     }
+}
+
+/// A `range` read in the parameter of a periodic arc `[lo, hi]`: each end
+/// is taken modulo the `period` into the arc, within `slack` of its ends,
+/// and the result is the sorted pair.
+pub(crate) fn range_on_periodic_arc(
+    (lo, hi): (Scalar, Scalar),
+    period: Scalar,
+    (start, end): (Scalar, Scalar),
+    slack: Scalar,
+) -> GeomResult<(Scalar, Scalar)> {
+    if !(start.is_finite() && end.is_finite()) {
+        return Err(GeomError::InvalidInput(
+            "sweep parameter range must be finite".into(),
+        ));
+    }
+    if start == end {
+        return Err(GeomError::Degenerate(
+            "sweep parameter range is empty".into(),
+        ));
+    }
+    let into_arc = |value: Scalar| -> GeomResult<Scalar> {
+        let shifted = lo + (value - lo).rem_euclid(period);
+        // Just below `lo`, a value wraps to just below `lo + period`:
+        // read it as `lo` rather than refuse a rounding residue.
+        let shifted = if shifted > lo + period - slack {
+            lo
+        } else {
+            shifted
+        };
+        if shifted > hi + slack {
+            return Err(GeomError::InvalidInput(
+                "sweep range exceeds trimmed directrix".into(),
+            ));
+        }
+        Ok(shifted.min(hi))
+    };
+    let (s, e) = (into_arc(start)?, into_arc(end)?);
+    // An end ON the trim's far end maps back to `lo` when the arc is
+    // a full turn; a range is never empty by that accident.
+    let (s, e) = if s == e { (lo, hi) } else { (s, e) };
+    Ok((s.min(e), s.max(e)))
 }
 
 fn sample_curve(
