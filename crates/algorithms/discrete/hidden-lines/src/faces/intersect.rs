@@ -234,6 +234,32 @@ mod tests {
     }
 
     #[test]
+    fn a_segment_is_charged_against_the_memory_budget_when_it_is_found() {
+        let parts: Vec<_> = [sheet(0.0, 0.0, 4.0, 4.0, 0.0), ramp()]
+            .into_iter()
+            .map(|m| (Sheet, m))
+            .collect();
+        let setup = Setup::new(&parts, plan(), None);
+        let run = |bytes: usize| {
+            let mut work = setup.work(usize::MAX);
+            let faces = setup.faces(&mut work);
+            let mut points = setup.points();
+            let mut out = Vec::new();
+            let options = options().with_memory_budget(bytes);
+            intersection_segments(&faces, &mut points, &mut work, 0, &options, &mut out)
+                .map(|()| out.len())
+        };
+        let count = run(usize::MAX).expect("found");
+        assert!(count > 0);
+        run(count * SEGMENT_SCRATCH_BYTES).expect("exactly enough");
+        let error = run(count * SEGMENT_SCRATCH_BYTES - 1).expect_err("one byte short");
+        assert_eq!(
+            error.error,
+            GeomError::BudgetExceeded { resource: "memory" }
+        );
+    }
+
+    #[test]
     fn the_pair_budget_is_enforced() {
         let parts = [sheet(0.0, 0.0, 4.0, 4.0, 0.0), ramp()];
         let error = found(&parts, 0).expect_err("over budget");

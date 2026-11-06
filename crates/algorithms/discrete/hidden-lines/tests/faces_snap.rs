@@ -8,11 +8,16 @@
 
 mod common;
 
-use axiolid_core::Frame3;
+use axiolid_contracts::ExecutionOptions;
+use axiolid_core::{Frame3, Point3, Tolerance};
 use axiolid_hidden_lines::ScalarVisibleFaces;
-use axiolid_mesh_hidden_lines_contract::{OrthographicView, VisibleFaceEvidence};
+use axiolid_mesh::TriMesh;
+use axiolid_mesh_hidden_lines_contract::{
+    HiddenLineMesh, MeshId, MeshRole, MeshVisibleFaces, OrthographicView, VisibleFaceEvidence,
+    VisibleFaceRequest,
+};
 use common::topology::assert_valid_topology;
-use common::{scene, solids, try_faces, views};
+use common::{scene, solids, try_faces, views, FACE_LIMITS};
 
 /// The evidence and the region count of one scene; its topology is checked.
 fn snapped(seed: u64, view: &str) -> (VisibleFaceEvidence, usize) {
@@ -63,4 +68,56 @@ fn seed_9_isometric_with_a_near_plane_is_snapped() {
         ),
         (2, 1, 0, 23)
     );
+}
+
+/// A sheet a few binary64 steps wide in front of another, in an oblique view,
+/// under a tolerance so small that the audit lets it be a triangle: its
+/// corners are exact, non-binary64 image points that round to one cell. It
+/// leaves a hole of no width in the sheet behind it and a region of no width
+/// of its own. Both collapse and are counted; the sheet behind keeps its
+/// outer ring.
+#[test]
+fn a_hole_and_its_occluder_thinner_than_a_cell_collapse() {
+    let (_, frame) = views()
+        .into_iter()
+        .find(|(name, _)| *name == "oblique")
+        .expect("the oblique view");
+    let behind = TriMesh::new(
+        vec![
+            Point3::new(-1.0, -1.0, 0.0),
+            Point3::new(1.0, -1.0, 0.0),
+            Point3::new(1.0, 1.0, 0.0),
+            Point3::new(-1.0, 1.0, 0.0),
+        ],
+        vec![0, 1, 2, 0, 2, 3],
+    );
+    let step = |x: f64| f64::from_bits(x.to_bits() + 1);
+    let (x, y) = (0.3, 0.2);
+    let tiny = TriMesh::new(
+        vec![
+            Point3::new(x, y, 1.0),
+            Point3::new(step(x), y, 1.0),
+            Point3::new(x, step(y), 1.0),
+        ],
+        vec![0, 1, 2],
+    );
+    let meshes = [
+        HiddenLineMesh::new(MeshId(1), MeshRole::Sheet, &behind),
+        HiddenLineMesh::new(MeshId(2), MeshRole::Sheet, &tiny),
+    ];
+    let request = VisibleFaceRequest::new(&meshes, OrthographicView::new(frame), FACE_LIMITS);
+    let options = ExecutionOptions::new(Tolerance::new(1e-40, 1e-40).expect("tolerance"));
+    let outcome = ScalarVisibleFaces::new()
+        .visible_faces(&request, &options)
+        .unwrap_or_else(|error| panic!("{error}"));
+    assert_valid_topology(&outcome);
+    let evidence = outcome.evidence;
+    assert_eq!(
+        (evidence.collapsed_regions, evidence.collapsed_holes),
+        (1, 1)
+    );
+    assert!(evidence.snap_displacement.get() > 0.0);
+    assert_eq!(outcome.regions.len(), 1);
+    assert_eq!(outcome.regions[0].mesh, MeshId(1));
+    assert!(outcome.regions[0].holes.is_empty());
 }

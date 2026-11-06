@@ -308,12 +308,12 @@ pub(crate) fn build(
                 Ok(canonical_rotation(at))
             };
             let outer = positions(&rings[found.outer])?;
-            let mut holes = found
+            let holes = found
                 .holes
                 .iter()
                 .map(|&hole| positions(&rings[hole]))
                 .collect::<Result<Vec<_>, _>>()?;
-            holes.sort_by(|a, b| sequence_order(a, b));
+            let holes = ordered_holes(holes);
             vertex_total += outer.len() + holes.iter().map(Vec::len).sum::<usize>();
             if vertex_total > limits.max_region_vertices {
                 return Err(Error::from(GeomError::BudgetExceeded {
@@ -558,4 +558,22 @@ fn place(
     Err(GeomError::Degenerate(
         "a visible region's cluster lies in no region".into(),
     ))
+}
+
+/// The holes of a region sorted lexicographically by their points.
+fn ordered_holes(mut holes: Vec<Vec<Point2>>) -> Vec<Vec<Point2>> {
+    holes.sort_by(|a, b| sequence_order(a, b));
+    holes
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn holes_are_sorted_by_their_points() {
+        let ring = |x: f64| vec![Point2::new(x, 0.0), Point2::new(x + 1.0, 0.0)];
+        let sorted = ordered_holes(vec![ring(5.0), ring(1.0), ring(3.0)]);
+        assert_eq!(sorted, vec![ring(1.0), ring(3.0), ring(5.0)]);
+    }
 }

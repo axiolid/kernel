@@ -2,7 +2,7 @@
 
 Each mutant breaks one decision the provider owes the contract (which face is
 frontmost, how ties, caps, edge-on triangles, clips and the crop behave, how
-regions are traced, rounded, attributed and ordered, what is refused) and must
+regions are traced, snap-rounded, attributed and ordered, what is refused) and must
 turn a test of the provider red: the conformance suite, the independent
 ray-casting oracle or a unit test.
 """
@@ -81,21 +81,38 @@ MUTANTS = [
      '                    let placed = place(points, &outlines, at, work).map_err(blame)?;',
      '                    let _ = at;\n                    let placed = 0;', TESTS),
     ('region limit unchecked', REG,
-     '            if regions.len() >= limits.max_regions {',
-     '            if false && regions.len() >= limits.max_regions {', TESTS),
+     '            if built.regions.len() >= limits.max_regions {',
+     '            if false && built.regions.len() >= limits.max_regions {', TESTS),
     ('region vertex limit unchecked', REG,
      '            if vertex_total > limits.max_region_vertices {',
      '            if false && vertex_total > limits.max_region_vertices {', TESTS),
     ('holes unsorted', REG,
-     '            holes.sort_by(|a, b| sequence_order(a, b));',
-     '            holes.sort_by(|_, _| std::cmp::Ordering::Equal);', TESTS),
+     '    holes.sort_by(|a, b| sequence_order(a, b));',
+     '    holes.sort_by(|_, _| std::cmp::Ordering::Equal);', TESTS),
     ('outer ring reversed', REG,
-     '            let outer = round(&rings[found.outer])?;',
-     '            let mut outer = round(&rings[found.outer])?;\n            outer.reverse();', TESTS),
-    # What is refused.
-    ('rounding collapse not refused', REG,
-     '    check_collapse(&rounded)?;',
+     '            let outer = positions(&rings[found.outer])?;',
+     '            let mut outer = positions(&rings[found.outer])?;\n            outer.reverse();', TESTS),
+    # Snap rounding of the regions (ADR 0100); the snap itself is probed by
+    # `probe_snap_rounding_mutants.py`.
+    ('snapped regions list no triangles', REG,
+     '                        listed.extend(&source.triangles[region]);',
+     '                        let _ = region;', TESTS),
+    ('collapsed regions are not counted', REG,
+     '                built.collapsed_regions += 1;',
+     '                let _ = &built;', TESTS),
+    ('collapsed holes are not counted', REG,
+     '                    .filter(|&&hole| !ring_survives[hole])',
+     '                    .filter(|&&hole| false && !ring_survives[hole])', TESTS),
+    ('the displacement is not copied to the evidence', PRO,
+     '    evidence.snap_displacement = built.snap_displacement;',
      '', TESTS),
+    ('the rerouted count is not copied to the evidence', PRO,
+     '    evidence.rerouted_edges = built.rerouted_edges;',
+     '', TESTS),
+    ('the collapsed counts are not copied to the evidence', PRO,
+     '    evidence.collapsed_regions = built.collapsed_regions;',
+     '', TESTS),
+    # What is refused.
     ('mesh limit unchecked', PRO,
      '            max_meshes: limits.max_meshes,',
      '            max_meshes: usize::MAX,', TESTS),
