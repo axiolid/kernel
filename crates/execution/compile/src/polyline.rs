@@ -6,8 +6,9 @@
 //! - A `Curve3` over its domain, and a `Curve2` over its domain lifted to
 //!   `z = 0` (the plane a 2D curve is placed from, as a curve placed at a
 //!   station is).
-//! - A trim, a composite or a constant offset of such curves (#317),
-//!   nested: see [Curve relations](#curve-relations).
+//! - A trim, a composite or a constant offset of such curves (#317), a trim
+//!   of a trim, an offset, a placed curve or a composite (#424), nested: see
+//!   [Curve relations](#curve-relations).
 //! - An `OpenProfile`: its path, which graph validation keeps a bounded
 //!   open 2D curve, so a path that is a relation compiles too.
 //! - An `Instance` of any of these, and an `InstanceAtStation` whose frame
@@ -56,12 +57,33 @@
 //!
 //! # Curve relations
 //!
-//! - **A trim** of an atomic curve is that curve flattened between the trim
-//!   parameters, with its own chord bounds. The parameters are read as a
-//!   station basis reads them (`crate::station::trim_parameters`): a
-//!   parameter, an arc length, or a point inverted exactly onto the basis;
-//!   a closed conic wraps from the start selector by the trim's sense,
-//!   across its seam if it must. The trim runs in its sense.
+//! - **A trim** reads its selectors in its basis's parameter (ISO
+//!   10303-42), as a sweep directrix does, so a polyline sampled from a
+//!   trim is the directrix's curve (ADR 0101). A trim of an atomic curve is
+//!   that curve flattened between the trim parameters, read as a station
+//!   basis reads them (`crate::station::trim_parameters`): a parameter, an
+//!   arc length, or a point inverted exactly onto the basis; a closed conic
+//!   wraps from the start selector by the trim's sense, across its seam if
+//!   it must. A trim of any other curve (a trim, an offset, a placed
+//!   curve, a composite) reads parameter selectors only, in the parameter
+//!   of that curve (`crate::station::trimmed_span`): it keeps a span of the
+//!   inner trim's span, read modulo the period where the curve is a closed
+//!   conic or a trim of one, and to the linear tolerance otherwise. The
+//!   trim runs in its sense; the span it keeps is the inner trim's, so the
+//!   sense of an inner trim shows in the direction of the points.
+//! - **A trim of a composite** takes its composite's parameter, its 3D arc
+//!   length from its start, and is cut through the station flattening
+//!   (`axiolid_reference::station::CompositeBasis`), the one arc-length
+//!   measure the kernel has. The pieces between the two distances are
+//!   flattened each between the native parameters a station reads at its
+//!   ends (`StationPiece::native_span`), with the same certified chord
+//!   bounds; a polyline's cut then lies on the point a station reads at the
+//!   same distance. Where the length of a piece is a quadrature (an
+//!   ellipse, a B-spline) the cut lies off the distance by its certified
+//!   error (`CompositeBasis::distance_interval_at`, at most an eighth of the
+//!   budget), which the bound adds. A composite inside a trim has its joints
+//!   within [`axiolid_reference::station::JOINT_TOLERANCE`] as a station
+//!   basis does, where an untrimmed composite takes the linear tolerance.
 //! - **A composite** is each segment compiled to the budget, in its sense,
 //!   end to end: the earlier segment's last vertex is the later one's
 //!   first, one shared vertex, and so is the first vertex where the last
@@ -88,10 +110,15 @@
 //! family whose flattening is not certified
 //! ([`axiolid_reference::bound::certifies_flattening2`]: implicit and banked
 //! curves, a 3D intrinsic curve with torsion, other numerically evaluated
-//! curves), a trim of anything but an atomic curve, a composite whose
-//! segments do not meet, an offset of an offset or of a placed curve, an
-//! offset across a corner of its basis or of a family it has no bound for,
-//! an offset by stations, a surface or parameter curve, a curve placed at a
+//! curves), a point or arc-length trim selector, or a Cartesian preference,
+//! on a trim of a relation (#432), a trim across the closing joint of a
+//! closed composite (selectors against its sense, #433), a trim of a
+//! composite measured in plan distance, holding an instanced curve or a
+//! p-curve, or ending inside an offset segment, an offset of a trimmed
+//! composite cut inside a piece whose length is a quadrature, a composite
+//! whose segments do not meet, an offset of an offset or of a placed curve
+//! or across a corner of its basis or of a family it has no bound for, an
+//! offset by stations, a surface or parameter curve, a curve placed at a
 //! numerically resolved station, a collection, and any node that is not a
 //! curve.
 

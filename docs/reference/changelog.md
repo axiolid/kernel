@@ -2436,6 +2436,14 @@ Every publishable crate versions and publishes independently ([ADR 0067](/adr/00
 
 ### Added
 
+- `StationPiece::native_span`, `CompositeBasis::distance_interval_at` and
+  `CompositeBasis::end_points` (#424): the native parameters the kernel
+  reads at a piece's start and end measures (so a graph compiler cutting a
+  composite flattens each piece between the parameters a station reads),
+  a certified interval for the length from the composite's start to the
+  point read at a distance (a point where every length is stored data), and
+  the points read at distance `0` and at the length.
+
 - `FrameLaw::bend` and `BendBounds` (#361): certified bounds, over a
   seam-free span, of the coefficients of the signed bend of a section frame
   law, `O'.N`, `L.N'` and `U.N'` (`N` the frame's tangent), in the section
@@ -4325,6 +4333,20 @@ Every publishable crate versions and publishes independently ([ADR 0067](/adr/00
 
 ### Added
 
+- `PolylineCompiler` compiles a trim of a trim, of an offset, of a placed
+  curve and of a composite (#424, ADR 0100). A trim reads its basis's
+  parameter, an offset its basis's, a placed curve its source's and a
+  composite its 3D arc length, as a swept directrix does: a window a trim
+  above keeps narrows the inner trim's span, modulo the period on a closed
+  conic. A trim of a composite is cut through the station flattening, each
+  piece flattened between the native parameters a station reads, and the
+  bound adds the certified error of a cut inside an ellipse or B-spline
+  piece. Refused by name: a point or arc-length selector on a relation
+  (#432), a trim across a closed composite's closing joint (#433), a trim of
+  a composite measured in plan distance, holding an instanced or parameter
+  curve, or ending inside an offset segment, and an offset of a trimmed
+  composite cut inside a quadrature piece. Requires `axiolid-evaluate` 0.3.20.
+
 - `station::placement_accuracy`, `PlacementAccuracy` and `PlacementBound`
   (#405): how far a node placed at a station lies from its exact
   placement, `Exact` on a line, `Certified` with the error of the
@@ -4373,6 +4395,15 @@ Every publishable crate versions and publishes independently ([ADR 0067](/adr/00
   details of a difference or an intersection the exact compiler decided.
 
 ### Changed
+
+- A station on a trim of a trim (or of a trim placed at a station) reads
+  the outer trim's parameter selectors in the inner trim's basis's
+  parameter, as a swept directrix and a polyline do (#424, the ADR 0082
+  amendment of 2026-11-06), no longer as a distance along the inner trim.
+  A nested trim's outer selectors that were distances along the inner trim
+  name the basis's parameters now, so the point of every station on one
+  moves. Selectors other than parameters on such a trim are refused by name
+  (#432).
 
 - A node placed at a station on a circle, a polyline, an elevated or
   banked curve over a line or a circle, an intrinsic plan alone or under a

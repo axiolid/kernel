@@ -24,17 +24,17 @@ TESTS = [
 MUTANTS = [
     # Trims.
     ('trim run against its sense', P, '    if !sense {\n        points.reverse();\n    }', '    if false && !sense {\n        points.reverse();\n    }', TESTS),
-    ('trim offset not flipped by its sense', P, '    let offset = sensed(offset, sense);', '    let offset = sensed(offset, true);', TESTS),
+    ('trim offset not flipped by its sense', P, '        sensed(offset, sense),\n    )?;\n    if !sense {', '        sensed(offset, true),\n    )?;\n    if !sense {', TESTS),
     ('periodic trim read against the domain', P, '    if periodic || unbounded {', '    if unbounded {', TESTS),
     ('trim past the domain accepted', P, [('    if (start.is_finite() && lo < start - slack(start))\n', '    if false && ((start.is_finite() && lo < start - slack(start))\n'), ('        || (end.is_finite() && hi > end + slack(end))\n', '        || (end.is_finite() && hi > end + slack(end)))\n')], TESTS),
     # Composites.
     ('joint vertex duplicated', P, '                child.remove(0);', '                child.remove(0);\n                child.insert(0, last);', TESTS),
     ('segment sense ignored', P, '            if !segment.same_sense {\n                child.reverse();\n            }', '            if false && !segment.same_sense {\n                child.reverse();\n            }', TESTS),
     ('segment offset not flipped by its sense', P, '            let law = sensed(offset, segment.same_sense);', '            let law = sensed(offset, true);', TESTS),
-    ('joint gap not in the bound', P, '        let bound = if gap > 0.0 { worst + gap } else { worst };', '        let bound = worst;', TESTS),
+    ('joint gap not in the bound', P, '        let bound = worst + gap + cut;', '        let bound = worst + cut;', TESTS),
     ('gap beyond the tolerance accepted', P, '                if joint.is_nan() || joint > tolerance {', '                if false && (joint.is_nan() || joint > tolerance) {', TESTS),
     ('closing joint not shared', P, '            if closing > 0.0 && closing <= tolerance {', '            if false && closing > 0.0 && closing <= tolerance {', TESTS),
-    ('no room left for the gap', P, '        if bound <= chord || budget < chord || gap >= chord {', '        if true {', TESTS),
+    ('no room left for the gap', P, '        if bound <= chord || budget < chord || gap + cut >= chord {', '        if true {', TESTS),
     # Offsets.
     ('2D offset distance dropped', P, '    let distance = offset.distance;\n    match curve {', '    let distance = 0.0 * offset.distance;\n    match curve {', TESTS),
     ('3D offset distance dropped', P, '    let distance = offset.distance;\n    bisected(\n        |t| bound::offset_point3(', '    let distance = 0.0 * offset.distance;\n    bisected(\n        |t| bound::offset_point3(', TESTS),
@@ -42,7 +42,7 @@ MUTANTS = [
     ('offset across a corner accepted', P, '    if inside(&bound::continuity_breaks2(curve, 1), span) {', '    if false && inside(&bound::continuity_breaks2(curve, 1), span) {', TESTS),
     ('C2 breaks of an offset basis not cut', P, '        &bound::continuity_breaks2(curve, 2),', '        &[],', TESTS),
     ('seams under an offset not cut', P, '                &intrinsic.curvature.seams_within(intrinsic.length),', '                &[],', TESTS),
-    ('offset of an offset accepted', P, '            if offset.is_some() {', '            if false && offset.is_some() {', TESTS),
+    ('offset of an offset accepted', P, '        } => {\n            if offset.is_some() {', '        } => {\n            if false && offset.is_some() {', TESTS),
     ('left normal flipped', O, '    let left = unit(Vec3::new(-d.y, d.x, 0.0))?;', '    let left = unit(Vec3::new(d.y, -d.x, 0.0))?;', TESTS),
     ('3D offset direction reversed', O, '    Ok(p + distance * unit(v.cross(d))?)', '    Ok(p + distance * unit(d.cross(v))?)', TESTS),
     ('unit normal bend not in the bound', O, '    let second = bounds.second + distance.abs() * (y + 3.0 * x * x);', '    let second = bounds.second;', TESTS),

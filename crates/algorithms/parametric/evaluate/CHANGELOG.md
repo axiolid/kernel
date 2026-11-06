@@ -9,6 +9,8 @@ caret rule for `0.x` versions.
 
 ## [Unreleased]
 
+## [0.3.20] - 2026-11-03
+
 ### Added
 
 - `StationPiece::native_span`, `CompositeBasis::distance_interval_at` and
@@ -18,10 +20,6 @@ caret rule for `0.x` versions.
   a certified interval for the length from the composite's start to the
   point read at a distance (a point where every length is stored data), and
   the points read at distance `0` and at the length.
-
-## [0.3.20] - 2026-11-03
-
-### Added
 
 - `FrameLaw::bend` and `BendBounds` (#361): certified bounds, over a
   seam-free span, of the coefficients of the signed bend of a section frame

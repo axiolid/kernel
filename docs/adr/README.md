@@ -85,3 +85,4 @@ Package names and paths in older accepted records describe the tree at the time 
 | [0098](./0098-a-union-the-mesh-cut-cannot-settle-is-decided-by-the-exact-compiler.md) | A union the mesh cut cannot settle is decided by the exact compiler |
 | [0099](./0099-mesh-volume-over-oriented-edge-cycles.md) | Mesh volume over oriented edge cycles |
 | [0100](./0100-exact-arrangements-are-snap-rounded-to-the-binary64-grid.md) | Exact arrangements are snap-rounded to the binary64 grid |
+| [0101](./0101-a-curve-relations-parameter.md) | A curve relation's parameter |
