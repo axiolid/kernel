@@ -3,6 +3,7 @@ set -euo pipefail
 
 python3 -m py_compile scripts/package-native.py scripts/verify-native-package.py scripts/test-native-cmake.py scripts/test-native-fetch.py scripts/verify-native-release-set.py
 python3 -m unittest tests/native/test_native_packaging.py
+python3 -m unittest tests/native/test_package_budget.py
 if grep -R -E 'target-cpu=native|CMAKE_(C|CXX)_FLAGS' native; then
   printf '%s\n' 'native integration must not set host-specific codegen or consumer-global flags' >&2
   exit 1

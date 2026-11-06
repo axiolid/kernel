@@ -155,6 +155,16 @@ All notable changes to Axiolid are documented in this file.
 
 ### Fixed
 
+- The Native integration job no longer fails on the debug static library
+  (#431). Its `libaxiolid_capi.a` had grown to 138.7 MB, over the 134 MB
+  per-member verification budget, which stays unchanged. Debug native
+  packages now build each crate as one non-incremental codegen unit, which
+  stops repeating the debug records in 256 units: 119.6 MB with the same
+  `line-tables-only` info. `addr2line -f -i` still resolves an exported
+  function and its inlined callees to Axiolid source lines in a linked C
+  consumer. `line-directives-only` (69.8 MB) was rejected: it resolves
+  nothing.
+
 - `axiolid-predicates`: the `insphere` filter's error bound used the rounded
   3x3 minors instead of Shewchuk's permanent, and certified a non-zero sign
   for exactly cospherical points (#126). Found by the 3D Delaunay tests;

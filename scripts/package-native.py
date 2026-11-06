@@ -20,6 +20,10 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
 
+# Copies of the verifier's limits; tests/native/test_package_budget.py fails on drift.
+MAX_MEMBER_BYTES = 128 * 1024 * 1024
+MAX_ARCHIVE_BYTES = 256 * 1024 * 1024
+
 
 def workspace_version() -> str:
     """The native package ships with the crates, so it carries their version.
@@ -155,16 +159,30 @@ def build(target: str, profile: str, target_dir: Path) -> Path:
     else:
         # Full DWARF puts the debug static library over the verifier's
         # 128 MiB per-member budget: measured 171.7 MB, of which 141 MB is
-        # debug sections -- the code is only 30 MB. Line tables keep file and
-        # line numbers in backtraces, which is what a debug package is for,
-        # and bring it to 74.7 MB.
+        # debug sections -- the code is only 30 MB. `line-tables-only` fixed
+        # that (74.7 MB) until the workspace grew; by #431 it measured
+        # 138.7 MB. The weight is the crates' own code: .debug_str 21 MB,
+        # .debug_info 12 MB and .debug_ranges 6 MB, subprogram and inlining
+        # records repeated in each of the dev profile's 256 codegen units.
+        # One non-incremental codegen unit per crate dedups them: 119.6 MB,
+        # with the same `line-tables-only` info.
+        #
+        # `line-directives-only` is smaller (69.8 MB) but was tried and
+        # rejected: addr2line and llvm-symbolizer give `??:0` for every
+        # address, because it drops the compile-unit records they index by.
+        # With the setting below, a C consumer linked against the packaged
+        # archive resolves, through `addr2line -f -i`:
+        #   axiolid_v0_4_version -> crates/facade/axiolid-capi/src/lib.rs:175
+        # with its inlined callees (lib.rs:176, std panicking, core ptr).
         #
         # Fixed here rather than by raising the budget: the verifier reads
         # each member fully into memory to hash it, so that limit is a
         # decompression-bomb guard on untrusted input, not a packaging
         # preference. Raising it to fit our own artifact would weaken a
-        # security control to avoid an unnecessary 141 MB of type descriptions.
+        # security control to avoid an unnecessary 70 MB of debug records.
         env["CARGO_PROFILE_DEV_DEBUG"] = "line-tables-only"
+        env["CARGO_PROFILE_DEV_CODEGEN_UNITS"] = "1"
+        env["CARGO_PROFILE_DEV_INCREMENTAL"] = "false"
     run(*command, env=env)
     return target_dir / target / ("release" if profile == "release" else "debug")
 
@@ -344,8 +362,8 @@ def assert_within_verification_budget(archive: Path) -> None:
     producer to the verifier's module layout, and a drift between the two is
     caught by `tests/native/test_package_budget.py`.
     """
-    max_member = 128 * 1024 * 1024
-    max_total = 256 * 1024 * 1024
+    max_member = MAX_MEMBER_BYTES
+    max_total = MAX_ARCHIVE_BYTES
 
     if archive.name.endswith(".zip"):
         with zipfile.ZipFile(archive) as bundle:
@@ -370,7 +388,7 @@ def assert_within_verification_budget(archive: Path) -> None:
                 f"{archive.name}: member {name} is "
                 f"{size / 1e6:.1f} MB, over the "
                 f"{max_member / 1e6:.0f} MB verification budget. "
-                "Debug builds use line-tables-only for this reason; "
+                "Debug builds use line-tables-only and one codegen unit for this reason; "
                 "check that the profile override still applies."
             )
     if total > max_total:
