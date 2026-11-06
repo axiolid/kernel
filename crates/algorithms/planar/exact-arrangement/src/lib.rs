@@ -20,6 +20,7 @@ mod arrangement;
 mod points;
 mod ratio;
 mod ring;
+mod snap;
 mod trace;
 
 pub use arrangement::{
@@ -29,4 +30,7 @@ pub use arrangement::{
 pub use points::{ExactPoints, Location, PointId, RingBox};
 pub use ratio::round_ratio;
 pub use ring::{canonical_rotation, canonical_start, point_order, sequence_order};
-pub use trace::{trace, HalfEdge, TracedRegion, TracedRing};
+pub use snap::{
+    snap_round, ClassBoundary, Snapped, FRAGMENT_SCRATCH_BYTES, HOT_POINT_SCRATCH_BYTES,
+};
+pub use trace::{check_winding, trace, HalfEdge, TracedRegion, TracedRing};

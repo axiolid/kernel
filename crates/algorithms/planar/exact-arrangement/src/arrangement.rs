@@ -487,7 +487,7 @@ fn shared_end(first: [PointId; 2], second: [PointId; 2]) -> Option<(PointId, Poi
 
 /// Refuse the next charge when the scratch declared per element and the
 /// crossings and splits charged so far no longer fit the memory budget.
-fn charge(
+pub(crate) fn charge(
     options: &ExecutionOptions,
     declared_bytes: usize,
     charged: &mut usize,

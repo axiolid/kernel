@@ -194,6 +194,11 @@ impl ExactPoints {
         }
     }
 
+    /// The frame sign the store was made with.
+    pub fn frame_sign(&self) -> Sign {
+        self.frame_sign
+    }
+
     /// The number of points.
     pub fn len(&self) -> usize {
         self.points.len()

@@ -326,6 +326,60 @@ pub fn trace(
     Ok((rings, regions))
 }
 
+/// Refuse a class that winds more than once at some point.
+///
+/// Every point has winding 0 or 1 for the class when each outer ring lies in
+/// as many outer rings as holes of the class, and each hole in one more
+/// outer ring than holes. Counts each ring's containment in every other ring
+/// whose box can hold it; each decided containment counts against `budget`.
+pub fn check_winding(
+    points: &ExactPoints,
+    arrangement: &Arrangement,
+    rings: &[TracedRing],
+    regions: &[TracedRegion],
+    budget: &mut PairBudget,
+    options: &ExecutionOptions,
+) -> GeomResult<()> {
+    if regions.iter().any(|region| {
+        rings[region.outer].hole || region.holes.iter().any(|&hole| !rings[hole].hole)
+    }) {
+        return Err(inconsistent());
+    }
+    let outlines: Vec<Vec<PointId>> = rings
+        .iter()
+        .map(|ring| {
+            ring.vertices
+                .iter()
+                .map(|vertex| arrangement.vertices[vertex.0].point)
+                .collect()
+        })
+        .collect();
+    let boxes: Vec<RingBox> = outlines.iter().map(|ring| points.ring_box(ring)).collect();
+    for (index, ring) in rings.iter().enumerate() {
+        let (mut outers, mut holes) = (0i64, 0i64);
+        for (other, container) in rings.iter().enumerate() {
+            if other == index || !boxes[index].possibly_within(&boxes[other]) {
+                continue;
+            }
+            options.check_cancelled()?;
+            budget.count()?;
+            if within(points, &outlines[index], &outlines[other])? {
+                if container.hole {
+                    holes += 1;
+                } else {
+                    outers += 1;
+                }
+            }
+        }
+        if outers - holes != i64::from(ring.hole) {
+            return Err(GeomError::Degenerate(
+                "a class winds twice after snap rounding".into(),
+            ));
+        }
+    }
+    Ok(())
+}
+
 /// The vertex the boundary leaves `edge.1` for, after it came along `edge`:
 /// the first half-edge met turning clockwise from the way it came.
 fn next_vertex(
