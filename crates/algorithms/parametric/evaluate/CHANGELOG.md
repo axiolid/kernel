@@ -9,6 +9,17 @@ caret rule for `0.x` versions.
 
 ## [Unreleased]
 
+### Added
+
+- `bound::chord_bound2` bounds `Curve2::QuadraticGraph` and
+  `Curve2::AngleGraph` pcurves (#414), which it left unbounded. The root
+  `w(t)` of `F(t, w) = 0` has `w'' = -(F_tt + 2 F_tw w' + F_ww w'^2) / F_w`;
+  interval enclosures of `F`'s partials (outward-rounded, from enclosed
+  trigonometric coefficients) over the span by a certified height range
+  bound it, on pieces of the span, and `None` is returned where the root
+  may be undefined on the span or `F_w` is not bounded away from zero (a
+  branch end nearby). Lifted pcurves stay unbounded.
+
 ## [0.3.20] - 2026-11-03
 
 ### Added

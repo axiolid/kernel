@@ -37,6 +37,10 @@
 //!   slope and bend through the implicit function theorem, with interval
 //!   bounds of the field's partials over the stretch's box; a bridge cell
 //!   by its cubic's control points (`implicit`, #249).
+//! - Quadratic and angle graphs (#414): a closed-form root `w(t)` of an
+//!   implicit `F(t, w) = 0`, `w''` through the implicit function theorem
+//!   with interval enclosures of `F`'s partials over the span by a
+//!   certified height range (`graph`).
 //! - Intrinsic curves (#317): at unit speed `|c''| = |k|`, so the
 //!   curvature law's closed-form supremum, times the start frame's
 //!   stretch, bounds the chords ([`intrinsic_chord_bound2`]); their
@@ -63,6 +67,7 @@ use axiolid_surface::{BSplineSurface, Surface};
 use crate::curve::span_in;
 use crate::nurbs::SplineAxis;
 
+mod graph;
 mod implicit;
 mod intrinsic;
 mod offset;
@@ -640,6 +645,14 @@ pub fn chord_bound2(curve: &Curve2, a: Scalar, b: Scalar) -> Option<Scalar> {
         Curve2::Implicit(c) => {
             let (lo, hi) = ordered(a, b);
             implicit::chord_bound(c, lo, hi).map(inflate)
+        }
+        Curve2::QuadraticGraph(g) => {
+            let (lo, hi) = ordered(a, b);
+            graph::quadratic_chord_bound(g, lo, hi).map(inflate)
+        }
+        Curve2::AngleGraph(g) => {
+            let (lo, hi) = ordered(a, b);
+            graph::angle_chord_bound(g, lo, hi).map(inflate)
         }
         _ => curve_derivative_bounds2(curve, a, b).map(|d| inflate(taylor(b - a, d.second))),
     }
