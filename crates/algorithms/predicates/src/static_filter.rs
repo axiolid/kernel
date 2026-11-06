@@ -7,10 +7,14 @@
 //! bound can be precomputed and the per-call work drops to one comparison.
 //!
 //! The trade is coverage, not correctness: a static bound is necessarily
-//! looser than a per-input one, so it defers more often. It never certifies a
-//! sign the dynamic filter would reject, because it is a strictly larger
-//! bound. A caller that exceeds the declared range gets `None` rather than a
-//! silently invalid answer.
+//! looser than a per-input one, so it defers more often. Its bound covers
+//! every rounding error of the f64 evaluation, so a sign it certifies is the
+//! exact sign. It does not defer wherever the dynamic filter does: the dynamic
+//! `orient2d` filter declines differences outside [1e-90, 1e90], which the
+//! static one may still settle. A caller that exceeds the declared range gets
+//! `None` rather than a silently invalid answer, and a declared range so small
+//! that a bound would sit below the normal range, where products lose their
+//! relative accuracy, is refused by [`StaticFilter::new`] (#429).
 
 use axiolid_core::{Point2, Point3};
 use axiolid_guarantees::Sign;
@@ -37,7 +41,10 @@ impl StaticFilter {
     /// Returns `None` for a non-finite or non-positive bound, and for a bound
     /// so large that the derived error bound is not finite: in both cases no
     /// sign could be certified, and returning a filter that always defers
-    /// would hide the configuration error.
+    /// would hide the configuration error. A bound so small that a derived
+    /// error bound falls below the normal range is refused as well: the
+    /// determinant's products then underflow, the bound no longer covers the
+    /// rounding error, and a bound of zero would certify every nonzero sign.
     #[must_use]
     pub fn new(bound: f64) -> Option<Self> {
         if !bound.is_finite() || bound <= 0.0 {
@@ -48,7 +55,8 @@ impl StaticFilter {
         let span = 2.0 * bound;
         let orient2d = (3.0 + 16.0 * EPSILON) * EPSILON * (2.0 * span * span);
         let orient3d = (7.0 + 56.0 * EPSILON) * EPSILON * (6.0 * span * span * span);
-        if !orient2d.is_finite() || !orient3d.is_finite() {
+        let usable = |bound: f64| bound.is_finite() && bound >= f64::MIN_POSITIVE;
+        if !usable(orient2d) || !usable(orient3d) {
             return None;
         }
         Some(Self {

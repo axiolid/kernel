@@ -11,6 +11,15 @@ caret rule for `0.x` versions.
 
 ### Fixed
 
+- `StaticFilter::orient3d` certified a wrong sign when the declared range was
+  below about 1e-103, in every published release: the precomputed error bound
+  underflowed to zero, so every nonzero rounded determinant was accepted
+  (#429; 540 wrong signs in 3.2M fuzzed cases). `StaticFilter::new` now returns
+  `None` when a derived bound is below the normal range or not finite, the
+  same refusal it already gave an overflowing bound. The module no longer
+  claims that the static filter never certifies a sign the dynamic one would
+  reject: it certifies only exact signs, and the dynamic `orient2d` filter
+  declines more (outside [1e-90, 1e90]) since #404.
 - `orient2d` returned a wrong sign, certified as exact, for four classes of
   input, in every published release; it now returns the exact sign for every
   finite input (#404):
