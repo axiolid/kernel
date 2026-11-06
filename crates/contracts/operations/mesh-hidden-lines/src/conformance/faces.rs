@@ -11,7 +11,7 @@
 use core::cmp::Ordering;
 use core::fmt;
 
-use axiolid_contracts::ExecutionOptions;
+use axiolid_contracts::{DisplacementBound, ExecutionOptions};
 use axiolid_core::{Point2, Tolerance};
 
 use crate::face_fixtures::{
@@ -474,7 +474,12 @@ fn check_expected_evidence(
     outcome: &VisibleFaceOutcome,
 ) {
     let evidence = &outcome.evidence;
-    let wrong = (expect.intersections && evidence.intersection_segments == 0)
+    // The exact cases have binary64 expectations: nothing is snapped.
+    let wrong = evidence.snap_displacement != DisplacementBound::ZERO
+        || evidence.rerouted_edges != 0
+        || evidence.collapsed_regions != 0
+        || evidence.collapsed_holes != 0
+        || (expect.intersections && evidence.intersection_segments == 0)
         || (expect.ties && evidence.tied_sides == 0)
         || expect
             .edge_on

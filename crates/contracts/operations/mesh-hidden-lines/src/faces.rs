@@ -20,13 +20,23 @@
 //! A region is a maximal edge-connected open set of one source, given by its
 //! closure. Its outer ring runs counter-clockwise and each hole clockwise;
 //! every ring starts at its lexicographically smallest point and does not
-//! repeat it at the end. A ring vertex is kept unless exactly two boundary
-//! pieces meet there in a straight line, so neighbouring regions share
-//! bit-identical vertices. Each vertex is an exact point rounded once to the
-//! nearest binary64, as for [`HiddenLineSegment`](crate::HiddenLineSegment)
-//! endpoints.
+//! repeat it at the end.
+//!
+//! The regions are the exact regions snap-rounded to the binary64 grid (ADR
+//! 0100). Where no exact edge passes through the rounding cell of another
+//! ring vertex, every vertex is the exact point rounded once to the nearest
+//! binary64, as for [`HiddenLineSegment`](crate::HiddenLineSegment)
+//! endpoints. Otherwise the edge is routed through that vertex, and a part
+//! of a region whose area vanishes under rounding is dropped and counted in
+//! the evidence, never refused. Rings are weakly simple: they may touch at a
+//! vertex, never cross and never run along each other, and no ring vertex
+//! lies inside the edge of any ring. A ring vertex is kept unless exactly two
+//! boundary pieces of the snapped boundary meet there in a straight line, so
+//! neighbouring regions share bit-identical vertices.
 
-use axiolid_contracts::{Backend, CancellationGranularity, ExecutionOptions, ScratchRequirement};
+use axiolid_contracts::{
+    Backend, CancellationGranularity, DisplacementBound, ExecutionOptions, ScratchRequirement,
+};
 use axiolid_core::{Aabb2, Point2};
 
 use crate::{HiddenLineError, HiddenLineMesh, HiddenLineSource, MeshId, OrthographicView};
@@ -171,8 +181,10 @@ pub struct VisibleRegion {
     pub outer: Vec<Point2>,
     /// Holes, sorted lexicographically by their points.
     pub holes: Vec<Vec<Point2>>,
-    /// Indices of the mesh's triangles that are frontmost somewhere in the
-    /// region, ascending. Empty for [`FaceSource::Cap`].
+    /// Indices of the mesh's triangles that are frontmost somewhere in an
+    /// exact region this region was snapped from, ascending. A region that
+    /// snapping split at a pinch lists the whole set in each part. Empty for
+    /// [`FaceSource::Cap`].
     pub triangles: Vec<u32>,
 }
 
@@ -234,6 +246,20 @@ pub struct VisibleFaceEvidence {
     pub regions: usize,
     /// Output regions whose source is [`FaceSource::Cap`].
     pub cap_regions: usize,
+    /// Bound, in the maximum norm of the image, on how far snap rounding
+    /// moved region boundaries (ADR 0100): an image point farther than this
+    /// from the exact boundary of a source lies in that source's regions
+    /// exactly when it lies in its exact regions. Zero when every ring
+    /// vertex is a binary64 point and no edge was rerouted.
+    pub snap_displacement: DisplacementBound,
+    /// Exact ring edges routed through the rounded point of another ring
+    /// vertex whose rounding cell they pass through.
+    pub rerouted_edges: usize,
+    /// Exact regions whose area collapsed under snap rounding; no region is
+    /// returned for them.
+    pub collapsed_regions: usize,
+    /// Holes of returned regions that collapsed under snap rounding.
+    pub collapsed_holes: usize,
 }
 
 impl VisibleFaceEvidence {
@@ -255,6 +281,10 @@ impl VisibleFaceEvidence {
             exact_escalations: 0,
             regions: 0,
             cap_regions: 0,
+            snap_displacement: DisplacementBound::ZERO,
+            rerouted_edges: 0,
+            collapsed_regions: 0,
+            collapsed_holes: 0,
         }
     }
 
@@ -304,7 +334,11 @@ impl VisibleFaceOutcome {
 ///   overlap only where they tie in depth;
 /// - flipping every triangle gives identical regions and identical evidence
 ///   except `exact_escalations`;
-/// - ring vertices are the exact points rounded once to nearest;
+/// - the regions are the exact regions snap-rounded to the binary64 grid (ADR
+///   0100), with the rings of [`VisibleRegion`] and the evidence of
+///   [`VisibleFaceEvidence`]; a region is never refused because rounding
+///   collapses it, and where no edge was rerouted the ring vertices are the
+///   exact points rounded once to nearest;
 /// - the tolerance of `options` applies to mesh audit and frame validation
 ///   only, never to a visibility decision;
 /// - the same input refusals as [`MeshHiddenLines`](crate::MeshHiddenLines),
@@ -397,7 +431,11 @@ mod tests {
             e.exact_escalations,
             e.regions,
             e.cap_regions,
+            e.rerouted_edges,
+            e.collapsed_regions,
+            e.collapsed_holes,
         ];
         assert!(counts.iter().all(|&c| c == 0));
+        assert_eq!(e.snap_displacement, DisplacementBound::ZERO);
     }
 }

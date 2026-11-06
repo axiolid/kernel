@@ -9,6 +9,23 @@ caret rule for `0.x` versions.
 
 ## [Unreleased]
 
+### Added
+
+- `VisibleFaceEvidence::snap_displacement`, `rerouted_edges`,
+  `collapsed_regions` and `collapsed_holes` (#410, ADR 0100): how far snap
+  rounding moved region boundaries, as a `DisplacementBound`, and how many
+  edges it rerouted and regions and holes it collapsed. `input_mesh` starts
+  them at zero. The conformance suite requires zero in every exact case.
+
+### Changed
+
+- `MeshVisibleFaces` regions are the exact regions snap-rounded to the
+  binary64 grid (ADR 0100): a region whose area collapses under rounding is
+  dropped and counted, never refused; rings are weakly simple; and
+  `VisibleRegion::triangles` lists the triangles frontmost somewhere in an
+  exact region it was snapped from. Where no edge is rerouted the vertices
+  are still the exact points rounded once.
+
 ## [0.1.3] - 2026-11-03
 
 ### Added
