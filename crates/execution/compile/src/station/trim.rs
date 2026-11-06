@@ -25,7 +25,9 @@ use axiolid_model::{
     CurveRelation, GeometryGraph, GeometryNode, NodeId, TrimSelector, TrimmingPreference,
 };
 use axiolid_reference::curve::{domain2, domain3};
-use axiolid_reference::station::StationCurve;
+use axiolid_reference::station::{
+    CompositeBasis, DistanceConvention, StationCurve, JOINT_TOLERANCE,
+};
 
 /// Most relations and placements a trim's carrier is read through.
 const MAX_DEPTH: usize = 256;
@@ -43,6 +45,14 @@ const TRIM_OUTSIDE: &str = "a trim's parameters lie outside the trimmed curve it
 /// TODO(#433): decide whether it crosses the closing joint.
 const TRIM_ACROSS_CLOSING_JOINT: &str = "a trim of a closed composite curve whose selectors run \
      against its sense: whether it crosses the closing joint is not read";
+
+/// Why a trim of a curve relation measured in plan distance is refused.
+const TRIM_OF_PLAN_MEASURED: &str = "a trim of a curve relation measured in plan distance \
+     (elevated or banked pieces): a composite's parameter is its 3D arc length";
+
+/// Why a trim of a composite no arc length is measured along is refused.
+const TRIM_OF_UNMEASURED: &str = "a trim of a composite holding an instanced curve, a parameter \
+     curve or a surface curve its p-curve governs: no arc length is measured along it";
 
 /// The curve a trim cuts, as far as its parameter goes.
 #[derive(Debug, Clone, Copy, PartialEq)]
@@ -165,14 +175,44 @@ pub(crate) fn carrier(
                 closed: false,
             })
         }
-        Some(GeometryNode::CurveRelation(CurveRelation::Composite { .. })) => Err(unsupported(
-            "a trim of a curve relation: a composite is not trimmed to a polyline yet",
-        )),
+        Some(GeometryNode::CurveRelation(CurveRelation::Composite { .. })) => {
+            let basis = composite_basis(graph, id)?;
+            let [first, last] = basis.end_points()?;
+            let tolerance = JOINT_TOLERANCE * first.abs().max_element().max(1.0);
+            Ok(Carrier::Interval {
+                lo: 0.0,
+                hi: basis.length(),
+                period: None,
+                closed: first.distance(last) <= tolerance,
+            })
+        }
         _ => Err(unsupported(
             "a trim of a node with no curve parameter to read it in: a collection, a surface \
              curve, an offset by stations or a node that is not a curve",
         )),
     }
+}
+
+/// The composite curve `id` measured as a station basis is: its parameter
+/// is its 3D arc length from its start (#424, ADR 0082).
+///
+/// # Errors
+///
+/// A composite holding a curve no arc length runs along (an instanced
+/// curve, a p-curve) and one measured in plan distance, by name; and as a
+/// station basis is built.
+pub(crate) fn composite_basis(graph: &GeometryGraph, id: NodeId) -> GeomResult<CompositeBasis<'_>> {
+    let pieces = super::relation_pieces(graph, id).map_err(|error| match error {
+        GeomError::UnsupportedInput { input, .. } if input == super::basis::UNSUPPORTED_BASIS => {
+            unsupported(TRIM_OF_UNMEASURED)
+        }
+        other => other,
+    })?;
+    let basis = CompositeBasis::new(pieces)?;
+    if basis.convention() != DistanceConvention::ArcLength3d {
+        return Err(unsupported(TRIM_OF_PLAN_MEASURED));
+    }
+    Ok(basis)
 }
 
 /// The span `[lo, hi]` of its basis's parameter a trim of `basis` keeps,

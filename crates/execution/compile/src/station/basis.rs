@@ -137,6 +137,19 @@ pub fn curve_path(graph: &GeometryGraph, id: NodeId) -> GeomResult<CurvePath> {
         .collect())
 }
 
+/// The curve relation `id` flattened into the pieces a station on it is
+/// measured along (#424): the pieces a trim of a composite is cut from.
+///
+/// # Errors
+///
+/// As [`curve_path`].
+pub(crate) fn relation_pieces(
+    graph: &GeometryGraph,
+    id: NodeId,
+) -> GeomResult<Vec<StationPiece<'_>>> {
+    flatten(graph, id, 0)?.into_pieces()
+}
+
 /// Pieces traversed the other way: in reverse order, each reversed.
 fn reversed(pieces: Vec<StationPiece<'_>>) -> Vec<StationPiece<'_>> {
     pieces

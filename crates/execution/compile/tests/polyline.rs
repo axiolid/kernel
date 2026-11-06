@@ -18,9 +18,8 @@ use axiolid_mesh_boolean_boolmesh::BoolmeshBoolean;
 use axiolid_mesh_compile::ReferenceMeshCompiler;
 use axiolid_mesh_compile_contract::{MeshCompiler, PolylineCompiler, PolylineOutcome};
 use axiolid_model::{
-    CurveRelation, CurveSegment, CurveStation, GeometryGraph, GeometryGraphBuilder, GeometryNode,
-    Instance, InstanceAtStation, NodeId, OpenProfile, Station, StationFrame, Transition,
-    TrimSelector, TrimmingPreference,
+    CurveStation, GeometryGraph, GeometryGraphBuilder, GeometryNode, Instance, InstanceAtStation,
+    NodeId, OpenProfile, Station, StationFrame,
 };
 
 const CHORD: Scalar = 1e-3;
@@ -394,7 +393,7 @@ fn a_curve_with_no_certified_chord_bound_is_refused_by_name() {
 }
 
 #[test]
-fn unbounded_relations_collections_and_solids_are_refused() {
+fn unbounded_curves_collections_and_solids_are_refused() {
     let (graph, root) = graph_of(|b| {
         b.push_value(Curve3::Line(Line3 {
             origin: Point3::ZERO,
@@ -403,33 +402,6 @@ fn unbounded_relations_collections_and_solids_are_refused() {
         .unwrap()
     });
     refused(polyline(&graph, root), "unbounded 3D line");
-
-    let (graph, root) = graph_of(|b| {
-        let basis = b
-            .push_value(Curve3::Circle(Circle3 {
-                frame: tilted_frame(),
-                radius: 1.0,
-            }))
-            .unwrap();
-        let chain = b
-            .push(GeometryNode::CurveRelation(CurveRelation::Composite {
-                segments: vec![CurveSegment {
-                    curve: basis,
-                    same_sense: true,
-                    transition: Transition::Continuous,
-                }],
-            }))
-            .unwrap();
-        b.push(GeometryNode::CurveRelation(CurveRelation::Trimmed {
-            basis: chain,
-            start: vec![TrimSelector::Parameter(0.0)],
-            end: vec![TrimSelector::Parameter(1.0)],
-            sense_agreement: true,
-            preference: TrimmingPreference::Parameter,
-        }))
-        .unwrap()
-    });
-    refused(polyline(&graph, root), "a trim of a curve relation");
 
     let (graph, root) = graph_of(|b| {
         let a = b

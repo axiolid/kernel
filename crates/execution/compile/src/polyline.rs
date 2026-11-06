@@ -97,7 +97,7 @@
 
 use axiolid_contracts::{ExecutionOptions, GeomError, GeomResult, Operation};
 use axiolid_core::{Interval, Point2, Point3, Scalar, Transform3, Vec3};
-use axiolid_curve::{Curve2, Curve3};
+use axiolid_curve::{Curve2, Curve3, OffsetLaw};
 use axiolid_mesh_compile_contract::{ChordDeviation, PolylineOutcome};
 use axiolid_model::{
     CurveRelation, CurveSegment, GeometryGraph, GeometryNode, NodeId, TrimSelector,
@@ -105,6 +105,7 @@ use axiolid_model::{
 };
 use axiolid_reference::bound;
 use axiolid_reference::curve::{domain2, domain3, evaluate2, evaluate3};
+use axiolid_reference::station::{StationCurve, StationPiece};
 
 /// Nesting of placements, relations and open profiles a root may hold.
 const MAX_DEPTH: usize = 256;
@@ -122,6 +123,16 @@ const DOMAIN_SLACK: Scalar = 1e-9;
 /// Why a composite whose segments do not meet is refused.
 const COMPOSITE_GAP: &str = "a composite curve whose consecutive segments do not meet within the \
                              tolerance: a polyline is one connected curve";
+
+/// Why a trim of a composite that ends inside an offset segment is refused.
+const TRIM_INSIDE_OFFSET_SEGMENT: &str = "a trim of a composite that ends inside an offset \
+     segment: an offset segment is measured by its own length, which is not read back to its \
+     basis's parameter";
+
+/// Why an offset of a trimmed composite whose cut is a quadrature is refused.
+const TRIM_CUT_UNDER_OFFSET: &str = "an offset of a trimmed composite cut inside a piece whose \
+     length is a quadrature (an ellipse, a B-spline): the cut's certified error is along the \
+     basis, not along the offset";
 
 /// Why an offset across a corner of its basis is refused.
 const OFFSET_ACROSS_CORNER: &str = "an offset curve across a vertex or corner of its basis: the \
@@ -190,7 +201,7 @@ fn node(
         Some(GeometryNode::Curve3(curve)) => atomic3(curve, window, chord, offset),
         Some(GeometryNode::Curve2(curve)) => atomic2(curve, window, chord, offset),
         Some(GeometryNode::CurveRelation(relation)) => {
-            curve_relation(graph, relation, window, chord, options, depth, offset)
+            curve_relation(graph, id, relation, window, chord, options, depth, offset)
         }
         Some(GeometryNode::Instance(_) | GeometryNode::InstanceAtStation(_))
             if offset.is_some() =>
@@ -239,8 +250,10 @@ fn node(
 
 /// A trim, a composite or an offset (#317), under `offset` when one of its
 /// ancestors is an offset.
+#[allow(clippy::too_many_arguments)]
 fn curve_relation(
     graph: &GeometryGraph,
+    id: NodeId,
     relation: &CurveRelation,
     window: Option<(Scalar, Scalar)>,
     chord: Scalar,
@@ -265,9 +278,10 @@ fn curve_relation(
             depth,
             offset,
         ),
-        CurveRelation::Composite { segments } => {
-            composite(graph, segments, chord, options, depth, offset)
-        }
+        CurveRelation::Composite { segments } => match window {
+            None => composite(graph, segments, chord, options, depth, offset),
+            Some(window) => composite_window(graph, id, window, chord, options, offset),
+        },
         CurveRelation::Offset {
             basis,
             distance,
@@ -363,18 +377,83 @@ fn composite(
             "a composite curve has no segments".into(),
         ));
     }
-    let tolerance = options.tolerance().linear();
-    let mut budget = chord;
-    loop {
-        let mut points: Vec<Point3> = Vec::new();
-        let (mut worst, mut gap): (Scalar, Scalar) = (0.0, 0.0);
-        for segment in segments {
+    joined(
+        chord,
+        options.tolerance().linear(),
+        0.0,
+        segments.len(),
+        |k, budget| {
+            let segment = &segments[k];
             let law = sensed(offset, segment.same_sense);
             let (mut child, bound) =
                 node(graph, segment.curve, None, budget, options, depth + 1, law)?;
             if !segment.same_sense {
                 child.reverse();
             }
+            Ok((child, bound))
+        },
+    )
+}
+
+/// A trim of a composite: the pieces between the two distances of its
+/// arc length (`window`), cut as a station basis cuts them, each flattened
+/// between the native parameters a station reads. The cut itself lies off
+/// the distance asked by at most the quadrature of a numerical length: the
+/// bound adds that certified error.
+fn composite_window(
+    graph: &GeometryGraph,
+    id: NodeId,
+    (lo, hi): (Scalar, Scalar),
+    chord: Scalar,
+    options: &ExecutionOptions,
+    offset: Option<Offset>,
+) -> GeomResult<(Vec<Point3>, Scalar)> {
+    let basis = crate::station::composite_basis(graph, id)?;
+    let pieces = basis.pieces_between(lo, hi)?;
+    let tolerance = 0.125 * chord;
+    let (start, end) = (
+        basis.distance_interval_at(lo, tolerance)?,
+        basis.distance_interval_at(hi, tolerance)?,
+    );
+    // The part of the trimmed curve the polyline does not reach, at each end.
+    let cut = (start.upper - lo).max(hi - end.lower).max(0.0);
+    if offset.is_some() && !(start.is_point() && end.is_point()) {
+        return Err(refused(TRIM_CUT_UNDER_OFFSET));
+    }
+    joined(
+        chord,
+        options.tolerance().linear(),
+        cut,
+        pieces.len(),
+        |k, budget| station_piece(&pieces[k], budget, options, offset),
+    )
+}
+
+/// `count` polylines from `compile` (each within the budget it is given),
+/// end to end, each joint one shared vertex, and so is the first vertex
+/// where the last one closes onto it. A joint whose ends differ by `g`, at
+/// most `tolerance`, moves that vertex by `g`, so the bound is the worst
+/// one's plus the largest such `g` plus `cut`, the part of the curve the
+/// polyline leaves out; when that misses `chord` they are compiled once
+/// more within the budget less `g` and `cut`. Ends further apart are refused.
+fn joined(
+    chord: Scalar,
+    tolerance: Scalar,
+    cut: Scalar,
+    count: usize,
+    mut compile: impl FnMut(usize, Scalar) -> GeomResult<(Vec<Point3>, Scalar)>,
+) -> GeomResult<(Vec<Point3>, Scalar)> {
+    if count == 0 {
+        return Err(GeomError::Degenerate(
+            "a trimmed composite curve keeps no piece".into(),
+        ));
+    }
+    let mut budget = chord;
+    loop {
+        let mut points: Vec<Point3> = Vec::new();
+        let (mut worst, mut gap): (Scalar, Scalar) = (0.0, 0.0);
+        for k in 0..count {
+            let (mut child, bound) = compile(k, budget)?;
             worst = worst.max(bound);
             if let (Some(&last), Some(&first)) = (points.last(), child.first()) {
                 let joint = last.distance(first);
@@ -391,7 +470,7 @@ fn composite(
                 });
             }
         }
-        if segments.len() > 1 && points.len() > 2 {
+        if count > 1 && points.len() > 2 {
             let (first, last) = (points[0], points[points.len() - 1]);
             let closing = first.distance(last);
             if closing > 0.0 && closing <= tolerance {
@@ -401,12 +480,90 @@ fn composite(
                 }
             }
         }
-        let bound = if gap > 0.0 { worst + gap } else { worst };
-        if bound <= chord || budget < chord || gap >= chord {
+        let bound = worst + gap + cut;
+        if bound <= chord || budget < chord || gap + cut >= chord {
             return Ok((points, bound));
         }
-        budget = chord - gap;
+        budget = chord - gap - cut;
     }
+}
+
+/// One piece of a trimmed composite: its curve between the native parameters
+/// its span is read at, in the piece's sense, placed by its placement, under
+/// `offset` when one of the composite's ancestors is an offset.
+fn station_piece(
+    piece: &StationPiece<'_>,
+    chord: Scalar,
+    options: &ExecutionOptions,
+    offset: Option<Offset>,
+) -> GeomResult<(Vec<Point3>, Scalar)> {
+    if !piece.placement_exact {
+        return Err(refused(
+            "a curve placed at a station whose frame is read at a numerically resolved \
+             distance: the placement has no certified bound",
+        ));
+    }
+    match piece.placement {
+        None => unplaced_piece(piece, chord, options, offset),
+        Some(_) if offset.is_some() => Err(refused(
+            "an offset of a placed curve: only atomic curves and their trims and composites \
+             are offset to a polyline",
+        )),
+        Some(rigid) => placed_with(rigid, chord, options, |local| {
+            unplaced_piece(piece, local, options, None)
+        }),
+    }
+}
+
+/// [`station_piece`] before its placement.
+fn unplaced_piece(
+    piece: &StationPiece<'_>,
+    chord: Scalar,
+    options: &ExecutionOptions,
+    offset: Option<Offset>,
+) -> GeomResult<(Vec<Point3>, Scalar)> {
+    let law = sensed(offset, !piece.reversed);
+    let (mut points, bound) = match piece.curve {
+        StationCurve::Two(curve) => atomic2(curve, Some(piece.native_span()?), chord, law)?,
+        StationCurve::Three(curve) => atomic3(curve, Some(piece.native_span()?), chord, law)?,
+        StationCurve::Offset(shifted) => {
+            if offset.is_some() {
+                return Err(refused(
+                    "an offset of an offset curve: only atomic curves and their trims and \
+                     composites are offset to a polyline",
+                ));
+            }
+            let slack = 1e-9 * shifted.length()?.max(1.0);
+            if piece.start.abs() > slack || (piece.end - shifted.length()?).abs() > slack {
+                return Err(refused(TRIM_INSIDE_OFFSET_SEGMENT));
+            }
+            let law = match shifted.law() {
+                OffsetLaw::Planar { distance } => Offset {
+                    distance,
+                    reference: None,
+                },
+                OffsetLaw::Directed {
+                    distance,
+                    reference_direction,
+                } => Offset {
+                    distance,
+                    reference: Some(reference_direction),
+                },
+                _ => {
+                    return Err(refused(
+                        "an offset by stations: its law is read along its basis's length, \
+                         which no chord bound here reaches",
+                    ))
+                }
+            };
+            station_piece(&shifted.base(), chord, options, Some(law))?
+        }
+        _ => return Err(refused("a station basis curve this compiler does not know")),
+    };
+    if piece.reversed {
+        points.reverse();
+    }
+    Ok((points, bound))
 }
 
 /// The source's polyline moved by `transform`, compiled to the budget

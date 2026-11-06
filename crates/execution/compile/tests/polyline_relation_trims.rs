@@ -9,15 +9,20 @@ use core::f64::consts::{FRAC_PI_2, FRAC_PI_4, PI};
 
 use axiolid_contracts::{ExecutionOptions, GeomError, GeomResult, Operation};
 use axiolid_core::{Frame2, Point2, Point3, Scalar, Tolerance, Transform3, Vec2, Vec3};
-use axiolid_curve::{BSplineCurve2, Circle2, Curve2, KnotSpec};
+use axiolid_curve::{
+    BSplineCurve2, Circle2, CurvatureLaw, Curve2, Curve3, Elevated3, ElevationLaw, Intrinsic2,
+    KnotSpec, Line2, Polyline2, Polyline3,
+};
 use axiolid_mesh_boolean_boolmesh::BoolmeshBoolean;
 use axiolid_mesh_compile::ReferenceMeshCompiler;
 use axiolid_mesh_compile_contract::{PolylineCompiler, PolylineOutcome};
 use axiolid_model::{
-    CurveRelation, GeometryGraph, GeometryGraphBuilder, GeometryNode, Instance, NodeId,
-    TrimSelector, TrimmingPreference,
+    CurveRelation, CurveSegment, CurveStation, GeometryGraph, GeometryGraphBuilder, GeometryNode,
+    Instance, InstanceAtStation, NodeId, Station, StationFrame, Transition, TrimSelector,
+    TrimmingPreference,
 };
 use axiolid_reference::curve::evaluate2;
+use axiolid_reference::station::CompositeBasis;
 
 const CHORD: Scalar = 1e-3;
 
@@ -171,6 +176,57 @@ fn spline2() -> Curve2 {
         self_intersect: None,
         knot_spec: KnotSpec::Unspecified,
     })
+}
+
+/// No vertex repeated by its successor: every joint is one vertex.
+fn no_repeated_vertex(points: &[Point3]) {
+    for (i, pair) in points.windows(2).enumerate() {
+        assert_ne!(pair[0], pair[1], "vertex {i} is repeated");
+    }
+}
+
+fn composite(b: &mut GeometryGraphBuilder, segments: &[(NodeId, bool)]) -> NodeId {
+    b.push(GeometryNode::CurveRelation(CurveRelation::Composite {
+        segments: segments
+            .iter()
+            .map(|&(curve, same_sense)| CurveSegment {
+                curve,
+                same_sense,
+                transition: Transition::Continuous,
+            })
+            .collect(),
+    }))
+    .unwrap()
+}
+
+fn segment2(b: &mut GeometryGraphBuilder, from: (Scalar, Scalar), to: (Scalar, Scalar)) -> NodeId {
+    b.push_value(Curve2::Polyline(Polyline2 {
+        points: vec![Point2::new(from.0, from.1), Point2::new(to.0, to.1)],
+        closed: false,
+    }))
+    .unwrap()
+}
+
+/// A segment `(0, 0) -> (3, 0)`, a quarter arc about `(3, 1)` to `(4, 1)`,
+/// and a segment `(4, 4) -> (4, 1)` run backwards: `3 + pi / 2 + 3` long.
+fn bent(b: &mut GeometryGraphBuilder) -> NodeId {
+    let first = segment2(b, (0.0, 0.0), (3.0, 0.0));
+    let basis = b.push_value(circle2(Point2::new(3.0, 1.0), 1.0)).unwrap();
+    let arc = trim(b, basis, p(-FRAC_PI_2), p(0.0), true);
+    let last = segment2(b, (4.0, 4.0), (4.0, 1.0));
+    composite(b, &[(first, true), (arc, true), (last, false)])
+}
+
+/// The point of [`bent`] at arc length `d`.
+fn bent_at(d: Scalar) -> Point3 {
+    if d <= 3.0 {
+        Point3::new(d, 0.0, 0.0)
+    } else if d <= 3.0 + FRAC_PI_2 {
+        let angle = -FRAC_PI_2 + (d - 3.0);
+        Point3::new(3.0 + angle.cos(), 1.0 + angle.sin(), 0.0)
+    } else {
+        Point3::new(4.0, 1.0 + (d - 3.0 - FRAC_PI_2), 0.0)
+    }
 }
 
 fn p(value: Scalar) -> TrimSelector {
@@ -354,4 +410,320 @@ fn a_selector_other_than_a_parameter_on_a_relation_is_refused() {
         polyline(&graph, root),
         "a point or arc-length trim selector",
     );
+}
+
+#[test]
+fn a_trim_of_a_composite_is_cut_in_its_arc_length() {
+    let (from, to) = (1.5, 3.0 + FRAC_PI_4);
+    let (graph, root) = graph_of(|b| {
+        let whole = bent(b);
+        trim(b, whole, p(from), p(to), true)
+    });
+    let outcome = polyline(&graph, root).unwrap();
+    close(outcome.points[0], Point3::new(1.5, 0.0, 0.0), "first");
+    close(
+        *outcome.points.last().unwrap(),
+        Point3::new(3.0 + (-FRAC_PI_4).cos(), 1.0 + (-FRAC_PI_4).sin(), 0.0),
+        "last",
+    );
+    within_bound(&outcome, |s| bent_at(from + (to - from) * s), SAMPLES);
+    no_repeated_vertex(&outcome.points);
+
+    // Against the sense, the same points the other way round.
+    let (graph, root) = graph_of(|b| {
+        let whole = bent(b);
+        trim(b, whole, p(from), p(to), false)
+    });
+    let against = polyline(&graph, root).unwrap();
+    let mut reversed = outcome.points.clone();
+    reversed.reverse();
+    assert_eq!(against.points, reversed);
+}
+
+#[test]
+fn a_cut_at_a_joint_leaves_no_repeated_vertex() {
+    let (graph, root) = graph_of(|b| {
+        let whole = bent(b);
+        trim(b, whole, p(3.0), p(4.0 + FRAC_PI_2), true)
+    });
+    let outcome = polyline(&graph, root).unwrap();
+    no_repeated_vertex(&outcome.points);
+    close(outcome.points[0], Point3::new(3.0, 0.0, 0.0), "first");
+    close(
+        *outcome.points.last().unwrap(),
+        Point3::new(4.0, 2.0, 0.0),
+        "last",
+    );
+    // Ending on the first joint.
+    let (graph, root) = graph_of(|b| {
+        let whole = bent(b);
+        trim(b, whole, p(1.0), p(3.0), true)
+    });
+    let outcome = polyline(&graph, root).unwrap();
+    no_repeated_vertex(&outcome.points);
+    close(
+        *outcome.points.last().unwrap(),
+        Point3::new(3.0, 0.0, 0.0),
+        "last",
+    );
+}
+
+/// A segment `(0, 0) -> (1, 0)` and a degree-one B-spline from `(1, 0)`
+/// along the x axis: its arc length is a quadrature.
+fn segment_then_spline(b: &mut GeometryGraphBuilder) -> NodeId {
+    let first = segment2(b, (0.0, 0.0), (1.0, 0.0));
+    let spline = b
+        .push_value(Curve2::BSpline(BSplineCurve2 {
+            degree: 1,
+            control_points: vec![
+                Point2::new(1.0, 0.0),
+                Point2::new(2.0, 0.0),
+                Point2::new(4.0, 0.0),
+            ],
+            knots: vec![0.0, 0.5, 1.0],
+            multiplicities: vec![2, 1, 2],
+            weights: None,
+            closed: false,
+            self_intersect: None,
+            knot_spec: KnotSpec::Unspecified,
+        }))
+        .unwrap();
+    composite(b, &[(first, true), (spline, true)])
+}
+
+#[test]
+fn a_cut_inside_a_quadrature_piece_adds_its_certified_error() {
+    let (from, to) = (0.5, 2.2);
+    let (graph, root) = graph_of(|b| {
+        let whole = segment_then_spline(b);
+        trim(b, whole, p(from), p(to), true)
+    });
+    let outcome = polyline(&graph, root).unwrap();
+    // The curve is the x axis, `d` from the origin.
+    within_bound(&outcome, |s| bent_at(from + (to - from) * s), SAMPLES);
+    // The error the cut certifies, read from the same basis.
+    let whole = match graph.get(root) {
+        Some(GeometryNode::CurveRelation(CurveRelation::Trimmed { basis, .. })) => *basis,
+        other => panic!("{other:?}"),
+    };
+    let path = axiolid_mesh_compile::station::curve_path(&graph, whole).unwrap();
+    let basis = CompositeBasis::from_path(&path).unwrap();
+    let tolerance = 0.125 * CHORD;
+    let start = basis.distance_interval_at(from, tolerance).unwrap();
+    let end = basis.distance_interval_at(to, tolerance).unwrap();
+    let expected = (start.upper - from).max(to - end.lower).max(0.0);
+    assert!(expected > 0.0, "the cut is exact: {start:?} {end:?}");
+    assert!(
+        outcome.deviation.bound >= expected,
+        "{} < {expected}",
+        outcome.deviation.bound
+    );
+}
+
+fn left_offset(b: &mut GeometryGraphBuilder, reversed_first: bool) -> NodeId {
+    let first = if reversed_first {
+        segment2(b, (3.0, 0.0), (0.0, 0.0))
+    } else {
+        segment2(b, (0.0, 0.0), (3.0, 0.0))
+    };
+    let basis = b.push_value(circle2(Point2::new(3.0, 1.0), 1.0)).unwrap();
+    let arc = trim(b, basis, p(-FRAC_PI_2), p(0.0), true);
+    let whole = composite(b, &[(first, !reversed_first), (arc, true)]);
+    offset(b, whole, 0.25, None)
+}
+
+#[test]
+fn a_trim_of_an_offset_composite_is_offset_on_the_side_it_is_traversed() {
+    for reversed in [false, true] {
+        let (graph, root) = graph_of(|b| {
+            let moved = left_offset(b, reversed);
+            trim(b, moved, p(1.0), p(2.0), true)
+        });
+        let outcome = polyline(&graph, root).unwrap();
+        close(outcome.points[0], Point3::new(1.0, 0.25, 0.0), "first");
+        close(
+            *outcome.points.last().unwrap(),
+            Point3::new(2.0, 0.25, 0.0),
+            "last",
+        );
+        assert_eq!(outcome.deviation.bound, 0.0, "reversed {reversed}");
+    }
+}
+
+#[test]
+fn a_trim_of_a_trimmed_composite_is_the_trim_of_the_composite() {
+    let (graph, root) = graph_of(|b| {
+        let whole = bent(b);
+        let inner = trim(b, whole, p(0.5), p(5.0), true);
+        trim(b, inner, p(1.0), p(2.0), true)
+    });
+    let nested = polyline(&graph, root).unwrap();
+    let (graph, root) = graph_of(|b| {
+        let whole = bent(b);
+        trim(b, whole, p(1.0), p(2.0), true)
+    });
+    let direct = polyline(&graph, root).unwrap();
+    assert_eq!(nested.points, direct.points);
+    assert_eq!(nested.deviation.bound, direct.deviation.bound);
+}
+
+#[test]
+fn a_composite_holding_a_trim_of_a_trim_reads_the_basis_parameter() {
+    // The arc of the radius-2 circle at the angles [pi / 4, pi / 2], then a
+    // segment from where it ends.
+    let circle = circle2(Point2::ZERO, 2.0);
+    let (graph, root) = graph_of(|b| {
+        let basis = b.push_value(circle.clone()).unwrap();
+        let inner = trim(b, basis, p(0.0), p(PI), true);
+        let arc = trim(b, inner, p(FRAC_PI_4), p(FRAC_PI_2), true);
+        let tail = segment2(b, (0.0, 2.0), (-3.0, 2.0));
+        let whole = composite(b, &[(arc, true), (tail, true)]);
+        trim(b, whole, p(0.0), p(1.0 + FRAC_PI_2), true)
+    });
+    let outcome = polyline(&graph, root).unwrap();
+    let on = |t: Scalar| lift(evaluate2(&circle, t).unwrap());
+    close(outcome.points[0], on(FRAC_PI_4), "first");
+    close(
+        *outcome.points.last().unwrap(),
+        Point3::new(-1.0, 2.0, 0.0),
+        "last",
+    );
+}
+
+#[test]
+fn a_trimmed_curve_placed_at_a_station_in_a_composite_comes_out_placed() {
+    let mut b = GeometryGraphBuilder::new();
+    let line = b
+        .push_value(Curve2::Line(Line2 {
+            origin: Point2::ZERO,
+            direction: Vec2::X,
+        }))
+        .unwrap();
+    // A curve placed at a station is 3D, and so is the segment before it.
+    let first = b
+        .push_value(Curve3::Polyline(Polyline3 {
+            points: vec![Point3::ZERO, Point3::new(3.0, 0.0, 0.0)],
+            closed: false,
+        }))
+        .unwrap();
+    let source = segment2(&mut b, (0.0, 0.0), (0.0, 2.0));
+    let station = CurveStation {
+        basis: line,
+        station: Station::at(3.0),
+        frame: StationFrame::Section,
+    };
+    let placed = b
+        .push_value(InstanceAtStation::new(source, station.into()))
+        .unwrap();
+    let whole = composite(&mut b, &[(first, true), (placed, true)]);
+    let cut = trim(&mut b, whole, p(1.0), p(4.0), true);
+    let graph = b.finish(vec![cut]).unwrap();
+    let placement = axiolid_mesh_compile::station::placement(&graph, placed).unwrap();
+    assert!(placement.exact);
+    let outcome = polyline(&graph, cut).unwrap();
+    // One metre into the placed segment, local `(0, 1)`.
+    close(
+        *outcome.points.last().unwrap(),
+        placement
+            .transform
+            .transform_point3(Point3::new(0.0, 1.0, 0.0)),
+        "placed last",
+    );
+    close(outcome.points[0], Point3::new(1.0, 0.0, 0.0), "first");
+}
+
+#[test]
+fn a_composite_whose_joint_leaves_a_gap_is_refused_trimmed() {
+    let hair = 2e-7;
+    let (graph, root) = graph_of(|b| {
+        let first = segment2(b, (0.0, 0.0), (3.0, 0.0));
+        let second = segment2(b, (3.0 + hair, 0.0), (6.0, 0.0));
+        let whole = composite(b, &[(first, true), (second, true)]);
+        trim(b, whole, p(1.0), p(5.0), true)
+    });
+    let result = polyline(&graph, root);
+    assert!(
+        matches!(&result, Err(GeomError::InvalidInput(detail)) if detail.contains("gap")),
+        "{result:?}"
+    );
+}
+
+#[test]
+fn the_remaining_trims_of_composites_are_refused_by_name() {
+    // A composite measured in plan distance.
+    let (graph, root) = graph_of(|b| {
+        let plan = Intrinsic2::new(
+            Frame2 {
+                origin: Point2::ZERO,
+                x: Vec2::X,
+                y: Vec2::Y,
+            },
+            CurvatureLaw::clothoid(0.0, 1.0 / 30.0, 60.0),
+            60.0,
+        );
+        let lifted = b
+            .push_value(Curve3::Elevated(Elevated3::new(
+                Curve2::Intrinsic(plan),
+                ElevationLaw::constant_grade(60.0, 0.02),
+            )))
+            .unwrap();
+        let whole = composite(b, &[(lifted, true)]);
+        trim(b, whole, p(0.0), p(10.0), true)
+    });
+    refused(polyline(&graph, root), "measured in plan distance");
+
+    // A closed composite trimmed against its sense.
+    let closed = |start: Scalar, end: Scalar| {
+        graph_of(|b| {
+            let basis = b.push_value(circle2(Point2::ZERO, 1.0)).unwrap();
+            let upper = trim(b, basis, p(0.0), p(PI), true);
+            let lower = trim(b, basis, p(PI), p(2.0 * PI), true);
+            let whole = composite(b, &[(upper, true), (lower, true)]);
+            trim(b, whole, p(start), p(end), true)
+        })
+    };
+    let (graph, root) = closed(3.0, 1.0);
+    refused(polyline(&graph, root), "closing joint");
+    let (graph, root) = closed(1.0, 3.0);
+    polyline(&graph, root).unwrap();
+
+    // An offset segment ends inside.
+    let offset_segment = |start: Scalar, end: Scalar| {
+        graph_of(|b| {
+            let basis = segment2(b, (0.0, 0.0), (3.0, 0.0));
+            let moved = offset(b, basis, 0.25, None);
+            let whole = composite(b, &[(moved, true)]);
+            trim(b, whole, p(start), p(end), true)
+        })
+    };
+    let (graph, root) = offset_segment(1.0, 2.0);
+    refused(polyline(&graph, root), "inside an offset segment");
+    let (graph, root) = offset_segment(0.0, 3.0);
+    let whole = polyline(&graph, root).unwrap();
+    close(whole.points[0], Point3::new(0.0, 0.25, 0.0), "offset first");
+
+    // An offset of a trimmed composite cut inside a quadrature.
+    let (graph, root) = graph_of(|b| {
+        let whole = segment_then_spline(b);
+        let moved = offset(b, whole, 0.1, None);
+        trim(b, moved, p(0.5), p(2.2), true)
+    });
+    refused(
+        polyline(&graph, root),
+        "cut inside a piece whose length is a quadrature",
+    );
+
+    // A composite no arc length runs along.
+    let (graph, root) = graph_of(|b| {
+        let source = b.push_value(circle2(Point2::ZERO, 1.0)).unwrap();
+        let placed = b
+            .push(GeometryNode::Instance(Instance {
+                source,
+                transform: Transform3::from_translation(Vec3::X),
+            }))
+            .unwrap();
+        let whole = composite(b, &[(placed, true)]);
+        trim(b, whole, p(0.0), p(1.0), true)
+    });
+    refused(polyline(&graph, root), "no arc length is measured along it");
 }
