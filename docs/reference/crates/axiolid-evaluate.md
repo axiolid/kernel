@@ -69,4 +69,17 @@ Latest release, 0.3.20 (2026-11-03):
   a seam it is not on, and every family `FrameLaw::bounds` leaves
   unbounded.
 
+- `FrameLaw::atomic_placed` (#408): `FrameLaw::atomic` for a curve whose
+  placement may be inexact.
+- `FrameLaw::with_placements_read_as_exact` (#408): bounds the frames of a
+  piece placed inexactly as read, to decide what depends on them alone (a
+  fold of the section planes); `error_at` stays `None` for such a piece.
+
+### Fixed
+
+- `FrameLaw::bounds`, `bend`, `has_bend` and `error_at` read the placement's
+  exactness (#408): a piece placed in a frame that is not exact (a curve
+  placed at a station on an arc) has no bounds, where its frames were
+  certified against the read placement rather than the exact one.
+
 Full history: [`crates/algorithms/parametric/evaluate/CHANGELOG.md`](https://github.com/axiolid/kernel/blob/main/crates/algorithms/parametric/evaluate/CHANGELOG.md)
