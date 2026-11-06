@@ -8,6 +8,7 @@ pub mod backend;
 pub mod cancel;
 pub mod capability;
 pub mod capability_id;
+pub mod displacement;
 pub mod error;
 pub mod execution;
 pub mod integration;
@@ -19,6 +20,7 @@ pub use backend::Backend;
 pub use cancel::{CancellationGranularity, CancellationToken};
 pub use capability::{BackendDescriptor, BackendId, ExecutionTarget, Operation};
 pub use capability_id::{capability_ids, CapabilityId};
+pub use displacement::DisplacementBound;
 pub use error::{GeomError, GeomResult};
 pub use execution::{
     DataResidency, Determinism, DevicePreference, ExecutionOptions, OutputBound, Parallelism,

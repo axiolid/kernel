@@ -9,6 +9,11 @@ caret rule for `0.x` versions.
 
 ## [Unreleased]
 
+### Added
+
+- `DisplacementBound`, a finite non-negative distance bound that is `Eq`, for
+  the snap-rounding evidence of visible face regions (#410).
+
 ## [0.3.6] - 2026-11-03
 
 ### Added
