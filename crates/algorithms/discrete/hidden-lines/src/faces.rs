@@ -25,12 +25,19 @@
 //!    depth keeps every tied source; a triangle seen edge-on covers nothing;
 //!    the cap of a cut solid is a surface at depth `near` found by ray
 //!    parity.
-//! 5. `regions` closes the boundary pieces of each source into rings, nests
-//!    holes, attributes the frontmost triangles, and rounds each vertex once.
+//! 5. `regions` closes the boundary pieces of each source into exact rings,
+//!    nests holes and attributes the frontmost triangles; then snap-rounds
+//!    the edges of all rings together (`axiolid_exact_arrangement::snap_round`,
+//!    ADR 0100), nets each source's boundary on the snapped fragments and
+//!    traces it again into rings, which are certified.
 //!
-//! No tolerance enters any decision. Every vertex is an exact point rounded
+//! No tolerance enters any decision. Where no edge passes through the
+//! rounding cell of another vertex, every vertex is an exact point rounded
 //! once to nearest, so a vertex shared by two regions is bit-identical in
-//! both and equals the hidden-line endpoint of the same point.
+//! both and equals the hidden-line endpoint of the same point. Otherwise the
+//! edge is routed through that cell's centre, a region that collapses is
+//! dropped, and the evidence reports how far anything moved and how much
+//! collapsed.
 
 mod intersect;
 mod label;

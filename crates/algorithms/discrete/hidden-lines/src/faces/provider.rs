@@ -31,16 +31,19 @@ const SCRATCH_PER_ELEMENT: usize = 3072;
 /// the cross-sections of interpenetrating triangles and the crop box; each
 /// side of each piece is labelled with the sources frontmost just beside it;
 /// and the pieces between different labels bound the regions. Nothing is
-/// rounded before a decision; each region vertex is the exact point rounded
-/// once, so it equals the hidden-line endpoint of the same point.
+/// rounded before a decision. The regions are then snap-rounded to the
+/// binary64 grid (ADR 0100): each vertex is the exact point rounded once, so
+/// it equals the hidden-line endpoint of the same point, unless an edge
+/// passes through the rounding cell of another vertex, in which case the
+/// edge is routed through it.
 ///
 /// Where several sources are at equal depth over an area they all get it
 /// and the evidence counts the tied sides. A triangle seen edge-on covers no
 /// area and makes no region. A near plane that cuts a
 /// [`MeshRole::Solid`](axiolid_mesh_hidden_lines_contract::MeshRole::Solid)
 /// leaves a [`FaceSource::Cap`](axiolid_mesh_hidden_lines_contract::FaceSource::Cap)
-/// region. A ring that collapses under rounding is `Degenerate` and names its
-/// mesh.
+/// region. A region that collapses under rounding is dropped and counted in
+/// the evidence, never refused.
 #[derive(Debug, Default, Clone, Copy)]
 pub struct ScalarVisibleFaces;
 
@@ -249,7 +252,7 @@ fn run(
         labels.push(label);
     }
 
-    let regions = build(
+    let built = build(
         &faces,
         &points.store,
         &arrangement,
@@ -258,9 +261,11 @@ fn run(
             max_regions: limits.max_regions,
             max_region_vertices: limits.max_region_vertices,
         },
+        per_element,
         &mut work,
         options,
     )?;
+    let regions = built.regions;
 
     evidence.edge_on_triangles = tris.iter().filter(|t| t.sigma == Ordering::Equal).count();
     evidence.removed_triangles = faces.removed.iter().filter(|&&r| r).count();
@@ -274,5 +279,9 @@ fn run(
         .iter()
         .filter(|r| r.source == axiolid_mesh_hidden_lines_contract::FaceSource::Cap)
         .count();
+    evidence.snap_displacement = built.snap_displacement;
+    evidence.rerouted_edges = built.rerouted_edges;
+    evidence.collapsed_regions = built.collapsed_regions;
+    evidence.collapsed_holes = built.collapsed_holes;
     Ok(VisibleFaceOutcome::new(request.view, regions, evidence))
 }

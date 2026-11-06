@@ -2,6 +2,8 @@
 //! different subset, hence the `dead_code` allowance on the module.
 #![allow(dead_code)]
 
+pub mod topology;
+
 use axiolid_core::{Frame3, Point3, Vec3};
 use axiolid_hidden_lines::ScalarHiddenLines;
 use axiolid_mesh::TriMesh;

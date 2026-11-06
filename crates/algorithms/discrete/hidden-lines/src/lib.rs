@@ -18,8 +18,10 @@
 //! image with an exact arrangement (`axiolid-exact-arrangement`) of the
 //! visible edge pieces, clip segments, cross-sections of interpenetrating
 //! triangles and the crop box, labels each side of each piece exactly, and
-//! rounds each region vertex once, so it equals the hidden-line endpoint of
-//! the same point.
+//! snap-rounds the regions to the binary64 grid (ADR 0100): where no edge
+//! passes through the rounding cell of another vertex, each region vertex is
+//! the exact point rounded once and equals the hidden-line endpoint of the
+//! same point.
 //!
 //! Module map: `view` (the affine map), `recipe` (the sign questions),
 //! `param` (parameters along an edge and their interval algebra), `edges`

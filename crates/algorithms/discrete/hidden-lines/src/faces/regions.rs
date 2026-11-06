@@ -7,7 +7,17 @@
 //! any source, meet there in a straight line, so neighbouring regions share
 //! bit-identical vertices.
 //!
-//! The triangles of a region are those frontmost on its sides. The sides of
+//! Those exact rings are then snap-rounded (ADR 0100). Every ring edge, the
+//! straight run between two kept vertices, goes once into
+//! `axiolid_exact_arrangement::snap_round`, which routes it through the
+//! rounded position of every vertex whose rounding cell it passes through. A
+//! source's boundary is netted on the snapped fragments (opposite traversals
+//! cancel, so a part of zero width vanishes), traced again into rings by the
+//! same rule and certified. A snapped region lists the triangles of every
+//! exact region one of its pieces was cut from. Exact rings and regions with
+//! no surviving boundary are counted as collapsed.
+//!
+//! The triangles of an exact region are those frontmost on its sides. The sides of
 //! `K` are joined into components: the two sides of a wedge at a vertex (one
 //! face of the arrangement) and the two sides of a piece that carries `K` on
 //! both. A component without a boundary half-edge is a cluster that
@@ -15,11 +25,11 @@
 
 use std::collections::BTreeMap;
 
-use axiolid_contracts::{ExecutionOptions, GeomError, GeomResult, Sign};
+use axiolid_contracts::{DisplacementBound, ExecutionOptions, GeomError, GeomResult, Sign};
 use axiolid_core::Point2;
 use axiolid_exact_arrangement::{
-    canonical_rotation, sequence_order, trace, Arrangement, ExactPoints, HalfEdge, Location,
-    PieceId, PointId, TracedRing, VertexId,
+    canonical_rotation, check_winding, sequence_order, snap_round, trace, Arrangement, ExactPoints,
+    HalfEdge, Location, PieceId, PointId, Segment, TracedRegion, TracedRing, VertexId,
 };
 use axiolid_mesh_hidden_lines_contract::{FaceSource, VisibleRegion};
 
@@ -132,19 +142,238 @@ fn disagreement(faces: &Faces<'_>, a: &Label, b: &Label) -> Error {
     }
 }
 
-/// The regions of every source.
+/// The regions and what snap rounding did to them.
+pub(crate) struct Built {
+    pub regions: Vec<VisibleRegion>,
+    pub snap_displacement: DisplacementBound,
+    pub rerouted_edges: usize,
+    pub collapsed_regions: usize,
+    pub collapsed_holes: usize,
+}
+
+/// The regions of every source: the exact regions, snap-rounded to the
+/// binary64 grid (ADR 0100).
+///
+/// Every edge of an exact ring (the straight run between two kept vertices)
+/// goes into one snap rounding. Each source's chain of edges is netted on the
+/// snapped fragments, so a part that became zero-width cancels, and its
+/// boundary is traced again into rings and certified.
+#[allow(clippy::too_many_arguments)]
 pub(crate) fn build(
     faces: &Faces<'_>,
     points: &ExactPoints,
     arrangement: &Arrangement,
     labels: &[[Label; 2]],
     limits: OutputLimits,
+    declared_bytes: usize,
     work: &mut Work,
     options: &ExecutionOptions,
-) -> Result<Vec<VisibleRegion>, Error> {
+) -> Result<Built, Error> {
     let boundary: Vec<bool> = labels.iter().map(|[l, r]| l.keys != r.keys).collect();
     let keep = kept_vertices(points, arrangement, &boundary)?;
+    let sources = exact_sources(
+        faces,
+        points,
+        arrangement,
+        labels,
+        &boundary,
+        &keep,
+        work,
+        options,
+    )?;
 
+    // The edges of all exact rings, once each, and each source's chain over
+    // them with the exact ring of every element.
+    let vertex_point = |vertex: VertexId| arrangement.vertices[vertex.0].point;
+    let mut edge_of: BTreeMap<(VertexId, VertexId), usize> = BTreeMap::new();
+    let mut edges: Vec<Segment> = Vec::new();
+    let mut chains: Vec<Vec<(usize, bool)>> = Vec::with_capacity(sources.len());
+    let mut chain_rings: Vec<Vec<usize>> = Vec::with_capacity(sources.len());
+    for source in &sources {
+        let (mut chain, mut rings) = (Vec::new(), Vec::new());
+        for (index, ring) in source.rings.iter().enumerate() {
+            let count = ring.vertices.len();
+            for at in 0..count {
+                let (from, to) = (ring.vertices[at], ring.vertices[(at + 1) % count]);
+                let ends = (from.min(to), from.max(to));
+                let edge = *edge_of.entry(ends).or_insert_with(|| {
+                    edges.push(Segment {
+                        ends: [vertex_point(ends.0), vertex_point(ends.1)],
+                    });
+                    edges.len() - 1
+                });
+                chain.push((edge, from < to));
+                rings.push(index);
+            }
+        }
+        chains.push(chain);
+        chain_rings.push(rings);
+    }
+    let snapped = snap_round(points, &edges, &mut work.budget, declared_bytes, options)?;
+
+    // The net boundary of each source, and the vertices to keep.
+    let mut boundary_after = vec![false; snapped.arrangement.pieces.len()];
+    let mut nets = Vec::with_capacity(sources.len());
+    for (source, chain) in sources.iter().zip(&chains) {
+        let id = faces.ids[source.key.0];
+        let net = snapped
+            .class_boundary(chain)
+            .map_err(|error| Error::mesh(id, error))?;
+        for half_edge in &net.half_edges {
+            boundary_after[half_edge.piece.0] = true;
+        }
+        nets.push(net);
+    }
+    let keep_after = kept_vertices(&snapped.points, &snapped.arrangement, &boundary_after)?;
+
+    let mut built = Built {
+        regions: Vec::new(),
+        snap_displacement: snapped.displacement,
+        rerouted_edges: snapped.rerouted,
+        collapsed_regions: 0,
+        collapsed_holes: 0,
+    };
+    let mut vertex_total = 0usize;
+    for (((source, net), element_rings), chain) in
+        sources.iter().zip(&nets).zip(&chain_rings).zip(&chains)
+    {
+        options.check_cancelled()?;
+        let (mesh, kind) = source.key;
+        let id = faces.ids[mesh];
+        let blame = |error: GeomError| Error::mesh(id, error);
+
+        // Which exact rings and regions survive, and which exact regions
+        // each snapped piece was cut from.
+        let mut ring_survives = vec![false; source.rings.len()];
+        for (element, &ring) in element_rings.iter().enumerate() {
+            ring_survives[ring] |= net.survives[element];
+        }
+        let mut region_of_ring = vec![usize::MAX; source.rings.len()];
+        for (region, found) in source.traced.iter().enumerate() {
+            for ring in std::iter::once(&found.outer).chain(&found.holes) {
+                region_of_ring[*ring] = region;
+            }
+            if ring_survives[found.outer] {
+                built.collapsed_holes += found
+                    .holes
+                    .iter()
+                    .filter(|&&hole| !ring_survives[hole])
+                    .count();
+            } else {
+                built.collapsed_regions += 1;
+            }
+        }
+        let mut regions_of_piece: BTreeMap<PieceId, Vec<usize>> = BTreeMap::new();
+        for (&(edge, _), &ring) in chain.iter().zip(element_rings) {
+            for &(piece, _) in &snapped.routes[edge] {
+                regions_of_piece
+                    .entry(piece)
+                    .or_default()
+                    .push(region_of_ring[ring]);
+            }
+        }
+
+        let (rings, traced) = trace(
+            &snapped.points,
+            &snapped.arrangement,
+            &net.half_edges,
+            &|vertex| keep_after[vertex.0],
+            &mut work.budget,
+            options,
+        )
+        .map_err(blame)?;
+        check_winding(
+            &snapped.points,
+            &snapped.arrangement,
+            &rings,
+            &traced,
+            &mut work.budget,
+            options,
+        )
+        .map_err(blame)?;
+
+        for found in &traced {
+            if built.regions.len() >= limits.max_regions {
+                return Err(Error::from(GeomError::BudgetExceeded {
+                    resource: "visible-face regions",
+                }));
+            }
+            let positions = |ring: &TracedRing| -> Result<Vec<Point2>, Error> {
+                let at = ring
+                    .vertices
+                    .iter()
+                    .map(|&vertex| snapped.point(vertex))
+                    .collect::<GeomResult<Vec<_>>>()
+                    .map_err(blame)?;
+                Ok(canonical_rotation(at))
+            };
+            let outer = positions(&rings[found.outer])?;
+            let mut holes = found
+                .holes
+                .iter()
+                .map(|&hole| positions(&rings[hole]))
+                .collect::<Result<Vec<_>, _>>()?;
+            holes.sort_by(|a, b| sequence_order(a, b));
+            vertex_total += outer.len() + holes.iter().map(Vec::len).sum::<usize>();
+            if vertex_total > limits.max_region_vertices {
+                return Err(Error::from(GeomError::BudgetExceeded {
+                    resource: "visible-face region vertices",
+                }));
+            }
+            // The triangles of every exact region a piece of it was cut from.
+            let mut listed: Vec<u32> = Vec::new();
+            for &ring in std::iter::once(&found.outer).chain(&found.holes) {
+                for half_edge in &rings[ring].half_edges {
+                    for &region in regions_of_piece
+                        .get(&half_edge.piece)
+                        .map_or(&[][..], Vec::as_slice)
+                    {
+                        listed.extend(&source.triangles[region]);
+                    }
+                }
+            }
+            listed.sort_unstable();
+            listed.dedup();
+            if kind == FaceSource::Cap {
+                listed.clear();
+            }
+            built
+                .regions
+                .push(VisibleRegion::new(id, kind, outer, holes, listed));
+        }
+    }
+
+    let position = |id| faces.ids.iter().position(|&m| m == id);
+    built.regions.sort_by(|a, b| {
+        position(a.mesh)
+            .cmp(&position(b.mesh))
+            .then(a.source.cmp(&b.source))
+            .then_with(|| sequence_order(&a.outer, &b.outer))
+    });
+    Ok(built)
+}
+
+/// A source's exact regions: its rings, their nesting and, per region, the
+/// triangles frontmost on its sides.
+struct ExactSource {
+    key: Key,
+    rings: Vec<TracedRing>,
+    traced: Vec<TracedRegion>,
+    triangles: Vec<Vec<u32>>,
+}
+
+/// The exact regions of every source, with the vertices `keep` asks for.
+#[allow(clippy::too_many_arguments)]
+fn exact_sources(
+    faces: &Faces<'_>,
+    points: &ExactPoints,
+    arrangement: &Arrangement,
+    labels: &[[Label; 2]],
+    boundary: &[bool],
+    keep: &[bool],
+    work: &mut Work,
+    options: &ExecutionOptions,
+) -> Result<Vec<ExactSource>, Error> {
     // Half-edges per source, with the source on their left.
     let mut half_edges: BTreeMap<Key, Vec<HalfEdge>> = BTreeMap::new();
     for (index, [left, right]) in labels.iter().enumerate() {
@@ -201,13 +430,11 @@ pub(crate) fn build(
         }
     }
 
-    let mut regions: Vec<VisibleRegion> = Vec::new();
-    let mut vertex_total = 0usize;
+    let mut sources = Vec::with_capacity(half_edges.len());
     for (key, half_edges) in &half_edges {
         options.check_cancelled()?;
-        let (mesh, source) = *key;
-        let id = faces.ids[mesh];
-        let blame = |error: GeomError| Error::mesh(id, error);
+        let (mesh, _) = *key;
+        let blame = |error: GeomError| Error::mesh(faces.ids[mesh], error);
         let (rings, traced) = trace(
             points,
             arrangement,
@@ -289,44 +516,18 @@ pub(crate) fn build(
             }
         }
 
-        for (region, found) in traced.iter().enumerate() {
-            if regions.len() >= limits.max_regions {
-                return Err(Error::from(GeomError::BudgetExceeded {
-                    resource: "visible-face regions",
-                }));
-            }
-            let round = |ring: &TracedRing| round_ring(points, arrangement, ring).map_err(blame);
-            let outer = round(&rings[found.outer])?;
-            let mut holes = found
-                .holes
-                .iter()
-                .map(|&hole| round(&rings[hole]))
-                .collect::<Result<Vec<_>, _>>()?;
-            holes.sort_by(|a, b| sequence_order(a, b));
-            vertex_total += outer.len() + holes.iter().map(Vec::len).sum::<usize>();
-            if vertex_total > limits.max_region_vertices {
-                return Err(Error::from(GeomError::BudgetExceeded {
-                    resource: "visible-face region vertices",
-                }));
-            }
-            let mut listed = std::mem::take(&mut triangles[region]);
+        for listed in &mut triangles {
             listed.sort_unstable();
             listed.dedup();
-            if source == FaceSource::Cap {
-                listed.clear();
-            }
-            regions.push(VisibleRegion::new(id, source, outer, holes, listed));
         }
+        sources.push(ExactSource {
+            key: *key,
+            rings,
+            traced,
+            triangles,
+        });
     }
-
-    let position = |id| faces.ids.iter().position(|&m| m == id);
-    regions.sort_by(|a, b| {
-        position(a.mesh)
-            .cmp(&position(b.mesh))
-            .then(a.source.cmp(&b.source))
-            .then_with(|| sequence_order(&a.outer, &b.outer))
-    });
-    Ok(regions)
+    Ok(sources)
 }
 
 /// The region of `key` that holds a floating component: the one whose outer
@@ -357,59 +558,4 @@ fn place(
     Err(GeomError::Degenerate(
         "a visible region's cluster lies in no region".into(),
     ))
-}
-
-/// A ring rounded once per vertex, in canonical rotation. A ring that
-/// collapses under rounding is refused.
-fn round_ring(
-    points: &ExactPoints,
-    arrangement: &Arrangement,
-    ring: &TracedRing,
-) -> GeomResult<Vec<Point2>> {
-    let mut rounded = Vec::with_capacity(ring.vertices.len());
-    for vertex in &ring.vertices {
-        rounded.push(points.round(arrangement.vertices[vertex.0].point)?);
-    }
-    check_collapse(&rounded)?;
-    Ok(canonical_rotation(rounded))
-}
-
-/// Refuse a ring with fewer than three points or two equal consecutive ones.
-pub(crate) fn check_collapse(ring: &[Point2]) -> GeomResult<()> {
-    let repeats = ring
-        .iter()
-        .zip(ring.iter().cycle().skip(1))
-        .any(|(a, b)| a == b);
-    if ring.len() < 3 || repeats {
-        return Err(GeomError::Degenerate(
-            "visible region collapsed under rounding".into(),
-        ));
-    }
-    Ok(())
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn a_ring_that_collapses_under_rounding_is_refused() {
-        let at = |x: f64, y: f64| Point2::new(x, y);
-        let ok = [at(0.0, 0.0), at(1.0, 0.0), at(0.0, 1.0)];
-        assert!(check_collapse(&ok).is_ok());
-        // Two consecutive vertices one ulp apart round to the same point.
-        let next = f64::from_bits(1.0f64.to_bits() + 1);
-        let apart = [at(0.0, 0.0), at(1.0, 0.0), at(next, 0.0), at(0.0, 1.0)];
-        assert!(check_collapse(&apart).is_ok(), "distinct after rounding");
-        let rounded = [at(0.0, 0.0), at(1.0, 0.0), at(1.0, 0.0), at(0.0, 1.0)];
-        assert!(matches!(
-            check_collapse(&rounded),
-            Err(GeomError::Degenerate(_))
-        ));
-        // The wrap-around pair counts, and fewer than three points do not
-        // make a ring.
-        let wrapped = [at(0.0, 0.0), at(1.0, 0.0), at(0.0, 0.0)];
-        assert!(check_collapse(&wrapped).is_err());
-        assert!(check_collapse(&ok[..2]).is_err());
-    }
 }

@@ -12,6 +12,10 @@ use axiolid_contracts::GeomError;
 use axiolid_core::{Aabb2, Frame3, Point2, Point3, Vec3};
 use axiolid_mesh::TriMesh;
 
+mod snap;
+
+pub(crate) use snap::snap_cases;
+
 use crate::fixtures::{box_mesh, isometric_frame, plan_frame, refusals, sheet_quad};
 use crate::MeshRole::{Sheet, Solid};
 use crate::{

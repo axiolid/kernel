@@ -3,7 +3,9 @@
 //! Like the hidden-line suite, it calls the provider directly, so a provider
 //! must refuse bad input itself. Each exact case states the regions it must
 //! return, bit for bit; the area cases state the area per source where the
-//! coordinates are not binary64. Every outcome is also checked for shape
+//! coordinates are not binary64; the snap cases are scenes that binary64
+//! rounding used to refuse and that must now be answered, with the snapping
+//! in the evidence. Every outcome is also checked for shape
 //! (ring orientation and start, sort order, triangle lists, caps, evidence).
 //! The scenes and the arithmetic behind them are in the (private) fixtures,
 //! checked by their own unit tests.
@@ -15,7 +17,7 @@ use axiolid_contracts::{DisplacementBound, ExecutionOptions};
 use axiolid_core::{Point2, Tolerance};
 
 use crate::face_fixtures::{
-    area_cases, cases, face_refusals, EvidenceExpect, FaceFixture, AREA_TOLERANCE,
+    area_cases, cases, face_refusals, snap_cases, EvidenceExpect, FaceFixture, AREA_TOLERANCE,
 };
 use crate::fixtures::reversed;
 use crate::{
@@ -211,6 +213,68 @@ impl FaceConformanceSuite {
             }
         }
 
+        for case in snap_cases() {
+            let scene = Scene {
+                name: case.name,
+                meshes: &case.meshes,
+                view: case.view,
+            };
+            let first = answer(
+                provider,
+                &case.meshes,
+                case.view,
+                None,
+                case.limits,
+                &options,
+            );
+            let second = answer(
+                provider,
+                &case.meshes,
+                case.view,
+                None,
+                case.limits,
+                &options,
+            );
+            match (first, second) {
+                (Ok(a), Ok(b)) => {
+                    check_shape(&mut report, &scene, &a);
+                    // The scene is one binary64 rounding used to refuse: the
+                    // answer must say what the snapping did.
+                    let evidence = &a.evidence;
+                    if evidence.rerouted_edges
+                        + evidence.collapsed_regions
+                        + evidence.collapsed_holes
+                        == 0
+                        || evidence.snap_displacement == DisplacementBound::ZERO
+                    {
+                        report
+                            .failures
+                            .push(FaceConformanceFailure::IncorrectEvidence { case: case.name });
+                    }
+                    if a != b {
+                        report
+                            .failures
+                            .push(FaceConformanceFailure::NonDeterministic { case: case.name });
+                    }
+                    check_orientation(
+                        provider,
+                        &mut report,
+                        &scene,
+                        None,
+                        case.limits,
+                        &a,
+                        &options,
+                    );
+                }
+                (Err(error), _) | (_, Err(error)) => {
+                    report.failures.push(FaceConformanceFailure::ReturnedError {
+                        case: case.name,
+                        error,
+                    })
+                }
+            }
+        }
+
         for refusal in face_refusals() {
             match answer(
                 provider,
@@ -322,6 +386,38 @@ fn signed_area(ring: &[Point2]) -> f64 {
         / 2.0
 }
 
+/// Add `b` to the nonoverlapping expansion `expansion`, exactly (Shewchuk's
+/// grow-expansion over error-free two-sums).
+fn grow(expansion: &mut Vec<f64>, b: f64) {
+    let mut carry = b;
+    for component in expansion.iter_mut() {
+        let sum = carry + *component;
+        let virtual_b = sum - carry;
+        let virtual_a = sum - virtual_b;
+        *component = (carry - virtual_a) + (*component - virtual_b);
+        carry = sum;
+    }
+    expansion.push(carry);
+}
+
+/// The exact sign of the signed area of a ring. Snapped regions can be
+/// thinner than a rounding error of the shoelace sum, so the sum is exact.
+fn area_sign(ring: &[Point2]) -> Ordering {
+    let mut sum: Vec<f64> = Vec::new();
+    for (i, a) in ring.iter().enumerate() {
+        let b = ring[(i + 1) % ring.len()];
+        for (x, y, sign) in [(a.x, b.y, 1.0), (b.x, a.y, -1.0)] {
+            let product = x * y;
+            grow(&mut sum, sign * product);
+            grow(&mut sum, sign * x.mul_add(y, -product));
+        }
+    }
+    sum.iter()
+        .rev()
+        .find(|&&component| component != 0.0)
+        .map_or(Ordering::Equal, |component| component.total_cmp(&0.0))
+}
+
 fn point_order(a: &Point2, b: &Point2) -> Ordering {
     a.x.total_cmp(&b.x).then(a.y.total_cmp(&b.y))
 }
@@ -366,11 +462,11 @@ fn check_ring(detail: &mut Option<String>, what: &str, ring: &[Point2], outer: b
     if ring.first() == ring.last() {
         fail(format!("{what} repeats its first point"));
     }
-    let area = signed_area(ring);
-    if outer && area <= 0.0 {
+    let area = area_sign(ring);
+    if outer && area != Ordering::Greater {
         fail(format!("{what} is not counter-clockwise"));
     }
-    if !outer && area >= 0.0 {
+    if !outer && area != Ordering::Less {
         fail(format!("{what} is not clockwise"));
     }
 }
@@ -769,6 +865,19 @@ mod tests {
             check_shape(&mut report, &scene, &outcome);
             assert!(report.is_success(), "{}: {report}", case.name);
         }
+    }
+
+    #[test]
+    fn the_area_sign_is_exact_for_slivers() {
+        let at = |x: f64, y: f64| Point2::new(x, y);
+        // A one-ulp apex above, on and below the diagonal of a square.
+        let apex = |y: f64| [at(1.0, 1.0), at(2.0, 2.0), at(1.5, y)];
+        assert_eq!(area_sign(&apex(1.5f64.next_up())), Ordering::Greater);
+        assert_eq!(area_sign(&apex(1.5)), Ordering::Equal);
+        assert_eq!(area_sign(&apex(1.5f64.next_down())), Ordering::Less);
+        let mut reversed = apex(1.5f64.next_down());
+        reversed.reverse();
+        assert_eq!(area_sign(&reversed), Ordering::Greater);
     }
 
     #[test]

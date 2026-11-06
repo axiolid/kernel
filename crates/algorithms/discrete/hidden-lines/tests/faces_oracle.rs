@@ -16,18 +16,21 @@
 //!
 //! Scenes are the seeded boxes of `oracle.rs`, some rotated by generic angles,
 //! in the plan, an elevation, the isometric and the oblique views, with and
-//! without a near plane. A scene whose region collapses under rounding is
-//! refused by the provider, as the contract says, and is not compared.
+//! without a near plane. Every scene must be answered: a region that
+//! collapses under rounding is snapped (ADR 0100), never refused. The
+//! displacement the evidence reports must stay below a quarter of `1e-7`,
+//! so the ambiguity margin above covers it, and every outcome must pass the
+//! independent topology checker of `common::topology`.
 
 mod common;
 
-use axiolid_contracts::GeomError;
 use axiolid_core::{Frame3, Point2};
 use axiolid_hidden_lines::ScalarVisibleFaces;
 use axiolid_mesh::TriMesh;
 use axiolid_mesh_hidden_lines_contract::{
     FaceGroup, FaceSource, OrthographicView, VisibleFaceOutcome,
 };
+use common::topology::assert_valid_topology;
 use common::{scene, solids, try_faces, views};
 
 const GRID: usize = 64;
@@ -131,7 +134,7 @@ struct Tally {
     checked: usize,
     skipped: usize,
     occupied: usize,
-    refused: usize,
+    snapped: usize,
 }
 
 fn check(seed: u64, name: &str, frame: Frame3, with_near: bool, tally: &mut Tally) {
@@ -154,21 +157,18 @@ fn check(seed: u64, name: &str, frame: Frame3, with_near: bool, tally: &mut Tall
     if let Some(n) = near {
         view = view.with_near(n);
     }
-    let outcome = match try_faces(&ScalarVisibleFaces::new(), &meshes, view, None) {
-        Ok(outcome) => outcome,
-        Err(error) => {
-            // Only the rounding collapse is a known refusal (TODO(#410)); any
-            // other refusal of these valid scenes is a bug.
-            assert!(
-                matches!(&error.error, GeomError::Degenerate(m) if m.contains("collapsed under rounding"))
-                    && error.mesh.is_some(),
-                "seed {seed}, {name}: {error}"
-            );
-            eprintln!("refused: seed {seed}, {name}, near {with_near}: {error}");
-            tally.refused += 1;
-            return;
-        }
-    };
+    let outcome = try_faces(&ScalarVisibleFaces::new(), &meshes, view, None)
+        .unwrap_or_else(|error| panic!("seed {seed}, {name}, near {with_near}: {error}"));
+    assert!(
+        outcome.evidence.snap_displacement.get() * 4.0 < EPS,
+        "seed {seed}, {name}: displacement {}",
+        outcome.evidence.snap_displacement.get()
+    );
+    assert_valid_topology(&outcome);
+    let evidence = &outcome.evidence;
+    tally.snapped += usize::from(
+        evidence.rerouted_edges + evidence.collapsed_regions + evidence.collapsed_holes > 0,
+    );
 
     let (mut u_lo, mut u_hi, mut v_lo, mut v_hi) = (f64::MAX, f64::MIN, f64::MAX, f64::MIN);
     for p in projected.iter().flat_map(|(v, _)| v) {
@@ -227,12 +227,6 @@ fn regions_agree_with_binary64_ray_casting() {
             }
         }
     }
-    let scenes = 12 * views().len() * 2;
-    assert!(
-        tally.refused <= 4.max(scenes / 20),
-        "{} of {scenes} scenes refused",
-        tally.refused
-    );
     let total = tally.checked + tally.skipped;
     assert!(
         tally.checked * 10 >= total * 9,
@@ -245,21 +239,28 @@ fn regions_agree_with_binary64_ray_casting() {
         tally.occupied
     );
     eprintln!(
-        "faces oracle: {} checked ({} covered), {} skipped, {} scenes refused",
-        tally.checked, tally.occupied, tally.skipped, tally.refused
+        "faces oracle: {} checked ({} covered), {} skipped, {} scenes snapped of {}",
+        tally.checked,
+        tally.occupied,
+        tally.skipped,
+        tally.snapped,
+        12 * views().len() * 2
     );
 }
 
-/// A pinned scene whose region collapses under binary64 rounding: it is
-/// refused by name, never answered with a degenerate polygon (TODO(#410)).
+/// The two scenes that binary64 rounding used to refuse as `Degenerate`
+/// (a region whose vertices round to one point) are answered, and the
+/// answer passes the oracle like any other scene.
 #[test]
-fn a_known_collapse_is_refused_as_such() {
-    let (name, frame) = views()
-        .into_iter()
-        .find(|(name, _)| *name == "oblique")
-        .expect("the oblique view");
-    let mut tally = Tally::default();
-    check(1, name, frame, true, &mut tally);
-    assert_eq!(tally.refused, 1);
-    assert_eq!(tally.checked, 0);
+fn the_known_collapses_are_snapped() {
+    for (seed, view) in [(1, "oblique"), (9, "isometric")] {
+        let (name, frame) = views()
+            .into_iter()
+            .find(|(name, _)| *name == view)
+            .expect("the view");
+        let mut tally = Tally::default();
+        check(seed, name, frame, true, &mut tally);
+        assert_eq!(tally.snapped, 1, "seed {seed}, {name}");
+        assert!(tally.checked > 0, "seed {seed}, {name}");
+    }
 }
