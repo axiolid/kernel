@@ -9,6 +9,16 @@ caret rule for `0.x` versions.
 
 ## [Unreleased]
 
+### Added
+
+- `StationPiece::native_span`, `CompositeBasis::distance_interval_at` and
+  `CompositeBasis::end_points` (#424): the native parameters the kernel
+  reads at a piece's start and end measures (so a graph compiler cutting a
+  composite flattens each piece between the parameters a station reads),
+  a certified interval for the length from the composite's start to the
+  point read at a distance (a point where every length is stored data), and
+  the points read at distance `0` and at the length.
+
 ## [0.3.20] - 2026-11-03
 
 ### Added

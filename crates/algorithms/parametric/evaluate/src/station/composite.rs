@@ -140,6 +140,15 @@
 //! piece's length between the points the kernel reads as its ends, which
 //! for a bounded piece are the curve's at its resolved measures.
 //!
+//! # Cutting a composite (#424)
+//!
+//! A graph compiler that cuts a composite at two distances reads the pieces
+//! between them ([`CompositeBasis::pieces_between`]), each piece's native
+//! parameters ([`StationPiece::native_span`]) and, where a measure is a
+//! quadrature, how far the cut lies from the distance asked
+//! ([`CompositeBasis::distance_interval_at`]); [`CompositeBasis::end_points`]
+//! are the points read at distance `0` and at the length.
+//!
 //! # Exactness
 //!
 //! A station frame on a composite is exact, rounding aside, only where
@@ -158,8 +167,8 @@ use axiolid_curve::{
 use axiolid_curve_evaluate_contract::{window_span, DistanceConvention};
 
 use super::certify::{
-    checked_tolerance, curve_span, piece_length, CertifiedSeam, DistanceInterval, Running,
-    POINT_ROUNDING, UNCERTIFIED_LENGTH,
+    checked_tolerance, curve_span, piece_length, read_parameter, CertifiedSeam, DistanceInterval,
+    Running, POINT_ROUNDING, UNCERTIFIED_LENGTH,
 };
 use super::offset::{OffsetTable, StationOffset};
 use super::seam::tidy;
@@ -434,6 +443,39 @@ impl StationCurve<'_> {
             }
             _ => t,
         })
+    }
+
+    /// The native parameter the kernel reads the station measure `m` at
+    /// (from the curve's start): the one [`Self::point_at`] evaluates the
+    /// curve at, so a span between two such parameters is the span between
+    /// the points a station reads.
+    fn native_parameter(self, m: Scalar) -> GeomResult<Scalar> {
+        match self {
+            Self::Offset(_) => Err(unsupported(
+                "the native parameter of an offset piece: an offset takes its basis's \
+                 parameter, not its own length",
+            )),
+            Self::Three(Curve3::Elevated(_) | Curve3::Banked(_)) => Err(unsupported(
+                "the native parameter of an elevated or banked curve: a piece of it is \
+                 measured in plan distance, not in arc length",
+            )),
+            Self::Two(Curve2::Intrinsic(_) | Curve2::Chain(_))
+            | Self::Three(Curve3::Intrinsic(_)) => Ok(m),
+            Self::Two(
+                curve @ (Curve2::Line(_)
+                | Curve2::Circle(_)
+                | Curve2::Ellipse(_)
+                | Curve2::BSpline(_)),
+            ) => read_parameter(Self::Two(curve), m),
+            Self::Three(
+                curve @ (Curve3::Line(_)
+                | Curve3::Circle(_)
+                | Curve3::Ellipse(_)
+                | Curve3::BSpline(_)),
+            ) => read_parameter(Self::Three(curve), m),
+            Self::Two(curve) => parameter_at_arc_length2(curve, start2(curve), m),
+            Self::Three(curve) => parameter_at_arc_length3(curve, start3(curve), m),
+        }
     }
 
     /// The point at measure `m` from the curve's start; an offset's
@@ -722,6 +764,28 @@ impl<'c> StationPiece<'c> {
             placement_exact: piece.placement_exact,
             ..span
         })
+    }
+
+    /// The native parameters `t0 < t1` the kernel reads at the piece's
+    /// start and end measures, the ones a point read inside the piece is
+    /// evaluated at: `m / |d|` on a line, `m / r` on a circle (past `2 pi`
+    /// where the piece crosses its seam), `m` on a curve parameterised by
+    /// its measure, and on a polyline, an ellipse or a B-spline the
+    /// arc-length inverse from the curve's start (a closed ellipse past its
+    /// length: `2 pi` plus the inverse of the measure less the length). A
+    /// graph compiler that flattens the curve between them lands on the
+    /// points [`CompositeBasis::section_on`] reads at the same distances.
+    ///
+    /// # Errors
+    ///
+    /// An offset piece (it takes its basis's parameter, not its own
+    /// length), an elevated or banked curve (it is measured in plan
+    /// distance), and the quadratures' refusals, by name.
+    pub fn native_span(&self) -> GeomResult<(Scalar, Scalar)> {
+        Ok((
+            self.curve.native_parameter(self.start)?,
+            self.curve.native_parameter(self.end)?,
+        ))
     }
 
     /// The piece's length in its station measure.
@@ -1344,6 +1408,73 @@ impl<'c> CompositeBasis<'c> {
         }
         let seams = self.certified_seams(certification(window), distance + window)?;
         snap(&seams, distance, window)
+    }
+
+    /// The points read at distance `0` and at the composite's length `L`:
+    /// the first piece's start and the last piece's end, placed.
+    ///
+    /// # Errors
+    ///
+    /// The evaluators' refusals reading the points.
+    pub fn end_points(&self) -> GeomResult<[Point3; 2]> {
+        let last = self.pieces.len() - 1;
+        Ok([
+            self.pieces[0].point_at(0.0, self.tables[0].as_ref())?,
+            self.pieces[last].point_at(self.pieces[last].length(), self.tables[last].as_ref())?,
+        ])
+    }
+
+    /// A certified interval containing the true length of the composite
+    /// from its start to the point read at `distance`: the certified
+    /// lengths of the pieces before it plus its own piece up to it (as
+    /// `certified_seams` sums them), no wider than `tolerance`. It
+    /// is the point `distance` where every length summed is read from
+    /// stored data. It says how far a cut at `distance` lies from the
+    /// distance asked, where a measure is a quadrature (an ellipse, a
+    /// B-spline).
+    ///
+    /// # Errors
+    ///
+    /// A tolerance that is not finite and positive and a distance outside
+    /// `[0, L]` (beyond the arc-length tolerance), by name, and as
+    /// [`Self::joint_intervals`].
+    pub fn distance_interval_at(
+        &self,
+        distance: Scalar,
+        tolerance: Scalar,
+    ) -> GeomResult<DistanceInterval> {
+        let tolerance = checked_tolerance(tolerance)?;
+        let distance = admitted(distance, Some(self.length()))?;
+        let (k, into) = self.locate(distance, SeamSide::Outgoing);
+        let shares = self.shares(tolerance);
+        let mut run = Running::ZERO;
+        let mut exact = true;
+        for ((piece, table), share) in self.pieces.iter().zip(&self.tables).zip(&shares).take(k) {
+            let length = piece_length(piece, table.as_ref(), *share)?;
+            exact &= length.is_point();
+            run = run.plus(length);
+        }
+        if into > 0.0 {
+            let piece = &self.pieces[k];
+            let into = into.min(piece.length());
+            let mut part = *piece;
+            if piece.reversed {
+                part.start = piece.end - into;
+            } else {
+                part.end = piece.start + into;
+            }
+            let length = piece_length(&part, self.tables[k].as_ref(), shares[k])?;
+            exact &= length.is_point();
+            run = run.plus(length);
+        }
+        if exact {
+            return Ok(DistanceInterval::point(distance));
+        }
+        let interval = run.interval();
+        if interval.width().is_nan() || interval.width() > tolerance {
+            return Err(unsupported(UNCERTIFIED_LENGTH));
+        }
+        Ok(interval)
     }
 
     /// The pieces between distances `start < end` along the composite,

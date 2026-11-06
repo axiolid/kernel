@@ -546,6 +546,13 @@ impl<'c> Native<'c> {
     }
 }
 
+/// The native parameter the kernel reads the station measure `m` at on a
+/// closed-form curve (a line, a circle, an ellipse, a B-spline): the one
+/// the certified lengths are measured between.
+pub(crate) fn read_parameter(curve: StationCurve<'_>, m: Scalar) -> GeomResult<Scalar> {
+    Native::of(curve, m, m)?.parameter(m)
+}
+
 /// A polyline's segment holding the measure `mid`, as the origin and unit
 /// direction of the line whose own measure is the polyline's there.
 fn segment<P: Copy>(
