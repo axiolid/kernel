@@ -179,10 +179,11 @@ fn meets(from: &[Dyadic; 3], to: &[Dyadic; 3], cell: &Cell) -> GeomResult<Option
                         den: h0.sub(&h1),
                         open,
                     };
-                    match compare_values(&candidate, &upper)? {
-                        Ordering::Less => upper = candidate,
-                        Ordering::Equal if candidate.open => upper = candidate,
-                        _ => {}
+                    // Two upper ends of equal value cannot meet a lower end
+                    // there (the lower ends lie on other lines of the cell),
+                    // so which of them is open never decides.
+                    if compare_values(&candidate, &upper)?.is_lt() {
+                        upper = candidate;
                     }
                 }
                 (false, true) => {

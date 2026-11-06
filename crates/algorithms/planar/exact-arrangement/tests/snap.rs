@@ -178,19 +178,85 @@ fn an_island_that_rounds_to_one_point_collapses_inside_a_surviving_ring() {
 #[test]
 fn the_displacement_of_a_reroute_is_the_half_width_of_the_cell() {
     let mut points = ExactPoints::new();
-    let a = flat(&mut points, 0.0, 0.0);
-    let b = flat(&mut points, 2.0, 2.0);
-    // The diagonal passes through (1, 1), the cell of v, whose spacing
-    // changes there: 2^-53 below 1.0, 2^-52 above.
-    let v = points
-        .push([d(3.0), d(3.0).add(&scaled(1, -60)), d(3.0)])
-        .unwrap();
-    let w = flat(&mut points, 1.0, 3.0);
-    let edges = [Segment { ends: [a, b] }, Segment { ends: [v, w] }];
+    // Every end is a binary64 point, so only the reroute moves anything. The
+    // first edge meets (1, 1) at (1, 1 + 2^-53), a tie that the even centre
+    // 1.0 owns, where the spacing changes: 2^-53 below 1.0, 2^-52 above.
+    let a = flat(&mut points, 0.5, 0.5);
+    let b = flat(&mut points, 1.5, 1.5 + 2f64.powi(-52));
+    let f = flat(&mut points, 1.0, 1.0);
+    let w = flat(&mut points, 1.0, -1.0);
+    let edges = [Segment { ends: [a, b] }, Segment { ends: [f, w] }];
     let snapped = snap(&points, &edges).unwrap();
     assert_eq!(snapped.rerouted, 1);
     assert_eq!(snapped.routes[0].len(), 2);
     assert_eq!(snapped.displacement.get(), 2f64.powi(-53));
+}
+
+#[test]
+fn cells_and_fragments_count_against_the_memory_budget() {
+    let mut points = ExactPoints::new();
+    let ids: Vec<PointId> = [(0.0, 0.0), (4.0, 0.0), (4.0, 4.0), (0.0, 4.0)]
+        .iter()
+        .map(|&(x, y)| flat(&mut points, x, y))
+        .collect();
+    let edges = ring_of(&ids);
+    // The documented charges: 256 bytes per cell, 64 per fragment.
+    let (cells, fragments) = (4 * 256, 4 * 64);
+    let run = |bytes: usize| {
+        snap_round(
+            &points,
+            &edges,
+            &mut budget(),
+            0,
+            &options().with_memory_budget(bytes),
+        )
+    };
+    run(cells + fragments).unwrap();
+    for short in [cells + fragments - 1, cells - 1] {
+        assert!(
+            matches!(
+                run(short),
+                Err(GeomError::BudgetExceeded { resource: "memory" })
+            ),
+            "{short}"
+        );
+    }
+}
+
+#[test]
+fn an_edge_visits_its_cells_in_order() {
+    let mut points = ExactPoints::new();
+    let a = flat(&mut points, 0.0, 0.0);
+    let b = flat(&mut points, 3.0, 3.0);
+    let mut edges = vec![Segment { ends: [a, b] }];
+    // Two vertices just above the diagonal, whose cells it passes through.
+    for (x, top) in [(1.0, 3.0), (2.0, 4.0)] {
+        let v = points
+            .push([d(3.0 * x), d(3.0 * x).add(&scaled(1, -60)), d(3.0)])
+            .unwrap();
+        let w = flat(&mut points, x, top);
+        edges.push(Segment { ends: [v, w] });
+    }
+    let snapped = snap(&points, &edges).unwrap();
+    assert_eq!(snapped.rerouted, 1);
+    let mut at = vec![];
+    let mut previous = None;
+    for &(piece, forward) in &snapped.routes[0] {
+        let ends = snapped.arrangement.pieces[piece.0].ends;
+        let (from, to) = if forward {
+            (ends[0], ends[1])
+        } else {
+            (ends[1], ends[0])
+        };
+        assert!(previous.is_none_or(|p| p == from), "the route is connected");
+        at.push(snapped.point(from).unwrap());
+        previous = Some(to);
+    }
+    at.push(snapped.point(previous.unwrap()).unwrap());
+    assert_eq!(
+        at,
+        [(0.0, 0.0), (1.0, 1.0), (2.0, 2.0), (3.0, 3.0)].map(|(x, y)| Point2::new(x, y))
+    );
 }
 
 #[test]
