@@ -9,6 +9,17 @@ caret rule for `0.x` versions.
 
 ## [Unreleased]
 
+### Changed
+
+- A station on a trim of a trim (or of a trim placed at a station) reads
+  the outer trim's parameter selectors in the inner trim's basis's
+  parameter, as a swept directrix and a polyline do (#424, the ADR 0082
+  amendment of 2026-11-06), no longer as a distance along the inner trim.
+  A nested trim's outer selectors that were distances along the inner trim
+  name the basis's parameters now, so the point of every station on one
+  moves. Selectors other than parameters on such a trim are refused by name
+  (#432).
+
 ## [0.3.44] - 2026-11-03
 
 ### Added

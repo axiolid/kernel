@@ -24,7 +24,10 @@
 //! length measured, a closed conic's trim possibly across its parameter
 //! seam), reversed where its sense disagrees; a trim of a relation between
 //! parameter selectors read as distances along it, which needs the
-//! relation measured in arc length (its parameter); a curve placed at a
+//! relation measured in arc length (its parameter), except a trim of a trim
+//! (through curves placed at stations), whose selectors are read in the
+//! inner trim's basis's parameter and narrow it, as a directrix and a
+//! polyline read it (`super::trim`, #424); a curve placed at a
 //! station carried by its placement, a trim of it in its source's
 //! parameter; an offset (#289) as offset pieces beside its basis's pieces,
 //! one per span between seams (an offset by stations also split at its
@@ -46,6 +49,12 @@ use axiolid_reference::station::{
 
 /// Most relations and placements a station basis may be nested through.
 const MAX_BASIS_DEPTH: usize = 64;
+
+/// Slack within which a window a trim above keeps may lie beyond the span
+/// of the trim it narrows (#424): a directrix and a polyline take the
+/// options' linear tolerance, which a station basis, read from the graph
+/// alone, does not have.
+const NARROW_SLACK: Scalar = 1e-9;
 
 /// The refusal of a basis no station can be measured along.
 pub(crate) const UNSUPPORTED_BASIS: &str =
@@ -303,6 +312,31 @@ impl<'g> Basis<'g> {
 }
 
 fn flatten<'g>(graph: &'g GeometryGraph, id: NodeId, depth: usize) -> GeomResult<Flat<'g>> {
+    flatten_in(graph, id, None, depth)
+}
+
+/// Whether `id`, through the curves placed at stations that carry it, is a
+/// trim: a trim above it reads its parameters in that trim's basis's
+/// parameter (#424).
+fn is_trim_through_placements(graph: &GeometryGraph, mut id: NodeId) -> bool {
+    loop {
+        match graph.get(id) {
+            Some(GeometryNode::InstanceAtStation(placed)) => id = placed.source,
+            Some(GeometryNode::CurveRelation(CurveRelation::Trimmed { .. })) => return true,
+            _ => return false,
+        }
+    }
+}
+
+/// [`flatten`] a trim, or a curve placed at a station that carries one,
+/// over its `window` of its basis's parameter (#424); every other curve
+/// is flattened whole.
+fn flatten_in<'g>(
+    graph: &'g GeometryGraph,
+    id: NodeId,
+    window: Option<(Scalar, Scalar)>,
+    depth: usize,
+) -> GeomResult<Flat<'g>> {
     if depth > MAX_BASIS_DEPTH {
         return Err(GeomError::BudgetExceeded {
             resource: "relations and placements nested in a station basis",
@@ -322,7 +356,7 @@ fn flatten<'g>(graph: &'g GeometryGraph, id: NodeId, depth: usize) -> GeomResult
         // A curve placed at a station (#264): its source carried by the
         // placement, whatever the source is.
         Some(GeometryNode::InstanceAtStation(placed)) => {
-            let source = flatten(graph, placed.source, depth + 1)?;
+            let source = flatten_in(graph, placed.source, window, depth + 1)?;
             let placement = super::placement_at(graph, &placed.station, depth + 1)?;
             Ok(match source {
                 Flat::Atomic {
@@ -378,20 +412,41 @@ fn flatten<'g>(graph: &'g GeometryGraph, id: NodeId, depth: usize) -> GeomResult
                      parameter, not its own length, and that parameter is not read along it",
                 ));
             }
-            let pieces = match flatten(graph, *basis, depth + 1)? {
+            // A trim of a trim reads its parameters in the inner trim's
+            // basis's parameter, as a directrix and a polyline do (#424),
+            // not as a distance along the inner trim; a trim read inside
+            // such a trim is narrowed to the span asked of it.
+            let nested = is_trim_through_placements(graph, *basis);
+            let span = if nested || window.is_some() {
+                Some(super::trimmed_span(
+                    graph,
+                    *basis,
+                    (start, end),
+                    (*sense_agreement, *preference),
+                    window,
+                    NARROW_SLACK,
+                    depth + 1,
+                )?)
+            } else {
+                None
+            };
+            let pieces = match flatten_in(graph, *basis, span.filter(|_| nested), depth + 1)? {
                 Flat::Atomic {
                     curve,
                     placed,
                     exact,
                 } => {
-                    let (lo, hi) =
-                        trim_parameters(curve, start, end, *sense_agreement, *preference)?;
+                    let (lo, hi) = match span {
+                        Some(span) => span,
+                        None => trim_parameters(curve, start, end, *sense_agreement, *preference)?,
+                    };
                     let piece = StationPiece::between_parameters(curve, lo, hi)?;
                     vec![match placed {
                         Some(rigid) => piece.placed(rigid, exact),
                         None => piece,
                     }]
                 }
+                Flat::Pieces(pieces) if nested => pieces,
                 Flat::Pieces(pieces) => {
                     let composite = CompositeBasis::new(pieces)?;
                     if composite.convention() != DistanceConvention::ArcLength3d {
@@ -401,9 +456,15 @@ fn flatten<'g>(graph: &'g GeometryGraph, id: NodeId, depth: usize) -> GeomResult
                              in",
                         ));
                     }
-                    let a = crate::directrix::parameter_only(start, *preference, "start")?;
-                    let b = crate::directrix::parameter_only(end, *preference, "end")?;
-                    composite.pieces_between(a.min(b), a.max(b))?
+                    let (a, b) = match span {
+                        Some(span) => span,
+                        None => {
+                            let a = crate::directrix::parameter_only(start, *preference, "start")?;
+                            let b = crate::directrix::parameter_only(end, *preference, "end")?;
+                            (a.min(b), a.max(b))
+                        }
+                    };
+                    composite.pieces_between(a, b)?
                 }
             };
             Ok(Flat::Pieces(if *sense_agreement {

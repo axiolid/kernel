@@ -417,7 +417,8 @@ relation were refused (#246, #264).
   possibly across its parameter seam, at most one turn); a trim of a
   relation spans its parameter selectors read as arc length along it, so
   a relation measured in plan distance cannot be trimmed (refused by
-  name); a placed curve is its source carried by the placement. The
+  name; a trim of a trim is read in its basis's parameter instead, see
+  the amendment of 2026-11-06); a placed curve is its source carried by the placement. The
   result is a list of spans of atomic curves, each between two distances
   in its curve's station measure, reversed or not, under a composed rigid
   placement (`axiolid-evaluate`'s `StationPiece`), measured as one
@@ -1756,3 +1757,50 @@ error in 97 ms (median of 10 samples, 93 to 106 ms, on a machine under a
 load of 70), every placement certified with a frame error of 0.32 um
 (`tools/benchmark/benches/station_clothoid.rs`); a measurement, not a
 performance claim.
+
+## Amendment 2026-11-06: a trim of a trim reads its basis's parameter (#424)
+
+A trim reads its selectors in the parameter of the curve it trims
+(ISO 10303-42 `trimmed_curve` inherits its basis's parameter). The
+directrix reads a trim of a trim so (`crate::directrix`: a sweep range on a
+trimmed circle is angles of the circle), and since #424 the polyline
+compiler does. A station basis read it differently: a trim of a relation,
+and a trim is one, spanned its parameter selectors as arc length along
+the relation, so `trim(trim(circle, 0, pi), pi / 4, pi / 2)` was the arc between
+the distances `pi / 4` and `pi / 2` along the inner trim, the angles `pi /
+(4 r)` to `pi / (2 r)` of a circle of radius `r`, and not the arc a
+directrix or a polyline of the same relation runs along. One relation read two ways is
+silent wrong geometry in whichever consumer reads it the other way (an IFC
+sweep range on an `IfcTrimmedCurve` circle is angles of the circle).
+
+- **Decision.** A trim whose basis is, through the curves placed at
+  stations, a trim is read in the inner trim's basis's parameter, as the
+  directrix and the polyline read it. The outer selectors are validated
+  against the inner span and narrow it: where the inner basis is a closed
+  conic they are read modulo its period into the inner trim's arc, so
+  selectors on either side of the seam name the same part of the arc; else
+  they must lie within the inner span, to a slack of `1e-9` (a station
+  basis is read from the graph alone, so the directrix's and the polyline's
+  linear tolerance is not at hand). A trim of a composite stays measured as
+  arc length along the composite, which is the composite's parameter, and a
+  trim of a trim of a composite reads the same arc length.
+- **What did not change.** Only a trim of a trim (or of a placed trim)
+  reads differently; a trim of an atomic curve, of a composite and of an
+  offset (refused) read as before.
+- **Selectors.** Only parameter selectors are read in a relation's
+  parameter. A point or arc-length selector, or a Cartesian preference, on
+  a trim of a trim is refused by name; this is the open question of
+  axiolid/kernel#432, which covers the directrix, the polyline and the
+  stations alike.
+- **Consumers.** This changes the span a station reads on a nested trim,
+  and so the point of every station on one. A consumer that wrote a
+  nested trim's outer selectors as distances along the inner trim names the
+  basis's parameters now; a distance along it is an `ArcLength` selector,
+  which #432 would read on a relation.
+
+Evidence: `crates/execution/compile/src/station/trim.rs` (the span a trim
+keeps, shared with the polyline compiler),
+`crates/execution/compile/src/station/basis.rs` (`flatten_in`) and
+`crates/execution/compile/tests/station_trim_of_trim.rs` (a station on a
+trim of a trim, bitwise against the polyline's ends and the swept
+directrix's volume).
