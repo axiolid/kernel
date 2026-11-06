@@ -53,7 +53,10 @@
 //! tangency the result of such a decision can differ from the boolean of
 //! the unperturbed operands by more than the tolerance, so the bound is
 //! not claimed for that boolean, and the contribution's detail says what
-//! it is measured against. No perturbation term is added: none is proved.
+//! it is measured against. The bound is widened by the readings and the
+//! rounding floor (#421): it covers the boolean of the operands as read,
+//! each moved by at most the named readings, not that of the operands as
+//! given.
 //!
 //! The exact compiler reports whether any such decision fired (#236,
 //! [`ReferenceExactCompiler::compile_exact_with_report`]). When none did,
@@ -344,8 +347,8 @@ fn reading_distance(report: &BooleanReport) -> Scalar {
 /// [`reading_distance`] of readings that moved a feature by up to `linear`
 /// and turned a direction by up to `angular` radians (the pairs), over
 /// operands within `extent` of the origin on each axis: a turn about any
-/// point moves one of them by at most the angle times twice its distance
-/// from the point, itself at most `sqrt(3) extent` from the origin. A
+/// point of the operands' box moves one of them by at most the angle times
+/// its distance from that point, at most `2 sqrt(3) extent`. A
 /// reading both moved and turned adds the two, rounded up.
 fn distance_of(readings: impl IntoIterator<Item = (Scalar, Scalar)>, extent: Scalar) -> Scalar {
     let lever = 2.0 * 3.0_f64.sqrt() * extent;

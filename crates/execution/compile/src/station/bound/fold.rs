@@ -216,9 +216,9 @@ impl<'r, 'g> SectionLaw<'r, 'g> {
         };
         // The fold is decided on the frames as read, which a placement
         // read inexactly does not change in their section planes (#408);
-        // that run is certified against the exact surface by no cell
-        // (`SectionLaw::cell` bounds the frames strictly), never refused
-        // as a fold nor cleared to a bound.
+        // a fold found there is refused, while the run is certified against
+        // the exact surface by no cell (`SectionLaw::cell` bounds the frames
+        // strictly), so it is never cleared to a bound.
         Ok(verdict)
     }
 

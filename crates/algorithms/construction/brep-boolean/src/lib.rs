@@ -114,11 +114,12 @@
 //! (a cut, a vertex, a point on an edge) compares `f64` evaluations of exact curves, so a
 //! residue up to `2^-40` of the operands' extent (about four thousand units
 //! in the last place) is the rounding of one exact point, read without the
-//! tolerance; only a larger residue is a decision within tolerance. That
-//! rounding floor is [`BooleanReport::rounding_floor`] (#244):
-//! [`ROUNDING_FACTOR`] times [`BooleanReport::extent`], which defines the
-//! extent exactly, plus the move of an angular residue of that factor
-//! (radians) over the same extent.
+//! tolerance; only a larger residue is a decision within tolerance. The
+//! widening that covers such unrecorded residues is
+//! [`BooleanReport::rounding_floor`] (#244): [`ROUNDING_FACTOR`] times
+//! [`BooleanReport::extent`], which defines the extent exactly, plus the
+//! move of an angular residue of that factor (radians) over the same
+//! extent. It is not the threshold for a decision.
 //!
 //! **Guarantee.** [`boolean_with_report`] returns a [`BooleanReport`] of the
 //! within-tolerance decisions that fired, by kind, with the furthest each
@@ -126,8 +127,8 @@
 //! ([`BooleanReport::is_exact`]), the result is the exact boolean of the
 //! operands as given: every decision was exact, and new vertices are exact
 //! points evaluated in `f64`. Constructed points closer than
-//! [`BooleanReport::rounding_floor`] count as one point and are not
-//! reported, so a consumer widening distances on any result, exact or not,
+//! [`ROUNDING_FACTOR`] times [`BooleanReport::extent`] count as one point
+//! and are not reported, and [`BooleanReport::rounding_floor`] covers them, so a consumer widening distances on any result, exact or not,
 //! widens them by that floor too. At [`Tolerance::ZERO`] nothing can be
 //! read within tolerance, so every result is exact (and still has its
 //! floor); operands that only miss each other by rounding are then refused,

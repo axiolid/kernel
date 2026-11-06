@@ -192,8 +192,8 @@ fn a_flat_wall_with_openings_coinciding_within_readings_is_certified() {
                 .unwrap_or_else(|| panic!("{what}: {deviation:?}"));
             eprintln!("{what}: reading {reading:e}, bound {bound:e}, volume {volume}");
             assert!(bound <= 1e-3, "{what}: {deviation:?}");
-            // The bound covers the boolean of the given operands: the readings
-            // and the rounding floor add to the measurement (#421).
+            // The bound covers the boolean of the operands as read: the
+            // readings and the rounding floor add to the measurement (#421).
             assert!(
                 bound >= reading + report.rounding_floor(),
                 "{what}: {deviation:?}"

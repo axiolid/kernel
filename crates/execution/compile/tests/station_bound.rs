@@ -951,8 +951,8 @@ fn a_composite_placed_inexactly_and_a_long_run_are_unbounded_by_name() {
     // The pieces of a composite carry the placement too.
     let (graph, root) = run_along_placed(plan_circle(25.0), line_then_arc, 2, 1.0);
     assert!(unbounded_reason(&graph, root).contains(reason));
-    // A run of many sections is no budget failure: the fold search is not
-    // run on a frame that bounds nothing.
+    // A run of many sections is no budget failure: the fold search runs on
+    // the frames as read, which bound the fold, not the surface.
     let (graph, root) = run_along_placed(
         plan_circle(25.0),
         |b| b.push_value(plan_circle(5.0)).unwrap(),

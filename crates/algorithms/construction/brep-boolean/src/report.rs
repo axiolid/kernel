@@ -97,8 +97,10 @@ pub struct ToleranceDecision {
 /// moved by at most [`Self::linear`] and turned by at most
 /// [`Self::angular`], both within the caller's tolerance.
 ///
-/// Either way, constructed points closer than [`Self::rounding_floor`]
-/// were read as one point without a decision, and are not reported (#244).
+/// Either way, constructed points closer than [`ROUNDING_FACTOR`] times
+/// [`Self::extent`] were read as one point without a decision, and are not
+/// reported (#244); [`Self::rounding_floor`] covers that residue and the
+/// move of an unrecorded angular one.
 ///
 /// A boolean the caller's tolerance left refused is cut again at
 /// [`FINER_FACTOR`] times it (#332); its readings then lie within that
@@ -159,9 +161,13 @@ impl BooleanReport {
     /// of the operands' box).
     ///
     /// A residue between constructed points (cuts, vertices, a point on an
-    /// edge) up to this floor was read as one exact point evaluated twice,
-    /// without the tolerance, and is in no [`ToleranceDecision`]; only a
-    /// larger one is a decision within tolerance. So a consumer widening
+    /// edge) up to [`ROUNDING_FACTOR`] times [`Self::extent`] was read as one
+    /// exact point evaluated twice, without the tolerance, and is in no
+    /// [`ToleranceDecision`]; only a larger one is a decision within
+    /// tolerance. This floor is the widening that covers those unrecorded
+    /// linear and angular residues, not the threshold between them and a
+    /// decision: a residue below it may still be a reported decision. So a
+    /// consumer widening
     /// distances on the result widens them by this floor too, even when
     /// [`Self::is_exact`] holds. Zero when no general boolean produced the
     /// report (the default report).

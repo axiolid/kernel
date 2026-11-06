@@ -22,9 +22,8 @@ caret rule for `0.x` versions.
   frame is not exact is unbounded by name (#408), where it was certified
   against the read placement rather than the exact one, a run of 130 or
   more sections included. Its folds are still decided, on the frames as
-  read, and refused. Requires
-  `axiolid-evaluate` with `FrameLaw::atomic_placed` and
-  `FrameLaw::with_placements_read_as_exact`.
+  read, and refused. Requires `axiolid-evaluate` 0.3.20 for
+  `FrameLaw::atomic_placed` and `FrameLaw::with_placements_read_as_exact`.
 - A boolean's deviation report (and the exact union referee's, #391) covers
   the boolean of the operands as read (#421), each moved by at most the
   named readings, which may change the topology against the operands as

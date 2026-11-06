@@ -1077,7 +1077,7 @@ fn every_reading_within_tolerance_is_named_not_only_coincident_supports() {
         other => panic!("{other:?}"),
     }
     // The boolean's own bound is the sum, not the worst: it covers the
-    // boolean of the given operands (#421).
+    // boolean of the operands as read, moved by the named readings (#421).
     let (Some(DeviationBound::Certified(reading)), Some(DeviationBound::Certified(floor))) =
         (named(TOLERANCE_READINGS), named(BOOLEAN_ROUNDING_FLOOR))
     else {
