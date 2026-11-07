@@ -27,8 +27,10 @@
 //! larger gap, each the evaluator's point against a table point plus the
 //! table point's own error, to the exact-chord bound. Over a chain plan
 //! (#438) and under an intrinsic profile (#481) the exact-chord bound is
-//! returned as it stands: neither has certified points, and
-//! `certifies_flattening3` claims neither.
+//! returned as it stands, and UNDER-reports the evaluated ends (a chain of a
+//! line and `k = 0.01 sin 50 s` gives 1.95e-5 over a span whose chord lies
+//! 2.8e-3 off): `certifies_flattening3` claims neither, so no consumer takes
+//! it as a certificate.
 
 use axiolid_core::{Point3, Scalar};
 use axiolid_curve::{Banked3, Curve2, Curve3, Elevated3, ElevationLaw};
@@ -138,7 +140,8 @@ pub(super) fn evaluated_chord_bound3(curve: &Curve3, a: Scalar, b: Scalar) -> Op
     };
     let Curve2::Intrinsic(plan) = base.plan.as_ref() else {
         // TODO(#438): the chain plan's evaluated pieces carry no certified
-        // gap yet.
+        // gap yet, so this under-reports the evaluated ends. Not a
+        // certificate: `certifies_flattening3` refuses a chain plan.
         return Some(law);
     };
     if has_intrinsic_piece(&base.elevation) {

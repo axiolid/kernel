@@ -91,6 +91,11 @@ caret rule for `0.x` versions.
   off at 96.5; `TODO(#480)`). The bound of a point span (`a == b`) is that
   distance. A chain plan is unchanged (`TODO(#438)`), and so is an
   intrinsic profile, which `certifies_flattening3` does not claim.
+- `bound::certifies_flattening3` no longer claims an elevated curve over a
+  chain plan (#393, `TODO(#438)`): the exact-chord bound of
+  `chord_bound3` under-reports the evaluated ends there (1.95e-5 against
+  2.8e-3 on a chain of a line and `k = 0.01 sin 50 s`), so `flatten3` and
+  the callers that trust the claim no longer take it as a certificate.
 
 ## [0.3.20] - 2026-11-03
 

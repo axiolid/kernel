@@ -336,9 +336,9 @@ fn combined(plan: [Scalar; 3], vertical: [Scalar; 3]) -> Option<CurveDerivativeB
 }
 
 /// Whether [`crate::curve::flatten3`] certifies an elevated curve's chords:
-/// its plan is a line, a circle, an intrinsic curve whose curvature law is
-/// bounded, or a chain whose pieces all are
-/// ([`crate::chain::chain_certifies`]), and every piece of its profile is
+/// its plan is a line, a circle or an intrinsic curve whose curvature law is
+/// bounded (a chain plan is not claimed until its evaluated pieces carry a
+/// certified gap, #438), and every piece of its profile is
 /// a polynomial or a circular arc. A circular arc's bound exists wherever
 /// the arc has heights, so no span the curve evaluates on is left to the
 /// midpoint sagitta.
@@ -356,7 +356,9 @@ pub(crate) fn certifies_elevated(curve: &Elevated3) -> bool {
         Curve2::Intrinsic(i) => {
             crate::chain::curvature_bound(&i.curvature, 0.0, i.length.max(0.0)).is_some()
         }
-        Curve2::Chain(chain) => crate::chain::chain_certifies(chain),
+        // TODO(#438): the chain plan's evaluated pieces carry no certified
+        // gap, so `chord_bound3` under-reports there; not claimed.
+        Curve2::Chain(_) => false,
         _ => false,
     };
     plan && curve.elevation.is_well_formed() && closed_form(&curve.elevation)

@@ -5,7 +5,7 @@ Each mutant breaks one step the bounds rest on. The table's point: the
 height dropped, the pivot dropped. Its uniform error: the remainders
 dropped. The chord bound of the evaluated ends: the gap of the ends dropped,
 the smaller of the two ends' gaps taken, the zero-width span answered with
-zero. The tube: its centre read from the evaluator instead of the table,
+zero, a chain plan claimed certified for flattening. The tube: its centre read from the evaluator instead of the table,
 the named refusal of a chain plan and of an intrinsic profile removed. Each
 must turn `evaluate/tests/elevated_positions.rs`,
 `evaluate/tests/intrinsic_position_table.rs`, the tube wall's unit test
@@ -32,6 +32,7 @@ EVAL = "crates/algorithms/parametric/evaluate"
 TABLE = f"{EVAL}/src/bound/position_table.rs"
 ELEVATED = f"{EVAL}/src/bound/elevated_positions.rs"
 BOUND = f"{EVAL}/src/bound.rs"
+ELEVATED_SRC = f"{EVAL}/src/elevated.rs"
 PATHS = "crates/execution/compile/src/deviation/paths.rs"
 
 POSITIONS = ["-p", "axiolid-evaluate", "--all-features", "--test", "elevated_positions"]
@@ -70,6 +71,9 @@ MUTANTS = [
     ("a zero-width span has no gap", BOUND,
      "        if over_intrinsic_plan(curve) {",
      "        if false && over_intrinsic_plan(curve) {", [POSITIONS]),
+    ("a chain plan is claimed certified for flattening", ELEVATED_SRC,
+     "        Curve2::Chain(_) => false,",
+     "        Curve2::Chain(chain) => crate::chain::chain_certifies(chain),", [POSITIONS]),
     # The tube.
     ("the tube reads the evaluator's centre", PATHS,
      "        Some(table) => table.point3(s).map(|(point, _)| point),",

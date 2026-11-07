@@ -11,10 +11,10 @@
 
 use axiolid_core::{Frame2, Point2, Point3, Scalar, Vec2, Vec3};
 use axiolid_curve::{
-    BankConvention, Banked3, CantLaw, CantPiece, Circle2, CurvatureLaw, Curve2, Curve3, Elevated3,
-    ElevationLaw, Intrinsic2, Line2,
+    BankConvention, Banked3, CantLaw, CantPiece, Chain2, ChainPiece2, Circle2, CurvatureLaw,
+    Curve2, Curve3, Elevated3, ElevationLaw, Intrinsic2, Line2,
 };
-use axiolid_evaluate::bound::{chord_bound3, ElevatedPositionTable};
+use axiolid_evaluate::bound::{certifies_flattening3, chord_bound3, ElevatedPositionTable};
 use axiolid_evaluate::curve::evaluate3;
 use axiolid_evaluate::elevated::{banked_chord_bound, elevated_chord_bound};
 
@@ -343,4 +343,36 @@ fn a_chord_bound_over_a_line_or_a_circle_plan_is_the_exact_chord_bound() {
             );
         }
     }
+}
+
+/// A chain plan's evaluated ends carry no certified gap (#438): the exact
+/// chord bound under-reports (1.95e-5 against 2.8e-3 over this span, and
+/// zero at a point against 1.4e-2), so the curve is not claimed certified.
+#[test]
+fn a_chain_plan_is_not_certified_for_flattening() {
+    let chain = Curve2::Chain(Chain2::new(
+        world(),
+        vec![
+            ChainPiece2::Intrinsic {
+                curvature: CurvatureLaw::Constant { curvature: 0.0 },
+                length: 20.0,
+            },
+            ChainPiece2::Intrinsic {
+                curvature: CurvatureLaw::Sinusoid {
+                    mean: 0.0,
+                    amplitude: AMPLITUDE,
+                    angular_frequency: FREQUENCY,
+                    phase: 0.0,
+                },
+                length: 100.0,
+            },
+        ],
+    ));
+    let curve = Curve3::Elevated(Elevated3::new(
+        chain,
+        ElevationLaw::constant_grade(50.0, 0.04),
+    ));
+    assert!(!certifies_flattening3(&curve));
+    let bound = chord_bound3(&curve, 116.4375, 116.5625).expect("the exact chord");
+    assert!(bound < 1e-4, "{bound:e}");
 }
