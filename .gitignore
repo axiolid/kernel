@@ -33,3 +33,6 @@ __pycache__/
 # VitePress build artifacts
 docs/node_modules/
 docs/.vitepress/dist/
+
+# Persistent per-slot build directories, locks and logs of scripts/gate.sh (#443)
+/gate-target/

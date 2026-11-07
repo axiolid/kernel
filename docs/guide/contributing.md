@@ -26,6 +26,24 @@ scripts/probe_layering_gate.sh
 
 The feature matrix protects minimal builds. The probe mutates the declared layering boundary and proves the gate fails, then verifies byte-accurate restoration.
 
+### The gate: tiers, slots and the gate's own probes
+
+`scripts/gate.sh` has two tiers ([kernel#443](https://github.com/axiolid/kernel/issues/443)):
+
+```bash
+scripts/gate.sh --branch   # while a branch is in flight
+scripts/gate.sh            # full gate: before landing workspace-wide changes
+GATE_META=1 scripts/gate.sh   # full gate plus the gate's own mutation probes; the release flow
+```
+
+- **`--branch`** runs the formatting, `Cargo.lock`, probe-anchor, architecture, closure, context, docs, roadmap, capability and ledger checks, then build, test (default and all features), clippy (both) and doc for the crates changed since the merge base with `origin/main` and every workspace crate that depends on them, directly or transitively (`scripts/gate-affected.py`, from `cargo metadata`). Uncommitted and untracked files count as changed.
+- It **escalates to the full gate by itself** when gate infrastructure changed: `scripts/`, `tools/xtask/`, any `Cargo.toml` or `Cargo.lock`, `rust-toolchain.toml`, `.cargo/`, `crates/facade/axiolid-capi/`, `native/`, `tests/consumers/`, `tests/downstream/`, `.github/` and `docs/architecture/*.toml`. A change it cannot determine (no `origin/main`, a failing `git`) counts as infrastructure.
+- The **full gate** is unchanged, except that the gate's own mutation probes (`probe_*_gate*`, the semver, minimal-versions, isolated-build, capi-soname and integration-contract probes) run only when gate infrastructure changed since the merge base, or when `GATE_META=1`. Everything else, including every crate's own `probe_*_mutants.py`, is not a gate step to begin with.
+- **Slots.** A gate takes one of `GATE_SLOTS` (default 3) machine-wide slots with `flock` before building, and prints that it waits when all are taken. The lock is released on exit, failure and signal. Gates from different worktrees therefore queue instead of running six or seven at once.
+- **Build directory.** Each slot has its own persistent `CARGO_TARGET_DIR`, `<repository>/gate-target/slot-N`, so consecutive gates reuse compiled dependencies and a worktree does not hold a target directory of its own. The gate sets `CARGO_TARGET_DIR` itself; every script under `scripts/` honours it. Slot directories are not cleaned automatically: delete `gate-target/` to reclaim the disk.
+- **Log.** The full output also goes to `gate-target/gate-logs/<worktree>-<time>.log`, or to `GATE_LOG`; its path is the first line printed.
+- `GATE_DRY=1` replaces every step by a sleep (`GATE_DRY_SLEEP` seconds), for testing the tier and slot logic: `scripts/test_gate_tiers.py` and `scripts/probe_gate_tiers.py` do. `GATE_LOCK_DIR` and `GATE_ROOT` relocate the locks and the gate root.
+
 The `scripts/probe_*_mutants.py` mutation probes share one runner, `scripts/probe_lib.py`: each takes `--list`, `--only NAME`, `--timeout SECS` and `--check-anchors`. A mutant whose anchor text is missing or not unique stops the probe before any test runs, and `scripts/check-probe-anchors.sh` checks every probe's anchors in the gate, so a refactor that moves probed code must re-anchor the probe (or remove the mutant with a stated reason) in the same change.
 
 ## Releases

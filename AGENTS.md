@@ -79,8 +79,18 @@ Iterate with focused crate checks, then run the full gate before landing
 workspace-wide changes. Judge it by exit code:
 
 ```bash
-scripts/gate.sh
+scripts/gate.sh --branch    # while iterating on a branch
+scripts/gate.sh             # full gate, before landing workspace-wide changes
 ```
+
+`--branch` checks only the crates changed since the merge base and their
+dependents, and escalates to the full gate when gate infrastructure
+changed (`scripts/`, `tools/xtask/`, manifests, `native/`, `.github/`, ...).
+The gate's own mutation probes run only on such a change or with
+`GATE_META=1` (always set it for a release). A gate holds one of
+`GATE_SLOTS` (default 3) machine-wide slots with its own persistent
+`CARGO_TARGET_DIR` under `gate-target/`, and waits when all are taken; its
+log path is the first line. `docs/guide/contributing.md` has the details.
 
 It needs `cargo-semver-checks`, pinned so the gate is reproducible and
 built by the pinned rustc:
