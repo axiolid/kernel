@@ -21,7 +21,10 @@
 //!
 //! A half-space clip is the exception (#400): it is a constructed stand-in
 //! with no coordinates of its own, so [`relative`] places it in its subject's
-//! frame whether or not the linear parts agree, and it is cut there.
+//! frame whether or not the linear parts agree, and it is cut there. A
+//! region, an intersection of half-spaces (#326), is placed leaf by leaf: each
+//! leaf's chain is relative to the subject's frame, and the region is cut in
+//! it unless one of them has no finite form there.
 
 use axiolid_core::{Transform3, Vec3};
 

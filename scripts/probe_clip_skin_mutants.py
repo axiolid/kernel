@@ -34,8 +34,8 @@ GUARD_HEAD = (
 
 MUTANTS = [
     ("clips left out of the subject's frame", COMPILER,
-     "        let Some((tool, chain)) = clip_tool(graph, right) else {\n            return Ok(None);",
-     "        let Some((tool, chain)) = clip_tool(graph, right).filter(|_| false) else {\n            return Ok(None);",
+     "        let Some(clip) = clip_of(graph, left, right, operator)? else {\n            return Ok(None);",
+     "        let Some(clip) = clip_of(graph, left, right, operator)?.filter(|_| false) else {\n            return Ok(None);",
      [T]),
     ("relative placement drops the offset", FRAME,
      "        let offset = relative_offset(subject, tool)?;\n        return Some(Transform3::from_translation(offset));",

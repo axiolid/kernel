@@ -1364,8 +1364,11 @@ impl<B: MeshBoolean> ReferenceMeshCompiler<B> {
     /// subject's faces are exactly axis-aligned; where the linear parts
     /// differ, its faces lie a residue off them and the snap lands them. The
     /// result is placed by the frame and keeps its unplaced form in
-    /// [`Built::local`]. The subject is the caller's, already refused if it
-    /// is a surface model and not empty (#326).
+    /// [`Built::local`]. A region (#326) is placed leaf by leaf, each
+    /// relative to the frame; one with a leaf that has no finite form there,
+    /// or that leaves nothing of the subject, is the world cut's. The subject
+    /// is the caller's, already refused if it is a surface model and not
+    /// empty.
     fn clip_in_subject_frame(
         &self,
         graph: &GeometryGraph,
@@ -1375,28 +1378,43 @@ impl<B: MeshBoolean> ReferenceMeshCompiler<B> {
         budget: Budget,
         cache: &Cache,
     ) -> GeomResult<Option<Built>> {
-        if !matches!(
-            operator,
-            axiolid_core::BooleanOperator::Difference | axiolid_core::BooleanOperator::Intersection
-        ) {
-            return Ok(None);
-        }
-        let Some((tool, chain)) = clip_tool(graph, right) else {
+        let Some(clip) = clip_of(graph, left, right, operator)? else {
             return Ok(None);
         };
         let Some((frame, subject)) = self.frame_of(graph, left, budget, cache)? else {
             return Ok(None);
         };
-        let Some(relative) = crate::frame::relative(frame, chain) else {
-            return Ok(None);
-        };
+        // Each leaf of a region (#326) is placed in the subject's frame; one
+        // that has no finite form there leaves the world cut to decide.
+        let mut leaves = Vec::with_capacity(clip.leaves.len());
+        for &(leaf, chain) in &clip.leaves {
+            let Some(relative) = crate::frame::relative(frame, chain) else {
+                return Ok(None);
+            };
+            leaves.push((leaf, relative));
+        }
         let local_budget = instance_local_budget(frame, budget, 0.0)?;
         let local_options = local_options(options, local_budget)?;
-        let tool = self.clip_tool_mesh(graph, tool, relative, &subject.mesh, &local_options)?;
+        // A region that leaves nothing of the subject is an empty tool: the
+        // world cut decides it by an identity.
+        let Some(tool) = self.region_tool_mesh(
+            graph,
+            &leaves,
+            &subject.mesh,
+            &local_options,
+            local_budget.placed,
+        )?
+        else {
+            return Ok(None);
+        };
         let local = self
             .boolean_of(
                 subject,
-                (&tool, None, None),
+                (
+                    &tool.mesh,
+                    None,
+                    (leaves.len() > 1).then_some(&tool.deviation),
+                ),
                 operator,
                 &local_options,
                 local_budget.placed,
@@ -2299,7 +2317,7 @@ fn collect_leaves(
                 return Ok(both);
             }
             _ => {
-                let Some((tool, inner)) = clip_tool(graph, id) else {
+                let Some(tool) = clip_tool(graph, id) else {
                     return Ok(false);
                 };
                 // A shared sub-region is read through many paths: the
@@ -2309,7 +2327,7 @@ fn collect_leaves(
                         "half-space intersection with more half-spaces than its graph has nodes",
                     ));
                 }
-                leaves.push((tool, outer * inner));
+                leaves.push((tool, outer));
                 return Ok(true);
             }
         }
@@ -2333,36 +2351,23 @@ enum ClipTool {
     },
 }
 
-/// The half-space `id` is, read through its instances, with their
-/// placements composed; `None` when it is none.
-fn clip_tool(graph: &GeometryGraph, mut id: NodeId) -> Option<(ClipTool, Transform3)> {
-    let mut placement = Transform3::IDENTITY;
-    // The graph is topologically ordered, so the chain ends; the bound
-    // only makes that visible.
-    for _ in 0..=graph.len() {
-        match graph.get(id)? {
-            GeometryNode::Instance(instance) => {
-                placement *= instance.transform;
-                id = instance.source;
-            }
-            GeometryNode::HalfSpace(half_space) => {
-                return Some((ClipTool::Unbounded(*half_space), placement))
-            }
-            GeometryNode::SolidOperation(operation) => {
-                let (half_space, boundary, frame, prism_axis) =
-                    crate::half_space_boundary::bounded(operation)?;
-                let tool = ClipTool::Bounded {
-                    half_space,
-                    boundary,
-                    placement: frame,
-                    prism_axis,
-                };
-                return Some((tool, placement));
-            }
-            _ => return None,
+/// The half-space `id` is, bounded or not; `None` when it is none. The
+/// instances above one are the region's to read ([`collect_leaves`]).
+fn clip_tool(graph: &GeometryGraph, id: NodeId) -> Option<ClipTool> {
+    match graph.get(id)? {
+        GeometryNode::HalfSpace(half_space) => Some(ClipTool::Unbounded(*half_space)),
+        GeometryNode::SolidOperation(operation) => {
+            let (half_space, boundary, frame, prism_axis) =
+                crate::half_space_boundary::bounded(operation)?;
+            Some(ClipTool::Bounded {
+                half_space,
+                boundary,
+                placement: frame,
+                prism_axis,
+            })
         }
+        _ => None,
     }
-    None
 }
 
 /// Which capability a node family would need.

@@ -639,3 +639,48 @@ fn the_mesh_compiler_refuses_a_region_with_no_solid_to_clip_by_name() {
     let united = g.boolean(wall, region, BooleanOperator::Union);
     refused(g, united, alone_text);
 }
+
+/// `Instance(wall, q) - (Instance(H1, q) & Instance({y <= 0.15}, q))` and
+/// the same cut in the wall's own frame, `Instance(wall - (H1 & {y <= 0.15}), q)`.
+/// The second plane lies on the wall's face, so the stand-in's face and the
+/// wall's are a rounding residue apart once turned (#400, #326).
+fn turned_pair(angle: f64) -> (Graph, NodeId, NodeId) {
+    let q = Transform3::from_translation(Vec3::new(13.475, -15.95, 4.3))
+        * Transform3::from_rotation_z(angle);
+    let mut g = Graph::new();
+    let wall = g.local_wall();
+    let h1 = g.local_side(Point3::new(0.0, 0.0, 2.0), h1_normal());
+    let face = g.local_side(Point3::new(0.0, 0.15, 0.0), -Vec3::Y);
+    let local_region = g.meet(h1, face);
+    let local_cut = g.minus(wall, local_region);
+    let whole = g.instance(local_cut, q);
+
+    let placed_wall = g.instance(wall, q);
+    let placed_h1 = g.instance(h1, q);
+    let placed_face = g.instance(face, q);
+    let region = g.meet(placed_h1, placed_face);
+    let world = g.minus(placed_wall, region);
+    (g, world, whole)
+}
+
+#[test]
+fn a_region_is_cut_in_the_subjects_frame() {
+    for angle in [0.3, 0.6, 1.1, std::f64::consts::FRAC_PI_4, 2.5] {
+        let (g, world, whole) = turned_pair(angle);
+        let graph = g.finish(vec![world, whole]);
+        let (placed, report) = compiler()
+            .compile_mesh_with_deviation(&graph, world, &options())
+            .unwrap_or_else(|error| panic!("{angle}: {error:?}"));
+        let detail = report.contributions[0].detail;
+        assert!(detail.starts_with("measured against"), "{angle}: {detail}");
+        let measured = mesh_volume(&placed.mesh);
+        assert!((measured - 3.6).abs() <= 1e-7 * 3.6, "{angle}: {measured}");
+        let in_frame = compiler()
+            .compile_mesh(&graph, whole, &options())
+            .unwrap_or_else(|error| panic!("{angle}: {error:?}"));
+        assert_eq!(
+            placed.mesh, in_frame,
+            "{angle}: cut in the wall's own frame"
+        );
+    }
+}
