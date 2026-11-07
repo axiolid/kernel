@@ -28,8 +28,8 @@ Equivalent mutants, deliberately not listed:
 - the order of the halving limits over the supports: the bound is a
   minimum over all of them.
 - the box of a part in `Along::merged` with its corners on one side of the
-  part only: proposals are a choice only, the spanned vertices lie on one
-  side of their chord, and `excess` checks every chord it is given.
+  part only: proposals are a choice only; `excess` and the proof check
+  every chord.
 """
 import probe_lib
 
@@ -147,6 +147,9 @@ MUTANTS = [
     ('a piece without a bound left out', F,
      '            pieces = pieces\n                .zip(notch_bound(&polygon[from..=to], t).0)\n                .map(|(m, e)| m.max(e));',
      '            pieces = pieces.map(|m| {\n                notch_bound(&polygon[from..=to], t).0.map_or(m, |e| m.max(e))\n            });', BOTH),
+    ('a notch bounded by its whole alone', F,
+     '        (w, p) => w.or(p),',
+     '        (w, p) => w,', UNIT),
     ('a notch cut at every spanned vertex', F,
      '        .filter(|&i| cover::on_segment(a, b, polygon[i]))\n        .chain([last])',
      '        .filter(|&i| i > 0)\n        .chain([last])', BOTH),

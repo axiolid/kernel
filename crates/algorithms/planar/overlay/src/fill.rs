@@ -32,7 +32,7 @@
 //! - every spanned vertex lies within `t` of the chord's line, `t` a lower
 //!   bound on the radius of a disc about the origin holding `P`, or the
 //!   notch, or each of its pieces between the spanned vertices exactly on
-//!   the chord, lies in its slab (below; needles, #428);
+//!   the chord, lies within `t` or in its slab (below; needles, #428);
 //! - its excess `e`, below, is within the caller's budget.
 //!
 //! Two chords used never meet but at a vertex both end at. A chord of
@@ -79,8 +79,8 @@
 //! e_W = sqrt(t^2 + g^2 / 4) - t = (g^2 / 4) / (sqrt(t^2 + g^2 / 4) + t)
 //! ```
 //!
-//! is an excess whatever the depth (`fill` only proposes notches within
-//! `t`, so for it the bound competes with the others). Proof: let
+//! is an excess whatever the depth (a notch within `t` has the other
+//! bounds too, so for it this one competes with them). Proof: let
 //! `|x - n| <= t` with `n` in `N`, and `L` the line through `n` parallel to the chord. The part of
 //! `L` in `N` through `n` is a segment `p q` of length at most `g`, the
 //! width of the slab. Its ends lie on the boundary of `N`; unless `L` is
@@ -97,8 +97,10 @@
 //! (each vertex projects at least `slack` inside the chord's ends), and
 //! `g` is the chord's length plus the slack. `e_W` joins the minimum above;
 //! for a notch deeper than `t` the minimum is that of `e_W` and `H`, the
-//! only bounds it has, and an overhanging vertex, beyond a chord's end,
-//! with a deep notch is refused. A needle deeper than `t` is reached by
+//! only bounds it has. An overhanging vertex, beyond a chord's end, with a
+//! deep piece, or a deep notch with no vertex exactly on its chord to cut
+//! at, is refused; an overhang in a shallow piece is bounded by that
+//! piece's own bounds. A needle deeper than `t` is reached by
 //! the proposals below, and bounded as a notch of pieces.
 //!
 //! Along a toothed wall the tips lie on the chord, so `e` is about the
@@ -803,6 +805,28 @@ mod tests {
             (4e-4, 0.0),
         ]);
         assert_eq!(excess(&leaning, t), (None, true));
+    }
+
+    #[test]
+    fn an_overhang_in_a_shallow_piece_is_bounded_by_its_pieces() {
+        // The first vertex overhangs the chord's start, but only in the
+        // shallow piece up to the vertex on the chord; the second piece is
+        // a needle in its slab. The whole notch has no bound, the pieces
+        // do: the widest, the needle's.
+        let t = 0.2_f64;
+        let wall = points(&[
+            (0.0, 0.0),
+            (-1e-5, 0.01),
+            (1e-4, 0.0),
+            (2e-4, 0.5),
+            (3e-4, 0.0),
+        ]);
+        assert_eq!(notch_bound(&wall, t), (None, true));
+        let (e, deep) = excess(&wall, t);
+        assert!(deep);
+        let want = 1e-8 / ((t * t + 1e-8).sqrt() + t);
+        let e = e.unwrap();
+        assert!((want..want * (1.0 + 1e-9)).contains(&e), "{e} {want}");
     }
 
     #[test]
