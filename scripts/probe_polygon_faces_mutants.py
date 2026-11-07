@@ -208,7 +208,7 @@ MUTANTS = [
      "                    | (DeviationPath::BRepFace, WARPED_BREP_FACE)\n",
      "", W),
     ("mesh tool refused (#266)", EB,
-     "        let tool = self.compile(right)?;\n",
+     "        let tool = self.body(right)?;\n",
      "        let mut at = right;\n"
      "        while let Some(GeometryNode::Instance(i)) = self.graph.get(at) {\n"
      "            at = i.source;\n"
@@ -216,7 +216,7 @@ MUTANTS = [
      "        if matches!(self.graph.get(at), Some(GeometryNode::PolygonMesh(_) | GeometryNode::TriMesh(_) | GeometryNode::BRep(_))) {\n"
      "            return Err(unsupported(\"exact boolean tool that is not a placed extrusion\"));\n"
      "        }\n"
-     "        let tool = self.compile(right)?;\n", W),
+     "        let tool = self.body(right)?;\n", W),
     ("meshes placed outside the report (#266)", E,
      "                if self.flatten =>\n            {\n                let (body, width)",
      "                if true =>\n            {\n                let (body, width)", W),

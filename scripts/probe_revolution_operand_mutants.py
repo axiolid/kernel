@@ -23,8 +23,8 @@ S = "crates/execution/compile/src/certify.rs"
 PLACED = ["-p", "axiolid-mesh-compile", "--test", "exact_placed_boolean"]
 MEASURED = ["-p", "axiolid-mesh-compile", "--test", "boolean_deviation"]
 
-SUBJECT = "        let subject = self.compile(left)?;\n"
-TOOL = "        let tool = self.compile(right)?;\n"
+SUBJECT = "        let subject = self.body(left)?;\n"
+TOOL = "        let tool = self.body(right)?;\n"
 
 
 def refuse(operand, kinds):

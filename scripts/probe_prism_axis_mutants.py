@@ -110,11 +110,11 @@ MUTANTS = [
        "            Some((footprint, frame, _)) => Some((footprint, frame)),")],
      [AXIS]),
     ("the plane's side is not cut from the prism", C,
-     "            Ok((side, _)) => side,",
-     "            Ok(_) => {\n"
+     "            Cover::Cuts(side, _) => side,",
+     "            Cover::Cuts(..) => {\n"
      "                return long\n"
      "                    .transformed(placement)\n"
-     "                    .map(|solid| Ok((solid, None)))\n"
+     "                    .map(|solid| Cover::Cuts(Box::new(solid), None))\n"
      "                    .map_err(transform_error)\n"
      "            }", [AXIS]),
     ("the axis is not turned across the boundary's plane", C,

@@ -104,8 +104,10 @@
 //! tolerance of the plane or whose placement is degenerate, a scaled or
 //! sheared placement above the half-space, an envelope with an edge family
 //! it cannot bound, and every refusal of the general boolean. An emptied
-//! subject is `GeomError::Degenerate`. The model's half-space carries a
-//! plane, so a curved base surface cannot reach this path.
+//! subject is an empty body (#326), which the booleans above it absorb
+//! (`crate::empty`); as the root it is `GeomError::Degenerate`. The model's
+//! half-space carries a plane, so a curved base surface cannot reach this
+//! path.
 
 use axiolid_brep::{ExactBRep, TransformError};
 use axiolid_brep_boolean::{boolean_with_report, BooleanError, BooleanReport};
@@ -121,7 +123,7 @@ use axiolid_primitive::HalfSpace;
 use axiolid_profile::{Contour, ContourProfile, Profile, ProfileSegment, RectangleProfile};
 
 use super::boolean::remap_boolean_error;
-use super::{remap_construction_error, unsupported, ExactCompilation};
+use super::{remap_construction_error, unsupported, Body, ExactCompilation};
 use crate::half_space_boundary::PrismAxis;
 
 /// A boolean tool that is a half-space, read through its placements.
@@ -156,13 +158,20 @@ enum Footprint {
     Profile(Profile),
 }
 
-/// What the envelope alone decides.
-enum Decided {
-    /// The subject, unchanged.
-    Subject,
-    /// Nothing is left.
-    Empty,
+/// What a half-space does to a subject's envelope.
+enum Cover {
+    /// The envelope lies wholly off the half-space.
+    Misses,
+    /// The half-space holds the whole envelope.
+    Holds,
+    /// The finite prism standing in for the half-space over the envelope,
+    /// with what building it read within tolerance, when that took a
+    /// boolean.
+    Cuts(Box<ExactBRep>, Option<BooleanReport>),
 }
+
+/// Why a clip leaves nothing.
+const CLIP_EMPTIED: &str = "exact half-space clip leaves nothing of the subject";
 
 /// A sound axis-aligned box.
 #[derive(Debug, Clone, Copy)]
@@ -263,7 +272,7 @@ impl ExactCompilation<'_> {
         left: NodeId,
         tool: ClipTool,
         operator: BooleanOperator,
-    ) -> GeomResult<ExactBRep> {
+    ) -> GeomResult<Body> {
         if operator == BooleanOperator::Union {
             return Err(unsupported(
                 "exact union with a half-space, which is unbounded",
@@ -272,35 +281,26 @@ impl ExactCompilation<'_> {
         if self.clip_tool(left)?.is_some() {
             return Err(unsupported("exact boolean whose subject is a half-space"));
         }
-        let subject = self.compile(left)?;
+        // Nothing clipped is still nothing.
+        let subject = match self.body(left)? {
+            Body::Solid(subject) => subject,
+            empty @ Body::Empty(_) => return Ok(empty),
+        };
         let envelope = self.envelope(left)?;
         let tolerance = self.options.tolerance();
-        let (half_space, footprint) = match tool.clip {
-            Clip::Unbounded(half_space) => (half_space, None),
-            Clip::Bounded {
-                half_space,
-                boundary,
-                frame,
-                axis,
-            } => (half_space, Some((self.boundary(boundary)?, frame, axis))),
+        let keeps = operator == BooleanOperator::Intersection;
+        let (solid, tool_report) = match self.leaf_cover(&tool, envelope)? {
+            Cover::Misses if keeps => return Ok(Body::Empty(CLIP_EMPTIED)),
+            Cover::Misses => return Ok(Body::Solid(subject)),
+            Cover::Holds if keeps => return Ok(Body::Solid(subject)),
+            Cover::Holds => return Ok(Body::Empty(CLIP_EMPTIED)),
+            Cover::Cuts(solid, report) => (solid, report),
         };
-        let (solid, tool_report) = match self.clip_solid(
-            &half_space,
-            footprint.as_ref(),
-            &tool.placement,
-            envelope,
-            operator,
-        )? {
-            Ok(solid) => solid,
-            Err(Decided::Subject) => return Ok(subject),
-            Err(Decided::Empty) => return Err(emptied()),
+        let (body, report) = match boolean_with_report(&subject, &solid, operator, tolerance) {
+            Ok(done) => done,
+            Err(BooleanError::EmptyResult) => return Ok(Body::Empty(CLIP_EMPTIED)),
+            Err(error) => return Err(remap_boolean_error(error)),
         };
-        let (body, report) = boolean_with_report(&subject, &solid, operator, tolerance).map_err(
-            |error| match error {
-                BooleanError::EmptyResult => emptied(),
-                error => remap_boolean_error(error),
-            },
-        )?;
         // What it read within tolerance, for the compiler's report (#236),
         // building the tool included.
         let report = match tool_report {
@@ -308,7 +308,25 @@ impl ExactCompilation<'_> {
             None => report,
         };
         self.boolean_report = Some(report);
-        Ok(body)
+        Ok(Body::new(body))
+    }
+
+    /// What the half-space `tool` does to `envelope`: the finite prism
+    /// standing in for it, unless the envelope decides alone.
+    fn leaf_cover(&self, tool: &ClipTool, envelope: Envelope) -> GeomResult<Cover> {
+        let (half_space, footprint) = match &tool.clip {
+            Clip::Unbounded(half_space) => (*half_space, None),
+            Clip::Bounded {
+                half_space,
+                boundary,
+                frame,
+                axis,
+            } => (
+                *half_space,
+                Some((self.boundary(*boundary)?, *frame, *axis)),
+            ),
+        };
+        self.clip_solid(&half_space, footprint.as_ref(), &tool.placement, envelope)
     }
 
     /// The finite prism standing in for the half-space over `envelope`, or
@@ -320,8 +338,7 @@ impl ExactCompilation<'_> {
         footprint: Option<&(Footprint, Transform3, PrismAxis)>,
         placement: &Transform3,
         envelope: Envelope,
-        operator: BooleanOperator,
-    ) -> GeomResult<Result<(ExactBRep, Option<BooleanReport>), Decided>> {
+    ) -> GeomResult<Cover> {
         let tolerance = self.options.tolerance();
         let origin = half_space.boundary.origin;
         let normal = half_space.boundary.normal.normalize_or_zero();
@@ -351,22 +368,11 @@ impl ExactCompilation<'_> {
                 (near.min(distance), far.max(distance))
             },
         );
-        let keeps = operator == BooleanOperator::Intersection;
         if far < 0.0 {
-            // The subject lies wholly off the half-space.
-            return Ok(Err(if keeps {
-                Decided::Empty
-            } else {
-                Decided::Subject
-            }));
+            return Ok(Cover::Misses);
         }
         if footprint.is_none() && near > 0.0 {
-            // The subject lies wholly in the half-space.
-            return Ok(Err(if keeps {
-                Decided::Subject
-            } else {
-                Decided::Empty
-            }));
+            return Ok(Cover::Holds);
         }
         let margin = 0.25 * (envelope.hi - envelope.lo).length() + 4.0 * tolerance.linear();
         let footprint = match footprint {
@@ -376,7 +382,6 @@ impl ExactCompilation<'_> {
                     (footprint, *frame),
                     placement,
                     envelope.mapped(&inverse),
-                    operator,
                 );
             }
             Some((footprint, frame, PrismAxis::PlaneNormal)) => Some((footprint, frame)),
@@ -501,7 +506,7 @@ impl ExactCompilation<'_> {
         };
         prism
             .transformed(&(*placement * turned))
-            .map(|solid| Ok((solid, None)))
+            .map(|solid| Cover::Cuts(Box::new(solid), None))
             .map_err(transform_error)
     }
 
@@ -529,8 +534,7 @@ impl ExactCompilation<'_> {
         (footprint, frame): (&Footprint, Transform3),
         placement: &Transform3,
         local: Envelope,
-        operator: BooleanOperator,
-    ) -> GeomResult<Result<(ExactBRep, Option<BooleanReport>), Decided>> {
+    ) -> GeomResult<Cover> {
         let tolerance = self.options.tolerance();
         let prism = BoundaryPrism::along_placement_z(frame, tolerance)?;
         prism.crossing(half_space.boundary, tolerance)?;
@@ -591,31 +595,25 @@ impl ExactCompilation<'_> {
             .map_err(transform_error)?;
         // The side of the plane over the same envelope, unless it holds the
         // envelope whole.
-        let side =
-            match self.clip_solid(half_space, None, &Transform3::IDENTITY, local, operator)? {
-                Ok((side, _)) => side,
-                Err(_) => {
-                    return long
-                        .transformed(placement)
-                        .map(|solid| Ok((solid, None)))
-                        .map_err(transform_error)
-                }
-            };
+        let side = match self.clip_solid(half_space, None, &Transform3::IDENTITY, local)? {
+            Cover::Cuts(side, _) => side,
+            Cover::Holds => {
+                return long
+                    .transformed(placement)
+                    .map(|solid| Cover::Cuts(Box::new(solid), None))
+                    .map_err(transform_error)
+            }
+            miss @ Cover::Misses => return Ok(miss),
+        };
         let (tool, report) =
             match boolean_with_report(&long, &side, BooleanOperator::Intersection, tolerance) {
                 Ok(tool) => tool,
                 // The prism misses the plane's side over the envelope.
-                Err(BooleanError::EmptyResult) => {
-                    return Ok(Err(if operator == BooleanOperator::Intersection {
-                        Decided::Empty
-                    } else {
-                        Decided::Subject
-                    }))
-                }
+                Err(BooleanError::EmptyResult) => return Ok(Cover::Misses),
                 Err(error) => return Err(remap_boolean_error(error)),
             };
         tool.transformed(placement)
-            .map(|solid| Ok((solid, Some(report))))
+            .map(|solid| Cover::Cuts(Box::new(solid), Some(report)))
             .map_err(transform_error)
     }
 
@@ -788,8 +786,4 @@ fn is_identity(map: &Transform2) -> bool {
     let floor = 8.0 * Scalar::EPSILON;
     (map.matrix2.x_axis - Vec2::X).abs().max_element() <= floor
         && (map.matrix2.y_axis - Vec2::Y).abs().max_element() <= floor
-}
-
-fn emptied() -> GeomError {
-    GeomError::Degenerate("exact half-space clip leaves nothing of the subject".to_owned())
 }

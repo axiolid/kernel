@@ -1,7 +1,18 @@
 //! Reference graph-to-exact-B-rep compiler.
 //!
 //! Exact and mesh compilation are separate result domains. One exact batch owns
-//! a `NodeId -> ExactBRep` memo table; a discrete value cannot enter that cache.
+//! a `NodeId -> Body` memo table, a `Body` being an `ExactBRep` or an empty
+//! result; a discrete value cannot enter that cache.
+//!
+//! # Empty results (#326)
+//!
+//! A clip or a boolean can leave nothing, and an `ExactBRep` cannot be
+//! empty. The compiler therefore holds such a node as `Body::Empty`, with
+//! the reason, and the booleans above it absorb it by the identities of
+//! `crate::empty` (`S - 0 = S`, `0 - T = 0`, `S & 0 = 0`, `S | 0 = S`); an
+//! instance of nothing is nothing. Only an empty root is refused, with
+//! `GeomError::Degenerate` giving the reason, for a value no consumer has
+//! asked for in place of the refusal.
 //!
 //! It never falls back to mesh compilation. Extrusions (either way along
 //! the profile normal, #275), revolutions,
@@ -108,7 +119,9 @@ impl ReferenceExactCompiler {
     /// as the exact polyhedra of their triangle meshes, and a union or
     /// intersection is taken when an operand is such a mesh. Also returns
     /// the largest slab width any flattened operand beneath `root` was
-    /// moved by (zero when none was warped). The public compiler keeps
+    /// moved by (zero when none was warped); the body is `None` when the
+    /// graph is empty, which an exact B-rep cannot be (#326). The public
+    /// compiler keeps
     /// refusing meshes: their triangles are one reading of a warped face,
     /// not its exact surface.
     pub(crate) fn compile_flattened_with_report(
@@ -116,10 +129,13 @@ impl ReferenceExactCompiler {
         graph: &GeometryGraph,
         root: NodeId,
         options: &ExecutionOptions,
-    ) -> GeomResult<(ExactBRep, BooleanReport, Scalar)> {
+    ) -> GeomResult<(Option<ExactBRep>, BooleanReport, Scalar)> {
         let mut compilation = ExactCompilation::new(graph, options);
         compilation.flatten = true;
-        let body = compilation.compile(root)?;
+        let body = match compilation.body(root)? {
+            Body::Solid(solid) => Some(*solid),
+            Body::Empty(_) => None,
+        };
         Ok((
             body,
             compilation.report_of(root),
@@ -181,10 +197,38 @@ impl ExactCompiler for ReferenceExactCompiler {
     }
 }
 
+/// What a node compiles to: a solid, or nothing (#326). An exact B-rep
+/// cannot be empty, so an empty node is held here, absorbed by the
+/// identities of `crate::empty`, and refused only as a root.
+#[derive(Debug, Clone)]
+enum Body {
+    Solid(Box<ExactBRep>),
+    /// Why nothing is left.
+    Empty(&'static str),
+}
+
+impl Body {
+    fn new(solid: ExactBRep) -> Self {
+        Self::Solid(Box::new(solid))
+    }
+
+    /// The solid, or the emptiness as a refusal.
+    fn solid(self) -> GeomResult<ExactBRep> {
+        match self {
+            Self::Solid(solid) => Ok(*solid),
+            Self::Empty(why) => Err(GeomError::Degenerate(why.to_owned())),
+        }
+    }
+
+    fn is_empty(&self) -> bool {
+        matches!(self, Self::Empty(_))
+    }
+}
+
 struct ExactCompilation<'a> {
     graph: &'a GeometryGraph,
     options: &'a ExecutionOptions,
-    cache: HashMap<NodeId, ExactBRep>,
+    cache: HashMap<NodeId, Body>,
     active: HashSet<NodeId>,
     cache_hits: usize,
     evaluated_nodes: usize,
@@ -283,6 +327,10 @@ impl<'a> ExactCompilation<'a> {
     }
 
     fn compile(&mut self, root: NodeId) -> GeomResult<ExactBRep> {
+        self.body(root)?.solid()
+    }
+
+    fn body(&mut self, root: NodeId) -> GeomResult<Body> {
         if let Some(cached) = self.cache.get(&root) {
             self.cache_hits += 1;
             return Ok(cached.clone());
@@ -294,14 +342,14 @@ impl<'a> ExactCompilation<'a> {
         }
 
         self.evaluated_nodes += 1;
-        let result = self.compile_uncached(root);
+        let result = self.body_uncached(root);
         self.active.remove(&root);
         let exact = result?;
         self.cache.insert(root, exact.clone());
         Ok(exact)
     }
 
-    fn compile_uncached(&mut self, root: NodeId) -> GeomResult<ExactBRep> {
+    fn body_uncached(&mut self, root: NodeId) -> GeomResult<Body> {
         let node = self.graph.get(root).ok_or_else(|| {
             GeomError::InvalidInput(format!("node {root:?} does not belong to this graph"))
         })?;
@@ -321,6 +369,7 @@ impl<'a> ExactCompilation<'a> {
                     return Err(unsupported("extrusion profile reference"));
                 };
                 extrude_profile_exact(profile, *direction, *depth, self.options.tolerance())
+                    .map(Body::new)
                     .map_err(remap_construction_error)
             }
             GeometryNode::SolidOperation(SolidOperation::Revolution {
@@ -344,15 +393,21 @@ impl<'a> ExactCompilation<'a> {
                     *angle,
                     self.options.tolerance(),
                 )
+                .map(Body::new)
                 .map_err(remap_construction_error)
             }
             GeometryNode::Instance(instance) => {
                 let instance = *instance;
-                let source = self.compile(instance.source)?;
+                let source = self.body(instance.source)?;
                 self.set_report(root, self.report_of(instance.source));
                 self.set_flattened(root, self.flattened_of(instance.source));
+                // Nothing placed is still nothing.
+                let Body::Solid(source) = source else {
+                    return Ok(source);
+                };
                 source
                     .transformed(&instance.transform)
+                    .map(Body::new)
                     .map_err(|error| match error {
                         TransformError::NotRigid => {
                             unsupported("exact instance under a scaled or sheared transform")
@@ -373,11 +428,15 @@ impl<'a> ExactCompilation<'a> {
                          not a line, so its distance is read by an estimate",
                     ));
                 }
-                let source = self.compile(source_id)?;
+                let source = self.body(source_id)?;
                 self.set_report(root, self.report_of(source_id));
                 self.set_flattened(root, self.flattened_of(source_id));
+                let Body::Solid(source) = source else {
+                    return Ok(source);
+                };
                 source
                     .transformed(&placement.transform)
+                    .map(Body::new)
                     .map_err(|error| match error {
                         TransformError::Unsupported(what) => unsupported(what),
                         other => GeomError::InvalidInput(format!("instance at a station: {other}")),
@@ -407,6 +466,7 @@ impl<'a> ExactCompilation<'a> {
                         swept_disk_along_arc_exact(&circle, span, *radius, *inner_radius, tolerance)
                     }
                 }
+                .map(Body::new)
                 .map_err(remap_construction_error)
             }
             GeometryNode::SolidOperation(SolidOperation::Boolean {
@@ -433,7 +493,7 @@ impl<'a> ExactCompilation<'a> {
             {
                 let (body, width) = self.flattened_mesh(node)?;
                 self.set_flattened(root, width);
-                Ok(body)
+                Ok(Body::new(body))
             }
             // A constant section along a line or a horizontal circle, and a
             // linear taper along a line, have closed forms (#247).
@@ -451,6 +511,7 @@ impl<'a> ExactCompilation<'a> {
                     self.options,
                     unsupported,
                 )
+                .map(Body::new)
             }
             GeometryNode::SolidOperation(SolidOperation::SectionsAtStations {
                 directrix,
@@ -463,7 +524,8 @@ impl<'a> ExactCompilation<'a> {
                 *frame,
                 self.options,
                 unsupported,
-            ),
+            )
+            .map(Body::new),
             _ => Err(unsupported(exact_input_family(node))),
         }
     }

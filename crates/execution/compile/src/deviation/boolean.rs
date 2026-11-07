@@ -278,6 +278,14 @@ pub(crate) fn of_boolean(
                 )
             }
         };
+    // An empty exact result is not measured yet (#326).
+    let Some(exact) = exact else {
+        return Deviation::one(
+            DeviationPath::Boolean,
+            NO_EXACT,
+            DeviationBound::Unbounded(refusal(&GeomError::Degenerate(String::new()))),
+        );
+    };
     // A warped operand was flattened to its triangles (#266): the result
     // is the exact boolean of operands moved by up to `flattened`. No
     // decision within tolerance otherwise: the exact compiler's result is

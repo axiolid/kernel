@@ -37,7 +37,11 @@
 //! build exactly ([`BooleanError`]): `GeomError::UnsupportedInput` naming
 //! the case. A boolean that leaves
 //! nothing (a difference that removes the whole subject, disjoint
-//! operands' intersection) is `GeomError::Degenerate`. Nothing is meshed.
+//! operands' intersection) is an empty body (#326), decided against the
+//! other operand by the identities of `crate::empty` (`S - 0 = S`,
+//! `0 - T = 0`, `S & 0 = 0`, `S | 0 = S`; the symmetric difference's
+//! refusal comes after them); as the root it is `GeomError::Degenerate`.
+//! Nothing is meshed.
 //!
 //! # Mesh operands, for a boolean's report only (#266)
 //!
@@ -48,7 +52,6 @@
 //! tool. The rest of the dispatch, and every refusal above, is
 //! unchanged; the public compiler still refuses a mesh operand by name.
 
-use axiolid_brep::ExactBRep;
 use axiolid_brep_boolean::{boolean_with_report, BooleanError};
 use axiolid_construct::boolean_exact::{boolean_prisms_exact, Prism};
 use axiolid_contracts::{GeomError, GeomResult};
@@ -56,7 +59,8 @@ use axiolid_core::{BooleanOperator, Point2, Vec3};
 use axiolid_model::{GeometryNode, NodeId, SolidOperation};
 use axiolid_profile::Profile;
 
-use super::{remap_construction_error, unsupported, ExactCompilation};
+use super::{remap_construction_error, unsupported, Body, ExactCompilation};
+use crate::empty::{self, Identity};
 
 impl ExactCompilation<'_> {
     pub(super) fn compile_boolean(
@@ -64,32 +68,47 @@ impl ExactCompilation<'_> {
         left: NodeId,
         right: NodeId,
         operator: BooleanOperator,
-    ) -> GeomResult<ExactBRep> {
+    ) -> GeomResult<Body> {
         // A half-space tool is a clip (#234, `super::clip`).
         if let Some(tool) = self.clip_tool(right)? {
             return self.compile_clip(left, tool, operator);
         }
         if let (Some(subject), Some(tool)) = (self.bare_prism(left)?, self.bare_prism(right)?) {
             return boolean_prisms_exact(&subject, &tool, operator, self.options.tolerance())
+                .map(Body::new)
                 .map_err(remap_construction_error);
+        }
+        // Each operand is whatever the exact compiler compiles, read
+        // through its placements (#378): a refusal is the operand's own,
+        // named by its family. An empty one is decided by the identities
+        // (#326), the first empty operand's text carried, subject first.
+        let subject = self.body(left)?;
+        let tool = self.body(right)?;
+        if let (Body::Empty(why), _) | (_, Body::Empty(why)) = (&subject, &tool) {
+            let why = *why;
+            return match empty::identity(operator, subject.is_empty(), tool.is_empty()) {
+                Some(Identity::Subject) => Ok(subject),
+                Some(Identity::Tool) => Ok(tool),
+                Some(Identity::Empty) => Ok(Body::Empty(why)),
+                None => Err(unsupported(
+                    "exact boolean with an operator it does not know",
+                )),
+            };
         }
         if operator == BooleanOperator::SymmetricDifference {
             return Err(unsupported("exact symmetric difference of placed operands"));
         }
-        // Each operand is whatever the exact compiler compiles, read
-        // through its placements (#378): a refusal is the operand's own,
-        // named by its family.
-        let subject = self.compile(left)?;
-        let tool = self.compile(right)?;
+        let (Body::Solid(subject), Body::Solid(tool)) = (subject, tool) else {
+            return Err(unsupported("exact boolean of an empty operand"));
+        };
         let (body, report) =
-            boolean_with_report(&subject, &tool, operator, self.options.tolerance()).map_err(
-                |error| match error {
-                    BooleanError::EmptyResult => emptied(operator),
-                    error => remap_boolean_error(error),
-                },
-            )?;
+            match boolean_with_report(&subject, &tool, operator, self.options.tolerance()) {
+                Ok(done) => done,
+                Err(BooleanError::EmptyResult) => return Ok(Body::Empty(emptied(operator))),
+                Err(error) => return Err(remap_boolean_error(error)),
+            };
         self.boolean_report = Some(report);
-        Ok(body)
+        Ok(Body::new(body))
     }
 
     /// The operand as a prism, when it is a bare sharp filled rectangle
@@ -139,19 +158,14 @@ impl ExactCompilation<'_> {
 
 /// A union, intersection or difference that leaves nothing: only the
 /// difference removes "the subject".
-fn emptied(operator: BooleanOperator) -> GeomError {
-    GeomError::Degenerate(
-        match operator {
-            BooleanOperator::Difference => "exact boolean difference removes the whole subject",
-            BooleanOperator::Intersection => "exact boolean intersection leaves nothing",
-            BooleanOperator::Union => "exact boolean union leaves nothing",
-            BooleanOperator::SymmetricDifference => {
-                "exact boolean symmetric difference leaves nothing"
-            }
-            _ => "exact boolean leaves nothing",
-        }
-        .to_owned(),
-    )
+fn emptied(operator: BooleanOperator) -> &'static str {
+    match operator {
+        BooleanOperator::Difference => "exact boolean difference removes the whole subject",
+        BooleanOperator::Intersection => "exact boolean intersection leaves nothing",
+        BooleanOperator::Union => "exact boolean union leaves nothing",
+        BooleanOperator::SymmetricDifference => "exact boolean symmetric difference leaves nothing",
+        _ => "exact boolean leaves nothing",
+    }
 }
 
 /// A general-boolean refusal, named for the compiler's caller.

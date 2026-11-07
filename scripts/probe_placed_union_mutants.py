@@ -22,8 +22,8 @@ PLACED = ["-p", "axiolid-mesh-compile", "--test", "exact_placed_boolean"]
 MEASURED = ["-p", "axiolid-mesh-compile", "--test", "boolean_deviation"]
 
 REFUSE = (
-    "        let subject = self.compile(left)?;\n",
-    "        let subject = self.compile(left)?;\n"
+    "        let subject = self.body(left)?;\n",
+    "        let subject = self.body(left)?;\n"
     "        if operator == BooleanOperator::{op} {{\n"
     "            return Err(unsupported(\n"
     '                "exact union or intersection of placed operands",\n'
@@ -51,8 +51,8 @@ MUTANTS = [
      "        if false && operator == BooleanOperator::SymmetricDifference {",
      [PLACED]),
     ("an emptied result named for a difference whatever the operator", C,
-     "BooleanError::EmptyResult => emptied(operator),",
-     "BooleanError::EmptyResult => emptied(BooleanOperator::Difference),",
+     "Err(BooleanError::EmptyResult) => return Ok(Body::Empty(emptied(operator))),",
+     "Err(BooleanError::EmptyResult) => return Ok(Body::Empty(emptied(BooleanOperator::Difference))),",
      [PLACED]),
 ]
 
