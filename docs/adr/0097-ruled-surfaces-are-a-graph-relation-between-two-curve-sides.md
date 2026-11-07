@@ -5,6 +5,7 @@
 - **Deciders:** Friedrich Schrödter
 - **Supersedes:** —
 - **Amends:** [0085](./0085-geometry-graph-wire-format.md) (format 1.5)
+- **Amended by:** [0103](./0103-b-rep-faces-on-swept-and-ruled-surface-relations.md) (a B-rep face on a ruled surface)
 
 ## Context
 
@@ -105,9 +106,9 @@ bound. Caps: 4096 cells per direction, 2^20 in all, `BudgetExceeded`.
 **Follow-ups / risks to watch**
 
 - Swept and revolved relations are still carried but refused by the
-  compilers.
-- A ruled surface as a B-rep face support is refused; a face on one needs
-  its own tessellation and a trim.
+  compilers as sheets; ADR 0103 reads them as a B-rep face's support.
+- A ruled surface as a B-rep face support is read by ADR 0103 when every
+  edge use carries a pcurve; it is refused otherwise.
 
 ## Relation to existing code
 

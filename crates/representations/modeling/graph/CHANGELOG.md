@@ -9,6 +9,14 @@ caret rule for `0.x` versions.
 
 ## [Unreleased]
 
+### Changed
+
+- `SurfaceRelation::Revolution` and `LinearExtrusion` document their
+  parameterisation: a revolution is `O + R_a(u) (c(v) - O)` with `u` the
+  right-handed angle about the normalised axis and `v` the swept curve's own
+  parameter, an extrusion is `c(u) + v d` with `v` in units of the
+  direction's length (#411, ADR 0103).
+
 ## [0.3.18] - 2026-11-03
 
 ### Added
