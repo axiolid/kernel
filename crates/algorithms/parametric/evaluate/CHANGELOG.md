@@ -9,21 +9,6 @@ caret rule for `0.x` versions.
 
 ## [Unreleased]
 
-### Added
-
-- `bound::chord_bound2` bounds `Curve2::QuadraticGraph` and
-  `Curve2::AngleGraph` pcurves (#414), which it left unbounded. The root
-  `w(t)` of `F(t, w) = 0` has `w'' = -(F_tt + 2 F_tw w' + F_ww w'^2) / F_w`;
-  interval enclosures of `F`'s partials (outward-rounded, from enclosed
-  trigonometric coefficients) over the span by a certified height range
-  bound it, on pieces of the span, and `None` is returned where the root
-  may be undefined on the span or `F_w` is not bounded away from zero (a
-  branch end nearby). Each computed end carries a certified root (a sign
-  change of `F` in outward-rounded intervals), and an angle graph whose
-  height box reaches the `+-pi` cut of `AngleGraph2::angle` is refused.
-  Lifted pcurves (`Curve2::Lifted`) and `Curve2::Intrinsic` stay unbounded
-  by `chord_bound2`; #414 remains open for them.
-
 ## [0.3.20] - 2026-11-03
 
 ### Added
@@ -56,6 +41,19 @@ caret rule for `0.x` versions.
 - `FrameLaw::with_placements_read_as_exact` (#408): bounds the frames of a
   piece placed inexactly as read, to decide what depends on them alone (a
   fold of the section planes); `error_at` stays `None` for such a piece.
+
+- `bound::chord_bound2` bounds `Curve2::QuadraticGraph` and
+  `Curve2::AngleGraph` pcurves (#414), which it left unbounded. The root
+  `w(t)` of `F(t, w) = 0` has `w'' = -(F_tt + 2 F_tw w' + F_ww w'^2) / F_w`;
+  interval enclosures of `F`'s partials (outward-rounded, from enclosed
+  trigonometric coefficients) over the span by a certified height range
+  bound it, on pieces of the span, and `None` is returned where the root
+  may be undefined on the span or `F_w` is not bounded away from zero (a
+  branch end nearby). Each computed end carries a certified root (a sign
+  change of `F` in outward-rounded intervals), and an angle graph whose
+  height box reaches the `+-pi` cut of `AngleGraph2::angle` is refused.
+  Lifted pcurves (`Curve2::Lifted`) and `Curve2::Intrinsic` stay unbounded
+  by `chord_bound2`; #414 remains open for them.
 
 ### Fixed
 
