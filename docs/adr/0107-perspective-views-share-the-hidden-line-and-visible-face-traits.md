@@ -80,6 +80,56 @@ implemented in later steps behind the same contract.
   adds the C ABI (`AXIOLID_PROJECTION_PERSPECTIVE = 2`). The capability
   ledger keeps "perspective" among the refusals until P4.
 
+## Amendment: perspective hidden lines (P3)
+
+`ScalarHiddenLines` and `ScanHiddenLines` draw perspective views and claim
+them through `supports_projection`. The visible-face providers still refuse.
+The exact method of the Decision is made concrete as follows.
+
+- **The vertex.** A perspective vertex keeps its exact view coordinates
+  `[U, V, W]` and the weight `h = -W`, so `[U, V, W, h]` is the point on the
+  plane `W = -1` the vertex projects to; the image is `U / h, V / h`, and the
+  endpoint of a piece is `(a·q - b·p) / (a·h_q - b·h_p)` rounded once, the
+  formula the orthographic path already uses with `h = 1`. `U, V, W` stay
+  affine in the edge parameter, so every constraint of the sign machinery
+  (`recipe`, `param`) is unchanged in kind. The enclosure of a vertex holds
+  the image coordinates `U / h`, `V / h` (the whole line when `h` is not
+  certainly positive) and `W`; a box over vertices that straddle the eye
+  plane is therefore unbounded in the image and the broad phase keeps it.
+- **The predicates.** All are evaluated on vectors from the eye, with no
+  division, so a triangle behind the eye needs no case. The side of an image
+  line is the determinant of the rows `(h, U, V)`. An eye ray through `P`
+  meets a triangle exactly when its three side determinants have the
+  triangle's sign, and then reaches its plane at `P / s`. "In front of `P`"
+  is `s > 1`, which is the sign of `det(t1 - t0, t2 - t0, P - t0)` against
+  the triangle's orientation, the orthographic plane determinant read in view
+  space. "Not past the near plane" is `near·s - W_P >= 0`, the determinant
+  with `near·P - W_P·t0` in place of `P - t0`. A crop bound `b` is
+  `b·h - U` or `U - b·h`. A depth bound compares `W` as before.
+- **Edge-on triangles.** A triangle whose plane contains the eye has image
+  orientation zero. Over an edge in the same plane through the eye, the
+  extent of a triangle edge `CD` is `(C × P)·(C × D) >= 0` and
+  `(P × D)·(C × D) >= 0`; the edge is in front when
+  `(P × (D - C))·(C × D) > |C × D|²` and not past the near plane when
+  `near·(P × (D - C))·(C × D) - |C × D|²·W_P >= 0`.
+- **The cap.** The point of the near plane on the eye ray through `P` is in
+  the solid exactly when an odd number of the solid's triangles are crossed
+  by the eye line on the eye's side of the plane. The provider counts the
+  other side instead, the triangles the ray meets between that point and
+  infinity away from the eye (strictly beyond the plane, `near·s - W_P > 0`),
+  which needs no triangle behind the eye and uses the same perturbed
+  image-side clips as the orthographic cap. The independent oracle counts
+  the eye line's own side, including behind the eye.
+- **Conformance.** The perspective suite draws five fixtures (a box in
+  front, the same box cut by the near plane, an eye inside a box, an exact
+  non-dyadic boundary, an edge along the eye ray) and requires the refusal
+  of a near depth that is missing, zero, positive or not finite. A provider
+  that claims hidden-line perspective and ignores the projection fails them.
+  The binary64 oracle of the provider tests casts rays from the eye.
+- **Compatibility.** Orthographic output is bit for bit unchanged: a
+  constraint carries a `perspective` flag and the orthographic arm of every
+  evaluation is the code it was.
+
 ## Alternatives considered
 
 | Option | Why not |
@@ -105,12 +155,13 @@ implemented in later steps behind the same contract.
 
 - Code that names `OrthographicView` gets a deprecation warning until it
   moves to `View`.
-- Until P3 a registered provider can only decline perspective.
+- Until P4 a registered visible-face provider can only decline perspective.
 
 **Follow-ups / risks to watch**
 
 - A provider that claims perspective must also decide the near-plane cap by
-  ray parity along the eye ray; its fixtures arrive with P3 and P4.
+  ray parity along the eye ray; the hidden-line fixtures arrived with P3, the
+  visible-face ones come with P4.
 - The C ABI (P5) needs its own enum value and a view struct field, and must
   keep the 0.4 call signatures.
 
@@ -123,5 +174,8 @@ implemented in later steps behind the same contract.
 - `crates/execution/dispatch`: `hidden_lines.rs`, `visible_faces.rs` (routing,
   `register_perspective_conformant`), `view_checks.rs` (`validate_view`).
 - `crates/algorithms/discrete/hidden-lines`: `view.rs`
-  (`require_orthographic`), `provider.rs`, `faces/provider.rs`.
-- `scripts/probe_perspective_routing_mutants.py`.
+  (`require_orthographic` for the face providers, `Vert::perspective`),
+  `recipe.rs` (the eye-ray reading of each constraint), `caps.rs`,
+  `occlusion.rs`, `provider.rs`, `faces/provider.rs`.
+- `scripts/probe_perspective_routing_mutants.py`,
+  `scripts/probe_perspective_lines_mutants.py`.
