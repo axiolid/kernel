@@ -7,6 +7,8 @@ arc-length evaluation of intrinsic (natural-equation) and elevated curves
 and of arc-length chains, arc length and its inverse on any curve,
 the section frames of banked curves, the derivatives and certified chord
 and derivative bounds of elevated and banked curves in plan distance,
+certified chord bounds of the pcurves a section is read through (graphs,
+implicit and intrinsic curves, lifted curves and pair sections, #414),
 stations (a section frame at a distance along a curve, or along pieces of
 curves laid end to end),
 and `ReferenceCurveEvaluator`, the reference implementation of the

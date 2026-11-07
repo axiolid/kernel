@@ -440,3 +440,87 @@ one root.
 - `crates/algorithms/parametric/nurbs/tests/pair_section.rs`: two sheets
   crossing (completeness against a dense scan), a closed loop inside one
   patch pair, and a spline curve crossing a spline surface.
+
+## Amendment 2026-11-07: certified chord bounds of lifted pcurves (#414)
+
+`bound::chord_bound2` bounded implicit pcurves (#249) and, with #414, the
+graphs of ADR 0076, but not the pcurve a B-spline section leaves on an
+analytic face (`Curve2::Lifted`), nor a section's pcurve on a B-spline
+(`PairSection3` read on one of its surfaces). The compilers refused those
+trims as unbounded. No boundary or dependency changes: everything is in
+`axiolid-evaluate`.
+
+- **One continuation.** A lifted pcurve is the solution of `S(p(t)) =
+  c(t)`. On a piece `[a, b]` of the span, with the evaluated ends `p_a`,
+  `p_b` and the box `P` of their hull widened by `rho`, a certified
+  separation `sigma` of the surface over `P` gives `|J w| >= sigma |D w|`
+  at every point of `P` and `|S(x) - S(y)| >= sigma |D (x - y)|` on it
+  (`D` scales the parameters by the columns' norms at the box's centre).
+  Then `|D p'| <= sup |c'| / sigma`, and differentiating twice `J p'' = c'' -
+  H[p', p']` bounds `|D p''|`. The lift of an exact end moves at most `|p'|
+  h / 2` to the middle of the piece; if that and the end's error are below
+  `rho`, the lifts from both ends stay in `P` and injectivity makes them
+  one, so the evaluated ends lie on one continuous branch. `rho` grows
+  until that holds, or the piece is refused. The chord of the pieces'
+  bounds is `min(h sup|p'| / 2, h^2 sup|p''| / 8)` over the best of the
+  splits into 1 to 64 equal pieces, the graph bounds' scheme.
+- **Separation by Weyl's inequality.** The separation is `sqrt(1 - |cos
+  theta|)` at the box's centre, `theta` the angle between the columns, less
+  the Frobenius norm of the columns' scaled spread over the box (the second
+  partials' suprema times the half widths) and a padded jet: the same for
+  every carrier, from `SurfaceBoundOracle::for_carrier` (closed forms for
+  planes, ruled surfaces, spheres and tori; the derivative nets of a
+  B-spline). It is `None` where it cannot be shown positive, so a pole, an
+  apex, a fold, a box too wide and a B-spline crease (`!smooth`) refuse.
+  The interval Gram matrix and the closed-form first fundamental form were
+  rejected: the first needs enclosures of every family, the second is not a
+  hull bound and cannot prove injectivity.
+- **Ends are certified, not assumed.** Each evaluated end is off its exact
+  lift by at most `|S(p_i) - c_i| / (sigma min(|S_u|, |S_v|))`, the residual
+  enclosed in outward-rounded arithmetic (closed forms for the analytic
+  carriers, the rational tensor sum of an interval basis for a B-spline),
+  and the larger of the two is added to the bound, because the chord joins
+  the evaluated ends. `chord_bound2`'s contract is now that: the chord of
+  what `evaluate2` returns. The space curve is read as the evaluator
+  computes it and lies on the carrier. For an intrinsic curve the same
+  contract adds the distance of each evaluated (quadrature) end from a
+  certified `IntrinsicPositionTable` point, with that point's error.
+- **The space curve's derivative bounds** are those of
+  `curve_derivative_bounds3`; for the sections of an analytic carrier they
+  come through the carrier from the plane curve `q(t)` read through the
+  surface (`|c'| <= S_u |q_u'| + S_v |q_v'|` and the second order
+  analogue): a graph's root (ADR 0076) or one cell of an implicit curve,
+  whose rate along its free parameter is constant and whose bridge cell is
+  a cubic bounded by its Bezier control values.
+- **Pair sections.** A pair section is the same continuation on `G(s, x)
+  = (S1(a) - S2(b), n . (S1(a) - P0) - s |d|)` in the four parameters of
+  both surfaces, over the product of two boxes. The smallest singular value
+  `mu` of the scaled matrix is `(1 - |I - R M'|) / |R| - |dM'|` (`R` an
+  approximate inverse at the centres, certified by the residual, `dM'` by
+  both surfaces' spreads, the first counted twice); `|y'| <= |d| / mu`, and
+  the end error is the 4D residual over `mu`. A side's pcurve is `y`
+  unscaled through its own smaller scale factor.
+- **Breaks.** The rate of an implicit section changes where one cell
+  joins the next, and a pair section's chord plane at each interior node,
+  so neither is `C^2` in its parameter there: `continuity_breaks3` names
+  them, a lifted pcurve inherits its space curve's, and a span across one
+  is refused as across a B-spline knot.
+- **Preconditions and refusals.** The boxes on a B-spline are clamped to
+  its knot domain, which the section lies in over the span (the assumption
+  of the face bound's lens); an evaluated end outside it is refused. A
+  guide that could change the turn of an angle inside a piece, a space
+  curve without derivative bounds (`Intrinsic3`, `Polyline3`, a pair section
+  read on a third surface) and a B-spline carrier outside a pair section
+  (which cannot be evaluated) return `None`.
+- **Tightness.** The pcurve's second derivative is the difference of `c''`
+  and the carrier's curvature along `p'`, nearly equal for a curve that
+  hugs the surface; the bound adds their magnitudes. It is within a few
+  times the sampled deviation on a flat carrier and sound but loose on a
+  curved one, most near an inflection. A tighter bound needs the tangential
+  parts of `c''` and of the carrier's curvature separately, which the
+  derivative suprema do not give.
+
+Not done here: the mesh compiler samples pcurve edges at uniform spans and
+ignores their breaks, so it still reports such trims unbounded (#436);
+`chord_bound3` and derivative bounds of the sections in space (#437); the
+chain bound's evaluated ends (#438).

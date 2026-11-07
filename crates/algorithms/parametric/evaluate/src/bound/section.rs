@@ -17,7 +17,8 @@
 //! B-spline carrier crossing a crease it is unknown (`second: None`), and
 //! the first-order bound stands alone. The box of a spline carrier is
 //! clamped to the knot domain, which holds the section by construction.
-//! Every other family has no bound here.
+//! Every other family has no bound here; `chord_bound3` and the derivative
+//! bounds of these sections in 3D are #437.
 
 use axiolid_core::Scalar;
 use axiolid_curve::{Carrier, Curve3};
