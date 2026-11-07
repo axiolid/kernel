@@ -971,7 +971,17 @@ exactly since #378; the gaps were the region as a tool and the empty operand.
   would drop the cavity and call the result exact. The exact compiler asks
   the same boolean at `Tolerance::ZERO`, which reads nothing: empty there too
   is empty, anything else is refused as `Degenerate`, as before empty
-  bodies. The envelope decisions (`far < 0`, `near > 0`) are exact and kept.
+  bodies. This holds for the operands of a boolean and for a clip's cut.
+  It does not hold for the stand-ins a region builds (the meeting of two
+  leaves, the prism along `z` and the plane's side): those are constructed
+  solids whose margin faces stay a margin from the subject, so a meeting read
+  within the tolerance there can be a touch at the margin, which a block
+  clipped by a strip starting `d = 1e-7` short of the margin has, and is no
+  cavity. For them the zero-tolerance result is taken as it is (empty is
+  `Misses`, a solid is the tool), exact and still under the margin argument;
+  only a refusal of that boolean is refused, by name, "only within the
+  tolerance". The envelope decisions (`far < 0`, `near > 0`) are exact and
+  kept.
   Carrying the session report on the error would be the alternative; it is
   a change to `axiolid-brep-boolean`'s public error and was not made here.
 - **Rejected.** Rewriting `S - R` to `S - (S & R)`: it works, but costs one
