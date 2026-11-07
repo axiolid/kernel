@@ -6,9 +6,14 @@ edge it bounds (`consistency.rs`, `BooleanError::VertexOffCurve`). Each
 mutant lets a window end replace a cut, loosens or removes one bound of the
 check (the cap by the caller's tolerance, the bound of a non-exact report,
 the NaN refusal), measures nothing on the edges or the pcurves, drops the
-check from `run` or from the recentred chain, or reads the retried tolerance
-as the caller's, and must turn a test red: the far corbel sweep, the
-sub-ulp refusal, the consistency unit tests or the report's.
+check from `run`, or reads the retried tolerance as the caller's, and must
+turn a test red: the far corbel sweep, the sub-ulp refusal, the consistency
+unit tests or the report's.
+
+Not probed: the check after the move back from a recentred cut
+(`consistency::check` after `recentre::restore`, defence in depth). It is
+observable only for an input whose recentred cut restores off its curves
+while the cut as given is fine; none is known.
 
 Each mutant runs in its own process group under a timeout that kills the
 whole group; the mutated file is always restored. A missing or ambiguous
@@ -50,9 +55,6 @@ MUTANTS = [
      '        let point = surface::evaluate(surface, uv.x, uv.y).map_err(|_| BooleanError::Evaluation)?;\n        worst = worst.max(distance(point, vertex)? * 0.0);', BOOLEAN),
     ('the check removed from the cut', L,
      '    consistency::check(&result, tolerance)?;\n',
-     '', BOOLEAN),
-    ('the check removed after the move back', L,
-     '            .and_then(|result| consistency::check(&result, tolerance).map(|()| result))\n',
      '', BOOLEAN),
     ('the caller tolerance read from the retried one', R,
      '.map(|s| s.caller))',

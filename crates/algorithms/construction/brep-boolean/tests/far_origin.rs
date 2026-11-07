@@ -454,3 +454,38 @@ fn a_tolerance_finer_than_far_coordinates_resolve_is_refused_by_name() {
     let health = geometric_audit(&brep, fine);
     assert!(health.is_consistent(), "{:?}", health.defects());
 }
+
+/// Stacked blocks in contact, far in `x` alone and at `Tolerance::ZERO`:
+/// cut as given, a point near the contact is "too close to a face boundary
+/// to classify" (#418). Recentred, the contact is decided exactly. The
+/// recentring probe relies on this case, since #445's window fix lets the
+/// far column and corbel sweeps sew without it.
+#[test]
+fn stacked_blocks_far_in_x_alone_are_decided_exactly_at_zero_tolerance() {
+    let (x, y, z) = (6e5, 0.0, 0.0);
+    let a = contour_block(x, y, x + 2.0, y + 2.0, z, 1.0);
+    let b = contour_block(x + 1.0, y + 1.0, x + 3.0, y + 3.0, z + 1.0, 1.0);
+    for (operator, want) in [
+        (BooleanOperator::Union, Some(8.0)),
+        (BooleanOperator::Difference, Some(4.0)),
+    ] {
+        for (first, second) in [(&a, &b), (&b, &a)] {
+            let what = format!("{operator:?}");
+            let got = match boolean_with_report(first, second, operator, Tolerance::ZERO) {
+                Ok((brep, report)) => {
+                    assert!(report.is_exact(), "{what}");
+                    Some(volume(&brep))
+                }
+                Err(BooleanError::EmptyResult) => None,
+                Err(error) => panic!("{what}: refused: {error}"),
+            };
+            match (got, want) {
+                (Some(got), Some(want)) => {
+                    assert!((got - want).abs() <= 1e-6, "{what}: volume {got}");
+                }
+                (None, None) => {}
+                (got, want) => panic!("{what}: {got:?}, expected {want:?}"),
+            }
+        }
+    }
+}
