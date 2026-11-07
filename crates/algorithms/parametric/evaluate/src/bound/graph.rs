@@ -11,15 +11,26 @@
 //!
 //! The suprema are taken over the box of the span by an interval `W` of
 //! heights, which must hold the graph. The ends give `[w(lo), w(hi)]`,
-//! widened by `rho` to `W`. If `F_w` has no zero on the box and `rho >
-//! L (hi - lo) / 2`, with `L` taken on that same box, the graph cannot
-//! leave `W`: from either end it moves at most `L` per unit of `t`, so
-//! it stays within `rho` of the nearer end up to the middle of the span.
+//! widened by `rho` to `W`. The computed ends are not exact, so a root is
+//! certified at each: `F` must change sign, in outward-rounded intervals,
+//! across `[w_end - d, w_end + d]`, which holds the true root (`F_w` has no
+//! zero on the box, so `F` is monotone in `w` there). If `F_w` has no zero
+//! on the box and `rho > d + L (hi - lo) / 2`, with `L` taken on that same
+//! box, the graph cannot leave `W`: from either end it moves at most `L` per
+//! unit of `t`, so it stays within `rho` of the nearer end up to the middle
+//! of the span. The largest `d` of the span's two ends is added to the bound
+//! (the chord joins the computed ends).
+//!
+//! An [`AngleGraph2`] is evaluated in `(-pi, pi]`: where its closed form
+//! crosses that cut the evaluated curve jumps by a turn, though the
+//! implicit solution does not. A piece whose box `W` reaches the cut (within
+//! a few ulps of it) is refused, so the closed form is continuous across a
+//! certified piece.
 //! Over the box the root is then unique (two roots would put a zero of
 //! `F_w` between them), so the implicit solution, which exists across the
 //! span for the same reason, is the branch the closed form names. `rho`
-//! starts at the ends' rounding and is grown until that holds, or the
-//! bound is refused (`None`).
+//! starts at `d` and is grown until that holds, or the bound is refused
+//! (`None`).
 //!
 //! Every enclosure is outward-rounded: each interval operation widens its
 //! result by one ulp each way, and the trigonometric ranges by a few.
@@ -210,6 +221,13 @@ trait Field {
     /// The closed-form `w(t)`.
     fn height(&self, t: Scalar) -> Option<Scalar>;
 
+    /// Whether `heights` reaches a cut of the closed form, across which it
+    /// jumps though the implicit solution does not.
+    fn cut(&self, heights: Iv) -> bool;
+
+    /// `F` at `t` in the span and `w` in `heights`.
+    fn value(&self, k: &Coefficients, heights: Iv) -> Iv;
+
     /// Whether `F(t, .)` certainly has no root for some `t` of the span.
     fn undefined(&self, k: &Coefficients) -> bool;
 
@@ -224,6 +242,14 @@ impl Field for QuadraticGraph2 {
 
     fn height(&self, t: Scalar) -> Option<Scalar> {
         QuadraticGraph2::height(self, t)
+    }
+
+    fn cut(&self, _heights: Iv) -> bool {
+        false
+    }
+
+    fn value(&self, k: &Coefficients, w: Iv) -> Iv {
+        k.a.value.mul(w.sq()).add(k.b.value.mul(w)).add(k.c.value)
     }
 
     fn undefined(&self, k: &Coefficients) -> bool {
@@ -253,6 +279,21 @@ impl Field for AngleGraph2 {
 
     fn height(&self, t: Scalar) -> Option<Scalar> {
         self.angle(t)
+    }
+
+    fn cut(&self, heights: Iv) -> bool {
+        // The angle is returned in `(-pi, pi]`, within a few ulps of it.
+        let margin = 64.0 * Scalar::EPSILON * core::f64::consts::PI;
+        heights.hi >= core::f64::consts::PI - margin
+            || heights.lo <= -core::f64::consts::PI + margin
+    }
+
+    fn value(&self, k: &Coefficients, w: Iv) -> Iv {
+        let (cw, sw) = (cos_iv(w.lo, w.hi), sin_iv(w.lo, w.hi));
+        k.a.value
+            .mul(cw)
+            .add(k.b.value.mul(sw))
+            .add(k.c.value.neg())
     }
 
     fn undefined(&self, k: &Coefficients) -> bool {
@@ -313,12 +354,12 @@ fn certify<F: Field>(field: &F, lo: Scalar, hi: Scalar) -> Option<Scalar> {
         return None;
     }
     let span = Iv::point(hi).add(Iv::point(-lo)).hi;
-    // The chord joins the computed ends, whose rounding the bound carries.
-    let err = rounding(field.height(lo)?, field.height(hi)?);
     let mut best: Option<Scalar> = None;
     let mut pieces = 1;
     while pieces <= MAX_PIECES {
-        if let Some(bend) = split_bend(field, lo, hi, pieces) {
+        if let Some((bend, err)) = split_bend(field, lo, hi, pieces) {
+            // The chord joins the computed ends, whose certified distance
+            // from the roots the bound carries.
             let bound = Iv::point(span)
                 .mul(Iv::point(span))
                 .scale(0.125)
@@ -339,9 +380,41 @@ fn rounding(a: Scalar, b: Scalar) -> Scalar {
     64.0 * Scalar::EPSILON * a.abs().max(b.abs()).max(1.0)
 }
 
-/// `sup |w''|` over `[lo, hi]` split into `pieces`, or `None` if a piece
+/// A certified piece: `sup |w''|`, and how far each computed end is from its
+/// root.
+#[derive(Debug, Clone, Copy, PartialEq)]
+struct Piece {
+    bend: Scalar,
+    start: Scalar,
+    end: Scalar,
+}
+
+/// A distance `d` such that the root of `F(t, .)` lies within `d` of `w`,
+/// certified by a sign change of `F` across `[w - d, w + d]`, or `None`.
+fn end_error<F: Field>(field: &F, t: Scalar, w: Scalar) -> Option<Scalar> {
+    let [a, b, c] = field.coefficients().map(|x| trig_enclose(x, t, t));
+    let k = Coefficients { a, b, c };
+    let mut d = rounding(w, w);
+    for _ in 0..RHO_STEPS {
+        let at = |x: Scalar| field.value(&k, Iv::point(x).widen());
+        let (below, above) = (at(w - d), at(w + d));
+        if (below.hi < 0.0 && above.lo > 0.0) || (below.lo > 0.0 && above.hi < 0.0) {
+            return Some(d);
+        }
+        d *= 2.0;
+    }
+    None
+}
+
+/// `sup |w''|` over `[lo, hi]` split into `pieces`, with the larger distance
+/// of the span's two computed ends from their roots, or `None` if a piece
 /// does not certify.
-fn split_bend<F: Field>(field: &F, lo: Scalar, hi: Scalar, pieces: usize) -> Option<Scalar> {
+fn split_bend<F: Field>(
+    field: &F,
+    lo: Scalar,
+    hi: Scalar,
+    pieces: usize,
+) -> Option<(Scalar, Scalar)> {
     let at = |i: usize| {
         if i == pieces {
             hi
@@ -350,19 +423,25 @@ fn split_bend<F: Field>(field: &F, lo: Scalar, hi: Scalar, pieces: usize) -> Opt
         }
     };
     let mut bend: Scalar = 0.0;
+    let (mut start, mut end) = (0.0, 0.0);
     for i in 0..pieces {
         let (a, b) = (at(i), at(i + 1));
         if a >= b {
             return None;
         }
-        bend = bend.max(piece_bend(field, a, b)?);
+        let piece = piece_bend(field, a, b)?;
+        bend = bend.max(piece.bend);
+        if i == 0 {
+            start = piece.start;
+        }
+        end = piece.end;
     }
-    Some(bend)
+    Some((bend, start.max(end)))
 }
 
 /// `sup |w''|` over one piece, from the box of the piece by the heights
 /// `rho` about the ends' (see the module docs).
-fn piece_bend<F: Field>(field: &F, lo: Scalar, hi: Scalar) -> Option<Scalar> {
+fn piece_bend<F: Field>(field: &F, lo: Scalar, hi: Scalar) -> Option<Piece> {
     let (w_lo, w_hi) = (field.height(lo)?, field.height(hi)?);
     let [a, b, c] = field.coefficients().map(|t| trig_enclose(t, lo, hi));
     let k = Coefficients { a, b, c };
@@ -371,13 +450,18 @@ fn piece_bend<F: Field>(field: &F, lo: Scalar, hi: Scalar) -> Option<Scalar> {
     }
     let span = Iv::point(hi).add(Iv::point(-lo)).hi;
     let (w_min, w_max) = (w_lo.min(w_hi), w_lo.max(w_hi));
-    let mut rho = rounding(w_lo, w_hi);
+    let (d_lo, d_hi) = (end_error(field, lo, w_lo)?, end_error(field, hi, w_hi)?);
+    let d = d_lo.max(d_hi);
+    let mut rho = d;
     for _ in 0..RHO_STEPS {
         let heights = Iv {
             lo: w_min - rho,
             hi: w_max + rho,
         }
         .widen();
+        if field.cut(heights) {
+            return None;
+        }
         let p = field.partials(&k, heights);
         if ![p.t, p.w, p.tt, p.tw, p.ww].iter().all(|i| i.finite()) || p.w.straddles_zero() {
             return None;
@@ -385,12 +469,17 @@ fn piece_bend<F: Field>(field: &F, lo: Scalar, hi: Scalar) -> Option<Scalar> {
         let floor = p.w.mig();
         let lipschitz = (p.t.mag() / floor).next_up();
         let reach = Iv::point(lipschitz).mul(Iv::point(span)).scale(0.5).hi;
-        if reach < rho {
+        if Iv::point(reach).add(Iv::point(d)).hi < rho {
             let l = Iv::point(lipschitz);
             let numerator = Iv::point(p.tt.mag())
                 .add(Iv::point(p.tw.mag()).mul(l).scale(2.0))
                 .add(Iv::point(p.ww.mag()).mul(l).mul(l));
-            return Some((numerator.hi / floor).next_up()).filter(|b| b.is_finite());
+            let bend = (numerator.hi / floor).next_up();
+            return bend.is_finite().then_some(Piece {
+                bend,
+                start: d_lo,
+                end: d_hi,
+            });
         }
         rho = (1.1 * reach).max(1.1 * rho);
     }

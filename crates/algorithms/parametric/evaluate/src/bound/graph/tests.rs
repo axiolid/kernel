@@ -102,7 +102,7 @@ fn a_piece_holds_a_height_that_leaves_the_hull_of_its_ends() {
     // `w'' = q''/(2w) - q'^2/(4 w^3)` at the bottom of the dip.
     let at_bottom = g.bend(0.0).unwrap().abs();
     assert!(at_bottom > 0.9, "{at_bottom}");
-    if let Some(bend) = piece_bend(&g, -1.0, 1.0) {
+    if let Some(bend) = piece_bend(&g, -1.0, 1.0).map(|p| p.bend) {
         assert!(bend >= at_bottom, "{bend} under {at_bottom}");
     }
 }
@@ -169,4 +169,80 @@ fn a_tiny_angle_span_is_bounded_as_tightly_as_the_curve_bends() {
             "{branch:?}: only {tight} spans bounded within 5%"
         );
     }
+}
+
+#[test]
+fn an_end_is_certified_within_the_distance_it_is_off_its_root() {
+    let g = QuadraticGraph2 {
+        a: trig(1.0, 0.2, 0.0, 0.0, 0.0),
+        b: trig(0.5, 0.0, -1.5, 0.25, 0.0),
+        c: trig(-2.0, 0.75, 0.0, 0.0, 0.5),
+        branch: Branch::Plus,
+    };
+    let (t, w) = (0.3, g.height(0.3).unwrap());
+    let exact = end_error(&g, t, w).unwrap();
+    assert!(exact < 1e-12, "{exact}");
+    // A height 1e-9 off is certified no closer than that, and not wildly
+    // further.
+    let off = end_error(&g, t, w + 1e-9).unwrap();
+    assert!((1e-9..=1e-8).contains(&off), "{off}");
+}
+
+#[test]
+fn a_box_reaching_the_cut_of_the_angle_is_refused() {
+    let g = AngleGraph2 {
+        a: trig(1.0, 0.0, 0.0, 0.0, 0.0),
+        b: Trig2::default(),
+        c: Trig2::default(),
+        branch: Branch::Plus,
+    };
+    let pi = core::f64::consts::PI;
+    assert!(g.cut(Iv { lo: 3.0, hi: pi }));
+    assert!(g.cut(Iv { lo: -pi, hi: -3.0 }));
+    assert!(g.cut(Iv { lo: 3.0, hi: 3.3 }));
+    assert!(!g.cut(Iv { lo: -3.0, hi: 3.0 }));
+    assert!(!QuadraticGraph2::cut(&dip(), Iv { lo: 3.0, hi: 4.0 }));
+}
+
+/// A quadratic graph whose evaluator is off by `shift`, as one with a loose
+/// closed form would be.
+struct Shifted {
+    graph: QuadraticGraph2,
+    shift: Scalar,
+}
+
+impl Field for Shifted {
+    fn coefficients(&self) -> [&Trig2; 3] {
+        self.graph.coefficients()
+    }
+    fn height(&self, t: Scalar) -> Option<Scalar> {
+        self.graph.height(t).map(|w| w + self.shift)
+    }
+    fn cut(&self, heights: Iv) -> bool {
+        self.graph.cut(heights)
+    }
+    fn value(&self, k: &Coefficients, heights: Iv) -> Iv {
+        self.graph.value(k, heights)
+    }
+    fn undefined(&self, k: &Coefficients) -> bool {
+        self.graph.undefined(k)
+    }
+    fn partials(&self, k: &Coefficients, heights: Iv) -> Partials {
+        self.graph.partials(k, heights)
+    }
+}
+
+#[test]
+fn the_distance_of_the_computed_ends_from_their_roots_is_in_the_bound() {
+    let graph = QuadraticGraph2 {
+        a: trig(1.0, 0.2, 0.0, 0.0, 0.0),
+        b: trig(0.5, 0.0, -1.5, 0.25, 0.0),
+        c: trig(-2.0, 0.75, 0.0, 0.0, 0.5),
+        branch: Branch::Plus,
+    };
+    let shift = 1e-6;
+    // On a span this short the curve's own bend is below the end error, so
+    // the bound is the end error to within a little.
+    let bound = certify(&Shifted { graph, shift }, 0.3, 0.3001).unwrap();
+    assert!((shift..2.0 * shift).contains(&bound), "{bound}");
 }

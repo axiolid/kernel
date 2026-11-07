@@ -238,3 +238,44 @@ fn a_span_near_a_vertical_tangent_has_no_bound() {
     assert_eq!(chord_bound2(&curve, -0.3, 0.3), None);
     assert_eq!(chord_bound2(&curve, 0.0, 0.3), None);
 }
+
+#[test]
+fn an_angle_graph_crossing_the_cut_at_pi_has_no_bound() {
+    // The solution runs through `u = pi`, where `angle` wraps to `-pi`: the
+    // evaluated curve jumps a turn inside the span while both ends sit on
+    // one side of the cut.
+    let phi = core::f64::consts::PI - 0.5;
+    let g = AngleGraph2 {
+        a: trig(phi.cos(), 0.0, 0.0, 0.0, 0.0),
+        b: trig(phi.sin(), 0.0, 0.0, 0.0, 0.0),
+        c: trig(0.88058, 0.004, 0.0, 0.0, 0.0),
+        branch: Branch::Plus,
+    };
+    let (lo, hi) = (2.2, 4.08);
+    let angles: Vec<Scalar> = (0..=2000)
+        .filter_map(|i| g.angle(lo + (hi - lo) * i as Scalar / 2000.0))
+        .collect();
+    assert!(
+        angles.windows(2).any(|w| (w[1] - w[0]).abs() > 3.0),
+        "the fixture must cross the cut"
+    );
+    assert_eq!(chord_bound2(&Curve2::AngleGraph(g), lo, hi), None);
+}
+
+#[test]
+fn a_near_degenerate_quadratic_span_holds_its_evaluated_points() {
+    // A tiny span where the root's evaluation carries its own rounding: the
+    // bound must cover the evaluated points' distance from the chord.
+    let g = QuadraticGraph2 {
+        a: trig(0.0, 0.0, 0.0, 0.0, 2.724257051713863e-4),
+        b: trig(0.0, 0.0, 0.0, 0.0, -1.8743182091123596),
+        c: trig(0.0, 0.0, 0.06533723051245799, 0.0, 0.0),
+        branch: Branch::Plus,
+    };
+    let curve = Curve2::QuadraticGraph(g);
+    let (lo, hi) = (-2.6291345526357697, -2.6283889577140203);
+    let sample = sampled(|t| evaluate2(&curve, t).expect("defined"), lo, hi);
+    if let Some(bound) = chord_bound2(&curve, lo, hi) {
+        assert!(sample <= bound, "sampled {sample} above the bound {bound}");
+    }
+}

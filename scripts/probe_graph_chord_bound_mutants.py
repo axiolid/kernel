@@ -17,7 +17,9 @@ test can tell them apart: the early refusal where the discriminant (or `a^2
 the added rounding of the computed ends, a few ulps of the bound; and the
 factor 1/2 of the reach `L (hi - lo) / 2`, a safety margin that only a
 graph climbing at its full slope bound to the middle of a piece and falling
-again would use, which no smooth quadratic or angle graph does.
+again would use, which no smooth quadratic or angle graph does; and the
+end distance `d` in the acceptance `rho > reach + d`, which only widens the
+box by `d`, too little for the bound to change visibly.
 """
 import probe_lib
 
@@ -58,9 +60,23 @@ MUTANTS = [
      '    let min = if false {', [UNIT]),
     # The height range.
     ('rho is not checked against the reach', G,
-     '        if reach < rho {', '        if true {', [UNIT, PUBLIC]),
+     '        if Iv::point(reach).add(Iv::point(d)).hi < rho {', '        if true {', [UNIT, PUBLIC]),
     ('rho is not grown', G,
      '        rho = (1.1 * reach).max(1.1 * rho);', '        rho = 1.1 * rho;', [UNIT, PUBLIC]),
+    # The ends and the cut.
+    ('the angle cut is ignored', G,
+     '        if field.cut(heights) {', '        if false && field.cut(heights) {', [UNIT, PUBLIC]),
+    ('the cut margin is dropped', G,
+     '        heights.hi >= core::f64::consts::PI - margin\n            || heights.lo <= -core::f64::consts::PI + margin',
+     '        heights.hi > core::f64::consts::PI || heights.lo < -core::f64::consts::PI', [UNIT]),
+    ('an end is not certified', G,
+     '        if (below.hi < 0.0 && above.lo > 0.0) || (below.lo > 0.0 && above.hi < 0.0) {',
+     '        if true {', [UNIT, PUBLIC]),
+    ('an end needs one sign change either way', G,
+     '(below.hi < 0.0 && above.lo > 0.0) || (below.lo > 0.0 && above.hi < 0.0)',
+     '(below.hi < 0.0 && above.lo > 0.0) || (below.lo > 0.0 && above.hi < 1e300)', [UNIT]),
+    ('the end distance is not carried into the bound', G,
+     '    Some((bend, start.max(end)))', '    Some((bend, 0.0))', [UNIT, PUBLIC]),
     # The refusal near a vertical tangent.
     ('F_w may vanish', G,
      FW_CHECK,
@@ -81,16 +97,16 @@ MUTANTS = [
      '                .add(Iv::point(p.ww.mag()).mul(l).mul(l));',
      '                .add(Iv::point(0.0));', [UNIT, PUBLIC]),
     ('the bend is not divided by F_w', G,
-     '            return Some((numerator.hi / floor).next_up()).filter(|b| b.is_finite());',
-     '            return Some(numerator.hi.next_up()).filter(|b| b.is_finite());', [UNIT, PUBLIC]),
+     '            let bend = (numerator.hi / floor).next_up();',
+     '            let bend = numerator.hi.next_up();', [UNIT, PUBLIC]),
     ('the chord bound is span^2 / 4', G,
      '                .scale(0.125)\n                .mul(Iv::point(bend))',
      '                .scale(0.25)\n                .mul(Iv::point(bend))', [PUBLIC]),
     ('the loosest split is taken', G,
      'best.is_none_or(|b| bound < b)', 'best.is_none_or(|b| bound > b)', [PUBLIC]),
     ('a piece is not certified from its own box', G,
-     '        bend = bend.max(piece_bend(field, a, b)?);',
-     '        bend = bend.max(piece_bend(field, lo, hi)?);', [PUBLIC]),
+     '        let piece = piece_bend(field, a, b)?;',
+     '        let piece = piece_bend(field, lo, hi)?;', [PUBLIC]),
     # The partials of the two fields.
     ('the quadratic F_t loses its linear term', G,
      '            t: poly(k.a.first, k.b.first, k.c.first),',
