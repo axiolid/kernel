@@ -1288,3 +1288,277 @@ fn the_fast_mode_on_a_floor_of_sub_budget_teeth_keeps_its_side() {
         }
     }
 }
+
+/// The pointwise side check of the fast mode against the definition: an
+/// inner result within the exact morphology and holding what lies the
+/// deviation inside it, an outer one the other way round. Returns how many
+/// points both rules decide.
+fn check_fast_side(
+    r: &Region,
+    fast: &Region,
+    erode: bool,
+    outer: bool,
+    radius: f64,
+    points: &[Point2],
+    what: &str,
+) -> usize {
+    let d = fast.bound().unwrap().deviation + 1e-7;
+    let mut checked = 0;
+    for &p in points {
+        let held = in_region(fast, p);
+        let (sure, near) = if erode {
+            let rule = |s: f64| in_exact_erosion(r, p, s);
+            if outer {
+                (rule(radius), rule(radius - d))
+            } else {
+                (rule(radius + d), rule(radius))
+            }
+        } else {
+            let rule = |s: f64| in_exact_dilation(r, p, s);
+            if outer {
+                (rule(radius), rule(radius + d))
+            } else {
+                (rule(radius - d), rule(radius))
+            }
+        };
+        assert!(!sure || held, "{what}: {p:?} left out");
+        assert!(!held || near, "{what}: {p:?} taken");
+        checked += usize::from(sure != near);
+    }
+    checked
+}
+
+#[test]
+fn the_fast_mode_fills_needles_deeper_than_the_disc() {
+    // #428: #340's room with needles 0.25 and 0.5 m deep, deeper than `t`
+    // (0.2 m for a 0.4 m disc), tips 36 mm apart. Each wall is one chord
+    // along its valleys; the excess is one needle's slab bound,
+    // sqrt(t^2 + g^2 / 4) - t for g = 4.5 / 124 m, within the 1 mm budget.
+    let (radius, budget) = (0.4, 1e-3);
+    let t = 0.2_f64;
+    let g = 4.5 / 124.0;
+    let slab = 0.25 * g * g / ((t * t + 0.25 * g * g).sqrt() + t);
+    for depth in [0.25, 0.5] {
+        let r = needle_room_with_column(124, depth);
+        let mut points = samples(Point2::new(-0.5, -0.5), Point2::new(5.0, 5.5), 1500);
+        for centre in [
+            radius,
+            5.0 - radius,
+            -radius,
+            5.0 + radius,
+            depth + radius,
+            5.0 - depth - radius,
+        ] {
+            points.extend(samples(
+                Point2::new(0.3, centre - 1e-2),
+                Point2::new(4.2, centre + 1e-2),
+                1500,
+            ));
+            points.extend(samples(
+                Point2::new(0.3, centre - 2e-3),
+                Point2::new(4.2, centre + 2e-3),
+                1500,
+            ));
+        }
+        for erode in [false, true] {
+            for outer in [false, true] {
+                let what = format!("depth {depth}, erode {erode}, outer {outer}");
+                let exact = morphology(&r, erode, outer, radius, MorphologyMode::Exact).unwrap();
+                let fast =
+                    morphology(&r, erode, outer, radius, MorphologyMode::fast(budget)).unwrap();
+                let (bound, exact_bound) = (fast.bound().unwrap(), exact.bound().unwrap());
+                assert_eq!(bound.side, exact_bound.side, "{what}");
+                let excess = fast.excess().expect("a fast result's excess");
+                assert!(
+                    excess >= slab && excess <= slab * (1.0 + 1e-6),
+                    "{what}: {excess} {slab}"
+                );
+                assert!(
+                    bound.deviation <= exact_bound.deviation + excess + 1e-12,
+                    "{what}"
+                );
+                let checked = check_fast_side(&r, &fast, erode, outer, radius, &points, &what);
+                assert!(checked > 100, "{what}: {checked}");
+                let corners: usize = fast
+                    .boundary_rings()
+                    .iter()
+                    .map(|ring| ring.points.len())
+                    .sum();
+                let exact_corners: usize = exact
+                    .boundary_rings()
+                    .iter()
+                    .map(|ring| ring.points.len())
+                    .sum();
+                assert!(
+                    corners < 100 && exact_corners > 400,
+                    "{what}: {corners} against {exact_corners}"
+                );
+            }
+        }
+    }
+}
+
+#[test]
+fn a_needle_wall_of_mixed_mouths_states_its_widest_needle() {
+    // #428: needles 0.5 m deep whose mouths are 0.2 mm and 120 mm in turn,
+    // by a 0.4 m disc with a 1 cm budget: the wall is one chord, and its
+    // excess is the wide needles' slab bound (8.8 mm for `t` 0.2 m), not
+    // the narrow ones'. Below a wide needle's mouth the filled sum reaches
+    // about 4.5 mm farther than the room's.
+    let (radius, budget) = (0.4, 1e-2);
+    let mut points = vec![Point2::new(0.0, 0.0)];
+    let mut x = 0.0;
+    for k in 0..17 {
+        let mouth = if k % 2 == 0 { 2e-4 } else { 0.12 };
+        points.push(Point2::new(x + 0.5 * mouth, 0.5));
+        x += mouth;
+        points.push(Point2::new(x, 0.0));
+    }
+    points.extend([Point2::new(x, 1.5), Point2::new(0.0, 1.5)]);
+    let r = Region::new(
+        vec![Polygon {
+            outer: Ring { points },
+            holes: vec![],
+        }],
+        tol(),
+    )
+    .unwrap();
+    let mut probe = samples(Point2::new(-0.6, -0.6), Point2::new(x + 0.6, 2.1), 1500);
+    for centre in [-radius, 0.5 + radius, 0.5 - radius] {
+        probe.extend(samples(
+            Point2::new(0.0, centre - 6e-3),
+            Point2::new(x, centre + 6e-3),
+            4000,
+        ));
+    }
+    let t = 0.5 * radius;
+    let wide = 0.25 * 0.12 * 0.12 / ((t * t + 0.25 * 0.12 * 0.12_f64).sqrt() + t);
+    for erode in [false, true] {
+        for outer in [false, true] {
+            let what = format!("erode {erode}, outer {outer}");
+            let fast = morphology(&r, erode, outer, radius, MorphologyMode::fast(budget)).unwrap();
+            let excess = fast.excess().unwrap();
+            assert!(excess <= budget, "{what}: {excess}");
+            if !erode {
+                assert!(excess >= wide, "{what}: {excess} {wide}");
+            }
+            let checked = check_fast_side(&r, &fast, erode, outer, radius, &probe, &what);
+            assert!(checked > 100, "{what}: {checked}");
+        }
+    }
+}
+
+/// #428, in the style of #345's fuzz family: seeded rooms and holes whose
+/// walls carry needles of random depth and spacing, many deeper than `t`,
+/// by random discs, budgets and operations. Every fast result lies on its
+/// side within its deviation, sampled over the plane and about its own
+/// edges, and the needles are filled.
+#[test]
+fn the_fast_mode_on_seeded_needle_walls_keeps_its_side() {
+    let mut state = 0x0428_u64;
+    let mut next = || {
+        state = state
+            .wrapping_mul(6_364_136_223_846_793_005)
+            .wrapping_add(1_442_695_040_888_963_407);
+        (state >> 11) as f64 / (1u64 << 53) as f64
+    };
+    let (mut cases, mut corners) = (0, 0);
+    for seed in 0..CASES_428 {
+        let (w, h) = (0.2 + 1.3 * next(), 1.0 + 2.0 * next());
+        let teeth = 20 + (next() * 100.0) as usize;
+        let deepest = [0.05_f64, 0.3, 0.8][(next() * 3.0) as usize].min(0.45 * h);
+        let both = next() < 0.5;
+        let step = w / (2 * teeth) as f64;
+        let mut xs: Vec<f64> = (0..=2 * teeth).map(|k| step * k as f64).collect();
+        for x in &mut xs[1..2 * teeth] {
+            *x += (next() - 0.5) * 0.4 * step;
+        }
+        let mut wall: Vec<Point2> = (0..=2 * teeth)
+            .map(|k| {
+                Point2::new(
+                    xs[k],
+                    if k % 2 == 1 {
+                        deepest * (0.3 + 0.7 * next())
+                    } else {
+                        0.0
+                    },
+                )
+            })
+            .collect();
+        if both {
+            let top: Vec<Point2> = (0..=2 * teeth)
+                .map(|k| {
+                    Point2::new(
+                        w - xs[k],
+                        if k % 2 == 1 {
+                            h - deepest * (0.3 + 0.7 * next())
+                        } else {
+                            h
+                        },
+                    )
+                })
+                .collect();
+            wall.extend(top);
+        } else {
+            wall.extend([Point2::new(w, h), Point2::new(0.0, h)]);
+        }
+        let polygon = if next() < 0.4 {
+            Polygon {
+                outer: ring(&[
+                    (-1.5, -1.5),
+                    (w + 1.5, -1.5),
+                    (w + 1.5, h + 1.5),
+                    (-1.5, h + 1.5),
+                ]),
+                holes: vec![Ring {
+                    points: wall.iter().rev().copied().collect(),
+                }],
+            }
+        } else {
+            Polygon {
+                outer: Ring { points: wall },
+                holes: vec![],
+            }
+        };
+        let radius = 0.15 + next();
+        let budget = [1e-4, 1e-3, 1e-2][(next() * 3.0) as usize];
+        let (erode, outer) = (next() < 0.5, next() < 0.5);
+        let Ok(r) = Region::new(vec![polygon], tol()) else {
+            continue;
+        };
+        let what =
+            format!("seed {seed}, erode {erode}, outer {outer}, radius {radius}, budget {budget}");
+        let fast = morphology(&r, erode, outer, radius, MorphologyMode::fast(budget)).unwrap();
+        let mut points = samples(
+            Point2::new(-2.0, -2.0),
+            Point2::new(w + 2.0, h + 2.0),
+            POINTS_428,
+        );
+        for edges in fast.boundary_rings() {
+            let n = edges.points.len();
+            for i in 0..n {
+                let (a, b) = (edges.points[i], edges.points[(i + 1) % n]);
+                let normal = (b - a).perp().normalize_or_zero();
+                for k in 0..6 {
+                    let q = a + (b - a) * ((k as f64 + 0.5) / 6.0);
+                    for d in [-3e-3, -3e-4, 3e-4, 3e-3] {
+                        points.push(q + normal * d);
+                    }
+                }
+            }
+        }
+        check_fast_side(&r, &fast, erode, outer, radius, &points, &what);
+        cases += 1;
+        corners += fast
+            .boundary_rings()
+            .iter()
+            .map(|r| r.points.len())
+            .sum::<usize>();
+    }
+    assert!(cases > CASES_428 * 9 / 10, "{cases} valid cases");
+    assert!(corners <= CORNERS_428, "{corners} corners");
+}
+
+const CASES_428: usize = 60;
+const POINTS_428: usize = 800;
+const CORNERS_428: usize = 3_000;
