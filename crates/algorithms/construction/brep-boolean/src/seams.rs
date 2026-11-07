@@ -257,12 +257,7 @@ fn at_pole(surface: &Surface, p: Point2) -> bool {
 /// point there, so the jump in u across it says nothing about winding. It
 /// gets no u shift, and the loop's closing difference gets no winding in u
 /// when the loop ends at one (#379).
-fn unwrap(
-    surface: &Surface,
-    uses: &mut [Use],
-    pu: bool,
-    pv: bool,
-) -> Result<Vec2, BooleanError> {
+fn unwrap(surface: &Surface, uses: &mut [Use], pu: bool, pv: bool) -> Result<Vec2, BooleanError> {
     let snap = |x: Scalar, periodic: bool| {
         if periodic {
             (x / TAU).round() * TAU
@@ -274,12 +269,20 @@ fn unwrap(
         let end = uses[k - 1].at(false)?;
         let start = uses[k].at(true)?;
         let d = end - start;
-        let u = if at_pole(surface, end) { 0.0 } else { snap(d.x, pu) };
+        let u = if at_pole(surface, end) {
+            0.0
+        } else {
+            snap(d.x, pu)
+        };
         uses[k].shift += Vec2::new(u, snap(d.y, pv));
     }
     let (first, last) = (uses[0].at(true)?, uses[uses.len() - 1].at(false)?);
     let d = last - first;
-    let u = if at_pole(surface, last) { 0.0 } else { snap(d.x, pu) };
+    let u = if at_pole(surface, last) {
+        0.0
+    } else {
+        snap(d.x, pu)
+    };
     Ok(Vec2::new(u, snap(d.y, pv)))
 }
 

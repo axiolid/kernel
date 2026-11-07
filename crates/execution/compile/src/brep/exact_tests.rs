@@ -533,8 +533,7 @@ fn a_face_closing_across_an_apex_is_refused_by_name() {
         outer: Contour::new(segments),
         holes: Vec::new(),
     });
-    let cone =
-        revolve_profile_exact(&profile, Point3::ZERO, Vec3::Y, 1.5 * PI, TOLERANCE).unwrap();
+    let cone = revolve_profile_exact(&profile, Point3::ZERO, Vec3::Y, 1.5 * PI, TOLERANCE).unwrap();
     match tessellate_exact(&cone, TOLERANCE, 1e-3, 0.0) {
         Err(GeomError::UnsupportedInput { input, .. }) => {
             assert!(input.contains("pole or a cone apex"), "{input}");

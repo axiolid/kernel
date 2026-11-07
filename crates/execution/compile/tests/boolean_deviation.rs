@@ -1328,3 +1328,93 @@ fn a_box_minus_a_partial_cone_keeping_its_apex_is_certified() {
     let (bound, _) = assert_measured("box minus partial cone", case, &options, 2.0);
     assert!(bound <= 1e-3, "{bound:e}");
 }
+
+fn cone_tool() -> Profile {
+    polygon(&[(0.0, 0.0), (0.5, 0.0), (0.0, 1.0)])
+}
+
+/// A cylinder with a conical point, 3 long.
+fn bolt_tool() -> Profile {
+    polygon(&[(0.0, -0.4), (0.5, 0.0), (0.5, 3.0), (0.0, 3.0)])
+}
+
+/// A box of 2 x 2 x 2 and a whole revolved tool placed by `at`, combined
+/// with `operator` (the tool first when `tool_first`), measured against the
+/// exact result and certified within the budget.
+fn pole_case(name: &str, tool: Profile, at: Vec3, operator: BooleanOperator, tool_first: bool) {
+    let options = options(1e-3);
+    let case = compile(
+        |g| {
+            let block = g.extrusion(rect(2.0, 2.0), 2.0);
+            let block = g.place(block, building());
+            let tool = g.revolution(tool, Point3::ZERO, Vec3::Y, 2.0 * PI);
+            let tool = g.place(tool, building() * Transform3::from_translation(at));
+            if tool_first {
+                g.boolean(tool, block, operator)
+            } else {
+                g.boolean(block, tool, operator)
+            }
+        },
+        &options,
+    );
+    let (bound, _) = assert_measured(name, case, &options, 2.0);
+    assert!(bound <= 1e-3, "{name}: {bound:e}");
+}
+
+/// A whole cone's apex, inside the box and outside it, and the bolt's: the
+/// wall's loop leaves the apex along the pole line, a gap in parameters
+/// that is no gap on the surface (#379).
+#[test]
+fn a_box_minus_a_cone_with_its_apex_inside_is_certified() {
+    pole_case(
+        "box minus cone, apex inside",
+        cone_tool(),
+        Vec3::new(0.8, -0.3, 1.0),
+        BooleanOperator::Difference,
+        false,
+    );
+}
+
+#[test]
+fn a_box_minus_a_cone_with_its_apex_outside_is_certified() {
+    pole_case(
+        "box minus cone, apex outside",
+        cone_tool(),
+        Vec3::new(0.0, 0.5, 1.0),
+        BooleanOperator::Difference,
+        false,
+    );
+}
+
+#[test]
+fn a_cone_minus_a_box_is_certified() {
+    pole_case(
+        "cone minus box",
+        cone_tool(),
+        Vec3::new(0.8, -0.3, 1.0),
+        BooleanOperator::Difference,
+        true,
+    );
+}
+
+#[test]
+fn a_box_meeting_a_cone_is_certified() {
+    pole_case(
+        "box meeting cone",
+        cone_tool(),
+        Vec3::new(0.0, 0.5, 1.0),
+        BooleanOperator::Intersection,
+        false,
+    );
+}
+
+#[test]
+fn a_bolt_minus_a_box_is_certified() {
+    pole_case(
+        "bolt minus box",
+        bolt_tool(),
+        Vec3::new(0.0, -2.5, 1.0),
+        BooleanOperator::Difference,
+        true,
+    );
+}

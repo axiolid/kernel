@@ -85,3 +85,42 @@ Landing this exposed documentation that no longer matched behaviour:
 
 `PLAN.md`'s two open entries are Boolean issues, untouched by this work and
 correctly still open.
+
+## Amendment 2026-11: a profile touching the axis (#379)
+
+A full turn may touch the axis. The rules below replace the refusal of a
+profile that touches it, in `revolve_arc_ring` and `revolve_profile_exact`.
+
+**Contact is exact.** "On the axis" is the exact `side_of_axis` sign, never
+a tolerance. A vertex on the axis is admitted when one of its two edges lies
+on the axis (an axis edge, which sweeps no face) and the other is another
+axis edge, a disc cap (a straight edge of exactly equal heights, which sweeps
+a plane) or any other straight edge (which sweeps a cone up to its apex). A
+vertex with no axis edge (a pinch point, a non-manifold vertex) is refused by
+name; the mesh path refuses it too (#363). A straight edge ending on the axis
+within the linear tolerance of perpendicular to it but not exactly is refused
+by name: a cone of rise 1e-12 builds but fails the geometric audit by 6e-5.
+
+**An apex has no degenerate edge.** The B-rep has no degenerate edges. An
+apex is a vertex, and the wall's loop runs
+`[rim circle] -> seam forward -> [rim circle] -> seam reversed`: in the
+parameters (u, v) it leaves a gap along the pole line, where every u names
+the same point. The partial-turn apex and brep-boolean's whole-sphere fixture
+already used this convention, and `builder.finish`, `audit_brep`,
+`geometric_audit` and `exact_properties` accept it. Consumers close the gap
+instead of the builder modelling it: brep-boolean's seam planner reads a step
+over a pole as no turn round the surface (it used to snap the jump to whole
+periods and add a second seam, so every such face was refused with
+`TangentSplit` or `Assembly`), and the deviation oracle treats a loop that
+leaves a pole at the height it reached it as closed and ends a cone's box at
+its apex. The B-rep tessellator has no pole row of samples yet and refuses
+such a face by name (#463).
+
+**The apex frame.** A cone with an end on the axis is framed at its apex with
+radius zero, as the partial-turn path does, so the apex is at v = 0 exactly.
+A cone between two circles keeps its frame at its start, bit for bit.
+
+**Nesting.** A piece's range along the axis, which decides which shell is the
+void of which, takes the heights of both stations of each of its faces, not
+only the stations off the axis: a cavity inside a spinning top lies inside
+the range of its two apexes, which no station off the axis spans.

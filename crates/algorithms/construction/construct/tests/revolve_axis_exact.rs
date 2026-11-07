@@ -1,11 +1,13 @@
-//! Exact full-turn revolution of a profile touching the axis (#379, step 1).
+//! Exact full-turn revolution of a profile touching the axis (#379).
 //!
-//! An edge lying on the axis sweeps no face and an edge ending on it exactly
-//! perpendicularly sweeps a disc cap: a solid cylinder, a stepped shaft.
-//! Volumes are closed forms from the inputs (`pi r^2 h`, a sum of those);
-//! every solid must audit clean. A profile crossing the axis, touching it at
-//! an isolated vertex, or ending on it at an oblique edge stays refused by
-//! name (steps 2 and 3 of #379).
+//! An edge lying on the axis sweeps no face, an edge ending on it exactly
+//! perpendicularly sweeps a disc cap, and any other straight edge ending on
+//! it sweeps a cone up to its apex: a solid cylinder, a stepped shaft, a
+//! cone, a bolt, a spinning top. Volumes are closed forms from the inputs
+//! (`pi r^2 h`, a sum of those); every solid must audit clean. A profile
+//! crossing the axis or touching it at an isolated vertex stays refused by
+//! name, as does an edge ending on the axis within the tolerance of
+//! perpendicular to it.
 
 use axiolid_brep::ExactBRep;
 use axiolid_brep_audit::geometric_audit;
@@ -65,6 +67,12 @@ fn volume(solid: &ExactBRep) -> f64 {
     axiolid_measure::exact_properties(solid, Tolerance::METRE)
         .expect("measurable")
         .signed_volume
+}
+
+fn area(solid: &ExactBRep) -> f64 {
+    axiolid_measure::exact_properties(solid, Tolerance::METRE)
+        .expect("measurable")
+        .area
 }
 
 fn close(got: f64, want: f64) {
@@ -165,7 +173,7 @@ fn a_profile_crossing_the_axis_is_refused_by_name() {
 #[test]
 fn a_vertex_touching_the_axis_alone_is_refused_by_name() {
     // A diamond whose left corner is the only contact: an isolated vertex,
-    // the apex of two cones (step 2).
+    // the pinch point of two cones.
     named(
         try_revolve(
             &polygon(&[(1.0, 0.0), (2.0, 1.0), (1.0, 2.0), (0.0, 1.0)]),
@@ -175,13 +183,152 @@ fn a_vertex_touching_the_axis_alone_is_refused_by_name() {
     );
 }
 
-#[test]
-fn an_oblique_edge_ending_on_the_axis_is_refused_by_name() {
-    // A cone: its slant meets the axis at the apex, a pole (step 3).
-    named(
-        try_revolve(&polygon(&[(0.0, 0.0), (1.0, 0.0), (0.0, 1.0)]), 0.0),
-        "oblique edge",
+/// The audited solid of a cone profile, with its volume and area checked.
+fn solid_of(
+    what: &str,
+    points: &[(f64, f64)],
+    axis_x: f64,
+    volume_want: f64,
+    area_want: f64,
+) -> ExactBRep {
+    let solid = revolve(&polygon(points), axis_x);
+    let (v, a) = (volume(&solid), area(&solid));
+    assert!(
+        (v - volume_want).abs() <= 1e-10 * volume_want
+            && (a - area_want).abs() <= 1e-10 * area_want,
+        "{what}: volume {v} want {volume_want}, area {a} want {area_want}"
     );
+    solid
+}
+
+#[test]
+fn a_cone_with_its_apex_up_is_a_third_of_its_cylinder() {
+    // Radius 1.5, height 2: V = pi r^2 h / 3, A = pi r (r + slant), slant 2.5.
+    let solid = solid_of(
+        "cone",
+        &[(0.0, 0.0), (1.5, 0.0), (0.0, 2.0)],
+        0.0,
+        4.71238898038469,
+        18.84955592153876,
+    );
+    close(volume(&solid), 1.5 * PI);
+    assert_eq!(count(&solid, |s| matches!(s, Surface::Cone(_))), 1);
+    assert_eq!(count(&solid, |s| matches!(s, Surface::Plane(_))), 1);
+    // The cone is framed at its apex with radius exactly zero, so the apex
+    // is at v = 0 and a consumer closing the pole gap meets no rounding.
+    let cone = solid
+        .surfaces()
+        .iter()
+        .find_map(|surface| match surface {
+            Surface::Cone(cone) => Some(cone),
+            _ => None,
+        })
+        .expect("a cone");
+    assert_eq!((cone.radius, cone.frame.origin.y), (0.0, 2.0));
+}
+
+#[test]
+fn a_cone_with_its_apex_down_is_the_same_solid() {
+    let solid = solid_of(
+        "cone",
+        &[(0.0, 0.0), (1.5, 2.0), (0.0, 2.0)],
+        0.0,
+        4.71238898038469,
+        18.84955592153876,
+    );
+    assert_eq!(count(&solid, |s| matches!(s, Surface::Cone(_))), 1);
+    assert_eq!(count(&solid, |s| matches!(s, Surface::Plane(_))), 1);
+}
+
+#[test]
+fn a_cone_on_the_negative_side_is_mirrored() {
+    solid_of(
+        "mirrored cone",
+        &[(0.0, 0.0), (0.0, 2.0), (-1.5, 0.0)],
+        0.0,
+        1.5 * PI,
+        18.84955592153876,
+    );
+}
+
+#[test]
+fn a_cone_about_an_offset_axis_is_the_same_cone() {
+    solid_of(
+        "offset cone",
+        &[(2.5, 0.0), (4.0, 0.0), (2.5, 2.0)],
+        2.5,
+        1.5 * PI,
+        18.84955592153876,
+    );
+}
+
+#[test]
+fn a_bolt_is_a_cylinder_with_a_conical_point() {
+    // Radius 0.5 over [0, 3] with a point reaching down to -0.4.
+    let solid = revolve(
+        &polygon(&[(0.0, -0.4), (0.5, 0.0), (0.5, 3.0), (0.0, 3.0)]),
+        0.0,
+    );
+    close(volume(&solid), 2.4609142453120048);
+    assert_eq!(count(&solid, |s| matches!(s, Surface::Cone(_))), 1);
+    assert_eq!(count(&solid, |s| matches!(s, Surface::Cylinder(_))), 1);
+}
+
+#[test]
+fn a_spinning_top_has_two_cones_and_two_apexes() {
+    let solid = solid_of(
+        "spinning top",
+        &[(0.0, 0.0), (1.0, 1.0), (0.0, 2.0)],
+        0.0,
+        2.0943951023931953,
+        8.885765876316732,
+    );
+    assert_eq!(count(&solid, |s| matches!(s, Surface::Cone(_))), 2);
+}
+
+#[test]
+fn a_frustum_ending_in_a_cone_has_a_disc_and_two_cones() {
+    solid_of(
+        "frustum to apex",
+        &[(0.0, 0.0), (1.0, 0.0), (0.5, 1.0), (0.0, 2.0)],
+        0.0,
+        2.0943951023931953,
+        10.166407384630519,
+    );
+}
+
+#[test]
+fn a_cavity_inside_a_spinning_top_is_a_void_not_a_second_solid() {
+    // The top's range along the axis comes from its apexes, off every
+    // station off the axis: the cavity nests only when it counts them.
+    let solid = revolve(
+        &polygon(&[
+            (0.0, 0.0),
+            (1.0, 1.0),
+            (0.0, 2.0),
+            (0.0, 1.5),
+            (0.2, 1.5),
+            (0.2, 0.5),
+            (0.0, 0.5),
+        ]),
+        0.0,
+    );
+    close(volume(&solid), 1.9687313962496034);
+    assert_eq!(solid.topology().solids().len(), 1);
+    assert_eq!(solid.topology().solids()[0].voids.len(), 1);
+    // The top is the solid and the cavity its void, not the other way round:
+    // the outer shell holds both cones.
+    let topology = solid.topology();
+    let outer = &topology.shells()[topology.solids()[0].outer.index()];
+    let cones = outer
+        .faces
+        .iter()
+        .filter(|(face, _)| {
+            let surface = topology.faces()[face.index()].surface.expect("a surface");
+            matches!(solid.surfaces()[surface.index()], Surface::Cone(_))
+        })
+        .count();
+    assert_eq!(cones, 2);
 }
 
 #[test]
@@ -197,13 +344,14 @@ fn a_vertex_within_tolerance_of_the_axis_but_not_on_it_is_refused() {
 
 #[test]
 fn an_edge_a_hair_off_perpendicular_ending_on_the_axis_is_refused() {
-    // The top edge rises by 1e-12 towards the axis: not a disc, exactly.
+    // The top edge rises by 1e-12 towards the axis: not a disc, exactly, and
+    // not a cone to the tolerance.
     named(
         try_revolve(
             &polygon(&[(0.0, 0.0), (1.0, 0.0), (1.0, 2.0), (0.0, 2.0 + 1e-12)]),
             0.0,
         ),
-        "oblique edge",
+        "within the tolerance of perpendicular",
     );
 }
 

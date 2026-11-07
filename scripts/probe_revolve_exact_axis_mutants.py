@@ -1,8 +1,9 @@
 """Mutation probe for the exact revolve of a profile touching the axis (#379).
 
 Each mutant misreads the exact on-axis classification, the perpendicularity
-of an edge ending on the axis, the admitted contacts, or the disc cap and the
-mirroring of a section on the other side, and must turn a test red. The tests
+of an edge ending on the axis, the admitted contacts, the disc cap and the
+cone's apex (its vertex, its frame, the nesting of a cavity inside it), or
+the mirroring of a section on the other side, and must turn a test red. The tests
 are `tests/revolve_axis_exact.rs` and `tests/revolve_exact.rs`; the
 compile-level case in `boolean_deviation.rs` covers a solid cylinder
 reaching a boolean as a certified bound.
@@ -28,9 +29,8 @@ MUTANTS = [
     ('any edge to the axis a disc', C, '        _ if here.height == there.height => Some(Contact::Cap),', '        _ => Some(Contact::Cap),', TESTS),
     ('disc judged within the tolerance', C, '        _ if here.height == there.height => Some(Contact::Cap),', '        _ if (here.height - there.height).abs() <= 1e-9 => Some(Contact::Cap),', TESTS),
     ('arc to the axis an axis edge', C, '        _ if here.bulge != 0.0 => Some(Contact::Arc),\n', '', TESTS),
-    ('axis edge not followed by a disc', C, '(Some(Contact::Axis), Some(Contact::Axis | Contact::Cap))', '(Some(Contact::Axis), Some(Contact::Axis))', TESTS),
-    ('disc not followed by an axis edge', C, '            | (Some(Contact::Cap), Some(Contact::Axis)) => {}', '            | (Some(Contact::Cap), Some(Contact::Axis)) if false => {}', TESTS),
-    ('oblique end beside an axis edge accepted', C, '            (Some(Contact::Axis), _) | (_, Some(Contact::Axis)) => {', '            (Some(Contact::Axis), _) | (_, Some(Contact::Axis)) => {\n                return Ok(());', TESTS),
+    ('axis edge only before an axis edge', C, '(Some(Contact::Axis), Some(_)) | (Some(_), Some(Contact::Axis)) => {}', '(Some(Contact::Axis), Some(Contact::Axis)) | (Some(_), Some(Contact::Axis)) => {}', TESTS),
+    ('axis edge only after a disc', C, '(Some(Contact::Axis), Some(_)) | (Some(_), Some(Contact::Axis)) => {}', '(Some(Contact::Axis), Some(_)) | (Some(Contact::Cap), Some(Contact::Axis)) => {}', TESTS),
     ('isolated vertex accepted', C, '            _ => {\n                return Err(unsupported(\n                    "exact revolution of a section touching', '            _ => {\n                continue;\n                #[allow(unreachable_code)]\n                return Err(unsupported(\n                    "exact revolution of a section touching', TESTS),
     ('axis edge sweeps a face', C, '            if here.on_axis && there.on_axis {\n                continue;\n            }\n', '', TESTS),
     ('disc faces the wrong way off the axis', C, '        (index, Orientation::Forward)\n', '        (index, Orientation::Reversed)\n', TESTS),
@@ -45,6 +45,12 @@ MUTANTS = [
     ('cavity not nested in the solid', C, '    let contains = |outer: &Piece, inner: &Piece| outer.low < inner.low && inner.high < outer.high;', '    let contains = |_: &Piece, _: &Piece| false;', TESTS),
     ('solid nested in a cavity accepted', C, '    if depth.iter().any(|&d| d > 1) {', '    if false {', TESTS),
     ('arc end named an oblique edge', C, '            (Some(Contact::Arc), _) | (_, Some(Contact::Arc)) => {', '            (Some(Contact::Arc), _) | (_, Some(Contact::Arc)) if false => {', TESTS),
+    ('near-flat cone edge accepted', C, '                && (station.height - stations[other].height).abs() <= epsilon\n', '                && false\n', TESTS),
+    ('apex without a vertex', C, '.any(|edge| contact(stations, edge) == Some(Contact::Cone));', '.any(|_| false);', TESTS),
+    ('cone framed at its start, not its apex', C, 'let basis = if there.on_axis { there } else { here };', 'let basis = here;', TESTS),
+    ("piece range without the faces' heights", C, '            for station in [index, next] {', '            for station in [index, next].into_iter().take(0) {', TESTS),
+    ('two faces refused', C, '    if faces.len() < 2 {', '    if faces.len() < 3 {', TESTS),
+    ('lower circle omitted', C, '    if let Some(lower) = lower {', '    if let Some(lower) = lower.filter(|_| false) {', TESTS),
     ('rectangle edge on the axis refused', E, '    if left == 0.0 || right == 0.0 {', '    if false {', TESTS),
 ]
 

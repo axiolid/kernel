@@ -26,14 +26,17 @@
 //! A FULL turn of a profile crossing the axis sweeps through itself and is
 //! refused, as is a partial turn crossing it.
 //!
-//! A FULL turn of a profile touching the axis (#379) is exact when its
-//! contact is only edges lying on the axis, which sweep no face, and straight
-//! edges ending on it exactly perpendicularly, which sweep disc caps: a solid
-//! cylinder, a stepped shaft. The contact is classified with the exact
-//! `side_of_axis` sign, no tolerance. A vertex on the axis where the profile
-//! meets it at a point (a cone apex, `TODO(#379)` step 2) or where an arc or
-//! an oblique edge ends (a sphere or cone pole, `TODO(#379)` step 3) is
-//! refused by name until the degenerate vertex is modelled.
+//! A FULL turn of a profile touching the axis (#379) is exact when each
+//! vertex on the axis ends an edge lying on the axis, which sweeps no face,
+//! and its other edge is another such edge, a straight edge ending on the
+//! axis exactly perpendicularly, which sweeps a disc cap, or any other
+//! straight edge, which sweeps a cone up to its apex: a solid cylinder, a
+//! stepped shaft, a cone, a bolt, a spinning top. The contact is classified
+//! with the exact `side_of_axis` sign, no tolerance. The apex is a vertex of
+//! the B-rep, not a degenerate edge (ADR 0059). A vertex on the axis with no
+//! edge along it (a pinch point) or where an arc ends (a sphere pole,
+//! `TODO(#379)` step 3) is refused by name, as is a straight edge ending on
+//! the axis within the tolerance of perpendicular to it but not exactly.
 //!
 //! The mesh path in `revolve.rs` handles all of these. Refusing here means a
 //! caller asking for exactness gets a typed refusal naming the gap instead of
@@ -79,9 +82,9 @@ fn unsupported(input: &'static str) -> GeomError {
 /// straight segments (see [`crate::revolve_partial`]).
 ///
 /// Refused by name: an ellipse, a turn beyond a full turn, a profile crossing
-/// the axis, one touching it at an isolated vertex or at an oblique or arc
-/// edge end (`TODO(#379)` steps 2 and 3), an arc whose circle reaches the axis. A zero or non-finite angle
-/// is invalid input.
+/// the axis, one touching it at an isolated vertex (a pinch point) or where an
+/// arc ends (`TODO(#379)` step 3), an arc whose circle reaches the axis. A
+/// zero or non-finite angle is invalid input.
 pub fn revolve_profile_exact(
     profile: &Profile,
     axis_origin: Point3,

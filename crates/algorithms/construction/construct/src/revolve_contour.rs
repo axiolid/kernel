@@ -78,9 +78,10 @@ enum Contact {
     /// point.
     Arc,
     /// A straight edge with an end on the axis that is not perpendicular to
-    /// it: a cone's slant (an apex or a pole).
-    Other,
+    /// it: a cone's slant up to its apex.
+    Cone,
 }
+
 /// Revolve a lowered section a full turn about the profile's local y axis.
 ///
 /// The section may touch the axis (#379), classified with the exact
@@ -88,14 +89,18 @@ enum Contact {
 /// face, and a straight edge ending on it exactly perpendicularly (equal
 /// heights) sweeps a disc cap, so a solid cylinder and a stepped shaft
 /// revolve. A section with vertices on both sides of the axis is refused as
-/// crossing it. A vertex on the axis that meets it at a point (a cone apex,
-/// `TODO(#379)` step 2) or where an arc or an oblique edge ends (a pole,
-/// `TODO(#379)` step 3) is refused by name: the surface is not a closed
-/// two-manifold with a seam there until the degenerate vertex is modelled.
-/// A vertex off the axis by no more than the tolerance is refused too, as
-/// neither on it nor clear of it. Several separate contacts (a cavity
-/// along the axis) give one solid per outermost shell with the nested shells
-/// as its voids.
+/// crossing it. A vertex on the axis is admitted when one of its two edges
+/// lies on the axis and the other is another axis edge, a disc cap or a
+/// straight edge to a cone's apex (an arc is refused until `TODO(#379)`
+/// step 3). The apex is a vertex of the B-rep, not a degenerate edge: the
+/// cone's wall loop runs `[rim circle], seam, [rim circle], seam reversed`
+/// and leaves a gap along the pole line in its parameters, which consumers
+/// close (ADR 0059). A vertex on the axis with no axis edge (a pinch point)
+/// is refused by name, and so is a vertex off the axis by no more than the
+/// tolerance, as neither on it nor clear of it, or a straight edge ending on
+/// the axis within the tolerance of perpendicular to it but not exactly.
+/// Several separate contacts (a cavity along the axis) give one solid per
+/// outermost shell with the nested shells as its voids.
 pub fn revolve_arc_ring(
     ring: &ArcRing,
     axis_origin: Point3,
@@ -176,7 +181,7 @@ pub(crate) fn revolve_ring_about(
             "exact revolution of a section within tolerance of the axis but not on it to the bit (an arc end computed onto the axis is needed, TODO(#379) step 3)",
         ));
     }
-    check_axis_contact(&stations)?;
+    check_axis_contact(&stations, epsilon)?;
     // The exact sign above is against the line through the origin along y.
     // The axis the caller named is that line only when it is exactly so: a
     // tilt or a z offset within the tolerance moves the real axis off a
@@ -221,13 +226,15 @@ fn contact(stations: &[Station], index: usize) -> Option<Contact> {
         _ if here.bulge != 0.0 => Some(Contact::Arc),
         (true, true) => Some(Contact::Axis),
         _ if here.height == there.height => Some(Contact::Cap),
-        _ => Some(Contact::Other),
+        _ => Some(Contact::Cone),
     }
 }
 
 /// Refuse every vertex on the axis that is not the end of an edge along the
-/// axis whose other edge runs along it or perpendicular to it.
-fn check_axis_contact(stations: &[Station]) -> GeomResult<()> {
+/// axis (a pinch point, a non-manifold vertex), an arc ending on it (until
+/// step 3), and a cone's edge so near perpendicular to the axis that it is
+/// neither a disc nor a cone to the tolerance.
+fn check_axis_contact(stations: &[Station], epsilon: Scalar) -> GeomResult<()> {
     let count = stations.len();
     for (index, station) in stations.iter().enumerate() {
         if !station.on_axis {
@@ -236,21 +243,30 @@ fn check_axis_contact(stations: &[Station]) -> GeomResult<()> {
         let incoming = contact(stations, (index + count - 1) % count);
         let outgoing = contact(stations, index);
         match (incoming, outgoing) {
-            (Some(Contact::Axis), Some(Contact::Axis | Contact::Cap))
-            | (Some(Contact::Cap), Some(Contact::Axis)) => {}
             (Some(Contact::Arc), _) | (_, Some(Contact::Arc)) => {
                 return Err(unsupported(
                     "exact revolution of a section with an arc ending on the axis (pole or horn torus, TODO(#379) step 3)",
                 ));
             }
-            (Some(Contact::Axis), _) | (_, Some(Contact::Axis)) => {
-                return Err(unsupported(
-                    "exact revolution of a section ending on the axis at an oblique edge (pole, TODO(#379) step 3)",
-                ));
-            }
+            (Some(Contact::Axis), Some(_)) | (Some(_), Some(Contact::Axis)) => {}
             _ => {
                 return Err(unsupported(
-                    "exact revolution of a section touching the axis at an isolated vertex (apex, TODO(#379) step 2)",
+                    "exact revolution of a section touching the axis at an isolated vertex (a pinch point)",
+                ));
+            }
+        }
+        // A cone's rise is rounding, not geometry, when it is within the
+        // tolerance: the edge is neither a disc (equal heights, exactly) nor
+        // a cone the audit can hold to the tolerance.
+        for (edge, other) in [
+            (incoming, (index + count - 1) % count),
+            (outgoing, (index + 1) % count),
+        ] {
+            if edge == Some(Contact::Cone)
+                && (station.height - stations[other].height).abs() <= epsilon
+            {
+                return Err(unsupported(
+                    "exact revolution of an edge ending on the axis within the tolerance of perpendicular to it but not exactly",
                 ));
             }
         }
@@ -277,12 +293,17 @@ fn build(stations: &[Station], axis_origin: Point3, epsilon: Scalar) -> GeomResu
     let mut circles = Vec::with_capacity(count);
     let mut vertices = Vec::with_capacity(count);
     let mut points = Vec::with_capacity(count);
-    for station in stations {
+    for (index, station) in stations.iter().enumerate() {
         let position = Point3::new(axis_origin.x + station.radius, station.height, 0.0);
         points.push(position);
         if station.on_axis {
             circles.push(None);
-            vertices.push(None);
+            // A cone's apex is a vertex its seam ends at; a station that only
+            // ends axis edges and discs has none.
+            let apex = [(index + count - 1) % count, index]
+                .into_iter()
+                .any(|edge| contact(stations, edge) == Some(Contact::Cone));
+            vertices.push(apex.then(|| builder.topology_mut().add_vertex(Vertex { position })));
             continue;
         }
         let vertex = builder.topology_mut().add_vertex(Vertex { position });
@@ -300,17 +321,32 @@ fn build(stations: &[Station], axis_origin: Point3, epsilon: Scalar) -> GeomResu
         vertices.push(Some(vertex));
     }
 
-    let mut faces: Vec<(FaceId, usize)> = Vec::with_capacity(count);
+    // Each face with the two stations of the edge it sweeps.
+    let mut faces: Vec<(FaceId, usize, usize)> = Vec::with_capacity(count);
     for index in 0..count {
         let next = (index + 1) % count;
         let here = stations[index];
         let there = stations[next];
         let face = if here.on_axis || there.on_axis {
-            // `check_axis_contact` admitted only an axis edge and a disc.
+            // `check_axis_contact` admitted only an axis edge, a disc and a
+            // cone's slant.
             if here.on_axis && there.on_axis {
                 continue;
             }
-            cap_wall(&mut builder, axis_origin.x, &circles, stations, index)?
+            if here.height == there.height {
+                cap_wall(&mut builder, axis_origin.x, &circles, stations, index)?
+            } else {
+                straight_wall(
+                    &mut builder,
+                    axis_origin.x,
+                    &circles,
+                    &vertices,
+                    &points,
+                    stations,
+                    index,
+                    true,
+                )?
+            }
         } else if here.bulge != 0.0 {
             torus_wall(
                 &mut builder,
@@ -352,12 +388,12 @@ fn build(stations: &[Station], axis_origin: Point3, epsilon: Scalar) -> GeomResu
                 true,
             )?
         };
-        faces.push((face, if here.on_axis { next } else { index }));
+        faces.push((face, index, next));
     }
 
-    if faces.len() < 3 {
+    if faces.len() < 2 {
         return Err(GeomError::Degenerate(format!(
-            "a revolved solid needs at least three faces, got {}",
+            "a revolved solid needs at least two faces, got {}",
             faces.len()
         )));
     }
@@ -368,6 +404,10 @@ fn build(stations: &[Station], axis_origin: Point3, epsilon: Scalar) -> GeomResu
 /// Both parameterise as `(angle, height)`, so one seam loop serves both: only
 /// the SURFACE differs. The seam is traversed forward and reversed so the
 /// loop is vertex-connected without enclosing extra area.
+///
+/// A cone with an end on the axis is framed at its apex, where its radius is
+/// exactly zero, so the apex is at `v = 0` and the loop omits the circle
+/// there (#379).
 #[allow(clippy::too_many_arguments)]
 fn straight_wall(
     builder: &mut ExactBRepBuilder,
@@ -396,13 +436,16 @@ fn straight_wall(
     });
     builder.set_edge_interval(seam, Interval::UNIT);
 
+    // The station the surface is framed at: the apex when an end is on the
+    // axis, else the start, as before.
+    let basis = if there.on_axis { there } else { here };
     let surface = if cone {
         // `semi_angle` is measured so radius grows as `r + v * tan(angle)`,
         // which is exactly the slope of this segment.
         let semi_angle = ((there.radius - here.radius) / rise).atan();
         builder.add_surface(Surface::Cone(Cone {
-            frame: frame_at(axis_x, here.height),
-            radius: here.radius,
+            frame: frame_at(axis_x, basis.height),
+            radius: basis.radius,
             semi_angle,
         }))
     } else {
@@ -412,12 +455,13 @@ fn straight_wall(
         }))
     };
 
-    let loop_id = seam_loop(
+    let loop_id = seam_loop_between(
         builder,
-        slot(circles, index)?,
-        slot(circles, next)?,
+        circles[index],
+        circles[next],
         seam,
-        rise,
+        here.height - basis.height,
+        there.height - basis.height,
     );
     Ok(add_face(builder, surface, loop_id, Orientation::Forward))
 }
@@ -593,8 +637,8 @@ fn torus_wall(
 
     let loop_id = seam_loop_between(
         builder,
-        slot(circles, index)?,
-        slot(circles, next)?,
+        Some(slot(circles, index)?),
+        Some(slot(circles, next)?),
         seam,
         start,
         end,
@@ -660,74 +704,82 @@ fn circle_loop(
     loop_id
 }
 
-/// The four-edge seam loop for a wall spanning `v` from 0 to `rise`.
-fn seam_loop(
-    builder: &mut ExactBRepBuilder,
-    lower: EdgeId,
-    upper: EdgeId,
-    seam: EdgeId,
-    rise: Scalar,
-) -> LoopId {
-    seam_loop_between(builder, lower, upper, seam, 0.0, rise)
-}
-
-/// The four-edge seam loop for a wall spanning `v` from `from` to `to`.
+/// The seam loop for a wall spanning `v` from `from` to `to`: the lower
+/// circle, the seam up, the upper circle back, the seam down.
 ///
 /// A wall between two disjoint circles cannot close with two edges: a loop
 /// must be vertex-connected, so the seam is traversed once each way. It adds
-/// no area because the two traversals cancel.
+/// no area because the two traversals cancel. A circle that is `None` is a
+/// pole or apex, a vertex: the loop omits its use and leaves a gap along the
+/// pole line in the wall's parameters.
 fn seam_loop_between(
     builder: &mut ExactBRepBuilder,
-    lower: EdgeId,
-    upper: EdgeId,
+    lower: Option<EdgeId>,
+    upper: Option<EdgeId>,
     seam: EdgeId,
     from: Scalar,
     to: Scalar,
 ) -> LoopId {
-    let lower_pcurve = builder.add_curve2(Curve2::Line(Line2 {
-        origin: Vec2::new(0.0, from),
-        direction: Vec2::X,
-    }));
-    let upper_pcurve = builder.add_curve2(Curve2::Line(Line2 {
-        origin: Vec2::new(0.0, to),
-        direction: Vec2::X,
-    }));
-    let up_pcurve = builder.add_curve2(Curve2::Line(Line2 {
-        origin: Vec2::new(TAU, from),
-        direction: Vec2::new(0.0, to - from),
-    }));
-    let down_pcurve = builder.add_curve2(Curve2::Line(Line2 {
-        origin: Vec2::new(0.0, from),
-        direction: Vec2::new(0.0, to - from),
-    }));
-    let loop_id = builder.topology_mut().add_loop(Loop {
-        edges: vec![
-            EdgeUse {
-                edge: lower,
-                orientation: Orientation::Forward,
-                pcurve: Some(lower_pcurve),
+    let rise = to - from;
+    let mut uses = Vec::with_capacity(4);
+    if let Some(lower) = lower {
+        uses.push((
+            lower,
+            Orientation::Forward,
+            Line2 {
+                origin: Vec2::new(0.0, from),
+                direction: Vec2::X,
             },
-            EdgeUse {
-                edge: seam,
-                orientation: Orientation::Forward,
-                pcurve: Some(up_pcurve),
+            Interval::new(0.0, TAU),
+        ));
+    }
+    uses.push((
+        seam,
+        Orientation::Forward,
+        Line2 {
+            origin: Vec2::new(TAU, from),
+            direction: Vec2::new(0.0, rise),
+        },
+        Interval::UNIT,
+    ));
+    if let Some(upper) = upper {
+        uses.push((
+            upper,
+            Orientation::Reversed,
+            Line2 {
+                origin: Vec2::new(0.0, to),
+                direction: Vec2::X,
             },
-            EdgeUse {
-                edge: upper,
-                orientation: Orientation::Reversed,
-                pcurve: Some(upper_pcurve),
-            },
-            EdgeUse {
-                edge: seam,
-                orientation: Orientation::Reversed,
-                pcurve: Some(down_pcurve),
-            },
-        ],
-    });
-    builder.set_pcurve_interval(loop_id, 0, Interval::new(0.0, TAU));
-    builder.set_pcurve_interval(loop_id, 1, Interval::UNIT);
-    builder.set_pcurve_interval(loop_id, 2, Interval::new(TAU, 0.0));
-    builder.set_pcurve_interval(loop_id, 3, Interval::new(1.0, 0.0));
+            Interval::new(TAU, 0.0),
+        ));
+    }
+    uses.push((
+        seam,
+        Orientation::Reversed,
+        Line2 {
+            origin: Vec2::new(0.0, from),
+            direction: Vec2::new(0.0, rise),
+        },
+        Interval::new(1.0, 0.0),
+    ));
+    let (edges, intervals): (Vec<_>, Vec<_>) = uses
+        .into_iter()
+        .map(|(edge, orientation, line, interval)| {
+            let pcurve = builder.add_curve2(Curve2::Line(line));
+            (
+                EdgeUse {
+                    edge,
+                    orientation,
+                    pcurve: Some(pcurve),
+                },
+                interval,
+            )
+        })
+        .unzip();
+    let loop_id = builder.topology_mut().add_loop(Loop { edges });
+    for (use_index, interval) in intervals.into_iter().enumerate() {
+        builder.set_pcurve_interval(loop_id, use_index, interval);
+    }
     loop_id
 }
 
@@ -754,14 +806,15 @@ fn add_face(
 ///
 /// A section touching the axis in several places gives several pieces: a
 /// cavity along the axis is a piece of its own. The pieces' ranges along the
-/// axis decide the nesting exactly, from heights taken from the input: one
-/// strictly inside another's range is its void. A piece nested twice (a
+/// axis (the heights of every station of each of its faces, an apex's
+/// included) decide the nesting exactly, from heights taken from the input:
+/// one strictly inside another's range is its void. A piece nested twice (a
 /// solid inside a cavity) is refused. The faces already face out of the
 /// material, so a void's faces face into its cavity as they are.
 fn finish(
     mut builder: ExactBRepBuilder,
     stations: &[Station],
-    faces: Vec<(FaceId, usize)>,
+    faces: Vec<(FaceId, usize, usize)>,
 ) -> GeomResult<ExactBRep> {
     struct Piece {
         label: usize,
@@ -801,12 +854,21 @@ fn finish(
             }),
         }
     }
-    for (face, representative) in faces {
+    for (face, index, next) in faces {
+        // The edge's station off the axis names its piece.
+        let representative = if stations[index].on_axis { next } else { index };
         if let Some(piece) = pieces
             .iter_mut()
             .find(|piece| piece.label == label[representative])
         {
             piece.faces.push(face);
+            // An apex or a disc's axis end lies off the piece's off-axis
+            // stations; without it a cavity inside a spinning top would not
+            // nest.
+            for station in [index, next] {
+                piece.low = piece.low.min(stations[station].height);
+                piece.high = piece.high.max(stations[station].height);
+            }
         }
     }
     let contains = |outer: &Piece, inner: &Piece| outer.low < inner.low && inner.high < outer.high;

@@ -88,8 +88,8 @@ fn close(what: &str, got: f64, want: f64) {
 }
 
 fn cut(a: &ExactBRep, b: &ExactBRep, want: f64, what: &str) {
-    let result = boolean(a, b, BooleanOperator::Difference, tol())
-        .unwrap_or_else(|e| panic!("{what}: {e}"));
+    let result =
+        boolean(a, b, BooleanOperator::Difference, tol()).unwrap_or_else(|e| panic!("{what}: {e}"));
     audited(&result, what);
     close(what, volume(&result), want);
 }
@@ -110,5 +110,45 @@ fn a_three_quarter_cone_loses_a_slab_and_a_block() {
         &block((0.2, 0.7), (0.1, 0.6), (-0.25, 0.3)),
         3.4717917352885173,
         "block",
+    );
+}
+
+/// A whole revolved cone: a half, a slab and an off-axis block cut away.
+#[test]
+fn a_whole_cone_loses_a_half_a_slab_and_a_block() {
+    let cone = revolved(&polygon(&[(0.0, 0.0), (1.5, 0.0), (0.0, 2.0)]), 2.0 * PI);
+    close("operand", volume(&cone), 1.5 * PI);
+    cut(
+        &cone,
+        &block((0.0, 6.0), (-6.0, 6.0), (-6.0, 6.0)),
+        2.356194490192345,
+        "half",
+    );
+    cut(
+        &cone,
+        &block((-6.0, 6.0), (1.0, 6.0), (-6.0, 6.0)),
+        4.123340357836604,
+        "slab",
+    );
+    cut(
+        &cone,
+        &block((0.2, 0.7), (0.1, 0.6), (-0.25, 0.3)),
+        4.5748889803846895,
+        "block",
+    );
+}
+
+/// A bolt's conical point and a slot through its flat head.
+#[test]
+fn a_bolt_loses_a_slot() {
+    let bolt = revolved(
+        &polygon(&[(0.0, -0.4), (0.5, 0.0), (0.5, 3.0), (0.0, 3.0)]),
+        2.0 * PI,
+    );
+    cut(
+        &bolt,
+        &block((-0.1, 0.1), (2.5, 3.5), (-1.0, 1.0)),
+        2.3615849702587584,
+        "slot",
     );
 }

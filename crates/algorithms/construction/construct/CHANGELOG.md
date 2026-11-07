@@ -19,22 +19,28 @@ caret rule for `0.x` versions.
 ### Added
 
 - `revolve_profile_exact` and `revolve_arc_ring` revolve a full turn of a
-  profile that touches the axis along edges lying on it and at straight
-  edges ending on it exactly perpendicularly: a solid cylinder, a stepped
-  shaft (#379, step 1). An axis edge sweeps no face and a perpendicular edge
-  sweeps a disc cap. The contact is classified with the exact `side_of_axis`
-  sign, no tolerance. A section crossing the axis, touching it at an
-  isolated vertex (cone apex) or ending on it at an arc or an oblique edge
-  (sphere and cone poles) stays `UnsupportedInput`, naming `TODO(#379)`
-  steps 2 and 3 (an arc ending on the axis, a horn torus included, names the
-  arc); so does a vertex within the tolerance of the axis but not on it to
-  the bit, and the crossing refusal now says "crossing the axis" only. A
-  touching section needs the axis exactly along the profile's y with its
-  origin exactly in the plane: a tilt or a z offset within the tolerance
-  would move the real axis off a vertex judged on it, so it is refused. A
-  section with several contacts (a cavity along the axis) gives one solid per
-  outermost piece with the nested pieces as void shells; a solid inside a
-  cavity is refused.
+  profile that touches the axis (#379): along edges lying on it, at straight
+  edges ending on it exactly perpendicularly (a disc cap: a solid cylinder, a
+  stepped shaft) and at any other straight edge ending on it (a cone up to
+  its apex: a cone, a bolt, a spinning top, a top with a cavity). An axis
+  edge sweeps no face. A vertex on the axis is admitted when one of its two
+  edges lies on the axis; the contact is classified with the exact
+  `side_of_axis` sign, no tolerance. The apex is a vertex of the B-rep, not
+  a degenerate edge: the cone is framed at it with radius zero, and its wall
+  loop leaves a gap along the pole line in its parameters, which the
+  boolean and the deviation oracle close. A section crossing the axis,
+  touching it at a vertex with no edge along it (a pinch point), or ending
+  on it at an arc (`TODO(#379)` step 3) stays `UnsupportedInput`, as does a
+  vertex within the tolerance of the axis but not on it to the bit and an
+  edge ending on the axis within the tolerance of perpendicular to it but
+  not exactly (a cone of rise below the tolerance fails the geometric audit,
+  so it is refused by name). A touching section needs the axis exactly along
+  the profile's y with its origin exactly in the plane: a tilt or a z offset
+  within the tolerance would move the real axis off a vertex judged on it,
+  so it is refused. A section with several contacts (a cavity along the
+  axis) gives one solid per outermost piece with the nested pieces as void
+  shells, nested by the heights of every face's stations, apexes included; a
+  solid inside a cavity is refused.
 
 ### Fixed
 
