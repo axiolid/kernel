@@ -277,6 +277,9 @@ pub const FINER_FACTOR: Scalar = 1.0 / 1024.0;
 pub(crate) const ROUNDING: Scalar = ROUNDING_FACTOR;
 
 struct Session {
+    /// The tolerance the caller asked for, which no retry changes: the
+    /// bound of the exit check ([`caller`], #445).
+    caller: Tolerance,
     /// The caller's tolerance: every recorded decision lies within it, and
     /// at [`Tolerance::ZERO`] none may be recorded (#251).
     tolerance: Tolerance,
@@ -482,6 +485,7 @@ pub(crate) fn open(operands: &[&ExactBRep], tolerance: Tolerance) -> Guard {
         let extent = operands.iter().map(|b| extent(b)).fold(0.0, Scalar::max);
         SESSION.with(|s| {
             *s.borrow_mut() = Some(Session {
+                caller: tolerance,
                 tolerance,
                 exceeded: false,
                 extent,
@@ -526,6 +530,22 @@ fn extent(brep: &ExactBRep) -> Scalar {
 /// The linear rounding floor of the open session (zero without one).
 pub(crate) fn rounding() -> Scalar {
     SESSION.with(|s| s.borrow().as_ref().map_or(0.0, |s| s.rounding))
+}
+
+/// The tolerance the caller opened the session with, whatever a retry has
+/// since cut at (`None` without a session).
+pub(crate) fn caller() -> Option<Tolerance> {
+    SESSION.with(|s| s.borrow().as_ref().map(|s| s.caller))
+}
+
+/// Whether no decision has been recorded in the open session so far (`true`
+/// without one): the report so far is exact.
+pub(crate) fn exact() -> bool {
+    SESSION.with(|s| {
+        s.borrow()
+            .as_ref()
+            .is_none_or(|s| s.report.decisions.is_empty())
+    })
 }
 
 /// The tolerance with its parts raised to the rounding floor: for naming a
@@ -697,6 +717,33 @@ mod tests {
         let report = guard.finish().expect("nothing recorded");
         assert_eq!((report.extent(), report.rounding_floor()), (0.0, 0.0));
         assert_eq!(ROUNDING_FACTOR, (2.0 as Scalar).powi(-40));
+    }
+
+    #[test]
+    fn the_caller_tolerance_survives_every_retry() {
+        let tol = Tolerance::METRE;
+        let guard = open(&[], tol);
+        assert_eq!(caller(), Some(tol));
+        let finer = Tolerance::new(tol.linear() / 1024.0, tol.angular()).expect("a tolerance");
+        assert!(guard.retry_at(finer));
+        assert_eq!(caller(), Some(tol));
+        assert!(guard.retry_extending(tol));
+        assert_eq!(caller(), Some(tol));
+        assert!(guard.restart(tol));
+        assert_eq!(caller(), Some(tol));
+        drop(guard);
+        assert_eq!(caller(), None);
+    }
+
+    #[test]
+    fn a_session_is_exact_until_a_decision_is_recorded() {
+        assert!(exact());
+        let guard = open(&[], Tolerance::METRE);
+        assert!(exact());
+        assert!(near(MergedPoints, 5e-7, Tolerance::METRE));
+        assert!(!exact());
+        assert!(guard.restart(Tolerance::METRE));
+        assert!(exact());
     }
 
     #[test]

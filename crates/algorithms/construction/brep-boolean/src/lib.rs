@@ -219,6 +219,7 @@
 mod assemble;
 mod bounds;
 mod classify;
+mod consistency;
 mod contact;
 mod predicate;
 mod recentre;
@@ -296,6 +297,7 @@ pub fn boolean_with_report(
     if let Some((near_a, near_b, centre)) = near {
         let moved = solve(&session, &near_a, &near_b, operator, tolerance)
             .and_then(|near| recentre::restore(&near, centre))
+            .and_then(|result| consistency::check(&result, tolerance).map(|()| result))
             .ok()
             .filter(|_| !session.exceeded());
         if let Some(result) = moved {
@@ -448,7 +450,9 @@ fn run(
             }
         }
     }
-    assemble::assemble(&kept, tolerance)
+    let result = assemble::assemble(&kept, tolerance)?;
+    consistency::check(&result, tolerance)?;
+    Ok(result)
 }
 
 /// Whether a region is kept, and whether it bounds the result from its
@@ -596,6 +600,12 @@ pub enum BooleanError {
     /// readings never ask for one; this refusal stands in for a result
     /// whose report would misdescribe it.
     ToleranceExceeded,
+    /// A vertex of the result lies off the curve of an edge it bounds, or
+    /// off an edge use's pcurve lifted at its end, further than the report
+    /// allows: the caller's linear tolerance, and for an exact report the
+    /// rounding floor too (#445). Refused rather than returned with a
+    /// report that misdescribes it.
+    VertexOffCurve,
 }
 
 impl fmt::Display for BooleanError {
@@ -632,6 +642,9 @@ impl fmt::Display for BooleanError {
             Self::ToleranceExceeded => {
                 f.write_str("a decision within tolerance was asked for beyond the caller's tolerance")
             }
+            Self::VertexOffCurve => f.write_str(
+                "a vertex of the result lies off its edge's curve beyond what its report allows",
+            ),
         }
     }
 }
