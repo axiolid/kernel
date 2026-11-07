@@ -271,3 +271,67 @@ fn a_section_across_a_cell_join_or_without_a_bound_has_none() {
     let b = space_bounds(&line, 0.0, 1.0).unwrap();
     assert!(b.first >= 1.0 && b.second == Some(0.0));
 }
+
+/// `v - k u = 0` over `u` in `[from, to]`, the cell's bracket the whole
+/// image: one regular cell of rate `to - from` in `t`.
+fn line_field(k: Scalar, from: Scalar, to: Scalar, low: Scalar, high: Scalar) -> ImplicitCurve2 {
+    ImplicitCurve2 {
+        field: Field2::Series(SeriesField2 {
+            u: Basis::Power,
+            v: Basis::Power,
+            coefficients: vec![vec![0.0, 1.0], vec![-k]],
+        }),
+        cells: vec![ImplicitCell {
+            axis: Axis::U,
+            from,
+            to,
+            low,
+            high,
+            bridge: None,
+        }],
+    }
+}
+
+#[test]
+fn an_implicit_cell_bounds_scale_with_its_rate_and_the_mixed_partial_counts_twice() {
+    // `w = u^2` over `u` in `[-1.5, 1.5]`: a rate of 3, so `q'' = 9 (0, 2)`
+    // exactly, which the bound is within rounding of.
+    let wide = ImplicitCurve2 {
+        cells: vec![ImplicitCell {
+            from: -1.5,
+            to: 1.5,
+            low: -0.1,
+            high: 2.5,
+            ..parabola().cells[0]
+        }],
+        ..parabola()
+    };
+    let b = implicit::derivative_bounds(&wide, 0.0, 1.0).unwrap();
+    assert!(b.second[1] >= 18.0 && b.second[1] <= 18.5, "{:?}", b.second);
+    assert!(b.second[0] == 0.0 && b.first[0] >= 3.0 && b.first[0] <= 3.0001);
+
+    // A line `v = 1.5 u` on a cone near its apex: `c''` is
+    // `r^2 (S_uu + 2 S_uv 1.5)`, its radial and tangential parts both
+    // counted, which is more than the radial part and the mixed partial once.
+    let (rate, slope, k) = (0.6, 1.0, 1.5);
+    let section = Curve3::ImplicitSection(ImplicitSection3 {
+        carrier: Carrier::Ruled(RuledCarrier {
+            frame: Frame3 {
+                origin: Point3::ZERO,
+                x: Vec3::X,
+                y: Vec3::Y,
+                z: Vec3::Z,
+            },
+            x_radius: 0.05,
+            y_radius: 0.05,
+            slope,
+        }),
+        curve: line_field(k, 0.2, 0.2 + rate, 0.2, 1.4),
+    });
+    let sampled = (0..=SAMPLES)
+        .map(|i| second_derivative3(&section, i as Scalar / SAMPLES as Scalar).unwrap())
+        .map(|v| v.length())
+        .fold(0.0, Scalar::max);
+    let got = space_bounds(&section, 0.0, 1.0).unwrap().second.unwrap();
+    assert!(sampled <= got, "{sampled} over {got}");
+}

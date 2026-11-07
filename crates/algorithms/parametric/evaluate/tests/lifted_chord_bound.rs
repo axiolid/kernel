@@ -527,3 +527,89 @@ fn a_spline_carrier_without_a_pair_and_a_curve_without_bounds_have_none() {
     assert!(chord_bound2(&on_plane, 0.1, Scalar::NAN).is_none());
     assert_eq!(chord_bound2(&on_plane, 0.5, 0.5), Some(0.0));
 }
+
+#[test]
+fn a_space_curve_off_its_carrier_carries_the_offset_in_its_bound() {
+    // A line 1e-3 above the plane it is read on: the pcurve is straight, but
+    // each evaluated end is as far from a lift as the curve is from the
+    // surface, and the bound says so.
+    let plane = common::rotated();
+    let line = Curve3::Line(axiolid_curve::Line3 {
+        origin: plane.origin + plane.x * 0.1 + plane.z * 1e-3,
+        direction: plane.x * 0.5 + plane.y * 0.2,
+    });
+    let curve = lifted(line, Carrier::Plane(plane), (0.0, 1.0), |t| {
+        Point2::new(0.1 + 0.5 * t, 0.2 * t)
+    });
+    let bound = chord_bound2(&curve, 0.2, 0.6).expect("bounded");
+    assert!((1e-3..1.1e-3).contains(&bound), "{bound}");
+}
+
+#[test]
+fn a_circle_bulging_toward_a_pole_between_its_ends_is_refused_or_held() {
+    // Tilted to within 0.07 of the pole: the ends' hull stays near the
+    // equator, the curve does not.
+    let c = common::rotated();
+    let (radius, tilt) = (0.8, 1.5_f64);
+    let y = c.y * tilt.cos() + c.z * tilt.sin();
+    let circle = Curve3::Circle(Circle3 {
+        frame: Frame3 {
+            origin: c.origin,
+            x: c.x,
+            y,
+            z: c.x.cross(y),
+        },
+        radius,
+    });
+    let point = move |t: Scalar| {
+        let raw = (t.sin() * tilt.cos()).atan2(t.cos());
+        Point2::new(near(raw, t), (t.sin() * tilt.sin()).asin())
+    };
+    let curve = lifted(
+        circle,
+        Carrier::Sphere { frame: c, radius },
+        (0.0, TAU),
+        point,
+    );
+    for (lo, hi) in [(0.05, 3.0), (0.3, 2.8), (0.7, 2.4)] {
+        if let Some(bound) = chord_bound2(&curve, lo, hi) {
+            let sample = sampled(&point, lo, hi);
+            assert!(sample <= bound, "[{lo}, {hi}]: {sample} above {bound}");
+        }
+    }
+    // Over the pole itself: refused.
+    assert!(chord_bound2(&curve, 1.2, 1.9).is_none());
+}
+
+#[test]
+fn a_spike_in_the_guide_between_two_honest_ends_is_refused_or_held() {
+    // One guide node a turn's worth off: the evaluator's nearest turn flips
+    // inside the span and back, so the ends alone are honest.
+    let v = |t: Scalar| 0.35 * t.sin();
+    let n = 129;
+    let mut guide: Vec<Point2> = (0..n)
+        .map(|i| {
+            let t = 3.0 * i as Scalar / (n - 1) as Scalar;
+            Point2::new(t, v(t))
+        })
+        .collect();
+    let honest = ellipse_with_guide(guide.clone(), 0.0, 3.0);
+    assert!(chord_bound2(&honest, 1.2, 1.7).is_some());
+    guide[64].x += 4.0;
+    let curve = ellipse_with_guide(guide, 0.0, 3.0);
+    let point = |t: Scalar| evaluate2(&curve, t).unwrap();
+    let (lo, hi) = (1.2, 1.7);
+    let (p, q) = (point(lo), point(hi));
+    let chord = q - p;
+    let sample = (1..SAMPLES)
+        .map(|i| {
+            let r = point(lo + (hi - lo) * i as Scalar / SAMPLES as Scalar) - p;
+            let s = (r.dot(chord) / chord.length_squared()).clamp(0.0, 1.0);
+            (r - chord * s).length()
+        })
+        .fold(0.0, Scalar::max);
+    assert!(sample > 1.0, "the evaluator does not flip: {sample}");
+    if let Some(bound) = chord_bound2(&curve, lo, hi) {
+        assert!(sample <= bound, "{sample} above {bound}");
+    }
+}

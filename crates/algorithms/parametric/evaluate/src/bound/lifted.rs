@@ -211,3 +211,6 @@ fn bend(
         .hi;
     bend.is_finite().then_some(bend)
 }
+
+#[cfg(test)]
+mod tests;

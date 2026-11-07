@@ -63,43 +63,10 @@ pub(super) fn chord_bound(
     lo: Scalar,
     hi: Scalar,
 ) -> Option<Scalar> {
-    let n = section.nodes.len();
-    if n < 2 || !(lo.is_finite() && hi.is_finite() && lo < hi) {
+    if !(lo.is_finite() && hi.is_finite() && lo < hi) {
         return None;
     }
-    if section
-        .nodes
-        .iter()
-        .any(|k| !(k.point.is_finite() && k.first.is_finite() && k.second.is_finite()))
-    {
-        return None;
-    }
-    let index = (lo.floor().max(0.0) as usize).min(n - 2);
-    if lo < index as Scalar || hi > (index + 1) as Scalar {
-        return None;
-    }
-    let (p0, p1) = (section.nodes[index].point, section.nodes[index + 1].point);
-    let d = p1 - p0;
-    let squares = [d.x, d.y, d.z]
-        .map(|c| Iv::point(c).sq())
-        .into_iter()
-        .fold(Iv::point(0.0), Iv::add);
-    let length = squares.sqrt();
-    if !(length.finite() && length.lo > 0.0) {
-        return None;
-    }
-    let chord = Chord {
-        section,
-        first,
-        index,
-        origin: p0,
-        d,
-        length,
-        oracles: [
-            SurfaceBoundOracle::for_carrier(&section.first)?,
-            SurfaceBoundOracle::for_carrier(&section.second)?,
-        ],
-    };
+    let chord = Chord::new(section, first, lo, hi)?;
     split_chord(lo, hi, |a, b| chord.piece(a, b))
 }
 
@@ -120,6 +87,50 @@ struct Chord<'a> {
 struct End {
     at: [Point2; 2],
     residual: Scalar,
+}
+
+impl<'a> Chord<'a> {
+    /// The chord of the section holding `[lo, hi]`, or `None` over more than
+    /// one chord, for a degenerate chord, or for non-finite nodes.
+    fn new(section: &'a PairSection3, first: bool, lo: Scalar, hi: Scalar) -> Option<Self> {
+        let n = section.nodes.len();
+        if n < 2 {
+            return None;
+        }
+        if section
+            .nodes
+            .iter()
+            .any(|k| !(k.point.is_finite() && k.first.is_finite() && k.second.is_finite()))
+        {
+            return None;
+        }
+        let index = (lo.floor().max(0.0) as usize).min(n - 2);
+        if lo < index as Scalar || hi > (index + 1) as Scalar {
+            return None;
+        }
+        let (p0, p1) = (section.nodes[index].point, section.nodes[index + 1].point);
+        let d = p1 - p0;
+        let squares = [d.x, d.y, d.z]
+            .map(|c| Iv::point(c).sq())
+            .into_iter()
+            .fold(Iv::point(0.0), Iv::add);
+        let length = squares.sqrt();
+        if !(length.finite() && length.lo > 0.0) {
+            return None;
+        }
+        Some(Self {
+            section,
+            first,
+            index,
+            origin: p0,
+            d,
+            length,
+            oracles: [
+                SurfaceBoundOracle::for_carrier(&section.first)?,
+                SurfaceBoundOracle::for_carrier(&section.second)?,
+            ],
+        })
+    }
 }
 
 impl Chord<'_> {
@@ -328,3 +339,6 @@ fn inverse(mut m: [[Scalar; 4]; 4]) -> Option<[[Scalar; 4]; 4]> {
     }
     r.iter().flatten().all(|x| x.is_finite()).then_some(r)
 }
+
+#[cfg(test)]
+mod tests;
