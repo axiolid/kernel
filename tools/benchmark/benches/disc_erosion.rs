@@ -26,6 +26,10 @@
 //! radius 0.4 m (`t` 0.2 m) holds the needles' depth, which is above
 //! `t / 16` (0.0125 m), the reach of #330's proposals.
 //!
+//! The cases of #428 take the same room with needles 0.25 m deep (`deep`),
+//! deeper than the disc's `t` (0.2 m): `fast` at 2,002 and 10,002 corners,
+//! `exact` at 2,002.
+//!
 //! The cases of #345 take a floor (`floor`): a 3 m square whose bottom and
 //! top sides carry teeth 0.5 mm deep, eroded inner and outer by 1.4 m, 1.49 m and
 //! 1.6 m (which empties it) at 50,000, 100,000, 150,000 and 200,000
@@ -48,7 +52,7 @@
 //! sizes of #323's and #330's cases, an empty list to run none,
 //! `DISC_EROSION_MODES` (`exact`, `fast` or both) for #330's modes, and
 //! `DISC_EROSION_NEEDLE` (`exact`, `fast`, both or empty) for #340's modes,
-//! and `DISC_EROSION_RUNS` for fewer timed runs.
+//! `DISC_EROSION_DEEP` the same for #428's, and `DISC_EROSION_RUNS` for fewer timed runs.
 //!
 //! ```bash
 //! cargo bench -p axiolid-benchmark --bench disc_erosion
@@ -70,6 +74,8 @@ const NEEDLE_FAST: [usize; 2] = [2002, 10002];
 const NEEDLE_EXACT: usize = 2002;
 /// The needles' depth.
 const NEEDLE_DEPTH: f64 = 0.05;
+/// The depth of #428's needles, deeper than the disc's `t` (0.2 m).
+const DEEP_DEPTH: f64 = 0.25;
 /// Corners of #345's floor, in `fast` mode.
 const FLOOR_CORNERS: [usize; 4] = [50_000, 100_000, 150_000, 200_000];
 /// Radii of #345's floor.
@@ -219,6 +225,7 @@ fn case(spec: &str) {
         "plain" => (0, 0.0),
         "flat" => ((corners - 2) / 4, 0.0),
         "needle" => ((corners - 2) / 4, NEEDLE_DEPTH),
+        "deep" => ((corners - 2) / 4, DEEP_DEPTH),
         _ => ((corners - 2) / 4, 5.0e-4),
     };
     let erode = parts[1] == "erode";
@@ -392,6 +399,19 @@ fn main() {
                 for n in NEEDLE_FAST {
                     if mode == "fast" || n <= NEEDLE_EXACT {
                         cases.push(format!("needle:{op}:{side}:{n}:{LARGE_RADIUS}:{mode}"));
+                    }
+                }
+            }
+        }
+    }
+    // #428: needles deeper than the disc.
+    let deep = std::env::var("DISC_EROSION_DEEP").unwrap_or_else(|_| "exact,fast".into());
+    for mode in deep.split(',').filter(|m| !m.is_empty()) {
+        for op in ["erode", "dilate"] {
+            for side in ["inner", "outer"] {
+                for n in NEEDLE_FAST {
+                    if mode == "fast" || n <= NEEDLE_EXACT {
+                        cases.push(format!("deep:{op}:{side}:{n}:{LARGE_RADIUS}:{mode}"));
                     }
                 }
             }
