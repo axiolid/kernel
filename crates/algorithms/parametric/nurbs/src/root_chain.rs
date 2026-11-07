@@ -22,6 +22,8 @@
 //! This module is pure: it knows nothing of curves, and is tested against
 //! polynomials.
 
+use std::cell::Cell;
+
 use crate::interval::I;
 use axiolid_core::Scalar;
 
@@ -29,10 +31,12 @@ use axiolid_core::Scalar;
 pub(crate) const MAX_CONTACT_ORDER: usize = 8;
 /// The orders that must be signed at a split point.
 pub(crate) const GENERIC_ORDER: usize = 2;
-/// Nodes one isolation may visit before it refuses: the most any test of
-/// the section, boolean and compile suites needed was 449, and this is the
-/// first power of two (at least `2^14`) above sixteen times that.
-pub(crate) const ROOT_BUDGET: usize = 1 << 14;
+/// Enclosures one isolation may ask before it refuses: the most any decided
+/// case of the section, boolean and compile suites needed was 3124, and this
+/// is the first power of two above sixteen times that.
+pub(crate) const ROOT_BUDGET: usize = 1 << 16;
+/// Enclosures one leaf's chain may ask before the leaf is split instead.
+const CHAIN_EVALS: usize = 8000;
 /// Enclosures spent on narrowing a root's extent.
 const REFINE_EVALS: usize = 256;
 const MAX_DEPTH: u32 = 128;
@@ -122,22 +126,24 @@ impl Zone {
     }
 }
 
-/// A count of the nodes still allowed.
+/// A count of the work still allowed, in enclosures (each node costs one
+/// more).
 #[derive(Debug, Clone)]
 pub(crate) struct Budget {
     left: usize,
 }
 
 impl Budget {
-    pub(crate) fn new(nodes: usize) -> Self {
-        Self { left: nodes }
+    pub(crate) fn new(units: usize) -> Self {
+        Self { left: units }
     }
 
-    fn spend(&mut self) -> Result<(), RootRefusal> {
-        if self.left == 0 {
+    fn spend(&mut self, units: usize) -> Result<(), RootRefusal> {
+        if self.left < units {
+            self.left = 0;
             return Err(RootRefusal::Budget);
         }
-        self.left -= 1;
+        self.left -= units;
         Ok(())
     }
 }
@@ -153,6 +159,52 @@ pub(crate) trait Tower {
     fn joins(&self, t0: Scalar, t1: Scalar) -> Vec<Scalar>;
 }
 
+/// A tower that counts the enclosures asked of it.
+struct Counted<'a, T> {
+    inner: &'a T,
+    used: Cell<usize>,
+}
+
+impl<T: Tower> Counted<'_, T> {
+    /// The enclosures asked since the last call.
+    fn take(&self) -> usize {
+        self.used.replace(0)
+    }
+}
+
+impl<T: Tower> Tower for Counted<'_, T> {
+    fn enclose(&self, t0: Scalar, t1: Scalar, order: usize) -> Option<Vec<I>> {
+        self.used.set(self.used.get() + 1);
+        self.inner.enclose(t0, t1, order)
+    }
+
+    fn joins(&self, t0: Scalar, t1: Scalar) -> Vec<Scalar> {
+        self.inner.joins(t0, t1)
+    }
+}
+
+/// A tower that answers only so many enclosures, then `None`: the chain of
+/// one leaf gets a share of its own, and refuses when it needs more.
+struct Limited<'a, T> {
+    inner: &'a T,
+    left: Cell<usize>,
+}
+
+impl<T: Tower> Tower for Limited<'_, T> {
+    fn enclose(&self, t0: Scalar, t1: Scalar, order: usize) -> Option<Vec<I>> {
+        let left = self.left.get();
+        if left == 0 {
+            return None;
+        }
+        self.left.set(left - 1);
+        self.inner.enclose(t0, t1, order)
+    }
+
+    fn joins(&self, t0: Scalar, t1: Scalar) -> Vec<Scalar> {
+        self.inner.joins(t0, t1)
+    }
+}
+
 /// Every root in `[t0, t1]` with its multiplicity, ascending.
 pub(crate) fn isolate<T: Tower>(
     tower: &T,
@@ -161,13 +213,18 @@ pub(crate) fn isolate<T: Tower>(
     ends: [End; 2],
     budget: &mut Budget,
 ) -> Result<Vec<Zone>, RootRefusal> {
+    let counted = Counted {
+        inner: tower,
+        used: Cell::new(0),
+    };
     let mut out = Vec::new();
-    isolate_in(tower, t0, t1, ends, 0, budget, &mut out)?;
+    isolate_in(&counted, t0, t1, ends, 0, budget, &mut out)?;
+    budget.spend(counted.take())?;
     Ok(out)
 }
 
 fn isolate_in<T: Tower>(
-    tower: &T,
+    tower: &Counted<'_, T>,
     t0: Scalar,
     t1: Scalar,
     ends: [End; 2],
@@ -175,7 +232,7 @@ fn isolate_in<T: Tower>(
     budget: &mut Budget,
     out: &mut Vec<Zone>,
 ) -> Result<(), RootRefusal> {
-    budget.spend()?;
+    budget.spend(1 + tower.take())?;
     // A stretch some order settles needs no split, wherever its joins lie.
     let low = tower.enclose(t0, t1, 1).ok_or(RootRefusal::Unresolved);
     if let Ok(low) = &low {
@@ -195,7 +252,11 @@ fn isolate_in<T: Tower>(
         if let Some(k) = k {
             // A chain that cannot settle the leaf (an inner end that
             // straddles, an overestimate) splits it like an unsettled one.
-            match chain(tower, t0, t1, k, ends) {
+            let limited = Limited {
+                inner: tower,
+                left: Cell::new(CHAIN_EVALS),
+            };
+            match chain(&limited, t0, t1, k, ends) {
                 Ok(zones) => {
                     out.extend(zones);
                     return Ok(());
@@ -254,6 +315,16 @@ fn chain<T: Tower>(
     k: usize,
     ends: [End; 2],
 ) -> Result<Vec<Zone>, RootRefusal> {
+    // An inner end that straddles zero at any order the chain climbs would
+    // put it in a cluster and refuse the leaf: ask before the chain's work.
+    for (t, kind) in [(a, ends[0]), (b, ends[1])] {
+        if kind == End::Inner {
+            let e = tower.enclose(t, t, k).ok_or(RootRefusal::Unresolved)?;
+            if e[..k].iter().any(|x| !x.excludes_zero()) {
+                return Err(RootRefusal::Unresolved);
+            }
+        }
+    }
     let mut z: Vec<Zone> = Vec::new();
     for j in (0..k).rev() {
         let mut p: Vec<Zone> = Vec::with_capacity(z.len() + 2);
@@ -295,6 +366,11 @@ fn chain<T: Tower>(
                 if i < p.len() {
                     (hi, after) = gap(tower, p[i].lo, positive(e[i]), hi, j)?;
                 }
+                // Distinct critical points of the value that the enclosures
+                // cannot tell from zero are not one root of the summed order.
+                if run.iter().filter(|q| q.m > 0).count() > 1 {
+                    return Err(RootRefusal::Unresolved);
+                }
                 let mut cluster = Zone::cluster(run, lo, hi);
                 // The enclosure of a wide extent overestimates: over its
                 // pieces H_0 may be signed everywhere, or straddle only in
@@ -317,7 +393,9 @@ fn chain<T: Tower>(
                             let sign_change = start > 0
                                 && i < p.len()
                                 && positive(e[start - 1]) != positive(e[i]);
-                            if sign_change {
+                            let found =
+                                usize::from(before.is_some()) + usize::from(after.is_some());
+                            if start > 0 && i < p.len() && sign_change != (found % 2 == 1) {
                                 return Err(RootRefusal::Unresolved);
                             }
                             next.extend(before);
@@ -359,7 +437,8 @@ fn chain<T: Tower>(
 
 /// The part of `[lo, hi]` over which the enclosure of `H_0` straddles zero,
 /// found by halving while it does, within `evals` enclosures: `None` when
-/// it is signed on every piece, the whole range when the work runs out.
+/// it is signed on every piece (on a piece where `H_1` is signed, at both
+/// ends), the whole range when the work runs out.
 fn straddling_hull<T: Tower>(
     tower: &T,
     lo: Scalar,
@@ -373,11 +452,24 @@ fn straddling_hull<T: Tower>(
         return Some((lo, hi));
     }
     *evals -= 1;
-    let Some(e) = tower.enclose(lo, hi, 0) else {
+    let Some(e) = tower.enclose(lo, hi, 1) else {
         return Some((lo, hi));
     };
     if e[0].excludes_zero() {
         return None;
+    }
+    // Where H_1 is signed, H_0 is monotone: its range is spanned by its
+    // values at the ends, with none of the enclosure's overestimate.
+    if e[1].excludes_zero() {
+        *evals = evals.saturating_sub(2);
+        let ends = (tower.enclose(lo, lo, 0), tower.enclose(hi, hi, 0));
+        if let (Some(a), Some(b)) = ends {
+            let (a, b) = (a[0], b[0]);
+            if a.excludes_zero() && b.excludes_zero() && positive(a) == positive(b) {
+                return None;
+            }
+        }
+        return Some((lo, hi));
     }
     let m = 0.5 * (lo + hi);
     if m <= lo || m >= hi {
@@ -760,10 +852,13 @@ mod tests {
                 p = p.iter().map(|c| -c).collect();
             }
             let tower = PolyTower::new(p.clone());
-            let Ok(roots) = run(&tower, -1.0, 1.0) else {
+            let mut budget = Budget::new(ROOT_BUDGET);
+            let Ok(roots_zones) = isolate(&tower, -1.0, 1.0, [End::Inner, End::Inner], &mut budget)
+            else {
                 refused += 1;
                 continue;
             };
+            let roots: Vec<(Scalar, usize)> = roots_zones.iter().map(|z| (z.at, z.m)).collect();
             decided += 1;
             // No invented root: the value is nil there to rounding.
             for (t, m) in &roots {
@@ -772,6 +867,16 @@ mod tests {
                     at.lo <= 1e-9 && at.hi >= -1e-9,
                     "case {case}: root {t} (m = {m}) of {p:?} has value {at:?}"
                 );
+            }
+            // No zone spans a signed point: roots with the value clearly
+            // signed between them are not one cluster.
+            for z in &roots_zones {
+                if z.hi - z.lo > 4.0 * MIN_WIDTH {
+                    for c in SPLITS {
+                        let x = z.lo + (z.hi - z.lo) * c;
+                        assert!(!signed(&tower, x), "case {case}: {z:?} of {p:?} holds {x}");
+                    }
+                }
             }
             // No crossing lost: a sign change of the exact values between
             // neighbouring grid points holds a reported root.
@@ -794,7 +899,7 @@ mod tests {
         // A line over 9000 cells: one node, however many joins it spans.
         let mut tower = PolyTower::new(vec![-4000.5, 1.0]);
         tower.joins = (1..9000).map(|k| k as Scalar).collect();
-        let mut budget = Budget::new(4);
+        let mut budget = Budget::new(300);
         let zones = isolate(&tower, 0.0, 9000.0, [End::Curve, End::Curve], &mut budget).unwrap();
         assert_eq!(zones.len(), 1);
         assert_eq!(zones[0].m, 1);
@@ -822,5 +927,75 @@ mod tests {
         )
         .unwrap();
         assert!(zones.is_empty(), "{zones:?}");
+    }
+
+    #[test]
+    fn a_flat_contact_lifted_off_zero_reports_no_root() {
+        // ((8 t + 3)^8 + 1) / 2^24: a contact of order eight lifted off
+        // zero, so no root. The enclosures cannot show it over the flat
+        // stretch, so the answer may be a refusal, but never a root.
+        let mut p = vec![1.0];
+        for _ in 0..8 {
+            p = mul(&p, &[3.0, 8.0]);
+        }
+        p[0] += 1.0;
+        let p = p.iter().map(|c| c / 16_777_216.0).collect();
+        let tower = PolyTower::new(p);
+        let mut budget = Budget::new(ROOT_BUDGET);
+        match isolate(&tower, -1.1, 1.05, [End::Inner, End::Inner], &mut budget) {
+            Ok(zones) => assert!(zones.is_empty(), "{zones:?}"),
+            Err(refusal) => assert_eq!(refusal, RootRefusal::Budget),
+        }
+    }
+
+    #[test]
+    fn roots_with_signed_points_between_them_are_not_one_cluster() {
+        // Roots of different orders a little apart, with the value signed
+        // between them: a decided answer has one zone per root.
+        let cases: [&[(f64, usize)]; 3] = [
+            &[(-7.0 / 9.0, 2), (-0.6, 4), (-0.5, 2)],
+            &[(-6.0 / 11.0, 3), (-0.5, 4), (0.2, 1)],
+            &[(0.6, 4), (2.0 / 3.0, 4)],
+        ];
+        for factors in cases {
+            let mut p = vec![-1.0];
+            for &(r, m) in factors {
+                for _ in 0..m {
+                    p = mul(&p, &[-r, 1.0]);
+                }
+            }
+            let tower = PolyTower::new(p);
+            let mut budget = Budget::new(ROOT_BUDGET);
+            let Ok(zones) = isolate(&tower, -1.1, 1.05, [End::Inner, End::Inner], &mut budget)
+            else {
+                continue;
+            };
+            assert_eq!(zones.len(), factors.len(), "{factors:?}: {zones:?}");
+            for (zone, &(r, _)) in zones.iter().zip(factors) {
+                assert!((zone.at - r).abs() < 1e-2, "{factors:?}: {zones:?}");
+            }
+        }
+    }
+
+    #[test]
+    fn a_near_miss_beside_a_contact_at_the_curve_end_is_not_part_of_it() {
+        // 40000 (t - 1)^4 (72 t^2 - 108 t + 41)^2 on [-1, 1]: a contact of
+        // order four at the end, and a near miss of zero at t = 3/4 that
+        // reads as a root of order two there. Merged, the end read as 6.
+        let mut p = vec![40000.0];
+        for _ in 0..4 {
+            p = mul(&p, &[-1.0, 1.0]);
+        }
+        for _ in 0..2 {
+            p = mul(&p, &[41.0, -108.0, 72.0]);
+        }
+        let tower = PolyTower::new(p);
+        let mut budget = Budget::new(ROOT_BUDGET);
+        let found = isolate(&tower, -1.0, 1.0, [End::Curve, End::Curve], &mut budget);
+        if let Ok(zones) = found {
+            assert_eq!(zones.len(), 1, "{zones:?}");
+            assert_eq!(zones[0].m, 4, "{zones:?}");
+            assert!((zones[0].at - 1.0).abs() < 1e-9, "{zones:?}");
+        }
     }
 }

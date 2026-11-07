@@ -15,6 +15,7 @@ R = "crates/algorithms/parametric/nurbs/src/root_chain.rs"
 T = "crates/algorithms/parametric/nurbs/src/curve_tower.rs"
 DOUBLE = ["-p", "axiolid-nurbs", "--test", "double_root"]
 CHAIN = ["-p", "axiolid-nurbs", "--lib", "root_chain"]
+GAPS = ["-p", "axiolid-nurbs", "--test", "contact_gaps"]
 TOWER = ["-p", "axiolid-nurbs", "--lib", "curve_tower"]
 
 MUTANTS = [
@@ -27,8 +28,10 @@ MUTANTS = [
      "        let m = 1;",
      CHAIN),
     ("an inner end allowed to sit on a root", R,
-     "                if run.iter().any(|q| q.end == Some(End::Inner)) {",
-     "                if false {",
+     [("            if e[..k].iter().any(|x| !x.excludes_zero()) {",
+       "            if false {"),
+      ("                if run.iter().any(|q| q.end == Some(End::Inner)) {",
+       "                if false {")],
      CHAIN),
     ("the depth floor returning no roots", R,
      "    if depth >= MAX_DEPTH || t1 - t0 <= MIN_WIDTH {\n"
@@ -37,8 +40,8 @@ MUTANTS = [
      "        return Ok(());",
      CHAIN),
     ("the node budget never spent", R,
-     "    budget.spend()?;",
-     "    let _ = &budget;",
+     [("    budget.spend(1 + tower.take())?;", "    let _ = tower.take();"),
+      ("    budget.spend(counted.take())?;", "    let _ = counted.take();")],
      ["-p", "axiolid-nurbs", "--lib", "root_chain::tests::the_budget_refuses_by_name"]),
     ("a split point that need not be generic", R,
      "        .find(|&m| generic(tower, m))",
@@ -60,6 +63,10 @@ MUTANTS = [
      "            let reach = big / floor * (f_hi - f_lo);",
      "            let reach = 0.0;",
      TOWER),
+    ("distinct critical points merged into one root", R,
+     "                if run.iter().filter(|q| q.m > 0).count() > 1 {",
+     "                if false {",
+     GAPS),
     ("the sign of the tower flipped on the u axis", T,
      "            Axis::U => -1.0,",
      "            Axis::U => 1.0,",

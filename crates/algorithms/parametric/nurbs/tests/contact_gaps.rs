@@ -118,3 +118,24 @@ fn a_flat_stretch_before_a_crossing_is_not_a_root_of_order_seven() {
     let p = displaced(&[(35.0 / 64.0, 6), (38.0 / 64.0, 1)], 2f64.powi(-29));
     assert_simple(meetings(&p), &[0.614_040]);
 }
+
+#[test]
+fn a_crossing_and_a_touch_with_signed_values_between_are_not_one_root() {
+    // -(5u - 1)(11u + 6)^3 (2u + 1)^4 / 2^19: a crossing of order 3 at
+    // -6/11 and a touch of order 4 at -1/2, 0.045 apart, with the value
+    // clearly signed between them. Merged, they read as one root of order 7.
+    let p: Vec<f64> = product(&[(0.2, 1), (-6.0 / 11.0, 3), (-0.5, 4)])
+        .iter()
+        .map(|c| -c * 5.0 * 11.0f64.powi(3) * 16.0 / 2f64.powi(19))
+        .collect();
+    let truth = [0.2, -6.0 / 11.0, -0.5];
+    match meetings(&p) {
+        Err(refusal) => assert_eq!(refusal, ExactCurveRefusal::Undecided),
+        Ok(hits) => {
+            for (u, m) in &hits {
+                assert!(*m <= 4, "{hits:?}");
+                assert!(truth.iter().any(|r| (u - r).abs() < 1e-2), "{hits:?}");
+            }
+        }
+    }
+}
