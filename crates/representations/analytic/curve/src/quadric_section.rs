@@ -111,9 +111,10 @@ impl Branch {
 /// its first coordinate: the point at `t` is `(t, v(t))`.
 ///
 /// Where `a` vanishes the quadratic is linear and the branch that stays
-/// finite is `v = -c / b`; the evaluation below is the rationalised form
-/// `v = 2c / (-b - sign sqrt(D))`, which is finite there and free of the
-/// cancellation `-b + sqrt(D)` suffers when `4ac` is small.
+/// finite is `v = -c / b`; the evaluation below takes the root as `c / q` or
+/// `q / a` with `q = -(b + sign(b) sqrt(D)) / 2`, which is finite there and
+/// free of the cancellation either textbook form suffers (`-b + sqrt(D)`
+/// when `4ac` is small, `-b - sqrt(D)` when `b` has the other sign).
 ///
 /// The graph is only defined where `D = b^2 - 4ac >= 0`. Which spans those
 /// are is decided when the graph is constructed (exactly, from the
@@ -161,20 +162,26 @@ impl QuadraticGraph2 {
             return None;
         }
         let root = d.max(0.0).sqrt();
-        let denominator = -b - self.branch.sign() * root;
-        if denominator != 0.0 {
-            let v = 2.0 * c / denominator;
-            if v.is_finite() {
-                return Some(v);
+        // `q = -(b + sign(b) sqrt(D)) / 2` adds two terms of one sign, so it
+        // is exact to rounding for either sign of `b`. It is `a` times one
+        // root and `c / q` is the other (their product is `c / a`): for `b
+        // >= 0`, `q / a` is the minus root and `c / q` the plus root; for
+        // `b < 0` the other way round.
+        let q = -0.5 * (b + if b >= 0.0 { 1.0 } else { -1.0 } * root);
+        let v = if q == 0.0 {
+            // `b = 0` and `D = 0`: a double root at zero, or no quadratic.
+            if a == 0.0 {
+                return None;
             }
-        }
-        // `-b - sign sqrt(D)` vanishes only where this branch's root is the
-        // other formula's: `(-b + sign sqrt(D)) / 2a`.
-        if a != 0.0 {
-            let v = (-b + self.branch.sign() * root) / (2.0 * a);
-            return v.is_finite().then_some(v);
-        }
-        None
+            0.0
+        } else if (self.branch == Branch::Plus) == (b >= 0.0) {
+            c / q
+        } else {
+            q / a
+        };
+        // `q / a` diverges where `a` vanishes: that branch has no finite
+        // root there.
+        v.is_finite().then_some(v)
     }
 
     /// `dv/dt` at `t`, by differentiating the quadratic implicitly; `None`

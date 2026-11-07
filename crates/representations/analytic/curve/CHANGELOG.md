@@ -9,6 +9,17 @@ caret rule for `0.x` versions.
 
 ## [Unreleased]
 
+### Fixed
+
+- `QuadraticGraph2::height` is exact to rounding for either sign of `b`
+  (#414). It took the root as `2c / (-b - sign sqrt(D))`, which cancels
+  for one sign of `b`, losing about `1e-11` relative height near a
+  vanishing `a`; it now takes `c / q` or `q / a` with `q = -(b + sign(b)
+  sqrt(D)) / 2`, which adds terms of one sign. `AngleGraph2::angle` is
+  unchanged: near `a^2 + b^2 = c^2` its loss is the problem's own
+  sensitivity (the root moves with the square root of the discriminant), not
+  a cancellation a different formula avoids.
+
 ### Added
 
 - The package now ships `LICENSE` and `LICENSE-COMMERCIAL` (symlinks to the
