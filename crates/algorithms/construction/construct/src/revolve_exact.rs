@@ -592,6 +592,9 @@ fn revolve_via_contour(
         ));
     }
 
+    // A vertex on the axis is decided against the line along y exactly.
+    let exact_direction = axis_direction.x == 0.0 && axis_direction.z == 0.0;
+
     // The sections are built about world +y; an axis pointing down turns
     // the right-hand sweep the other way.
     let angle = angle.map(|angle| if axis.y < 0.0 { -angle } else { angle });
@@ -607,6 +610,7 @@ fn revolve_via_contour(
                 &region.holes,
                 axis_origin,
                 angle,
+                exact_direction,
                 tolerance,
             )?);
         }
@@ -620,7 +624,14 @@ fn revolve_via_contour(
         .iter()
         .map(|hole| crate::contour_lower::contour_to_arc_ring(hole, tolerance))
         .collect::<GeomResult<Vec<_>>>()?;
-    revolve_region(&outer, &holes, axis_origin, angle, tolerance)
+    revolve_region(
+        &outer,
+        &holes,
+        axis_origin,
+        angle,
+        exact_direction,
+        tolerance,
+    )
 }
 
 /// Revolve one section a full turn -- its outer ring as the solid, each hole
@@ -630,6 +641,7 @@ fn revolve_region(
     holes: &[ArcRing],
     axis_origin: Point3,
     angle: Option<Scalar>,
+    exact_direction: bool,
     tolerance: Tolerance,
 ) -> GeomResult<ExactBRep> {
     if let Some(angle) = angle {
@@ -641,9 +653,15 @@ fn revolve_region(
             tolerance,
         );
     }
-    let solid = crate::revolve_contour::revolve_arc_ring(outer, axis_origin, tolerance)?;
+    let solid =
+        crate::revolve_contour::revolve_ring_about(outer, axis_origin, exact_direction, tolerance)?;
     if holes.is_empty() {
         return Ok(solid);
+    }
+    if solid.topology().solids().len() != 1 || !solid.topology().solids()[0].voids.is_empty() {
+        return Err(unsupported(
+            "exact revolution of a section with holes and several contacts with the axis",
+        ));
     }
     // A hole swept a full turn encloses a ring-shaped cavity: it touches
     // neither cap, so it is a second shell, not a second loop. Each hole
@@ -653,7 +671,12 @@ fn revolve_region(
     let outer = builder.append(&solid, false);
     let mut voids = Vec::with_capacity(holes.len());
     for hole in holes {
-        let cavity = crate::revolve_contour::revolve_arc_ring(hole, axis_origin, tolerance)?;
+        let cavity = crate::revolve_contour::revolve_ring_about(
+            hole,
+            axis_origin,
+            exact_direction,
+            tolerance,
+        )?;
         voids.extend(builder.append(&cavity, true));
     }
     let [outer] = outer[..] else {

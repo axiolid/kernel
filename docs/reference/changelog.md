@@ -833,8 +833,15 @@ Every publishable crate versions and publishes independently ([ADR 0067](/adr/00
   sign, no tolerance. A section crossing the axis, touching it at an
   isolated vertex (cone apex) or ending on it at an arc or an oblique edge
   (sphere and cone poles) stays `UnsupportedInput`, naming `TODO(#379)`
-  steps 2 and 3; so does a vertex within the tolerance of the axis but not
-  on it, and the crossing refusal now says "crossing the axis" only.
+  steps 2 and 3 (an arc ending on the axis, a horn torus included, names the
+  arc); so does a vertex within the tolerance of the axis but not on it to
+  the bit, and the crossing refusal now says "crossing the axis" only. A
+  touching section needs the axis exactly along the profile's y with its
+  origin exactly in the plane: a tilt or a z offset within the tolerance
+  would move the real axis off a vertex judged on it, so it is refused. A
+  section with several contacts (a cavity along the axis) gives one solid per
+  outermost piece with the nested pieces as void shells; a solid inside a
+  cavity is refused.
 
 - `ExactProfileValidator::validate_with` and `validate_contours_with` take
   `ArcCheckOptions`; with a clearance, segments of the lowered contour whose

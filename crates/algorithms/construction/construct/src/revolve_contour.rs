@@ -74,8 +74,11 @@ enum Contact {
     Axis,
     /// One end on the axis, straight and exactly perpendicular to it: a disc.
     Cap,
-    /// Anything else with an end on the axis: an arc, or a straight edge
-    /// that meets the axis obliquely (a cone apex or a pole).
+    /// An arc with an end on the axis: a pole, or a horn torus's tangent
+    /// point.
+    Arc,
+    /// A straight edge with an end on the axis that is not perpendicular to
+    /// it: a cone's slant (an apex or a pole).
     Other,
 }
 /// Revolve a lowered section a full turn about the profile's local y axis.
@@ -90,10 +93,23 @@ enum Contact {
 /// `TODO(#379)` step 3) is refused by name: the surface is not a closed
 /// two-manifold with a seam there until the degenerate vertex is modelled.
 /// A vertex off the axis by no more than the tolerance is refused too, as
-/// neither on it nor clear of it.
+/// neither on it nor clear of it. Several separate contacts (a cavity
+/// along the axis) give one solid per outermost shell with the nested shells
+/// as its voids.
 pub fn revolve_arc_ring(
     ring: &ArcRing,
     axis_origin: Point3,
+    tolerance: Tolerance,
+) -> GeomResult<ExactBRep> {
+    revolve_ring_about(ring, axis_origin, true, tolerance)
+}
+
+/// [`revolve_arc_ring`], told whether the axis direction is exactly the
+/// profile's `y` (`x` and `z` zero), which a vertex on the axis needs.
+pub(crate) fn revolve_ring_about(
+    ring: &ArcRing,
+    axis_origin: Point3,
+    exact_direction: bool,
     tolerance: Tolerance,
 ) -> GeomResult<ExactBRep> {
     let epsilon = tolerance.linear();
@@ -157,10 +173,20 @@ pub fn revolve_arc_ring(
         .any(|station| !station.on_axis && station.radius.abs() <= epsilon)
     {
         return Err(unsupported(
-            "exact revolution of a section within tolerance of the axis but not on it",
+            "exact revolution of a section within tolerance of the axis but not on it to the bit (an arc end computed onto the axis is needed, TODO(#379) step 3)",
         ));
     }
     check_axis_contact(&stations)?;
+    // The exact sign above is against the line through the origin along y.
+    // The axis the caller named is that line only when it is exactly so: a
+    // tilt or a z offset within the tolerance moves the real axis off a
+    // vertex the sign called on it (#367 refuses the mesh the same way).
+    if stations.iter().any(|station| station.on_axis) && !(exact_direction && axis_origin.z == 0.0)
+    {
+        return Err(unsupported(
+            "exact revolution of a section touching an axis that is not exactly the profile's y axis (tilted or off the plane)",
+        ));
+    }
     // Mirror a section on the negative side so every radius is positive; a
     // full turn makes the two cases the same solid. `side_of_axis` is
     // positive to the left of the upward axis, which is the negative radius.
@@ -192,7 +218,7 @@ fn contact(stations: &[Station], index: usize) -> Option<Contact> {
     let there = stations[(index + 1) % stations.len()];
     match (here.on_axis, there.on_axis) {
         (false, false) => None,
-        _ if here.bulge != 0.0 => Some(Contact::Other),
+        _ if here.bulge != 0.0 => Some(Contact::Arc),
         (true, true) => Some(Contact::Axis),
         _ if here.height == there.height => Some(Contact::Cap),
         _ => Some(Contact::Other),
@@ -212,9 +238,14 @@ fn check_axis_contact(stations: &[Station]) -> GeomResult<()> {
         match (incoming, outgoing) {
             (Some(Contact::Axis), Some(Contact::Axis | Contact::Cap))
             | (Some(Contact::Cap), Some(Contact::Axis)) => {}
+            (Some(Contact::Arc), _) | (_, Some(Contact::Arc)) => {
+                return Err(unsupported(
+                    "exact revolution of a section with an arc ending on the axis (pole or horn torus, TODO(#379) step 3)",
+                ));
+            }
             (Some(Contact::Axis), _) | (_, Some(Contact::Axis)) => {
                 return Err(unsupported(
-                    "exact revolution of a section ending on the axis at an arc or an oblique edge (pole, TODO(#379) step 3)",
+                    "exact revolution of a section ending on the axis at an oblique edge (pole, TODO(#379) step 3)",
                 ));
             }
             _ => {
@@ -269,7 +300,7 @@ fn build(stations: &[Station], axis_origin: Point3, epsilon: Scalar) -> GeomResu
         vertices.push(Some(vertex));
     }
 
-    let mut faces = Vec::with_capacity(count);
+    let mut faces: Vec<(FaceId, usize)> = Vec::with_capacity(count);
     for index in 0..count {
         let next = (index + 1) % count;
         let here = stations[index];
@@ -321,7 +352,7 @@ fn build(stations: &[Station], axis_origin: Point3, epsilon: Scalar) -> GeomResu
                 true,
             )?
         };
-        faces.push(face);
+        faces.push((face, if here.on_axis { next } else { index }));
     }
 
     if faces.len() < 3 {
@@ -330,7 +361,7 @@ fn build(stations: &[Station], axis_origin: Point3, epsilon: Scalar) -> GeomResu
             faces.len()
         )));
     }
-    finish(builder, faces)
+    finish(builder, stations, faces)
 }
 /// A cylinder or cone wall between two coaxial circles.
 ///
@@ -717,18 +748,100 @@ fn add_face(
     })
 }
 
-fn finish(mut builder: ExactBRepBuilder, faces: Vec<FaceId>) -> GeomResult<ExactBRep> {
-    let shell = builder.topology_mut().add_shell(Shell {
-        faces: faces
-            .into_iter()
-            .map(|f| (f, Orientation::Forward))
-            .collect(),
-        closed: true,
-    });
-    builder.topology_mut().add_solid(Solid {
-        outer: shell,
-        voids: Vec::new(),
-    });
+/// Close the faces into shells, one per connected piece of the revolved
+/// section (two stations are connected by an edge between them off the
+/// axis), and the shells into solids by nesting.
+///
+/// A section touching the axis in several places gives several pieces: a
+/// cavity along the axis is a piece of its own. The pieces' ranges along the
+/// axis decide the nesting exactly, from heights taken from the input: one
+/// strictly inside another's range is its void. A piece nested twice (a
+/// solid inside a cavity) is refused. The faces already face out of the
+/// material, so a void's faces face into its cavity as they are.
+fn finish(
+    mut builder: ExactBRepBuilder,
+    stations: &[Station],
+    faces: Vec<(FaceId, usize)>,
+) -> GeomResult<ExactBRep> {
+    struct Piece {
+        label: usize,
+        faces: Vec<FaceId>,
+        low: Scalar,
+        high: Scalar,
+    }
+    let count = stations.len();
+    let mut label: Vec<usize> = (0..count).collect();
+    for index in 0..count {
+        let next = (index + 1) % count;
+        if stations[index].on_axis || stations[next].on_axis {
+            continue;
+        }
+        let (a, b) = (label[index], label[next]);
+        for l in label.iter_mut() {
+            if *l == b {
+                *l = a;
+            }
+        }
+    }
+    let mut pieces: Vec<Piece> = Vec::new();
+    for (index, station) in stations.iter().enumerate() {
+        if station.on_axis {
+            continue;
+        }
+        match pieces.iter_mut().find(|piece| piece.label == label[index]) {
+            Some(piece) => {
+                piece.low = piece.low.min(station.height);
+                piece.high = piece.high.max(station.height);
+            }
+            None => pieces.push(Piece {
+                label: label[index],
+                faces: Vec::new(),
+                low: station.height,
+                high: station.height,
+            }),
+        }
+    }
+    for (face, representative) in faces {
+        if let Some(piece) = pieces
+            .iter_mut()
+            .find(|piece| piece.label == label[representative])
+        {
+            piece.faces.push(face);
+        }
+    }
+    let contains = |outer: &Piece, inner: &Piece| outer.low < inner.low && inner.high < outer.high;
+    let depth: Vec<usize> = pieces
+        .iter()
+        .map(|piece| pieces.iter().filter(|other| contains(other, piece)).count())
+        .collect();
+    if depth.iter().any(|&d| d > 1) {
+        return Err(unsupported(
+            "exact revolution of a section with a solid nested inside a cavity",
+        ));
+    }
+    let shells: Vec<_> = pieces
+        .iter()
+        .map(|piece| {
+            builder.topology_mut().add_shell(Shell {
+                faces: piece
+                    .faces
+                    .iter()
+                    .map(|&face| (face, Orientation::Forward))
+                    .collect(),
+                closed: true,
+            })
+        })
+        .collect();
+    for outer in (0..pieces.len()).filter(|&piece| depth[piece] == 0) {
+        let voids = (0..pieces.len())
+            .filter(|&inner| depth[inner] == 1 && contains(&pieces[outer], &pieces[inner]))
+            .map(|inner| shells[inner])
+            .collect();
+        builder.topology_mut().add_solid(Solid {
+            outer: shells[outer],
+            voids,
+        });
+    }
     builder.finish().map_err(|error| {
         GeomError::InvalidInput(format!("revolved solid failed validation: {error:?}"))
     })

@@ -27,7 +27,7 @@ MUTANTS = [
     ('vertex on the axis read as a side', C, '                _ => {}\n            }\n            Ok(Station {', '                _ => positive = true,\n            }\n            Ok(Station {', TESTS),
     ('any edge to the axis a disc', C, '        _ if here.height == there.height => Some(Contact::Cap),', '        _ => Some(Contact::Cap),', TESTS),
     ('disc judged within the tolerance', C, '        _ if here.height == there.height => Some(Contact::Cap),', '        _ if (here.height - there.height).abs() <= 1e-9 => Some(Contact::Cap),', TESTS),
-    ('arc to the axis an axis edge', C, '        _ if here.bulge != 0.0 => Some(Contact::Other),\n', '', TESTS),
+    ('arc to the axis an axis edge', C, '        _ if here.bulge != 0.0 => Some(Contact::Arc),\n', '', TESTS),
     ('axis edge not followed by a disc', C, '(Some(Contact::Axis), Some(Contact::Axis | Contact::Cap))', '(Some(Contact::Axis), Some(Contact::Axis))', TESTS),
     ('disc not followed by an axis edge', C, '            | (Some(Contact::Cap), Some(Contact::Axis)) => {}', '            | (Some(Contact::Cap), Some(Contact::Axis)) if false => {}', TESTS),
     ('oblique end beside an axis edge accepted', C, '            (Some(Contact::Axis), _) | (_, Some(Contact::Axis)) => {', '            (Some(Contact::Axis), _) | (_, Some(Contact::Axis)) => {\n                return Ok(());', TESTS),
@@ -38,6 +38,13 @@ MUTANTS = [
     ('disc bounded by the axis station', C, '        slot(circles, rim)?,\n        stations[rim].radius,', '        slot(circles, index)?,\n        stations[rim].radius,', TESTS),
     ('section on the far side not mirrored', C, '    let stations: Vec<Station> = if positive {', '    let stations: Vec<Station> = if false {', TESTS),
     ('mirrored walk not reversed', C, '                let source = count - 1 - index;\n                Station {', '                let source = index;\n                Station {', TESTS),
+    ('tilted axis accepted', C, ' && !(exact_direction && axis_origin.z == 0.0)', ' && !(true && axis_origin.z == 0.0)', TESTS),
+    ('axis off the plane accepted', C, ' && !(exact_direction && axis_origin.z == 0.0)', ' && !(exact_direction && axis_origin.z.abs() <= epsilon)', TESTS),
+    ('axis direction judged within the tolerance', E, '    let exact_direction = axis_direction.x == 0.0 && axis_direction.z == 0.0;', '    let exact_direction = axis_direction.x.abs() <= tolerance.linear() && axis_direction.z.abs() <= tolerance.linear();', TESTS),
+    ('pieces not split', C, '        if stations[index].on_axis || stations[next].on_axis {\n            continue;\n        }\n        let (a, b)', '        let (a, b)', TESTS),
+    ('cavity not nested in the solid', C, '    let contains = |outer: &Piece, inner: &Piece| outer.low < inner.low && inner.high < outer.high;', '    let contains = |_: &Piece, _: &Piece| false;', TESTS),
+    ('solid nested in a cavity accepted', C, '    if depth.iter().any(|&d| d > 1) {', '    if false {', TESTS),
+    ('arc end named an oblique edge', C, '            (Some(Contact::Arc), _) | (_, Some(Contact::Arc)) => {', '            (Some(Contact::Arc), _) | (_, Some(Contact::Arc)) if false => {', TESTS),
     ('rectangle edge on the axis refused', E, '    if left == 0.0 || right == 0.0 {', '    if false {', TESTS),
 ]
 

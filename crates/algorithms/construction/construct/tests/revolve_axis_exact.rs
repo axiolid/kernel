@@ -250,7 +250,7 @@ fn an_arc_ending_on_the_axis_is_refused_as_a_pole() {
             }),
             0.0,
         ),
-        "arc or an oblique edge",
+        "arc ending on the axis",
     );
 }
 
@@ -270,6 +270,197 @@ fn an_arc_across_the_top_of_a_cylinder_is_not_a_disc() {
     ]);
     named(
         revolve_arc_ring(&ring, Point3::ZERO, Tolerance::METRE),
-        "arc or an oblique edge",
+        "arc ending on the axis",
+    );
+}
+
+fn cylinder_polygon() -> Profile {
+    polygon(&[(0.0, 0.0), (1.0, 0.0), (1.0, 4.0), (0.0, 4.0)])
+}
+
+#[test]
+fn a_tilted_axis_within_the_tolerance_is_refused_for_a_touching_section() {
+    // (0, 4) is 4e-3 off the real axis, which the sign against the vertical
+    // line through the origin cannot see.
+    for tilt in [1e-12, 1e-3, 1.4e-3] {
+        named(
+            revolve_profile_exact(
+                &cylinder_polygon(),
+                Point3::ZERO,
+                Vec3::new(tilt, 1.0, 0.0),
+                TAU,
+                Tolerance::METRE,
+            ),
+            "not exactly the profile's y axis",
+        );
+    }
+    named(
+        revolve_profile_exact(
+            &cylinder_polygon(),
+            Point3::ZERO,
+            Vec3::new(0.0, 1.0, 1e-3),
+            TAU,
+            Tolerance::METRE,
+        ),
+        "not exactly the profile's y axis",
+    );
+}
+
+#[test]
+fn an_axis_off_the_plane_by_less_than_the_tolerance_is_refused_for_a_touching_section() {
+    named(
+        revolve_profile_exact(
+            &cylinder_polygon(),
+            Point3::new(0.0, 0.0, 1e-7),
+            Vec3::Y,
+            TAU,
+            Tolerance::METRE,
+        ),
+        "not exactly the profile's y axis",
+    );
+}
+
+#[test]
+fn an_axis_pointing_down_is_exact_too() {
+    let solid = revolve_profile_exact(
+        &cylinder_polygon(),
+        Point3::ZERO,
+        Vec3::NEG_Y,
+        TAU,
+        Tolerance::METRE,
+    )
+    .expect("a downward axis is exactly y");
+    close(volume(&solid), PI * 4.0);
+}
+
+#[test]
+fn a_cavity_along_the_axis_is_a_void_shell() {
+    // A cylinder of radius 2 and height 3 with a disc cavity of radius 1
+    // between heights 1 and 2: two contacts with the axis.
+    let solid = revolve(
+        &polygon(&[
+            (0.0, 0.0),
+            (2.0, 0.0),
+            (2.0, 3.0),
+            (0.0, 3.0),
+            (0.0, 2.0),
+            (1.0, 2.0),
+            (1.0, 1.0),
+            (0.0, 1.0),
+        ]),
+        0.0,
+    );
+    // The same body from its parts: the outer cylinder, and the hole
+    // revolved on its own, joined as a void as `revolve_region` does.
+    let outer = revolve(
+        &polygon(&[(0.0, 0.0), (2.0, 0.0), (2.0, 3.0), (0.0, 3.0)]),
+        0.0,
+    );
+    let hole = revolve(
+        &polygon(&[(0.0, 1.0), (1.0, 1.0), (1.0, 2.0), (0.0, 2.0)]),
+        0.0,
+    );
+    close(volume(&solid), volume(&outer) - volume(&hole));
+    close(volume(&solid), PI * (4.0 * 3.0 - 1.0));
+    assert_eq!(solid.topology().solids().len(), 1);
+    assert_eq!(solid.topology().solids()[0].voids.len(), 1);
+    assert_eq!(
+        solid.topology().faces().len(),
+        outer.topology().faces().len() + hole.topology().faces().len()
+    );
+}
+
+#[test]
+fn two_cylinders_joined_along_the_axis_are_two_solids() {
+    // Radius 1 over [0, 1] and radius 2 over [2, 3], joined by an axis edge
+    // of no width: two separate solids.
+    let solid = revolve(
+        &polygon(&[
+            (0.0, 0.0),
+            (1.0, 0.0),
+            (1.0, 1.0),
+            (0.0, 1.0),
+            (0.0, 2.0),
+            (2.0, 2.0),
+            (2.0, 3.0),
+            (0.0, 3.0),
+        ]),
+        0.0,
+    );
+    assert_eq!(solid.topology().solids().len(), 2);
+    close(volume(&solid), PI * (1.0 + 4.0));
+}
+
+#[test]
+fn a_circle_tangent_to_the_axis_is_refused_as_a_horn_torus() {
+    named(
+        try_revolve(
+            &Profile::Circle(axiolid_profile::CircleProfile {
+                radius: 1.0,
+                thickness: None,
+            }),
+            -1.0,
+        ),
+        "horn torus",
+    );
+}
+
+#[test]
+fn a_half_disc_whose_arc_ends_are_trigonometric_says_so() {
+    let arc = ProfileSegment {
+        curve: Curve2::Circle(Circle2 {
+            frame: Frame2 {
+                origin: Point2::ZERO,
+                x: Vec2::X,
+                y: Vec2::Y,
+            },
+            radius: 1.0,
+        }),
+        domain: Interval::new(-PI / 2.0, PI / 2.0),
+        same_sense: true,
+    };
+    let (from, to) = (Point2::new(0.0, 1.0), Point2::new(0.0, -1.0));
+    let close = ProfileSegment {
+        curve: Curve2::Line(Line2 {
+            origin: from,
+            direction: to - from,
+        }),
+        domain: Interval::UNIT,
+        same_sense: true,
+    };
+    named(
+        try_revolve(
+            &Profile::Contour(ContourProfile {
+                outer: Contour::new(vec![arc, close]),
+                holes: Vec::new(),
+            }),
+            0.0,
+        ),
+        "an arc end computed onto the axis is needed",
+    );
+}
+
+#[test]
+fn a_solid_inside_a_cavity_along_the_axis_is_refused_by_name() {
+    // Three nested pieces: the outer cylinder, its cavity and an island in it.
+    named(
+        try_revolve(
+            &polygon(&[
+                (0.0, 0.0),
+                (3.0, 0.0),
+                (3.0, 5.0),
+                (0.0, 5.0),
+                (0.0, 4.0),
+                (2.0, 4.0),
+                (2.0, 1.0),
+                (0.0, 1.0),
+                (0.0, 2.0),
+                (1.0, 2.0),
+                (1.0, 3.0),
+                (0.0, 3.0),
+            ]),
+            0.0,
+        ),
+        "nested inside a cavity",
     );
 }
