@@ -109,7 +109,7 @@ Latest release, 0.3.44 (2026-11-03):
 ### Added
 
 - `PolylineCompiler` compiles a trim of a trim, of an offset, of a placed
-  curve and of a composite (#424, ADR 0100). A trim reads its basis's
+  curve and of a composite (#424, ADR 0101). A trim reads its basis's
   parameter, an offset its basis's, a placed curve its source's and a
   composite its 3D arc length, as a swept directrix does: a window a trim
   above keeps narrows the inner trim's span, modulo the period on a closed

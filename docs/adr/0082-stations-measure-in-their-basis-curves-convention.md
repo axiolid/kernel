@@ -1783,7 +1783,7 @@ sweep range on an `IfcTrimmedCurve` circle is angles of the circle).
   `1e-12 * max(1, |x|)` in parameter units, the evaluator's own rule for a
   distance, so a nested and an unnested station basis admit the same window
   (a station basis, read from the graph alone, has no linear tolerance; the
-  directrix and the polyline admit the tolerance along the curve, ADR 0100). A trim of a composite stays measured as
+  directrix and the polyline admit the tolerance along the curve, ADR 0101). A trim of a composite stays measured as
   arc length along the composite, which is the composite's parameter, and a
   trim of a trim of a composite reads the same arc length.
 - **What did not change.** Only a trim of a trim (or of a placed trim)
