@@ -26,7 +26,7 @@ EVAL = ["-p", "axiolid-evaluate", "--test", "quadratic_graph"]
 
 MUTANTS = [
     ('trig derivative sign', Q, '        -self.cos * s + self.sin * c - 2.0 * self.cos2 * s2 + 2.0 * self.sin2 * c2', '        self.cos * s + self.sin * c - 2.0 * self.cos2 * s2 + 2.0 * self.sin2 * c2', EVAL),
-    ('branches swapped', Q, '        let denominator = -b - self.branch.sign() * root;', '        let denominator = -b + self.branch.sign() * root;', EVAL),
+    ('branches swapped', Q, '        } else if (self.branch == Branch::Plus) == (b >= 0.0) {', '        } else if (self.branch == Branch::Plus) != (b >= 0.0) {', EVAL),
     ('span-end rounding refused', Q, '        if d < -1e-12 * scale {', '        if d < 0.0 {', RULED),
     ('squares not halved', R, '        f(&x.e0, &y.e0).add(&cc.add(&ss).mul(&half())),', '        f(&x.e0, &y.e0).add(&cc.add(&ss)),', RULED),
     ('discriminant 2ac', R, '        let discriminant = psub(&pmul(&tb, &tb), &pmul(&trig_scale_poly(&ta, 4), &tc));', '        let discriminant = psub(&pmul(&tb, &tb), &pmul(&trig_scale_poly(&ta, 2), &tc));', RULED),
