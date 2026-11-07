@@ -269,13 +269,16 @@ pub(crate) fn of_boolean(
     // The slab width is a deviation the report already carries: like a
     // sampled one, it lets the budget settle an all-planar search (#314).
     let reading = closing_reading(&report, options);
+    let left = if flattened < budget {
+        budget - flattened
+    } else {
+        budget
+    };
     let measured = if extra_shells(&exact, mesh) {
         Err(EXTRA_SHELLS)
-    } else if flattened < budget {
-        let left = budget - flattened;
-        measure(&exact, mesh, left, left, flattened, reading)
     } else {
-        measure(&exact, mesh, budget, budget, flattened, reading)
+        exact_faces(&exact, left, reading)
+            .and_then(|faces| measure_faces(&faces, mesh, left, left, flattened))
     };
     let bound = match measured {
         Ok(value) => DeviationBound::Certified(widened(value, flattened)),
@@ -465,6 +468,7 @@ fn refusal(error: &GeomError) -> &'static str {
 /// a deviation is shown, sampled or the `shown` one the report adds. A
 /// face's loops may close within `reading`, the largest linear reading the
 /// boolean took (see the module's "Loops closed by a reading").
+#[cfg(test)]
 fn measure(
     exact: &ExactBRep,
     mesh: &TriMesh,
@@ -473,6 +477,17 @@ fn measure(
     shown: Scalar,
     reading: Scalar,
 ) -> Result<Scalar, &'static str> {
+    let faces = exact_faces(exact, target, reading)?;
+    measure_faces(&faces, mesh, target, enough, shown)
+}
+
+/// The faces of `exact` as patches over their trimmed domains, their trims
+/// flattened for a search to `target` (see [`measure`]).
+fn exact_faces(
+    exact: &ExactBRep,
+    target: Scalar,
+    reading: Scalar,
+) -> Result<Vec<ExactFace<'_>>, &'static str> {
     let topology = exact.topology();
     let mut faces = Vec::with_capacity(topology.faces().len());
     for face in topology.faces() {
@@ -489,6 +504,17 @@ fn measure(
             domain,
         });
     }
+    Ok(faces)
+}
+
+/// [`measure`] over faces already built.
+fn measure_faces(
+    faces: &[ExactFace<'_>],
+    mesh: &TriMesh,
+    target: Scalar,
+    enough: Scalar,
+    shown: Scalar,
+) -> Result<Scalar, &'static str> {
     let mut cells = Vec::new();
     for (k, face) in faces.iter().enumerate() {
         face.seed(k, &mut cells)?;
