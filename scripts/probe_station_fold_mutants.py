@@ -17,12 +17,18 @@ conservative bound refusing. Each must turn
 `compile/tests/station_fold.rs` red. The probe of the turned and quadrature
 decision itself is `probe_exact_fold_mutants.py`.
 
-The sheets of open sections (#407) share the decision and add three steps in
+The sheets of open sections (#407) share the decision and add two steps in
 `station::sectioned_surface`: a sectioned surface and an open-section run
-skipping the fold check (each by its own test), and an undecided fold
-reported certified. Each must turn `compile/tests/station_fold_sheet.rs` red.
+skipping the fold check (each by its own test). Each must turn
+`compile/tests/station_fold_sheet.rs` red.
 
 Not probed, because no test can tell them apart:
+
+- a sheet's undecided fold reported certified (`settle(.., fold, ..)`): since
+  #406 a fold is undecided only on a frame without bounds (a chain, whose
+  cells are unbounded by the same reason) or on a span across a curvature
+  break that the conservative bound fails to clear, which no test builds
+  reliably;
 
 - the `within` flag of a sheet (`fold.is_ok()`): refinement does not change
   when a run is unbounded, so no test can tell it from `true`;
@@ -57,6 +63,8 @@ BEND_TEST = ["-p", "axiolid-evaluate", "--all-features", "--test", "station_bend
 UNIT = ["-p", "axiolid-evaluate", "--all-features", "--lib", "frame_bound"]
 FOLD_TEST = ["-p", "axiolid-mesh-compile", "--all-features", "--test", "station_fold"]
 SHEET = ["-p", "axiolid-mesh-compile", "--all-features", "--test", "station_fold_sheet"]
+TURNED = ["-p", "axiolid-mesh-compile", "--all-features", "--test", "station_fold_turned"]
+BOUND_TEST = ["-p", "axiolid-mesh-compile", "--all-features", "--test", "station_bound"]
 
 SHEET_CHECK = (COMPILE_STATION,
                "    let fold = law.fold(0.0)?;\n",
@@ -108,26 +116,23 @@ MUTANTS = [
      "        if self.fold_frames.rates(span.lo, span.hi, reading).is_some() {\n", [FOLD_TEST]),
     ("the exact compiler builds a turned fold", COMPILE_STATION,
      "    law.fold(margin)?.map_err(unsupported)\n",
-     "    let _ = (law.fold(margin)?, unsupported);\n    Ok(())\n", [FOLD_TEST]),
+     "    let _ = (&law, margin, unsupported);\n    Ok(())\n", [FOLD_TEST]),
     ("a span at a joint takes the earlier piece", FB,
      "        (holds && mid >= start && mid <= end).then(|| Located {\n",
      "        holds.then(|| Located {\n", [FOLD_TEST]),
     ("the plan reading's vertical part is all of sup |O'|", FOLD,
      "            let speed = bounds.point[0];\n            (speed * speed - bounds.forward * bounds.forward)",
-     "            let speed = bounds.point[0];\n            (speed * speed - 0.0 * bounds.forward)", [FOLD_TEST]),
+     "            let speed = bounds.point[0];\n            (speed * speed - 0.0 * bounds.forward)", [TURNED]),
     ("the conservative bound refuses", FOLD,
      "            if depth >= CONSERVATIVE_FOLD_DEPTH {\n                return Ok(Err(reason));\n",
      "            if depth >= CONSERVATIVE_FOLD_DEPTH {\n"
      "                return Err(GeomError::InvalidInput(\"sections fold\".into()));\n",
-     [FOLD_TEST]),
+     [BOUND_TEST]),
     # The sheets of open sections.
     ("a sectioned surface skips the fold check", *SHEET_CHECK,
      [SHEET + ["--", "a_sectioned_surface_reaching"]]),
     ("an open section run skips the fold check", *SHEET_CHECK,
      [SHEET + ["--", "an_open_section_run_reaching"]]),
-    ("a sheet's undecided fold is reported certified", COMPILE_STATION,
-     "    let bound = settle(&law, Ok(0.0), fold, &samples, &rows)?;\n",
-     "    let bound = settle(&law, Ok(0.0), Ok(()), &samples, &rows)?;\n", [SHEET]),
 ]
 
 probe_lib.main(MUTANTS, root=ROOT, timeout=TIMEOUT, baseline=False)

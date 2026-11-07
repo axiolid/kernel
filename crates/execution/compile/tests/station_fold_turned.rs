@@ -14,8 +14,8 @@
 use axiolid_contracts::{ExecutionOptions, GeomError};
 use axiolid_core::{Frame2, Frame3, Point2, Point3, Scalar, Tolerance, Vec2, Vec3};
 use axiolid_curve::{
-    BankConvention, Banked3, CantLaw, CantPiece, Circle2, Circle3, CurvatureLaw, Curve2, Curve3,
-    Elevated3, ElevationLaw, Intrinsic2, Line2,
+    BSplineCurve, BankConvention, Banked3, CantLaw, CantPiece, Circle2, Circle3, CurvatureLaw,
+    Curve2, Curve3, Elevated3, ElevationLaw, Intrinsic2, KnotSpec, Line2,
 };
 use axiolid_exact_compile_contract::ExactCompiler;
 use axiolid_mesh_boolean_boolmesh::BoolmeshBoolean;
@@ -27,6 +27,7 @@ use axiolid_model::{
     Station, StationFrame, StationOffsets, StationOrientation,
 };
 use axiolid_profile::{Profile, RectangleProfile};
+use axiolid_reference::derivative3;
 use axiolid_reference::station::{station_section2, station_section3, SectionFrame};
 
 const BUDGET: Scalar = 0.01;
@@ -434,6 +435,48 @@ fn a_section_pitching_between_stations_folds_where_its_top_swings_back() {
 }
 
 #[test]
+fn a_section_swinging_past_a_right_angle_and_back_folds_at_its_station() {
+    // A tiny section pitched or yawed to 91 degrees at station 4 and back to
+    // the base at 10 runs backwards on the last few centimetres before
+    // station 4 (`F = cos(91)` there) while the middle of the stretch before
+    // it advances, and the section's own extent adds next to nothing: the
+    // turn of the plane's normal over a span must widen it, or a span
+    // stretching into the fold is cleared by its middle.
+    for turned in [pitched(91.0), yawed(91.0)] {
+        let sections = [
+            Section {
+                distance: 0.0,
+                orientation: BASE,
+            },
+            Section {
+                distance: 4.0,
+                orientation: turned,
+            },
+            Section {
+                distance: 10.0,
+                orientation: BASE,
+            },
+        ];
+        let (graph, root) = run(
+            line_x(),
+            StationFrame::Section,
+            (0.02, 0.02),
+            StationOffsets::ZERO,
+            &sections,
+        );
+        let oracle = sampled_min_rate(
+            &|s| station_section2(&line_x(), s).unwrap(),
+            (BASE, turned),
+            StationOffsets::ZERO,
+            (0.02, 0.02),
+            4.0,
+        );
+        assert!(oracle < -0.01, "{oracle}");
+        refused(&mesh(&graph, root));
+    }
+}
+
+#[test]
 fn a_section_yawing_between_stations_folds_alike() {
     let ((graph, root), oracle) = turning(yawed(80.0), (6.0, 1.0));
     assert!(oracle < -0.05, "{oracle}");
@@ -542,4 +585,64 @@ fn a_pitched_section_on_a_canted_transition_is_judged_by_its_roll_rate() {
         (0.0, 40.0),
         100.0,
     );
+}
+
+/// A quadratic space B-spline climbing at a grade of about 0.3, whose
+/// curvature jumps at its interior knot.
+fn climbing_quadratic() -> Curve3 {
+    Curve3::BSpline(BSplineCurve {
+        degree: 2,
+        control_points: vec![
+            Point3::new(0.0, 0.0, 0.0),
+            Point3::new(12.0, 0.0, 3.6),
+            Point3::new(12.0, 12.0, 7.2),
+            Point3::new(24.0, 14.0, 10.8),
+        ],
+        knots: vec![0.0, 0.5, 1.0],
+        multiplicities: vec![3, 1, 3],
+        weights: None,
+        closed: false,
+        self_intersect: None,
+        knot_spec: KnotSpec::Unspecified,
+    })
+}
+
+/// The arc length of `climbing_quadratic` to its knot, by Simpson's rule.
+fn knot_distance() -> Scalar {
+    let curve = climbing_quadratic();
+    let n = 2000;
+    let speed = |u: Scalar| derivative3(&curve, u).unwrap().length();
+    let h = 0.5 / n as Scalar;
+    (0..n)
+        .map(|i| {
+            let a = h * i as Scalar;
+            h / 6.0 * (speed(a) + 4.0 * speed(a + 0.5 * h) + speed(a + h))
+        })
+        .sum()
+}
+
+#[test]
+fn a_turned_section_across_a_curvature_break_is_cleared_by_the_conservative_bound() {
+    // The spans across the knot have no rates, so the conservative bound
+    // decides them: in the plan frame a section pitched down 50 degrees
+    // advances at `rho cos(50) - |O'_z| sin(50)`, which it clears.
+    let knot = knot_distance();
+    let pitch = pitched(-50.0);
+    let (graph, root) = run(
+        climbing_quadratic(),
+        StationFrame::Plan,
+        (1.0, 1.0),
+        StationOffsets::ZERO,
+        &[
+            Section {
+                distance: knot - 3.0,
+                orientation: pitch,
+            },
+            Section {
+                distance: knot + 3.0,
+                orientation: pitch,
+            },
+        ],
+    );
+    certified(&mesh(&graph, root));
 }

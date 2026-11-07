@@ -35,7 +35,7 @@ fn twist_at(frame: &dyn Fn(Scalar) -> SectionFrame, s: Scalar, h: Scalar) -> Sca
     frame(s).up.dot(rate)
 }
 
-/// The bends, the twist and the rise sampled at `samples + 1` points over
+/// The forward rate, the bends, the twist and the rise sampled at `samples + 1` points over
 /// `[lo, hi]` lie within the rates' ranges, and their middle values within
 /// their errors (and `slack`) of the references.
 fn check_sampled(
@@ -48,7 +48,9 @@ fn check_sampled(
     let at = |s: Scalar| {
         let (before, here, after) = (frame(s - h), frame(s), frame(s + h));
         let bend = (after.tangent - before.tangent) / (2.0 * h);
+        let velocity = (after.point - before.point) / (2.0 * h);
         [
+            (&rates.forward, velocity.dot(here.tangent), "forward"),
             (&rates.lateral, here.lateral.dot(bend), "lateral"),
             (&rates.up, here.up.dot(bend), "up"),
             (
@@ -56,11 +58,7 @@ fn check_sampled(
                 here.up.dot((after.lateral - before.lateral) / (2.0 * h)),
                 "twist",
             ),
-            (
-                &rates.rise,
-                ((after.point - before.point) / (2.0 * h)).dot(here.up),
-                "rise",
-            ),
+            (&rates.rise, velocity.dot(here.up), "rise"),
         ]
     };
     for i in 0..=samples {
