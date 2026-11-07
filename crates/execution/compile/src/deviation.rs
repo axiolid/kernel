@@ -351,7 +351,10 @@ pub const MESH_TO_EXACT: &str =
 
 /// The [`DeviationContribution::detail`] of a boolean whose exact result is
 /// empty and whose mesh is too (#326): nothing is left in either, so the
-/// distance between them is certified `0`. The exact compiler holds the
+/// distance between them is certified `0`, widened like any bound by the
+/// readings and the rounding floor of the exact result's report. The
+/// bound is unbounded by name when the empty result is that of operands
+/// flattened within a warped slab width. The exact compiler holds the
 /// empty result internally and refuses it only as a root, so the report
 /// cannot be measured against a B-rep; an empty exact result against a
 /// mesh with triangles, or the reverse, is unbounded by name.

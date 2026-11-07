@@ -199,9 +199,12 @@
 //! solids' intersection) has no B-rep to measure against: the exact
 //! compiler holds it as empty and refuses it only as a root. When the mesh
 //! has no triangles either, nothing is left in either and the distance is
-//! certified `0` under [`EMPTY_RESULT`]. The two mismatches, an empty exact
-//! result with a mesh that has triangles and a mesh with none against an
-//! exact result that has faces, are unbounded by name.
+//! certified `0` under [`EMPTY_RESULT`], widened like any bound by the
+//! report's readings and rounding floor ([`with_readings`]); an empty result
+//! of operands flattened within a warped slab width is unbounded, as the
+//! operands may not be empty. The two mismatches, an empty exact result
+//! with a mesh that has triangles and a mesh with none against an exact
+//! result that has faces, are unbounded by name.
 //!
 //! # Unbounded, by name
 //!
@@ -289,7 +292,7 @@ pub(crate) fn of_boolean(
             }
         };
     let Some(exact) = exact else {
-        return empty_result(mesh);
+        return empty_result(mesh, flattened, &report);
     };
     // A warped operand was flattened to its triangles (#266): the result
     // is the exact boolean of operands moved by up to `flattened`. No
@@ -363,23 +366,31 @@ pub(crate) fn of_boolean(
     deviation
 }
 
-/// The deviation of a boolean whose exact result is empty (#326): `0` when
-/// the mesh has no triangles either, else unbounded, as the exact compiler
-/// has no B-rep to measure the mesh against.
-fn empty_result(mesh: &TriMesh) -> Deviation {
-    if mesh.indices.is_empty() {
-        Deviation::one(
-            DeviationPath::Boolean,
-            EMPTY_RESULT,
-            DeviationBound::Certified(0.0),
-        )
-    } else {
-        Deviation::one(
+/// The deviation of a boolean whose exact result is empty (#326): when the
+/// mesh has no triangles either, `0`, widened like any bound by the
+/// readings and the rounding floor of the exact result's report
+/// ([`with_readings`]); unbounded when the empty result is that of operands
+/// flattened by `flattened` (a warped operand within its slab width may not
+/// be empty), or when the mesh is not empty. The exact compiler has no B-rep
+/// to measure a mesh against.
+fn empty_result(mesh: &TriMesh, flattened: Scalar, report: &BooleanReport) -> Deviation {
+    if !mesh.indices.is_empty() {
+        return Deviation::one(
             DeviationPath::Boolean,
             NO_EXACT,
             DeviationBound::Unbounded("boolean: the exact result is empty and the mesh is not"),
-        )
+        );
     }
+    if flattened > 0.0 {
+        return Deviation::one(
+            DeviationPath::Boolean,
+            NO_EXACT,
+            DeviationBound::Unbounded(
+                "boolean: the exact result is empty only for operands flattened within a slab width",
+            ),
+        );
+    }
+    with_readings(EMPTY_RESULT, DeviationBound::Certified(0.0), report)
 }
 
 /// The deviation of a boolean whose mesh lies `bound` from the exact
@@ -1979,6 +1990,31 @@ mod tests {
         assert_eq!(deviation.0.len(), 1);
         assert_eq!(deviation.0[0].detail, EMPTY_RESULT);
         assert_eq!(deviation.0[0].bound, DeviationBound::Certified(0.0));
+    }
+
+    #[test]
+    fn an_empty_result_is_widened_by_the_floor_and_unbounded_when_flattened() {
+        // A boolean that ran has a rounding floor above zero.
+        let (graph, root) = block_and_half_space(0.5, BooleanOperator::Difference);
+        let options = ExecutionOptions::new(Tolerance::new(1e-6, 1e-9).unwrap());
+        let (_, report, _) = ReferenceExactCompiler::new()
+            .compile_flattened_with_report(&graph, root, &options)
+            .unwrap();
+        assert!(report.rounding_floor() > 0.0);
+        let nothing = TriMesh::default();
+        let deviation = empty_result(&nothing, 0.0, &report);
+        assert_eq!(deviation.0[0].detail, EMPTY_RESULT);
+        let DeviationBound::Certified(bound) = deviation.0[0].bound else {
+            panic!("certified");
+        };
+        assert!(bound >= report.rounding_floor(), "{bound:e}");
+        assert!(deviation
+            .0
+            .iter()
+            .any(|c| c.detail == BOOLEAN_ROUNDING_FLOOR));
+        // Operands flattened within a slab width may not be empty at all.
+        let flattened = empty_result(&nothing, 1e-3, &report);
+        assert!(matches!(flattened.0[0].bound, DeviationBound::Unbounded(_)));
     }
 
     #[test]
