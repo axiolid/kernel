@@ -30,7 +30,7 @@ impl Points {
         let exact = &verts[vertex as usize].exact;
         let point = self
             .store
-            .push([exact[0].clone(), exact[1].clone(), one()])?;
+            .push([exact[0].clone(), exact[1].clone(), exact[3].clone()])?;
         self.vertices[vertex as usize] = Some(point);
         Ok(point)
     }
@@ -66,16 +66,13 @@ impl Points {
         let [a, b] = values;
         let coordinate = |axis: usize| a.mul(&q[axis]).sub(&b.mul(&p[axis]));
         let hints = [0, 1].map(|axis| fixed(&p[axis], &q[axis]));
+        // The third component is the weight, `h`, of the homogeneous point.
         self.store
-            .push_hinted([coordinate(0), coordinate(1), a.sub(b)], hints)
+            .push_hinted([coordinate(0), coordinate(1), coordinate(3)], hints)
     }
 }
 
 /// The coordinate of an edge that does not move in it, as a binary64 hint.
 fn fixed(from: &Dyadic, to: &Dyadic) -> Option<f64> {
     (from == to).then(|| from.to_f64())
-}
-
-pub(crate) fn one() -> Dyadic {
-    Dyadic::from_parts(1.into(), 0)
 }

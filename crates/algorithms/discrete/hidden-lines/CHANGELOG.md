@@ -24,6 +24,15 @@ caret rule for `0.x` versions.
   `EdgeSelection::group_boundary` is set, resolving the groups only then;
   with it off the output is unchanged (ADR 0106, #385).
 
+### Changed
+
+- The providers' view-space vertices carry exact homogeneous coordinates
+  `[U, V, W, h]` with `h = 1` in an orthographic view, preparing perspective
+  (ADR 0107, #387). The drawings are bit for bit the same: the segment hash
+  of every `scenario/hidden-lines` case is unchanged, and the wall clock
+  there is unchanged (isometric and cut plan at 20x20 and 50x50 agree with
+  the previous commit within run-to-run noise).
+
 ## [0.1.3] - 2026-11-03
 
 ### Added

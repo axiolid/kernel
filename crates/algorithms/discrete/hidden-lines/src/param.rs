@@ -314,9 +314,9 @@ mod tests {
     use crate::recipe::{Kind, Lift, Orient2};
 
     fn vert(u: f64, v: f64, w: f64) -> Vert {
-        let exact = [u, v, w].map(|x| Dyadic::try_from_f64(x).expect("finite"));
+        let [u_, v_, w_] = [u, v, w].map(|x| Dyadic::try_from_f64(x).expect("finite"));
         Vert {
-            exact,
+            exact: [u_, v_, w_, crate::view::one()],
             enc: [u, v, w].map(Interval::point),
         }
     }
@@ -479,7 +479,12 @@ mod tests {
         });
         Vert {
             enc: exact.clone().map(|x| x.enclosure()),
-            exact,
+            exact: [
+                exact[0].clone(),
+                exact[1].clone(),
+                exact[2].clone(),
+                crate::view::one(),
+            ],
         }
     }
 

@@ -30,12 +30,22 @@ pub(crate) fn require_orthographic(
 }
 
 /// One vertex in view space.
+///
+/// The exact coordinates are homogeneous (ADR 0107): `[U, V, W, h]` stands
+/// for the point `(U / h, V / h, W / h)`. An orthographic view has `h = 1`,
+/// so the first three are the view coordinates themselves; a perspective view
+/// will carry a depth-dependent `h`.
 #[derive(Debug, Clone)]
 pub(crate) struct Vert {
-    /// Exact `[U, V, W]`.
-    pub exact: [Dyadic; 3],
+    /// Exact `[U, V, W, h]`.
+    pub exact: [Dyadic; 4],
     /// Sound enclosures of `[U, V, W]`.
     pub enc: [Interval; 3],
+}
+
+/// The homogeneous weight of an orthographic vertex.
+pub(crate) fn one() -> Dyadic {
+    Dyadic::from_parts(1.into(), 0)
 }
 
 /// `[U, V, W]` of `p` evaluated in arithmetic `T`.
@@ -56,13 +66,12 @@ pub(crate) fn project<T: Arith>(p: Point3, frame: &Frame3) -> [T; 3] {
 impl Vert {
     /// The view-space vertex for a finite model point.
     pub(crate) fn new(p: Point3, frame: &Frame3) -> Self {
-        let exact = project::<Dyadic>(p, frame);
-        let enc = [
-            exact[0].enclosure(),
-            exact[1].enclosure(),
-            exact[2].enclosure(),
-        ];
-        Self { exact, enc }
+        let [u, v, w] = project::<Dyadic>(p, frame);
+        let enc = [u.enclosure(), v.enclosure(), w.enclosure()];
+        Self {
+            exact: [u, v, w, one()],
+            enc,
+        }
     }
 }
 
