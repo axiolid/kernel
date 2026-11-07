@@ -40,8 +40,8 @@ MUTANTS = [
     (
         "slot not released: the lock descriptor leaks into the steps",
         LIB,
-        'if "${gate_wrap[@]}" "$@" 9>&- >"$gate_out" 2>&1; then',
-        'if "${gate_wrap[@]}" "$@" >"$gate_out" 2>&1; then',
+        '"${gate_wrap[@]}" "$@" 9>&- >"$gate_out" 2>&1 || rc=$?',
+        '"${gate_wrap[@]}" "$@" >"$gate_out" 2>&1 || rc=$?',
         tiers("SlotTests.test_a_straggling_step_process_does_not_keep_the_slot"),
     ),
     (

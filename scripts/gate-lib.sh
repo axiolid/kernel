@@ -107,10 +107,13 @@ step() {
     set -- sleep "${GATE_DRY_SLEEP:-0}"
     [ "${GATE_DRY_FAIL:-}" = "$name" ] && set -- false
   fi
-  if "${gate_wrap[@]}" "$@" 9>&- >"$gate_out" 2>&1; then
-    echo ok
+  local started=$SECONDS rc=0
+  "${gate_wrap[@]}" "$@" 9>&- >"$gate_out" 2>&1 || rc=$?
+  # Each step's wall time, so a slow step shows where the gate's time goes.
+  if [ "$rc" -eq 0 ]; then
+    echo "ok ($((SECONDS - started))s)"
   else
-    echo "FAIL (exit $?)"
+    echo "FAIL (exit $rc, $((SECONDS - started))s)"
     tail -25 "$gate_out" | sed 's/^/    /'
     fail=1
   fi
