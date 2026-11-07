@@ -302,7 +302,11 @@ fn check(
             };
             let exact = wanted(s);
             let off = (frame.point - Point3::ZERO - exact.point).length();
-            assert!(off <= bounds.point_error, "{off} > {} at {s}", bounds.point_error);
+            assert!(
+                off <= bounds.point_error,
+                "{off} > {} at {s}",
+                bounds.point_error
+            );
             for (got, want) in [
                 (frame.tangent, exact.tangent),
                 (frame.lateral, exact.lateral),
