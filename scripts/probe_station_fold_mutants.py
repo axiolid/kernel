@@ -2,19 +2,20 @@
 ADR 0082 amendment).
 
 Each mutant breaks one step the decision rests on. The bend's coefficients
-(`FrameLaw::bend`): the lateral turning dropped, the up turning dropped, the
-plan reading given the section reading's up turning, a reversed piece's
-velocity not negated, the spread over the span dropped. The forward floor
-(`FrameLawBounds::forward`): returned as zero, a placement's shrink ignored.
-The decision (`SectionLaw::fold`): the longitudinal offset's rate dropped, the
-witness refusing only far below zero, an undecided span after the last
-halving accepted, a span without a bound at its width given up, only a span
-with a bound decided exactly, a span at a joint read from the earlier piece,
-the exact compiler building a fold it cannot exclude, the plan reading's
-vertical part of the velocity taken as all of it, the conservative bound
-refusing. Each must turn
+(`FrameLaw::rates`, of which `bend` is the projection since #406): the lateral
+turning dropped, the up turning dropped, the plan reading given the section
+reading's up turning, a reversed piece's velocity not negated, the spread over
+the span dropped. The forward floor (`FrameLawBounds::forward`): returned as
+zero, a placement's shrink ignored. The decision (`SectionLaw::decide`): the
+longitudinal offset's rate dropped, the witness refusing only far below zero,
+an undecided span after the last halving accepted, a span without a bound at
+its width given up, only a span with rates decided exactly, a span at a joint
+read from the earlier piece, the exact compiler building a turned fold, the
+plan reading's vertical part of the velocity taken as all of it, the
+conservative bound refusing. Each must turn
 `evaluate/tests/station_bend.rs`, the `frame_bound` unit tests or
-`compile/tests/station_fold.rs` red.
+`compile/tests/station_fold.rs` red. The probe of the turned and quadrature
+decision itself is `probe_exact_fold_mutants.py`.
 
 The sheets of open sections (#407) share the decision and add three steps in
 `station::sectioned_surface`: a sectioned surface and an open-section run
@@ -45,9 +46,11 @@ ROOT = pathlib.Path(__file__).resolve().parents[1]
 TIMEOUT = 1800
 EVAL = "crates/algorithms/parametric/evaluate"
 BEND = f"{EVAL}/src/station/frame_bound/bend.rs"
+RATES = f"{EVAL}/src/station/frame_bound/rates.rs"
 FB = f"{EVAL}/src/station/frame_bound.rs"
 COMPILE = "crates/execution/compile"
 FOLD = f"{COMPILE}/src/station/bound/fold.rs"
+RATE = f"{COMPILE}/src/station/bound/fold/rate.rs"
 COMPILE_STATION = f"{COMPILE}/src/station.rs"
 
 BEND_TEST = ["-p", "axiolid-evaluate", "--all-features", "--test", "station_bend"]
@@ -61,21 +64,22 @@ SHEET_CHECK = (COMPILE_STATION,
 
 MUTANTS = [
     # The bend's coefficients.
-    ("the lateral turning is dropped", BEND,
-     "            frame.lateral.dot(w) / speed,\n",
-     "            0.0 * frame.lateral.dot(w) / speed,\n", [BEND_TEST, FOLD_TEST]),
-    ("the up turning is dropped", BEND,
-     "            if plan { 0.0 } else { frame.up.dot(w) / speed },\n",
-     "            0.0,\n", [BEND_TEST, FOLD_TEST]),
-    ("the plan reading takes the section reading's up turning", BEND,
-     "            if plan { 0.0 } else { frame.up.dot(w) / speed },\n",
-     "            frame.up.dot(w) / speed,\n", [BEND_TEST, FOLD_TEST]),
+    ("the lateral turning is dropped", RATES,
+     "        let lateral = RateBounds::around(frame.lateral.dot(w) / speed, turn, reach, lip[1]);\n",
+     "        let lateral = RateBounds::around(0.0 * frame.lateral.dot(w) / speed, turn, reach, lip[1]);\n",
+     [BEND_TEST, FOLD_TEST]),
+    ("the up turning is dropped", RATES,
+     "            RateBounds::around(frame.up.dot(w) / speed, turn, reach, lip[2])\n",
+     "            RateBounds::around(0.0, turn, reach, lip[2])\n", [BEND_TEST, FOLD_TEST]),
+    ("the plan reading takes the section reading's up turning", RATES,
+     "        let up = if plan {\n            RateBounds::ZERO\n",
+     "        let up = if false {\n            RateBounds::ZERO\n", [BEND_TEST, FOLD_TEST]),
     ("a reversed piece's velocity is not negated", BEND,
      "    let (v, w) = if piece.reversed { (-v, w) } else { (v, w) };\n",
      "    let (v, w) = (v, w);\n", [BEND_TEST, FOLD_TEST]),
-    ("the spread over the span is dropped", BEND,
-     "            let pad = middle_error[j] + reach * lip[j];\n",
-     "            let pad = middle_error[j];\n", [BEND_TEST, FOLD_TEST]),
+    ("the spread over the span is dropped", RATES,
+     "        let pad = error + reach * lipschitz;\n",
+     "        let pad = error;\n", [BEND_TEST, FOLD_TEST]),
     # The forward floor.
     ("the forward floor is zero", FB,
      "        forward: forward * shrink * (1.0 - ROUNDING),\n",
@@ -84,25 +88,25 @@ MUTANTS = [
      "        shrink = placement_shrink(rigid);\n",
      "        shrink = 1.0;\n", [UNIT]),
     # The decision.
-    ("the longitudinal offset's rate is dropped", FOLD,
-     "        (self.offsets[i + 1].longitudinal - self.offsets[i].longitudinal)\n"
-     "            / (self.distances[i + 1] - self.distances[i])\n",
-     "        0.0 * (self.offsets[i + 1].longitudinal - self.offsets[i].longitudinal)\n"
-     "            / (self.distances[i + 1] - self.distances[i])\n", [FOLD_TEST]),
+    ("the longitudinal offset's rate is dropped", RATE,
+     "        let rates = [0, 1, 2].map(|k| (components(b)[k] - components(a)[k]) / delta);\n",
+     "        let rates = [0, 1, 2].map(|k| if k == 0 { 0.0 } else { (components(b)[k] - components(a)[k]) / delta });\n",
+     [FOLD_TEST]),
     ("the witness refuses only far below zero", FOLD,
-     "        if floor.is_nan() || floor <= 0.0 {\n            let rate",
-     "        if floor.is_nan() || floor <= -1.0 {\n            let rate", [FOLD_TEST]),
+     "                if let Some(f) = witness.iter().find(|f| f.floor.is_nan() || f.floor <= 0.0) {\n",
+     "                if let Some(f) = witness.iter().find(|f| f.floor.is_nan() || f.floor <= -1.0) {\n",
+     [FOLD_TEST]),
     ("an undecided span after the last halving is accepted", FOLD,
-     "            if depth >= MAX_FOLD_DEPTH || !(mid > lo && mid < hi) {\n",
-     "            if depth >= MAX_FOLD_DEPTH || !(mid > lo && mid < hi) {\n"
+     "            if depth >= MAX_FOLD_DEPTH || !halvable {\n",
+     "            if depth >= MAX_FOLD_DEPTH || !halvable {\n"
      "                continue;\n            }\n            if false {\n", [FOLD_TEST]),
     ("a span without a bound at its width gives up", FOLD,
-     "                continue;\n            };\n            let ends",
-     "                return Ok(Err(FOLD_NOT_EXCLUDED));\n            };\n            let ends", [FOLD_TEST]),
-    ("only a span with a bound is decided exactly", FOLD,
-     "        let verdict = if plain && self.fold_frames.has_bend(span.lo, span.hi) {\n",
-     "        let verdict = if plain && self.fold_frames.bend(span.lo, span.hi, reading).is_some() {\n", [FOLD_TEST]),
-    ("the exact compiler builds a fold it cannot exclude", COMPILE_STATION,
+     "                if depth >= CONSERVATIVE_FOLD_DEPTH || !halvable {\n",
+     "                if true {\n", [FOLD_TEST]),
+    ("only a span with rates is decided exactly", FOLD,
+     "        if self.fold_frames.has_bend(span.lo, span.hi) {\n",
+     "        if self.fold_frames.rates(span.lo, span.hi, reading).is_some() {\n", [FOLD_TEST]),
+    ("the exact compiler builds a turned fold", COMPILE_STATION,
      "    law.fold(margin)?.map_err(unsupported)\n",
      "    let _ = (law.fold(margin)?, unsupported);\n    Ok(())\n", [FOLD_TEST]),
     ("a span at a joint takes the earlier piece", FB,

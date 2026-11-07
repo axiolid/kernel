@@ -86,9 +86,9 @@
 //! The bound assumes the sections cross nowhere. The `fold` check decides
 //! it per seam-free span of a station interval, from the frame law's signed
 //! bend, before any cell is bounded: refused as invalid input where the
-//! section planes stop advancing, unbounded by name ([`FOLD_NOT_EXCLUDED`])
-//! where a turned section, a frame read by quadrature or a span without a
-//! bound leaves it open; its
+//! section planes stop advancing past a section point, unbounded by name
+//! ([`FOLD_NOT_EXCLUDED`]) only where a span without rates, or across a
+//! curvature break of a frame read by quadrature, leaves it open; its
 //! module documentation states the condition and the decisions.
 //!
 //! # Mitres
@@ -152,13 +152,14 @@ pub(crate) const UNBOUNDED_TURN: &str =
     "stationed sections: the orientation turns between stations through a direction its \
      interpolation cannot bound";
 
-/// Why a run whose section planes may fold is not decided (#361): a
-/// turned section, or a frame read by quadrature, is checked only by a
-/// conservative bound of its forward rate, which never refuses.
+/// Why a run whose section planes may fold is not decided (#361, #406): a
+/// span whose rates cannot be bounded, or that crosses a curvature break of
+/// a frame read by quadrature, is checked only by a conservative bound of
+/// its forward rate, which never refuses.
 pub(crate) const FOLD_NOT_EXCLUDED: &str =
-    "stationed sections: a fold cannot be excluded (a turned section, a frame read by \
-     quadrature, or a span whose bend cannot be bounded, checked only by the conservative \
-     bound of the forward rate)";
+    "stationed sections: a fold cannot be excluded (a span whose bend cannot be bounded at any \
+     width the check reaches, or that crosses a curvature break of a frame read by quadrature, \
+     checked only by the conservative bound of the forward rate)";
 
 /// The frame reading a run's frame names, `None` for one this compiler
 /// does not know.
@@ -196,10 +197,12 @@ pub(crate) const CERTIFICATION_SHARE: Scalar = 1e-3;
 type Pair = [Scalar; 2];
 
 /// The bounds of an orientation interpolated between two stations: the
-/// turned lateral's and up's components (`[y1, y2]`, `[n1, n2]`).
+/// turned lateral's, up's and tangent's components (`[y1, y2]`, `[n1, n2]`,
+/// `[x1, x2]`).
 struct Turn {
     lateral: Pair,
     up: Pair,
+    tangent: Pair,
 }
 
 /// The smallest length of `p + t (q - p)` over `t` in `[0, 1]`.
@@ -224,6 +227,7 @@ fn turn(a: (Vec3, Vec3), b: (Vec3, Vec3), u0: Scalar, u1: Scalar, delta: Scalar)
         return Some(Turn {
             lateral: [0.0; 2],
             up: [0.0; 2],
+            tangent: [0.0; 2],
         });
     }
     let rho_a = segment_floor(lerp3(a.0, b.0, u0), lerp3(a.0, b.0, u1));
@@ -247,6 +251,7 @@ fn turn(a: (Vec3, Vec3), b: (Vec3, Vec3), u0: Scalar, u1: Scalar, delta: Scalar)
     Some(Turn {
         lateral: [n1 + x1, n2 + 2.0 * n1 * x1 + x2],
         up: [n1, n2],
+        tangent: [x1, x2],
     })
 }
 

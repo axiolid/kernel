@@ -56,12 +56,17 @@
 //! curvature, or recedes along the tangent faster than the basis advances,
 //! the planes stop advancing and the sections cross. The spine is refused as
 //! invalid input, by this compiler and the exact one alike, wherever the
-//! frame law has a closed-form bend (unturned sections), a touch within
-//! rounding included; for a turned section or a frame read by quadrature the
-//! `bound` module's conservative bound never refuses and reports
+//! frame law has a jet, a touch within rounding (and, on a frame read by
+//! quadrature, the frames' certified error) included: the rate of a section
+//! point along its turned plane's normal, from the frame's twist, rise and
+//! bend, decides a turned section and a frame read by quadrature (an
+//! ellipse, a B-spline, an offset beside them) as it does an unturned one
+//! (#406). A section turned to face backwards along its basis is refused by
+//! the same rule. Only a span across a curvature break of a frame read by
+//! quadrature, or one the frames cannot be bounded over, is checked by the
+//! `bound` module's conservative bound, which never refuses and reports
 //! [`DeviationBound::Unbounded`] by name when it cannot exclude a fold. The
-//! check is local: a run that meets itself far away is not detected (#407);
-//! a turned section or a frame read by quadrature is never refused (#406).
+//! check is local: a run that meets itself far away is not detected (#407).
 //!
 //! The `exact` module builds the runs with a closed form exactly (#247):
 //! a constant section along a line or a straight polyline (an extrusion)

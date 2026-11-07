@@ -11,39 +11,50 @@
 //!
 //! # The condition
 //!
-//! A vertex at `(a, b)` in the unturned section frame (`a = lat + x_k`, `b =
-//! vert + y_k`) with the longitudinal offset `c` moves along `N` at
+//! A vertex `p = q + x y^ + y e` of the section turned to the plane with
+//! normal `n` (components in the base frame `E = [T, L, U]`, `q` the offsets,
+//! `(x, y)` the profile point) moves along `n` at
 //!
-//! `F = sigma + c' - a beta_L - b beta_U`
+//! `F = sigma n_T + rise n_U + q'.n + w.(p x n) + x c_x + y c_y`
 //!
-//! (`axiolid_reference::station::FrameLaw::bend`: `sigma = O'.N`, `beta_L =
-//! L.N'`, `beta_U = U.N'`, in station distance). `F` is affine in `(a, b)`
-//! at a fixed `s`, so the smallest `F` of a section stands at a vertex, and
-//! each vertex's `(a, b)` is affine in `s` between two stations. The
-//! planes fold where `F <= 0`. On a plan arc `F = 1 - a / R` (the curvature
-//! radius `R` against the section's lateral extent on the inner side); a
-//! vertical arc folds a section whose up extent reaches the vertical
-//! radius, in the section frame only, since the plan frame's `U = +Z` never
-//! turns toward the horizontal tangent; and a longitudinal offset that
-//! recedes faster than the basis advances (`c' <= -sigma`) folds a section
-//! on a line.
+//! (`axiolid_reference::station::FrameLaw::rates`, in station distance:
+//! `O' = sigma T + rise U`, `T' = beta_L L + beta_U U`, `L' = -beta_L T + tau
+//! U`, `w = (tau, -beta_U, beta_L)` the Darboux vector; `c_x = y^'.n` and
+//! `c_y = e'.n` the orientation's turn, see `turned`). This is the Jacobian
+//! determinant of `(s, x, y) -> A`: the planes advance past a point while it
+//! is positive. For an unturned section it is `sigma + c' - a beta_L - b
+//! beta_U`, `(a, b)` the vertex in the section frame. `F` is affine in
+//! `(x, y)` at a fixed `s`, so the smallest `F` of a section stands at a
+//! vertex. The planes fold where `F <= 0`. On a plan arc `F = 1 - a / R` (the
+//! curvature radius `R` against the section's lateral extent on the inner
+//! side); a vertical arc folds a section whose up extent reaches the
+//! vertical radius, in the section frame only, since the plan frame's `U =
+//! +Z` never turns toward the horizontal tangent; a longitudinal offset that
+//! recedes faster than the basis advances (`c' <= -sigma`) folds a section on
+//! a line; a section yawed by `alpha` on a plan arc has `F = cos(alpha)(1 -
+//! a / R) - x / R`; and one pitched against a grade in the plan frame has `F
+//! = cos(t) + G sin(t)`, backwards where that is not positive.
 //!
 //! # Exact decision
 //!
-//! An unturned run whose basis has a bend (a line, circle, polyline, an
-//! elevated or banked curve over a line or a circle, an intrinsic curve) is
-//! decided per seam-free span of a station interval by bisection. A span is
-//! clear once the lower bound of `F` is positive at every vertex over the
-//! span's certified coefficient ranges, less the profile's flattening bound
-//! `d` (a flattened ring's vertex stands up to `d` off the profile it stands
-//! for, and `F` moves by at most `d |beta|`) and the rounding of the
-//! arithmetic. Otherwise the span's middle is a witness: the coefficients
-//! there are known to their rounding, and a vertex whose `F` is not
-//! certified positive within that rounding folds or touches, so the run is
-//! refused. A touch is a non-manifold solid: refused alike. A span neither
-//! cleared nor refused is halved, to [`MAX_FOLD_DEPTH`] halvings; a span
-//! left undecided there lies within rounding or the profile's flattening bound
-//! of a fold and is refused too.
+//! A run whose frame law has a jet (a line, circle, polyline, an elevated or
+//! banked curve over a line or a circle, an intrinsic curve, and a frame
+//! read by quadrature: an ellipse, a B-spline, an offset beside them), turned
+//! or not, is decided per seam-free span of a station interval by bisection.
+//! A span is clear once the lower bound of `F` is positive at every vertex
+//! over the span's certified rate ranges (`rate`), less the profile's
+//! flattening bound `d` (a flattened ring's vertex stands up to `d` off the
+//! profile it stands for, and `F` moves by at most `d` times its gradient in
+//! `(x, y)`) and the rounding of the arithmetic. Otherwise the span's middle
+//! is a witness: the rates there are known to their error, over the
+//! distances that read may stand at, and a vertex whose `F` is not certified
+//! positive within that width folds or touches, so the run is refused. A
+//! touch is a non-manifold solid: refused alike. A span neither cleared nor
+//! refused is halved, to [`MAX_FOLD_DEPTH`] halvings; a span left undecided
+//! there lies within rounding, the frames' certified error or the profile's
+//! flattening bound of a fold and is refused too. A span without rates, or
+//! across a curvature break of a frame read by quadrature, is halved to
+//! [`CONSERVATIVE_FOLD_DEPTH`] and left to the conservative bound.
 //! The bisection visits at most [`MAX_FOLD_SPANS`] spans, then fails with a
 //! budget error by name.
 //!
@@ -59,8 +70,10 @@
 //!
 //! # Conservative bound
 //!
-//! A run with a turned section, or whose frames are read by quadrature (an
-//! ellipse, a B-spline, an offset) has no closed-form bend. Its turned
+//! A span without rates (longer than the bend can be bounded over, a vertical
+//! tangent, across a curvature break of a frame read by quadrature, or whose
+//! orientation turns through a direction it cannot bound) is checked by a
+//! magnitude bound. Its turned
 //! section plane has the normal `N_t`, with components `n` in the base
 //! frame, and a vertex advances along it at
 //!
@@ -83,15 +96,17 @@
 //!
 //! The condition is local: the section planes advance at every station
 //! distance. A run that meets itself far away (a loop of the basis, two legs
-//! of a spiral) is not detected here (#407). A turned section or a frame read
-//! by quadrature is never refused, only checked conservatively (#406 asks for
-//! an exact decision).
+//! of a spiral) is not detected here (#407).
+
+mod rate;
+mod turned;
 
 use axiolid_contracts::{GeomError, GeomResult};
 use axiolid_core::{Point3, Scalar, Vec3};
 use axiolid_curve::{Curve3, Line3};
-use axiolid_reference::station::{station_section3, BendBounds, FrameReading, SectionFrame};
+use axiolid_reference::station::{station_section3, FrameReading, SectionFrame};
 
+use self::rate::Coefficients;
 use super::{
     lerp, lerp_offsets, oriented, seam_slack, turn, turned, SectionLaw, FOLD_NOT_EXCLUDED,
     UNBOUNDED_TURN, UNCERTIFIED_FRAMES,
@@ -114,11 +129,6 @@ const ROUNDING: Scalar = 64.0 * Scalar::EPSILON;
 
 /// What a span's decision is: `Ok` clear, `Err` unbounded by name.
 type Verdict = Result<(), &'static str>;
-
-/// The smaller and larger of two values.
-fn ordered(p: Scalar, q: Scalar) -> [Scalar; 2] {
-    [p.min(q), p.max(q)]
-}
 
 /// The largest product of a value in `a` and a value in `b`.
 fn product_hi(a: [Scalar; 2], b: [Scalar; 2]) -> Scalar {
@@ -215,100 +225,97 @@ impl<'r, 'g> SectionLaw<'r, 'g> {
         identity: &SectionFrame,
         visited: &mut usize,
     ) -> GeomResult<Verdict> {
-        let plain = self.orientations[span.i].is_base() && self.orientations[span.i + 1].is_base();
-        // A frame with a closed-form bend is bisected even where its bend
-        // is not bounded over the whole span (a span longer than twice the
-        // bend's radius); only a frame without one is checked conservatively.
-        let verdict = if plain && self.fold_frames.has_bend(span.lo, span.hi) {
-            let first = self.fold_frames.bend(span.lo, span.hi, reading);
-            self.bisect(span, first, (reading, margin, identity), visited)?
-        } else {
-            self.conservative(span, reading, margin, identity)?
-        };
+        // A frame with a jet is decided by bisection, turned or not, even
+        // where its rates are not bounded over the whole span (a span longer
+        // than twice the bend's radius); only a frame without one is
+        // checked conservatively.
+        //
         // The fold is decided on the frames as read, which a placement
         // read inexactly does not change in their section planes (#408);
         // a fold found there is refused, while the run is certified against
         // the exact surface by no cell (`SectionLaw::cell` bounds the frames
         // strictly), so it is never cleared to a bound.
-        Ok(verdict)
+        if self.fold_frames.has_bend(span.lo, span.hi) {
+            self.decide(span, (reading, margin, identity), visited)
+        } else {
+            self.conservative(span, reading, margin, identity)
+        }
     }
 
-    /// The vertices' section coordinates `(a, b)` (lateral, up in the
-    /// unturned frame) at `s` in station interval `i`.
-    fn coordinates(&self, i: usize, s: Scalar) -> Vec<(Scalar, Scalar)> {
-        let (d0, d1) = (self.distances[i], self.distances[i + 1]);
-        let u = ((s - d0) / (d1 - d0)).clamp(0.0, 1.0);
-        let offsets = lerp_offsets(&self.offsets[i], &self.offsets[i + 1], u);
-        self.locals[i]
-            .iter()
-            .zip(&self.locals[i + 1])
-            .map(|(p, q)| {
-                (
-                    offsets.lateral + lerp(p.x, q.x, u),
-                    offsets.vertical + lerp(p.y, q.y, u),
-                )
-            })
-            .collect()
-    }
-
-    /// The rate of the longitudinal offset in station interval `i`.
-    fn long_rate(&self, i: usize) -> Scalar {
-        (self.offsets[i + 1].longitudinal - self.offsets[i].longitudinal)
-            / (self.distances[i + 1] - self.distances[i])
-    }
-
-    /// Bisects `span` over its certified bend `first`; see the [module
-    /// documentation](self#exact-decision).
-    fn bisect(
+    /// Decides `span` by bisection over the frame law's certified rates; see
+    /// the [module documentation](self#exact-decision).
+    fn decide(
         &self,
         span: Span,
-        first: Option<BendBounds>,
         (reading, margin, identity): (FrameReading, Scalar, &SectionFrame),
         visited: &mut usize,
     ) -> GeomResult<Verdict> {
-        let long_rate = self.long_rate(span.i);
         let mut verdict: Verdict = Ok(());
-        let mut stack = vec![(span.lo, span.hi, 0_u32, first)];
-        while let Some((lo, hi, depth, known)) = stack.pop() {
+        let mut stack = vec![(span.lo, span.hi, 0_u32)];
+        while let Some((lo, hi, depth)) = stack.pop() {
             *visited += 1;
             if *visited > MAX_FOLD_SPANS {
                 return Err(GeomError::BudgetExceeded {
                     resource: "station fold check",
                 });
             }
-            let Some(bend) = known.or_else(|| self.fold_frames.bend(lo, hi, reading)) else {
-                // Not bounded over this width: halve it, and where it stays
-                // so (a vertical tangent, a span across a curvature break
-                // of a frame read by quadrature) leave it to the
-                // conservative bound, the other spans still decided.
-                let mid = 0.5 * (lo + hi);
-                if depth >= CONSERVATIVE_FOLD_DEPTH || !(mid > lo && mid < hi) {
+            let mid = 0.5 * (lo + hi);
+            let halvable = mid > lo && mid < hi;
+            let rates = self.fold_frames.rates(lo, hi, reading);
+            let floors = rates
+                .and_then(|r| self.floors(span.i, (lo, hi), &Coefficients::ranges(&r), margin));
+            let (Some(rates), Some(floors)) = (rates, floors) else {
+                // No rates over this width (a span longer than the bend can
+                // be bounded over, a vertical tangent, a span across a
+                // curvature break of a frame read by quadrature) or a turn
+                // it cannot bound: halve it, and where it stays so leave it
+                // to the conservative bound, the other spans still decided.
+                if depth >= CONSERVATIVE_FOLD_DEPTH || !halvable {
                     let part = Span { lo, hi, ..span };
                     if !matches!(self.advancing(part, reading, margin, identity)?, Ok(true)) {
                         verdict = Err(FOLD_NOT_EXCLUDED);
                     }
                 } else {
-                    stack.push((mid, hi, depth + 1, None));
-                    stack.push((lo, mid, depth + 1, None));
+                    stack.push((mid, hi, depth + 1));
+                    stack.push((lo, mid, depth + 1));
                 }
                 continue;
             };
-            let ends = [self.coordinates(span.i, lo), self.coordinates(span.i, hi)];
-            if clear(&bend, &ends, long_rate, margin) {
+            if floors.iter().all(|f| f.floor > 0.0) {
                 continue;
             }
-            let mid = 0.5 * (lo + hi);
-            witness(&bend, &self.coordinates(span.i, mid), long_rate, mid)?;
-            if depth >= MAX_FOLD_DEPTH || !(mid > lo && mid < hi) {
+            // The witness: the rates at the middle read are known to their
+            // error, over the distances that read may stand at.
+            let reach = rates.measure;
+            let window = ((mid - reach).max(lo), (mid + reach).min(hi));
+            let middles = Coefficients::middles(&rates);
+            if let Some(witness) = self.floors(span.i, window, &middles, 0.0) {
+                if let Some(f) = witness.iter().find(|f| f.floor.is_nan() || f.floor <= 0.0) {
+                    return Err(GeomError::InvalidInput(format!(
+                        "{FOLD}: at distance {mid} the section point ({}, {}) (lateral, up in \
+                         the base section frame, {} along it): the section planes stop \
+                         advancing past it, or run backwards (forward rate {:e}, within {:e}); \
+                         a touch within rounding or the frames' certified error is refused \
+                         alike",
+                        f.point[1],
+                        f.point[2],
+                        f.point[0],
+                        f.centre,
+                        f.centre - f.floor,
+                    )));
+                }
+            }
+            if depth >= MAX_FOLD_DEPTH || !halvable {
                 return Err(GeomError::InvalidInput(format!(
-                    "{FOLD}, or touch within rounding or the profile's flattening bound of a \
-                     fold, between distances {lo} and {hi}: the forward rate of a section \
-                     point is not certified positive there, and halving the span {depth} \
-                     times cannot decide it; a touch within rounding is refused alike"
+                    "{FOLD}, or touch within rounding, the frames' certified error or the \
+                     profile's flattening bound of a fold, between distances {lo} and {hi}: \
+                     the rate of a section point along its plane's normal is not certified \
+                     positive there, and halving the span {depth} times cannot decide it; a \
+                     touch within rounding is refused alike"
                 )));
             }
-            stack.push((mid, hi, depth + 1, None));
-            stack.push((lo, mid, depth + 1, None));
+            stack.push((mid, hi, depth + 1));
+            stack.push((lo, mid, depth + 1));
         }
         Ok(verdict)
     }
@@ -442,68 +449,4 @@ impl<'r, 'g> SectionLaw<'r, 'g> {
         }
         Ok(Ok(true))
     }
-}
-
-/// Whether the forward rate of every vertex is positive over the whole span
-/// of `bend`, the vertices moving between `ends` (their coordinates at the
-/// span's ends), less the profile's flattening bound and the rounding.
-fn clear(
-    bend: &BendBounds,
-    ends: &[Vec<(Scalar, Scalar)>; 2],
-    long_rate: Scalar,
-    margin: Scalar,
-) -> bool {
-    let reach = margin * magnitude(bend.lateral).hypot(magnitude(bend.up));
-    ends[0].iter().zip(&ends[1]).all(|(p, q)| {
-        let (a, b) = (ordered(p.0, q.0), ordered(p.1, q.1));
-        let magnitudes = magnitude(bend.forward)
-            + long_rate.abs()
-            + magnitude(a) * magnitude(bend.lateral)
-            + magnitude(b) * magnitude(bend.up)
-            + reach;
-        let floor = bend.forward[0] + long_rate
-            - product_hi(a, bend.lateral)
-            - product_hi(b, bend.up)
-            - reach
-            - ROUNDING * magnitudes;
-        floor > 0.0
-    })
-}
-
-/// Refuses a vertex of the section at `s` (coordinates `at`) whose forward
-/// rate is not certified positive within the rounding of the bend's middle
-/// values.
-fn witness(
-    bend: &BendBounds,
-    at: &[(Scalar, Scalar)],
-    long_rate: Scalar,
-    s: Scalar,
-) -> GeomResult<()> {
-    let around = |j: usize| {
-        [
-            bend.middle[j] - bend.middle_error[j],
-            bend.middle[j] + bend.middle_error[j],
-        ]
-    };
-    let (forward, lateral, up) = (around(0), around(1), around(2));
-    for &(a, b) in at {
-        let magnitudes = magnitude(forward)
-            + long_rate.abs()
-            + a.abs() * magnitude(lateral)
-            + b.abs() * magnitude(up);
-        let floor = forward[0] + long_rate
-            - product_hi([a, a], lateral)
-            - product_hi([b, b], up)
-            - ROUNDING * magnitudes;
-        if floor.is_nan() || floor <= 0.0 {
-            let rate = bend.middle[0] + long_rate - a * bend.middle[1] - b * bend.middle[2];
-            return Err(GeomError::InvalidInput(format!(
-                "{FOLD}: at distance {s} the section point ({a}, {b}) (lateral, up in the \
-                 section frame): the section planes stop advancing there (forward rate \
-                 {rate:e}, rounding {:e}); a touch within rounding is refused alike",
-                rate - floor
-            )));
-        }
-    }
-    Ok(())
 }

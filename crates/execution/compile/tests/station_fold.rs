@@ -5,8 +5,10 @@
 //! the closed forms are `F = 1 - a / R` on a plan arc of radius `R`,
 //! `F = sigma (1 - b / R_v)` on a vertical arc in the section frame,
 //! `F = 1 + c'` on a line with a longitudinal offset of rate `c'`. A turned
-//! section and a frame read by quadrature are checked conservatively and
-//! never refused: reported unbounded by name where the bound cannot tell.
+//! section and a frame read by quadrature are decided alike (#406): the
+//! rate along the turned plane's normal, from the frame's twist, rise and
+//! bend; `station_fold_turned.rs` and `station_fold_quadrature.rs` test
+//! them against closed forms.
 
 use axiolid_contracts::{ExecutionOptions, GeomError};
 use axiolid_core::{Frame2, Point2, Scalar, Tolerance, Vec2, Vec3};
@@ -167,7 +169,8 @@ fn refused(outcome: &Outcome) -> &str {
             assert!(detail.contains("sections fold"), "{detail}");
             detail
         }
-        other => panic!("not refused: {other:?}"),
+        Outcome::Unbounded(reason) => panic!("not refused, unbounded: {reason}"),
+        Outcome::Certified => panic!("not refused, certified"),
     }
 }
 
@@ -399,7 +402,7 @@ fn a_touch_at_the_end_of_a_span_is_refused_after_halving() {
 }
 
 #[test]
-fn a_turned_section_is_checked_conservatively_and_never_refused() {
+fn a_turned_section_past_the_centre_is_refused() {
     let turn = StationOrientation::new(None, Some(Vec3::new(0.98, 0.2, 0.0)));
     let turned = |lateral: Scalar| {
         let mut b = GeometryGraphBuilder::new();
@@ -422,36 +425,9 @@ fn a_turned_section_is_checked_conservatively_and_never_refused() {
     };
     let (graph, root) = turned(3.0);
     assert!(matches!(mesh(&graph, root), Outcome::Certified));
-    // Past the centre: the conservative bound cannot clear it, and does not
-    // refuse.
+    // Past the centre: the section planes run backwards.
     let (graph, root) = turned(11.0);
-    match mesh(&graph, root) {
-        Outcome::Unbounded(reason) => assert!(reason.contains("cannot be excluded"), "{reason}"),
-        other => panic!("{other:?}"),
-    }
-}
-
-#[test]
-fn a_frame_read_by_quadrature_is_decided_by_its_exact_curvature() {
-    let ellipse = || {
-        Curve2::Ellipse(Ellipse2 {
-            frame: Frame2 {
-                origin: Point2::ZERO,
-                x: Vec2::X,
-                y: Vec2::Y,
-            },
-            semi_axis_x: 20.0,
-            semi_axis_y: 10.0,
-        })
-    };
-    // Its sharpest bend is `10^2 / 20 = 5` m at the ends of the major axis.
-    let (graph, root) = along(ellipse(), StationFrame::Section, constant(1.5, 0.0), 10.0);
-    assert!(matches!(mesh(&graph, root), Outcome::Certified));
-    let (graph, root) = along(ellipse(), StationFrame::Section, constant(7.5, 0.0), 10.0);
-    match mesh(&graph, root) {
-        Outcome::Refused(reason) => assert!(reason.contains("sections fold"), "{reason}"),
-        other => panic!("{other:?}"),
-    }
+    refused(&mesh(&graph, root));
 }
 
 #[test]
@@ -578,10 +554,9 @@ fn a_fold_after_a_joint_inside_a_station_interval_is_found() {
 }
 
 #[test]
-fn the_exact_compiler_refuses_a_fold_it_cannot_exclude_by_name() {
+fn the_exact_compiler_refuses_a_turned_fold_as_invalid_input() {
     // A turned section along a line whose longitudinal offset recedes: the
-    // conservative bound cannot clear it, so the exact compiler does not
-    // build what the mesh compiler cannot vouch for.
+    // section planes fold, and the mesh and the exact compiler refuse alike.
     let turn = StationOrientation::new(None, Some(Vec3::new(0.996, 0.087, 0.0)));
     let mut b = GeometryGraphBuilder::new();
     let basis = b.push_value(line_x()).unwrap();
@@ -604,12 +579,9 @@ fn the_exact_compiler_refuses_a_fold_it_cannot_exclude_by_name() {
         ))
         .unwrap();
     let graph = b.finish(vec![root]).unwrap();
-    match ReferenceExactCompiler::new().compile_exact(&graph, root, &options()) {
-        Err(GeomError::UnsupportedInput { input, .. }) => {
-            assert!(input.contains("cannot be excluded"), "{input}");
-        }
-        other => panic!("not refused by name: {other:?}"),
-    }
+    refused(&mesh(&graph, root));
+    let detail = exact(&graph, root).expect_err("the exact compiler refuses alike");
+    assert!(detail.contains("sections fold"), "{detail}");
 }
 
 fn pitched(degrees: Scalar) -> StationOrientation {

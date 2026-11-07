@@ -3,8 +3,8 @@
 //! `OpenSectionsAtStations` are judged as a stationed spine is (#361) at the
 //! vertices of their polylines, with no flattening margin: `F = 1 - a / R`
 //! on a plan arc of radius `R`, `F = 1 + c'` on a line with a longitudinal
-//! offset of rate `c'`. A turned section is checked conservatively and never
-//! refused: reported unbounded by name where the bound cannot tell.
+//! offset of rate `c'`. A turned section is decided alike (#406): the rate
+//! along the turned plane's normal.
 
 use axiolid_contracts::{ExecutionOptions, GeomError};
 use axiolid_core::{Frame2, Point2, Scalar, Tolerance, Vec2, Vec3};
@@ -60,7 +60,8 @@ fn refused(outcome: Outcome) -> String {
             assert!(detail.contains("sections fold"), "{detail}");
             detail
         }
-        other => panic!("expected a fold refusal, got {other:?}"),
+        Outcome::Unbounded(reason) => panic!("expected a fold refusal, got unbounded: {reason}"),
+        Outcome::Certified => panic!("expected a fold refusal, got certified"),
     }
 }
 
@@ -290,7 +291,7 @@ fn a_reversed_tagged_sheet_is_judged_on_its_joined_vertices() {
 }
 
 #[test]
-fn a_turned_sheet_is_checked_conservatively_and_never_refused() {
+fn a_turned_sheet_past_the_centre_is_refused() {
     let turn = StationOrientation::new(None, Some(Vec3::new(0.98, 0.2, 0.0)));
     for frame in FRAMES {
         let case = format!("{frame:?}");
@@ -311,11 +312,6 @@ fn a_turned_sheet_is_checked_conservatively_and_never_refused() {
             StationOffsets::ZERO,
             Some(turn),
         );
-        match past {
-            Outcome::Unbounded(reason) => {
-                assert!(reason.contains("cannot be excluded"), "{case}: {reason}")
-            }
-            other => panic!("{case}: expected unbounded, got {other:?}"),
-        }
+        refused(past);
     }
 }
