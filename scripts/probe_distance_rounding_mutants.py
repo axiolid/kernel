@@ -21,6 +21,18 @@ displacement only seeds a support point to query, whose lower bound holds
 for any point of the source, so a seed taken or missed changes how fast the
 interval closes, and `square_translates_far_from_the_origin_close` closes
 either way.
+
+Nor the `RATIO` guards of the pair and point bounds (`rounding` and the
+closing `1 - RATIO eps` in `lower_bound` and `point_lower_bound`) or a point
+query's own pad `PROJECTION eps |p|` (#447): each covers rounding that another
+margin covers too. `S` is at least the magnitude of every point of its side,
+so a computed gap or projection is off by a few `eps (S_a + S_b)` at most,
+inside the side pads; for a query point far beyond the side the bound is near
+the distance only when it is about `|p|`, where the closing ratio factor
+covers `p . d`. Their mutants survive every distance and Hausdorff test; they
+stay so that each bound is sound by its own arithmetic. Nor the floor's
+witness excess (#439), which only stops refinement on sides with B-spline
+faces.
 """
 import probe_lib
 
@@ -69,6 +81,18 @@ MUTANTS = [
      "        Surface::Plane(_) | Surface::Cylinder(_) | Surface::EllipticalCylinder(_) => {\n"
      "            sum * (1.0 + lo.y.abs().max(hi.y.abs()) + grow)\n"
      "        }", (UNIT, HAUS)),
+    ("the reported upper bound drops its witnesses' rounding", D,
+     "    distance * (1.0 + RATIO_EPSILONS * Scalar::EPSILON) + error",
+     "    distance * (1.0 + RATIO_EPSILONS * Scalar::EPSILON)", UNIT),
+    ("a Hausdorff lower bound keeps its witness's rounding", H,
+     "    (found.lower - error).max(0.0)",
+     "    found.lower.max(0.0)", UNIT),
+    ("a B-spline witness's M without its de Boor levels", D,
+     "    let levels = Scalar::from(spline.u_degree) + Scalar::from(spline.v_degree) + 1.0;",
+     "    let levels = 1.0;", UNIT),
+    ("a B-spline witness's M without its weights' spread", D,
+     "            hi / lo\n",
+     "            1.0\n", UNIT),
 ]
 
 probe_lib.main(MUTANTS, timeout=1200)
