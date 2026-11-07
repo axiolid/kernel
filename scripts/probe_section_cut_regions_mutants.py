@@ -5,7 +5,8 @@ regions: which region edges bound the cut and in which direction, how the
 rings are linked and simplified, the pinch refusal, the exact points the rings
 are decided on (#377: the frame sign, the weight normalisation, the exact
 fallback, the box of a point), the outer-or-hole turn at the smallest vertex,
-the nesting (innermost container, containment, crossings, collinear overlaps),
+the nesting (innermost container, containment, the edge midpoint that decides
+a ring touching another at every corner, crossings, collinear overlaps),
 the budgets, and the registry checks of the answer. A mutant must turn a test red:
 the hand-derived cases of `tests/section_request.rs`, the region conformance
 suite, the unit tests of the ring tracing and nesting, or the registry tests
@@ -13,7 +14,9 @@ of `mesh_section_contract.rs`.
 
 Not mutated, because no input reaches the difference: the mixed-containment
 and tied-container refusals (a ring with vertices strictly inside and outside
-another needs a crossing or contact, which the sweep refuses first), the
+another needs a crossing, which the sweep refuses first), the
+coincident-rings refusal after the midpoints (a coincident hole has no
+container and an equal outer ring overlaps, which refuse first), the
 same-ring clause of the contact rule (the local test also sees both passages
 of a repeated vertex), and the order of the two local tests (a crossing is seen
 from both rings).
@@ -74,6 +77,33 @@ MUTANTS = [
         'pinch level spoke always in the upper half', K,
         '                Ordering::Equal => exact.compare(towards, here, 0)? == Ordering::Greater,',
         '                Ordering::Equal => true,', TESTS,
+    ),
+    (
+        'two edges of one direction along one ray not crossing', K,
+        '        _ if a.incoming == b.incoming => Err(refused(REFUSED_CROSSING_CUT_RINGS)),',
+        '        _ if false => Err(refused(REFUSED_CROSSING_CUT_RINGS)),', TESTS,
+    ),
+    (
+        'ring touching at every corner decided as outside', N,
+        '                    if inside_by_midpoint(exact, &inner.nodes, &outer.nodes)? {',
+        '                    if false && inside_by_midpoint(exact, &inner.nodes, &outer.nodes)? {',
+        TESTS,
+    ),
+    (
+        'ring touching at every corner decided as inside', N,
+        '                    if inside_by_midpoint(exact, &inner.nodes, &outer.nodes)? {',
+        '                    if !inside_by_midpoint(exact, &inner.nodes, &outer.nodes)? {',
+        TESTS,
+    ),
+    (
+        'edge midpoint without the doubled weight', N,
+        '            weight.add(&weight),', '            weight.clone(),', TESTS,
+    ),
+    (
+        'midpoint on the boundary decides as outside', N,
+        '            Location::Boundary => {}\n        }\n    }\n    Err(refused())',
+        '            Location::Boundary => return Ok(false),\n        }\n    }\n    Err(refused())',
+        TESTS,
     ),
     (
         'zero-length pinch edge not degenerate', K,
