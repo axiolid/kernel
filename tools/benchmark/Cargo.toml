@@ -140,3 +140,7 @@ harness = false
 [[bench]]
 name = "station_clothoid"
 harness = false
+
+[[bench]]
+name = "chain_chord_bound"
+harness = false
