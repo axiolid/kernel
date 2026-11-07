@@ -55,7 +55,7 @@ Validated, deterministic planar booleans (intersection, union, difference, xor) 
   #448): a hole outside its outer ring (`HoleOutsideOuter`), two holes of a polygon that
   overlap (`HolesOverlap`), two polygons that overlap (`PolygonsOverlap`). The decision is exact
   and tolerance-free, on one arrangement of all rings; rings may touch at points or share a
-  stretch with their insides on opposite sides, as settled outputs do. Operations do not
+  stretch with the polygons' insides on opposite sides, as settled outputs do. Operations do not
   re-check their outputs. `scripts/probe_region_nesting_mutants.py` lists the faults its tests
   must catch.
 - A degenerate input ring refuses the operation by default. `overlay_with` and

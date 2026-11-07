@@ -9,6 +9,7 @@ Solid generation: profiles, lofts, sweeps, revolutions and half-space clipping.
 | | |
 | --- | --- |
 | Latest release | 0.3.29 (2026-11-03) |
+| On `main` | 0.4.0 (unreleased) |
 | crates.io | [`axiolid-construct`](https://crates.io/crates/axiolid-construct) |
 | Facade | [`axiolid`](./axiolid) feature `generate` |
 | Layer | algorithms (`algorithm.construction`) |

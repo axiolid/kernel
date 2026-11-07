@@ -9,6 +9,7 @@ Exact planar shortest path over a visibility graph.
 | | |
 | --- | --- |
 | Latest release | 0.3.9 (2026-11-07) |
+| On `main` | 0.4.0 (unreleased) |
 | crates.io | [`axiolid-route`](https://crates.io/crates/axiolid-route) |
 | Facade | [`axiolid`](./axiolid) feature `route` |
 | Layer | algorithms (`algorithm.planar`) |

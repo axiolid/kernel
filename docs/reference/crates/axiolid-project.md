@@ -9,6 +9,7 @@ Projection of triangle meshes onto a plane, and prism intersection.
 | | |
 | --- | --- |
 | Latest release | 0.3.3 (2026-11-07) |
+| On `main` | 0.4.0 (unreleased) |
 | crates.io | [`axiolid-project`](https://crates.io/crates/axiolid-project) |
 | Facade | [`axiolid`](./axiolid) feature `project` |
 | Layer | algorithms (`algorithm.planar`) |

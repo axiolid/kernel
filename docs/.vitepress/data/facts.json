@@ -97,7 +97,7 @@
       "released": "0.3.29",
       "released_date": "2026-11-03",
       "role": "algorithm.construction",
-      "version": "0.3.29"
+      "version": "0.4.0"
     },
     "axiolid-contracts": {
       "description": "Common backend-neutral execution and diagnostic contracts",
@@ -475,7 +475,7 @@
       "released": "0.3.3",
       "released_date": "2026-11-07",
       "role": "algorithm.planar",
-      "version": "0.3.3"
+      "version": "0.4.0"
     },
     "axiolid-ray-mesh": {
       "description": "Narrow-phase ray/triangle-mesh nearest-hit intersection",
@@ -511,7 +511,7 @@
       "released": "0.3.9",
       "released_date": "2026-11-07",
       "role": "algorithm.planar",
-      "version": "0.3.9"
+      "version": "0.4.0"
     },
     "axiolid-spatial": {
       "description": "Acceleration structures: BVH and uniform point grid, and their queries; barycentric and mean-value coordinates.",
