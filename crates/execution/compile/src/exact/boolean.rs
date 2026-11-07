@@ -184,6 +184,9 @@ pub(super) fn remap_boolean_error(error: BooleanError) -> GeomError {
         BooleanError::UnsupportedContact => {
             "exact boolean whose plane touching a cylinder within tolerance is crossed where the contact cannot be placed"
         }
+        BooleanError::VertexOffCurve => {
+            "exact boolean whose result has a vertex off its edge's curve beyond what its report allows"
+        }
         BooleanError::Evaluation => "exact boolean over a curve or surface it cannot evaluate",
         BooleanError::DanglingReference => "exact boolean over a dangling operand handle",
         BooleanError::Measure(_) => "exact boolean over a face whose domain cannot be built",
