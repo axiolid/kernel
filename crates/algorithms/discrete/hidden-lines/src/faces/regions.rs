@@ -29,7 +29,7 @@ use axiolid_contracts::{DisplacementBound, ExecutionOptions, GeomError, GeomResu
 use axiolid_core::Point2;
 use axiolid_exact_arrangement::{
     canonical_rotation, check_winding, sequence_order, snap_round, trace, Arrangement, ExactPoints,
-    HalfEdge, Location, PieceId, PointId, Segment, TracedRegion, TracedRing, VertexId,
+    HalfEdge, Location, PieceId, PointId, Segment, Snapped, TracedRegion, TracedRing, VertexId,
 };
 use axiolid_mesh_hidden_lines_contract::{FaceSource, VisibleRegion};
 
@@ -243,11 +243,15 @@ pub(crate) fn build(
         let blame = |error: GeomError| Error::mesh(id, error);
 
         // Which exact rings and regions survive, and which exact regions
-        // each snapped piece was cut from.
-        let mut ring_survives = vec![false; source.rings.len()];
-        for (element, &ring) in element_rings.iter().enumerate() {
-            ring_survives[ring] |= net.survives[element];
-        }
+        // each snapped piece was cut from. Each ring is netted alone: a ring
+        // that collapses onto another surviving edge of the class leaves
+        // nothing of its own, and its triangles are not attributed to it.
+        let ring_pieces =
+            ring_boundaries(&snapped, chain, element_rings, source.rings.len()).map_err(blame)?;
+        let ring_survives: Vec<bool> = ring_pieces
+            .iter()
+            .map(|pieces| !pieces.is_empty())
+            .collect();
         let mut region_of_ring = vec![usize::MAX; source.rings.len()];
         for (region, found) in source.traced.iter().enumerate() {
             for ring in std::iter::once(&found.outer).chain(&found.holes) {
@@ -264,10 +268,10 @@ pub(crate) fn build(
             }
         }
         let mut regions_of_piece: BTreeMap<PieceId, Vec<usize>> = BTreeMap::new();
-        for (&(edge, _), &ring) in chain.iter().zip(element_rings) {
-            for &(piece, _) in &snapped.routes[edge] {
+        for (ring, pieces) in ring_pieces.iter().enumerate() {
+            for half_edge in pieces {
                 regions_of_piece
-                    .entry(piece)
+                    .entry(half_edge.piece)
                     .or_default()
                     .push(region_of_ring[ring]);
             }
@@ -530,6 +534,27 @@ fn exact_sources(
     Ok(sources)
 }
 
+/// The net boundary of each exact ring on its own: `chain` holds the elements
+/// of every ring of a source and `element_rings` the ring of each element.
+fn ring_boundaries(
+    snapped: &Snapped,
+    chain: &[(usize, bool)],
+    element_rings: &[usize],
+    rings: usize,
+) -> GeomResult<Vec<Vec<HalfEdge>>> {
+    (0..rings)
+        .map(|ring| {
+            let own: Vec<(usize, bool)> = chain
+                .iter()
+                .zip(element_rings)
+                .filter(|&(_, &of)| of == ring)
+                .map(|(&element, _)| element)
+                .collect();
+            Ok(snapped.class_boundary(&own)?.half_edges)
+        })
+        .collect()
+}
+
 /// The region of `key` that holds a floating component: the one whose outer
 /// ring contains the point and none of whose holes does.
 fn place(
@@ -575,5 +600,63 @@ mod tests {
         let ring = |x: f64| vec![Point2::new(x, 0.0), Point2::new(x + 1.0, 0.0)];
         let sorted = ordered_holes(vec![ring(5.0), ring(1.0), ring(3.0)]);
         assert_eq!(sorted, vec![ring(1.0), ring(3.0), ring(5.0)]);
+    }
+
+    #[test]
+    fn a_ring_that_collapses_onto_a_surviving_edge_of_its_class_leaves_nothing() {
+        use axiolid_contracts::ExecutionOptions;
+        use axiolid_core::Tolerance;
+        use axiolid_exact::{Arith, Dyadic};
+        use axiolid_exact_arrangement::PairBudget;
+
+        let d = |v: f64| Dyadic::try_from_f64(v).expect("finite");
+        // 2^-1080, below the smallest binary64 number: it rounds to zero.
+        let tiny = d(2f64.powi(-540)).mul(&d(2f64.powi(-540)));
+        let mut points = ExactPoints::new();
+        let mut at = |x: f64, y: f64| points.push_flat(Point2::new(x, y)).unwrap();
+        let square = [at(0.0, 0.0), at(4.0, 0.0), at(4.0, 4.0), at(0.0, 4.0)];
+        // A counter-clockwise sliver below the square's bottom edge.
+        let below = |x: f64, depth: f64, points: &mut ExactPoints| {
+            points
+                .push([d(x), d(-depth).mul(&tiny), d(1.0)])
+                .expect("point")
+        };
+        let sliver = [
+            below(1.0, 3.0, &mut points),
+            below(3.0, 3.0, &mut points),
+            below(2.0, 1.0, &mut points),
+        ];
+        let mut edges = Vec::new();
+        let mut chain = Vec::new();
+        let mut element_rings = Vec::new();
+        for (ring, corners) in [&square[..], &sliver[..]].into_iter().enumerate() {
+            for i in 0..corners.len() {
+                edges.push(Segment {
+                    ends: [corners[i], corners[(i + 1) % corners.len()]],
+                });
+                chain.push((edges.len() - 1, true));
+                element_rings.push(ring);
+            }
+        }
+        let options = ExecutionOptions::new(Tolerance::METRE);
+        let snapped = snap_round(
+            &points,
+            &edges,
+            &mut PairBudget::new(100_000, "test pairs"),
+            0,
+            &options,
+        )
+        .expect("snapped");
+        // Netted together, the sliver's elements still carry the square's
+        // bottom edge, so they would be reported as surviving.
+        let together = snapped.class_boundary(&chain).expect("class");
+        assert!(together.survives[4..].iter().any(|&kept| kept));
+        let alone = ring_boundaries(&snapped, &chain, &element_rings, 2).expect("rings");
+        assert_eq!(
+            alone[0].len(),
+            7,
+            "the square keeps its boundary, split at the sliver"
+        );
+        assert!(alone[1].is_empty(), "the sliver has none of its own");
     }
 }

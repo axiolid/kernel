@@ -94,6 +94,9 @@ MUTANTS = [
      '            let mut outer = positions(&rings[found.outer])?;\n            outer.reverse();', TESTS),
     # Snap rounding of the regions (ADR 0100); the snap itself is probed by
     # `probe_snap_rounding_mutants.py`.
+    ('a ring is netted with the rest of its class', REG,
+     '            let own: Vec<(usize, bool)> = chain\n                .iter()\n                .zip(element_rings)\n                .filter(|&(_, &of)| of == ring)',
+     '            let own: Vec<(usize, bool)> = chain\n                .iter()\n                .zip(element_rings)\n                .filter(|&(_, &of)| of == of || of == ring)', TESTS),
     ('snapped regions list no triangles', REG,
      '                        listed.extend(&source.triangles[region]);',
      '                        let _ = region;', TESTS),
