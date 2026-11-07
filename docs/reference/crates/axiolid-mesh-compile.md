@@ -249,4 +249,10 @@ Latest release, 0.3.44 (2026-11-03):
   is mapped back to the knot exactly, not by `(t + period) - period`, which
   left the piece ending an ulp past the knot (#426).
 
+- A curved face's Delaunay flips (#425) visit interior edges in key order, not
+  in a `HashMap`'s: compiling the same B-rep twice gave different triangles
+  (a cap bounded by a circle, whose corners are cocircular) or the same
+  triangles in a different order (a unique triangulation), from call to call
+  and process to process. Each flip's decision is unchanged.
+
 Full history: [`crates/execution/compile/CHANGELOG.md`](https://github.com/axiolid/kernel/blob/main/crates/execution/compile/CHANGELOG.md)

@@ -9,14 +9,6 @@ caret rule for `0.x` versions.
 
 ## [Unreleased]
 
-### Fixed
-
-- A curved face's Delaunay flips (#425) visit interior edges in key order, not
-  in a `HashMap`'s: compiling the same B-rep twice gave different triangles
-  (a cap bounded by a circle, whose corners are cocircular) or the same
-  triangles in a different order (a unique triangulation), from call to call
-  and process to process. Each flip's decision is unchanged.
-
 ## [0.3.44] - 2026-11-03
 
 ### Added
@@ -161,6 +153,12 @@ caret rule for `0.x` versions.
   0.1, 0.2 or 1/3 keeps its chord bound: the copy of the knot one period on
   is mapped back to the knot exactly, not by `(t + period) - period`, which
   left the piece ending an ulp past the knot (#426).
+
+- A curved face's Delaunay flips (#425) visit interior edges in key order, not
+  in a `HashMap`'s: compiling the same B-rep twice gave different triangles
+  (a cap bounded by a circle, whose corners are cocircular) or the same
+  triangles in a different order (a unique triangulation), from call to call
+  and process to process. Each flip's decision is unchanged.
 
 ## [0.3.43] - 2026-11-03
 
