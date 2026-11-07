@@ -8,7 +8,7 @@ Geometry data types and tolerance policy. No algorithms, no backends.
 
 | | |
 | --- | --- |
-| Latest release | 0.3.4 (2026-10-28) |
+| Latest release | 0.3.5 (2026-11-07) |
 | crates.io | [`axiolid-core`](https://crates.io/crates/axiolid-core) |
 | Layer | foundation (`foundation.values`) |
 | API documentation | [rustdoc](/api/rustdoc/axiolid_core/index.html) · [docs.rs](https://docs.rs/axiolid-core) |
@@ -39,11 +39,11 @@ Default: none.
 
 ## Changes
 
-Latest release, 0.3.4 (2026-10-28):
+Latest release, 0.3.5 (2026-11-07):
 
-### Changed
+### Added
 
-- The package metadata names rheonda UG (haftungsbeschränkt) as author, and commercial
-  licences are available from rheonda UG (haftungsbeschränkt) (`LICENSE-COMMERCIAL`, ADR 0089).
+- The package now ships `LICENSE` and `LICENSE-COMMERCIAL` (symlinks to the
+  repository root), so the licence texts travel with the archive (#358).
 
 Full history: [`crates/foundation/core/CHANGELOG.md`](https://github.com/axiolid/kernel/blob/main/crates/foundation/core/CHANGELOG.md)

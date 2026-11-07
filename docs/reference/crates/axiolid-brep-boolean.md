@@ -8,7 +8,7 @@ General exact B-rep booleans over analytic faces (ADR 0075).
 
 | | |
 | --- | --- |
-| Latest release | 0.1.13 (2026-11-03) |
+| Latest release | 0.1.14 (2026-11-07) |
 | crates.io | [`axiolid-brep-boolean`](https://crates.io/crates/axiolid-brep-boolean) |
 | Layer | algorithms (`algorithm.construction`) |
 | API documentation | [rustdoc](/api/rustdoc/axiolid_brep_boolean/index.html) · [docs.rs](https://docs.rs/axiolid-brep-boolean) |
@@ -51,27 +51,32 @@ results against them.
 
 ## Changes
 
-Latest release, 0.1.13 (2026-11-03):
-
-### Added
-
-- The package now ships `LICENSE` and `LICENSE-COMMERCIAL` (symlinks to the
-  repository root), so the licence texts travel with the archive (#358).
+Latest release, 0.1.14 (2026-11-07):
 
 ### Fixed
 
-- A box less a torus whose tube leaves through a face the ring's radius from
-  the axis was refused as `Undecided` (#381). The traced section touches the
-  latitude circle where the tube's quarter faces meet; its double root split
-  into cuts `2e-8` apart, which were never merged for a traced section.
-  They are now one cut within tolerance, reported as `MergedPoints`, so the
-  box less the torus cuts at a micrometre; `Tolerance::ZERO` still refuses.
-- A column united with a revolved bend whose start cap lies in the column's
-  foot did not sew (#382). The plane through the torus axis meets the torus
-  in the cap's circles as a traced section while the cap imprints them in
-  closed form, and the two copies of one stretch were kept apart. A traced
-  piece along an operand's line or conic edge now takes that edge's curve,
-  so the union is exact at `Tolerance::ZERO` and, placed by a general rigid
-  motion, cuts at a micrometre.
+- `BooleanReport::rounding_floor` adds the move of an angular residue at
+  the rounding floor (`2^-40` rad, read without a decision) over the
+  operands' extent, `2 sqrt(3)` times it (#421): a consumer widening by the
+  floor now covers the unrecorded angular residues too. The floor is that
+  widening, not the threshold for a decision: a residue between
+  `2^-40` times the extent and the floor may be a reported decision, so a
+  check of `linear() <= rounding_floor()` is about 4.5 times looser than
+  before.
+- A floor-standing door `3e-7` to `9e-7` short of a wall's face under a
+  millimetre tolerance is cut, not refused as "the kept faces did not sew
+  into a valid exact B-rep" (#409). The door's end face is read as the
+  wall's, but its floor edge stops short of the wall's floor edge by more
+  than the splitter's fixed relative slack (`1e-7`), so the wall's floor
+  did not split round the door's footprint. A boolean refused at the
+  caller's tolerance and at the finer one is now cut a last time at the
+  caller's tolerance with such a line edge extended to the boundary it
+  falls short of, as the door past the face already meets it; the move is
+  reported (`MergedPoints`, at least the gap). The extension is tested for
+  a difference at `3e-7`, `7e-7` and `9e-7` short and `3e-7` and `7e-7`
+  past a straight wall, for a union and an intersection at `3e-7` either
+  side, and for a curved wall at `9e-7`. A door `1e-6` or more short is
+  past the finer tolerance (`9.8e-7`) and is cut exactly at it, its skin
+  kept.
 
 Full history: [`crates/algorithms/construction/brep-boolean/CHANGELOG.md`](https://github.com/axiolid/kernel/blob/main/crates/algorithms/construction/brep-boolean/CHANGELOG.md)

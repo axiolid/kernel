@@ -9,6 +9,8 @@ caret rule for `0.x` versions.
 
 ## [Unreleased]
 
+## [0.1.3] - 2026-11-07
+
 ### Added
 
 - The package now ships `LICENSE` and `LICENSE-COMMERCIAL` (symlinks to the

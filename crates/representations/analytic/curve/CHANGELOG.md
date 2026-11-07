@@ -9,6 +9,8 @@ caret rule for `0.x` versions.
 
 ## [Unreleased]
 
+## [0.3.12] - 2026-11-07
+
 ### Fixed
 
 - `QuadraticGraph2::height` is exact to rounding for either sign of `b`

@@ -8,7 +8,7 @@ Portable pointcloud-to-surface reconstruction contract, evidence, and conformanc
 
 | | |
 | --- | --- |
-| Latest release | 0.3.3 (2026-10-28) |
+| Latest release | 0.3.4 (2026-11-07) |
 | crates.io | [`axiolid-pointcloud-reconstruction-contract`](https://crates.io/crates/axiolid-pointcloud-reconstruction-contract) |
 | Facade | [`axiolid`](./axiolid) feature `pointcloud-reconstruction` |
 | Layer | contracts (`contract.operation`) |
@@ -33,11 +33,11 @@ refuse rather than return an empty or fabricated mesh. Providers such as
 
 ## Changes
 
-Latest release, 0.3.3 (2026-10-28):
+Latest release, 0.3.4 (2026-11-07):
 
-### Changed
+### Added
 
-- The package metadata names rheonda UG (haftungsbeschränkt) as author, and commercial
-  licences are available from rheonda UG (haftungsbeschränkt) (`LICENSE-COMMERCIAL`, ADR 0089).
+- The package now ships `LICENSE` and `LICENSE-COMMERCIAL` (symlinks to the
+  repository root), so the licence texts travel with the archive (#358).
 
 Full history: [`crates/contracts/operations/pointcloud-reconstruction/CHANGELOG.md`](https://github.com/axiolid/kernel/blob/main/crates/contracts/operations/pointcloud-reconstruction/CHANGELOG.md)

@@ -8,7 +8,7 @@ Reference pointcloud reconstruction: signed-distance field from samples, extract
 
 | | |
 | --- | --- |
-| Latest release | 0.3.3 (2026-10-28) |
+| Latest release | 0.3.4 (2026-11-07) |
 | crates.io | [`axiolid-pointcloud-reconstruction-sdf`](https://crates.io/crates/axiolid-pointcloud-reconstruction-sdf) |
 | Facade | [`axiolid`](./axiolid) feature `pointcloud-provider` |
 | Layer | providers (`provider.pointcloud`) |
@@ -38,11 +38,11 @@ replace it behind the same contract.
 
 ## Changes
 
-Latest release, 0.3.3 (2026-10-28):
+Latest release, 0.3.4 (2026-11-07):
 
-### Changed
+### Added
 
-- The package metadata names rheonda UG (haftungsbeschränkt) as author, and commercial
-  licences are available from rheonda UG (haftungsbeschränkt) (`LICENSE-COMMERCIAL`, ADR 0089).
+- The package now ships `LICENSE` and `LICENSE-COMMERCIAL` (symlinks to the
+  repository root), so the licence texts travel with the archive (#358).
 
 Full history: [`crates/providers/pointcloud/sdf/CHANGELOG.md`](https://github.com/axiolid/kernel/blob/main/crates/providers/pointcloud/sdf/CHANGELOG.md)

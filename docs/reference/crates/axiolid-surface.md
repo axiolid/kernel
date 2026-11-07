@@ -8,7 +8,7 @@ Exact, format-neutral surface values: planes, quadrics, tori, and B-spline patch
 
 | | |
 | --- | --- |
-| Latest release | 0.3.5 (2026-10-28) |
+| Latest release | 0.3.6 (2026-11-07) |
 | crates.io | [`axiolid-surface`](https://crates.io/crates/axiolid-surface) |
 | Facade | [`axiolid`](./axiolid) feature `surfaces` |
 | Layer | representations (`representation.atomic`) |
@@ -44,11 +44,11 @@ Default: none.
 
 ## Changes
 
-Latest release, 0.3.5 (2026-10-28):
+Latest release, 0.3.6 (2026-11-07):
 
-### Changed
+### Added
 
-- The package metadata names rheonda UG (haftungsbeschränkt) as author, and commercial
-  licences are available from rheonda UG (haftungsbeschränkt) (`LICENSE-COMMERCIAL`, ADR 0089).
+- The package now ships `LICENSE` and `LICENSE-COMMERCIAL` (symlinks to the
+  repository root), so the licence texts travel with the archive (#358).
 
 Full history: [`crates/representations/analytic/surface/CHANGELOG.md`](https://github.com/axiolid/kernel/blob/main/crates/representations/analytic/surface/CHANGELOG.md)

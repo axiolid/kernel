@@ -8,7 +8,7 @@ Portable mesh plane-section request, result, and evidence contract.
 
 | | |
 | --- | --- |
-| Latest release | 0.3.7 (2026-11-03) |
+| Latest release | 0.3.8 (2026-11-07) |
 | crates.io | [`axiolid-mesh-section-contract`](https://crates.io/crates/axiolid-mesh-section-contract) |
 | Facade | [`axiolid`](./axiolid) feature `mesh-section` |
 | Layer | contracts (`contract.operation`) |
@@ -39,32 +39,11 @@ where its material lies on both sides of the plane, as closed regions (ADR
 
 ## Changes
 
-Latest release, 0.3.7 (2026-11-03):
+Latest release, 0.3.8 (2026-11-07):
 
 ### Added
 
-- `PlaneSectionEvidence::in_plane_crossings` and
-  `with_in_plane_crossings`: the distinct points, other than source vertices,
-  where in-plane source edges cross (ADR 0093, #366).
-- Fixtures for stacked boxes, tubes and an L-step block, whose faces coincide
-  in the plane, and for `Both` regions as cut regions.
-
-### Changed
-
-- Every `InPlaneSide::Both` region is a cut region, equal to it bit for bit
-  (ADR 0093, #366). The region conformance suite checks it, and the registry
-  checks it instead of refusing cut regions beside a `Both` region. A
-  provider that reports a `Both` region and refuses only the cut request now
-  fails the conformance suite; it must either refuse the plain request too or
-  return the cut regions.
-- `in_plane_pairs` and `RegionLimits::max_in_plane_pairs` count the candidate
-  pairs examined for the in-plane faces (segment, piece-triangle and hole
-  containment pairs of a merge), not only overlap tests. The count grows for
-  the same mesh (68,104 to 105,600 on the 8,192-triangle bench grid), so a
-  `max_in_plane_pairs` sized to the old counts can now give
-  `BudgetExceeded`.
-- Documentation: the classes of the plane (`Below`, `Above`, `Both`), that
-  regions have pairwise disjoint interiors, and that a provider may still
-  refuse overlapping in-plane faces by name.
+- The package now ships `LICENSE` and `LICENSE-COMMERCIAL` (symlinks to the
+  repository root), so the licence texts travel with the archive (#358).
 
 Full history: [`crates/contracts/operations/mesh-section/CHANGELOG.md`](https://github.com/axiolid/kernel/blob/main/crates/contracts/operations/mesh-section/CHANGELOG.md)

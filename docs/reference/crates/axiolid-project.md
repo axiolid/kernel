@@ -8,7 +8,7 @@ Projection of triangle meshes onto a plane, and prism intersection.
 
 | | |
 | --- | --- |
-| Latest release | 0.3.2 (2026-10-28) |
+| Latest release | 0.3.3 (2026-11-07) |
 | crates.io | [`axiolid-project`](https://crates.io/crates/axiolid-project) |
 | Facade | [`axiolid`](./axiolid) feature `project` |
 | Layer | algorithms (`algorithm.planar`) |
@@ -27,14 +27,11 @@ Projection of triangle meshes onto a plane and intersection with prisms: the bri
 
 ## Changes
 
-Latest release, 0.3.2 (2026-10-28):
+Latest release, 0.3.3 (2026-11-07):
 
-### Changed
+### Added
 
-- The licence is now `MPL-2.0 OR LicenseRef-Commercial` (was `MPL-2.0`):
-  a commercial licence is available from the copyright holder
-  (`LICENSE-COMMERCIAL`, ADR 0089, #358).
-- The minimum supported Rust version is now 1.99 (was 1.88), and the
-  workspace builds on Rust 1.99.1 (#349).
+- The package now ships `LICENSE` and `LICENSE-COMMERCIAL` (symlinks to the
+  repository root), so the licence texts travel with the archive (#358).
 
 Full history: [`crates/algorithms/planar/project/CHANGELOG.md`](https://github.com/axiolid/kernel/blob/main/crates/algorithms/planar/project/CHANGELOG.md)

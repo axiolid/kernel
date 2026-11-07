@@ -9,6 +9,8 @@ caret rule for `0.x` versions.
 
 ## [Unreleased]
 
+## [0.1.14] - 2026-11-07
+
 ### Fixed
 
 - `BooleanReport::rounding_floor` adds the move of an angular residue at

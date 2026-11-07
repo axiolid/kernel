@@ -9,6 +9,8 @@ caret rule for `0.x` versions.
 
 ## [Unreleased]
 
+## [0.3.5] - 2026-11-07
+
 ### Fixed
 
 - `incircle` and `insphere` returned a wrong sign, certified as exact, for

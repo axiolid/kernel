@@ -9,17 +9,6 @@ caret rule for `0.x` versions.
 
 ## [Unreleased]
 
-### Added
-
-- `certify_unit_winding` and `WindingError`: bracket the winding excess
-  `E = integral of w(w-1)/2 = (integral of w^2 - integral of w) / 2` of a
-  closed oriented cycle, an upper bound on the volume where its winding
-  number is neither 0 nor 1 (equal to it where `w` is in {-1..2}), and
-  accept it within a positive budget.
-  Edge-touching shells and cavities pass; duplicated, overlapping and
-  inverted shells are refused, so `cycle_volume_properties` can be trusted
-  as the enclosed volume (#420).
-
 ## [0.3.9] - 2026-11-04
 
 ### Added

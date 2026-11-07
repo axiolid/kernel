@@ -8,7 +8,7 @@ Level-set extraction: a closed manifold mesh from a sampled scalar field.
 
 | | |
 | --- | --- |
-| Latest release | 0.3.2 (2026-10-28) |
+| Latest release | 0.3.3 (2026-11-07) |
 | crates.io | [`axiolid-levelset`](https://crates.io/crates/axiolid-levelset) |
 | Layer | algorithms (`algorithm.sampled`) |
 | API documentation | [rustdoc](/api/rustdoc/axiolid_levelset/index.html) · [docs.rs](https://docs.rs/axiolid-levelset) |
@@ -25,14 +25,11 @@ Level-set extraction: a closed two-manifold triangle mesh from a scalar field sa
 
 ## Changes
 
-Latest release, 0.3.2 (2026-10-28):
+Latest release, 0.3.3 (2026-11-07):
 
-### Changed
+### Added
 
-- The licence is now `MPL-2.0 OR LicenseRef-Commercial` (was `MPL-2.0`):
-  a commercial licence is available from the copyright holder
-  (`LICENSE-COMMERCIAL`, ADR 0089, #358).
-- The minimum supported Rust version is now 1.99 (was 1.88), and the
-  workspace builds on Rust 1.99.1 (#349).
+- The package now ships `LICENSE` and `LICENSE-COMMERCIAL` (symlinks to the
+  repository root), so the licence texts travel with the archive (#358).
 
 Full history: [`crates/algorithms/sampled/levelset/CHANGELOG.md`](https://github.com/axiolid/kernel/blob/main/crates/algorithms/sampled/levelset/CHANGELOG.md)

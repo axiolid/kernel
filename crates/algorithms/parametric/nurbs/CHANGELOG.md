@@ -9,6 +9,8 @@ caret rule for `0.x` versions.
 
 ## [Unreleased]
 
+## [0.3.9] - 2026-11-07
+
 ### Fixed
 
 - A traced section against a surface that touches it reports the double root

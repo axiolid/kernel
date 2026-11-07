@@ -8,7 +8,7 @@ Versioned, memory-safe C ABI for the Axiolid application facade.
 
 | | |
 | --- | --- |
-| Latest release | 0.3.3 (2026-10-28) |
+| Latest release | 0.3.4 (2026-11-07) |
 | crates.io | [`axiolid-capi`](https://crates.io/crates/axiolid-capi) |
 | Layer | facade (`facade.native-c`) |
 | API documentation | [rustdoc](/api/rustdoc/axiolid_capi/index.html) · [docs.rs](https://docs.rs/axiolid-capi) |
@@ -31,11 +31,11 @@ the only Axiolid crate that contains `unsafe` code. See ADR 0040.
 
 ## Changes
 
-Latest release, 0.3.3 (2026-10-28):
+Latest release, 0.3.4 (2026-11-07):
 
-### Changed
+### Added
 
-- The package metadata names rheonda UG (haftungsbeschränkt) as author, and commercial
-  licences are available from rheonda UG (haftungsbeschränkt) (`LICENSE-COMMERCIAL`, ADR 0089).
+- The package now ships `LICENSE` and `LICENSE-COMMERCIAL` (symlinks to the
+  repository root), so the licence texts travel with the archive (#358).
 
 Full history: [`crates/facade/axiolid-capi/CHANGELOG.md`](https://github.com/axiolid/kernel/blob/main/crates/facade/axiolid-capi/CHANGELOG.md)

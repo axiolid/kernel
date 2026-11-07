@@ -8,7 +8,7 @@ GPU executor adapter contract for batched Axiolid geometry.
 
 | | |
 | --- | --- |
-| Latest release | 0.3.2 (2026-10-28) |
+| Latest release | 0.3.3 (2026-11-07) |
 | crates.io | [`axiolid-backend-gpu`](https://crates.io/crates/axiolid-backend-gpu) |
 | Facade | [`axiolid`](./axiolid) feature `gpu` |
 | Layer | execution (`execution.context`) |
@@ -42,14 +42,11 @@ stack. Concrete executors live in their own crates, including out of tree
 
 ## Changes
 
-Latest release, 0.3.2 (2026-10-28):
+Latest release, 0.3.3 (2026-11-07):
 
-### Changed
+### Added
 
-- The licence is now `MPL-2.0 OR LicenseRef-Commercial` (was `MPL-2.0`):
-  a commercial licence is available from the copyright holder
-  (`LICENSE-COMMERCIAL`, ADR 0089, #358).
-- The minimum supported Rust version is now 1.99 (was 1.88), and the
-  workspace builds on Rust 1.99.1 (#349).
+- The package now ships `LICENSE` and `LICENSE-COMMERCIAL` (symlinks to the
+  repository root), so the licence texts travel with the archive (#358).
 
 Full history: [`crates/execution/gpu/CHANGELOG.md`](https://github.com/axiolid/kernel/blob/main/crates/execution/gpu/CHANGELOG.md)

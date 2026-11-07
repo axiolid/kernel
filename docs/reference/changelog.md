@@ -85,6 +85,13 @@ Every publishable crate versions and publishes independently ([ADR 0067](/adr/00
 
 ## axiolid-arrangement
 
+### 0.3.3 - 2026-11-07
+
+### Added
+
+- The package now ships `LICENSE` and `LICENSE-COMMERCIAL` (symlinks to the
+  repository root), so the licence texts travel with the archive (#358).
+
 ### 0.3.2 - 2026-10-28
 
 ### Changed
@@ -104,6 +111,13 @@ Every publishable crate versions and publishes independently ([ADR 0067](/adr/00
 
 
 ## axiolid-backend-cpu
+
+### 0.3.4 - 2026-11-07
+
+### Added
+
+- The package now ships `LICENSE` and `LICENSE-COMMERCIAL` (symlinks to the
+  repository root), so the licence texts travel with the archive (#358).
 
 ### 0.3.3 - 2026-10-28
 
@@ -138,6 +152,13 @@ Every publishable crate versions and publishes independently ([ADR 0067](/adr/00
 
 ## axiolid-backend-gpu
 
+### 0.3.3 - 2026-11-07
+
+### Added
+
+- The package now ships `LICENSE` and `LICENSE-COMMERCIAL` (symlinks to the
+  repository root), so the licence texts travel with the archive (#358).
+
 ### 0.3.2 - 2026-10-28
 
 ### Changed
@@ -157,6 +178,13 @@ Every publishable crate versions and publishes independently ([ADR 0067](/adr/00
 
 
 ## axiolid-brep
+
+### 0.3.6 - 2026-11-07
+
+### Added
+
+- The package now ships `LICENSE` and `LICENSE-COMMERCIAL` (symlinks to the
+  repository root), so the licence texts travel with the archive (#358).
 
 ### 0.3.5 - 2026-10-28
 
@@ -214,6 +242,13 @@ Every publishable crate versions and publishes independently ([ADR 0067](/adr/00
 
 ## axiolid-brep-audit
 
+### 0.3.4 - 2026-11-07
+
+### Added
+
+- The package now ships `LICENSE` and `LICENSE-COMMERCIAL` (symlinks to the
+  repository root), so the licence texts travel with the archive (#358).
+
 ### 0.3.3 - 2026-10-28
 
 ### Changed
@@ -243,6 +278,34 @@ Every publishable crate versions and publishes independently ([ADR 0067](/adr/00
 
 
 ## axiolid-brep-boolean
+
+### 0.1.14 - 2026-11-07
+
+### Fixed
+
+- `BooleanReport::rounding_floor` adds the move of an angular residue at
+  the rounding floor (`2^-40` rad, read without a decision) over the
+  operands' extent, `2 sqrt(3)` times it (#421): a consumer widening by the
+  floor now covers the unrecorded angular residues too. The floor is that
+  widening, not the threshold for a decision: a residue between
+  `2^-40` times the extent and the floor may be a reported decision, so a
+  check of `linear() <= rounding_floor()` is about 4.5 times looser than
+  before.
+- A floor-standing door `3e-7` to `9e-7` short of a wall's face under a
+  millimetre tolerance is cut, not refused as "the kept faces did not sew
+  into a valid exact B-rep" (#409). The door's end face is read as the
+  wall's, but its floor edge stops short of the wall's floor edge by more
+  than the splitter's fixed relative slack (`1e-7`), so the wall's floor
+  did not split round the door's footprint. A boolean refused at the
+  caller's tolerance and at the finer one is now cut a last time at the
+  caller's tolerance with such a line edge extended to the boundary it
+  falls short of, as the door past the face already meets it; the move is
+  reported (`MergedPoints`, at least the gap). The extension is tested for
+  a difference at `3e-7`, `7e-7` and `9e-7` short and `3e-7` and `7e-7`
+  past a straight wall, for a union and an intersection at `3e-7` either
+  side, and for a curved wall at `9e-7`. A door `1e-6` or more short is
+  past the finer tolerance (`9.8e-7`) and is cut exactly at it, its skin
+  kept.
 
 ### 0.1.13 - 2026-11-03
 
@@ -655,6 +718,13 @@ Every publishable crate versions and publishes independently ([ADR 0067](/adr/00
 
 ## axiolid-capi
 
+### 0.3.4 - 2026-11-07
+
+### Added
+
+- The package now ships `LICENSE` and `LICENSE-COMMERCIAL` (symlinks to the
+  repository root), so the licence texts travel with the archive (#358).
+
 ### 0.3.3 - 2026-10-28
 
 ### Changed
@@ -682,6 +752,13 @@ Every publishable crate versions and publishes independently ([ADR 0067](/adr/00
 
 ## axiolid-collide
 
+### 0.3.3 - 2026-11-07
+
+### Added
+
+- The package now ships `LICENSE` and `LICENSE-COMMERCIAL` (symlinks to the
+  repository root), so the licence texts travel with the archive (#358).
+
 ### 0.3.2 - 2026-10-28
 
 ### Changed
@@ -701,6 +778,13 @@ Every publishable crate versions and publishes independently ([ADR 0067](/adr/00
 
 
 ## axiolid-constraint2d
+
+### 0.1.3 - 2026-11-07
+
+### Added
+
+- The package now ships `LICENSE` and `LICENSE-COMMERCIAL` (symlinks to the
+  repository root), so the licence texts travel with the archive (#358).
 
 ### 0.1.2 - 2026-10-28
 
@@ -1820,6 +1904,13 @@ Every publishable crate versions and publishes independently ([ADR 0067](/adr/00
 
 ## axiolid-core
 
+### 0.3.5 - 2026-11-07
+
+### Added
+
+- The package now ships `LICENSE` and `LICENSE-COMMERCIAL` (symlinks to the
+  repository root), so the licence texts travel with the archive (#358).
+
 ### 0.3.4 - 2026-10-28
 
 ### Changed
@@ -1858,6 +1949,24 @@ Every publishable crate versions and publishes independently ([ADR 0067](/adr/00
 
 
 ## axiolid-curve
+
+### 0.3.12 - 2026-11-07
+
+### Fixed
+
+- `QuadraticGraph2::height` is exact to rounding for either sign of `b`
+  (#414). It took the root as `2c / (-b - sign sqrt(D))`, which cancels
+  for one sign of `b`, losing about `1e-11` relative height near a
+  vanishing `a`; it now takes `c / q` or `q / a` with `q = -(b + sign(b)
+  sqrt(D)) / 2`, which adds terms of one sign. `AngleGraph2::angle` is
+  unchanged: near `a^2 + b^2 = c^2` its loss is the problem's own
+  sensitivity (the root moves with the square root of the discriminant), not
+  a cancellation a different formula avoids.
+
+### Added
+
+- The package now ships `LICENSE` and `LICENSE-COMMERCIAL` (symlinks to the
+  repository root), so the licence texts travel with the archive (#358).
 
 ### 0.3.11 - 2026-10-28
 
@@ -2095,6 +2204,13 @@ Every publishable crate versions and publishes independently ([ADR 0067](/adr/00
 
 ## axiolid-curve-evaluate-contract
 
+### 0.3.9 - 2026-11-07
+
+### Added
+
+- The package now ships `LICENSE` and `LICENSE-COMMERCIAL` (symlinks to the
+  repository root), so the licence texts travel with the archive (#358).
+
 ### 0.3.8 - 2026-10-28
 
 ### Changed
@@ -2246,6 +2362,13 @@ Every publishable crate versions and publishes independently ([ADR 0067](/adr/00
 
 ## axiolid-decimate
 
+### 0.3.4 - 2026-11-07
+
+### Added
+
+- The package now ships `LICENSE` and `LICENSE-COMMERCIAL` (symlinks to the
+  repository root), so the licence texts travel with the archive (#358).
+
 ### 0.3.3 - 2026-10-28
 
 ### Changed
@@ -2273,6 +2396,13 @@ Every publishable crate versions and publishes independently ([ADR 0067](/adr/00
 
 
 ## axiolid-decompose
+
+### 0.3.3 - 2026-11-07
+
+### Added
+
+- The package now ships `LICENSE` and `LICENSE-COMMERCIAL` (symlinks to the
+  repository root), so the licence texts travel with the archive (#358).
 
 ### 0.3.2 - 2026-10-28
 
@@ -3085,6 +3215,13 @@ Every publishable crate versions and publishes independently ([ADR 0067](/adr/00
 
 ## axiolid-exact
 
+### 0.1.4 - 2026-11-07
+
+### Added
+
+- The package now ships `LICENSE` and `LICENSE-COMMERCIAL` (symlinks to the
+  repository root), so the licence texts travel with the archive (#358).
+
 ### 0.1.3 - 2026-10-28
 
 ### Changed
@@ -3171,6 +3308,13 @@ Every publishable crate versions and publishes independently ([ADR 0067](/adr/00
 
 ## axiolid-exact-compile-contract
 
+### 0.3.3 - 2026-11-07
+
+### Added
+
+- The package now ships `LICENSE` and `LICENSE-COMMERCIAL` (symlinks to the
+  repository root), so the licence texts travel with the archive (#358).
+
 ### 0.3.2 - 2026-10-28
 
 ### Changed
@@ -3190,6 +3334,13 @@ Every publishable crate versions and publishes independently ([ADR 0067](/adr/00
 
 
 ## axiolid-field
+
+### 0.3.4 - 2026-11-07
+
+### Added
+
+- The package now ships `LICENSE` and `LICENSE-COMMERCIAL` (symlinks to the
+  repository root), so the licence texts travel with the archive (#358).
 
 ### 0.3.3 - 2026-10-28
 
@@ -3218,6 +3369,13 @@ Every publishable crate versions and publishes independently ([ADR 0067](/adr/00
 
 ## axiolid-field-ops
 
+### 0.3.4 - 2026-11-07
+
+### Added
+
+- The package now ships `LICENSE` and `LICENSE-COMMERCIAL` (symlinks to the
+  repository root), so the licence texts travel with the archive (#358).
+
 ### 0.3.3 - 2026-10-28
 
 ### Changed
@@ -3245,6 +3403,13 @@ Every publishable crate versions and publishes independently ([ADR 0067](/adr/00
 
 ## axiolid-fixtures
 
+### 0.3.3 - 2026-11-07
+
+### Added
+
+- The package now ships `LICENSE` and `LICENSE-COMMERCIAL` (symlinks to the
+  repository root), so the licence texts travel with the archive (#358).
+
 ### 0.3.2 - 2026-10-28
 
 ### Changed
@@ -3264,6 +3429,13 @@ Every publishable crate versions and publishes independently ([ADR 0067](/adr/00
 
 
 ## axiolid-guarantees
+
+### 0.3.3 - 2026-11-07
+
+### Added
+
+- The package now ships `LICENSE` and `LICENSE-COMMERCIAL` (symlinks to the
+  repository root), so the licence texts travel with the archive (#358).
 
 ### 0.3.2 - 2026-10-28
 
@@ -3586,6 +3758,13 @@ Every publishable crate versions and publishes independently ([ADR 0067](/adr/00
 
 ## axiolid-levelset
 
+### 0.3.3 - 2026-11-07
+
+### Added
+
+- The package now ships `LICENSE` and `LICENSE-COMMERCIAL` (symlinks to the
+  repository root), so the licence texts travel with the archive (#358).
+
 ### 0.3.2 - 2026-10-28
 
 ### Changed
@@ -3605,6 +3784,13 @@ Every publishable crate versions and publishes independently ([ADR 0067](/adr/00
 
 
 ## axiolid-linear
+
+### 0.3.5 - 2026-11-07
+
+### Added
+
+- The package now ships `LICENSE` and `LICENSE-COMMERCIAL` (symlinks to the
+  repository root), so the licence texts travel with the archive (#358).
 
 ### 0.3.4 - 2026-10-28
 
@@ -3642,6 +3828,13 @@ Every publishable crate versions and publishes independently ([ADR 0067](/adr/00
 
 
 ## axiolid-linear-intersection
+
+### 0.3.3 - 2026-11-07
+
+### Added
+
+- The package now ships `LICENSE` and `LICENSE-COMMERCIAL` (symlinks to the
+  repository root), so the licence texts travel with the archive (#358).
 
 ### 0.3.2 - 2026-10-28
 
@@ -4107,6 +4300,18 @@ Every publishable crate versions and publishes independently ([ADR 0067](/adr/00
 
 ## axiolid-mesh-boolean-boolmesh
 
+### 0.3.7 - 2026-11-07
+
+### Added
+
+- The package now ships `LICENSE` (a symlink to the repository root), so the
+  licence text travels with the archive (#358).
+
+### Changed
+
+- The minimum supported Rust version is now 1.99 (was 1.88), and the
+  workspace builds on Rust 1.99.1 (#349).
+
 ### 0.3.6 - 2026-10-14
 
 ### Fixed
@@ -4278,6 +4483,13 @@ Every publishable crate versions and publishes independently ([ADR 0067](/adr/00
 
 
 ## axiolid-mesh-boolean-contract
+
+### 0.3.5 - 2026-11-07
+
+### Added
+
+- The package now ships `LICENSE` and `LICENSE-COMMERCIAL` (symlinks to the
+  repository root), so the licence texts travel with the archive (#358).
 
 ### 0.3.4 - 2026-10-28
 
@@ -6216,6 +6428,13 @@ Every publishable crate versions and publishes independently ([ADR 0067](/adr/00
 
 ## axiolid-mesh-compile-contract
 
+### 0.3.6 - 2026-11-07
+
+### Added
+
+- The package now ships `LICENSE` and `LICENSE-COMMERCIAL` (symlinks to the
+  repository root), so the licence texts travel with the archive (#358).
+
 ### 0.3.5 - 2026-10-28
 
 ### Changed
@@ -6279,6 +6498,13 @@ Every publishable crate versions and publishes independently ([ADR 0067](/adr/00
 
 
 ## axiolid-mesh-contracts
+
+### 0.3.3 - 2026-11-07
+
+### Added
+
+- The package now ships `LICENSE` and `LICENSE-COMMERCIAL` (symlinks to the
+  repository root), so the licence texts travel with the archive (#358).
 
 ### 0.3.2 - 2026-10-28
 
@@ -6370,6 +6596,13 @@ Every publishable crate versions and publishes independently ([ADR 0067](/adr/00
 
 
 ## axiolid-mesh-section-contract
+
+### 0.3.8 - 2026-11-07
+
+### Added
+
+- The package now ships `LICENSE` and `LICENSE-COMMERCIAL` (symlinks to the
+  repository root), so the licence texts travel with the archive (#358).
 
 ### 0.3.7 - 2026-11-03
 
@@ -6483,6 +6716,13 @@ Every publishable crate versions and publishes independently ([ADR 0067](/adr/00
 
 
 ## axiolid-minkowski
+
+### 0.3.3 - 2026-11-07
+
+### Added
+
+- The package now ships `LICENSE` and `LICENSE-COMMERCIAL` (symlinks to the
+  repository root), so the licence texts travel with the archive (#358).
 
 ### 0.3.2 - 2026-10-28
 
@@ -6829,6 +7069,13 @@ Every publishable crate versions and publishes independently ([ADR 0067](/adr/00
 
 ## axiolid-numeric
 
+### 0.1.4 - 2026-11-07
+
+### Added
+
+- The package now ships `LICENSE` and `LICENSE-COMMERCIAL` (symlinks to the
+  repository root), so the licence texts travel with the archive (#358).
+
 ### 0.1.3 - 2026-10-28
 
 ### Changed
@@ -6887,6 +7134,16 @@ Every publishable crate versions and publishes independently ([ADR 0067](/adr/00
 
 
 ## axiolid-nurbs
+
+### 0.3.9 - 2026-11-07
+
+### Fixed
+
+- A traced section against a surface that touches it reports the double root
+  once, with multiplicity 2, instead of the root plus two spurious sign
+  changes about 2.4e-8 either side: a stretch whose second derivative along
+  the curve is enclosed away from zero is settled by a Rolle certificate
+  before it is bisected (#397).
 
 ### 0.3.8 - 2026-11-03
 
@@ -7829,6 +8086,13 @@ Every publishable crate versions and publishes independently ([ADR 0067](/adr/00
 
 ## axiolid-pointcloud
 
+### 0.3.4 - 2026-11-07
+
+### Added
+
+- The package now ships `LICENSE` and `LICENSE-COMMERCIAL` (symlinks to the
+  repository root), so the licence texts travel with the archive (#358).
+
 ### 0.3.3 - 2026-10-28
 
 ### Changed
@@ -7855,6 +8119,13 @@ Every publishable crate versions and publishes independently ([ADR 0067](/adr/00
 
 
 ## axiolid-pointcloud-reconstruction-contract
+
+### 0.3.4 - 2026-11-07
+
+### Added
+
+- The package now ships `LICENSE` and `LICENSE-COMMERCIAL` (symlinks to the
+  repository root), so the licence texts travel with the archive (#358).
 
 ### 0.3.3 - 2026-10-28
 
@@ -7883,6 +8154,13 @@ Every publishable crate versions and publishes independently ([ADR 0067](/adr/00
 
 ## axiolid-pointcloud-reconstruction-sdf
 
+### 0.3.4 - 2026-11-07
+
+### Added
+
+- The package now ships `LICENSE` and `LICENSE-COMMERCIAL` (symlinks to the
+  repository root), so the licence texts travel with the archive (#358).
+
 ### 0.3.3 - 2026-10-28
 
 ### Changed
@@ -7909,6 +8187,78 @@ Every publishable crate versions and publishes independently ([ADR 0067](/adr/00
 
 
 ## axiolid-predicates
+
+### 0.3.5 - 2026-11-07
+
+### Fixed
+
+- `incircle` and `insphere` returned a wrong sign, certified as exact, for
+  three classes of input, in every published release; each now returns the
+  exact sign for every finite input (#430):
+  - Coordinate differences of about 1e77 or more (`incircle`) or 1e61
+    (`insphere`): the exact path's degree-4 and degree-5 products
+    overflowed, and a point clearly inside or outside the circle was
+    reported as a certain Zero (`(s, 0)`, `(0, s)`, `(-s, 0)` against
+    `(0, 0)` and `(2s, 2s)` for s = 1e80, 1e100, 1e160).
+  - Very small differences (s = 1e-100 and 1e-160 failed, 1e-80 did
+    not): the products underflowed and the same Zero was reported.
+  - A NaN or infinite coordinate: it returned a certain sign; it now
+    returns `Uncertain`, as `orient3d` does.
+
+  The filters decline unless every nonzero coordinate difference has a
+  magnitude in [2^-128, 2^128), so that no product or sub-product overflows or
+  underflows (a gate on the permanent alone does not exclude a degree-2
+  sub-product that underflows and is then multiplied by a large lift). The
+  expansion stage of the exact path runs only where every difference lies in
+  [1e-60, 1e60] (`incircle`) or [1e-45, 1e45] (`insphere`) and every nonzero
+  rounding tail is at least as large as the lower bound; anything else goes
+  to a fixed-size dyadic evaluation over the original coordinates (133 and
+  166 words, the accumulator `orient2d` and `orient3d` share), which forms
+  no difference and no rounded product. Cost, measured with the committed
+  `predicates` bench on a loaded machine (ns per call, old and new binaries
+  alternated five times, minimum to typical): random points 20.6 to 23 before,
+  about 25 to 28 after (the difference gate costs about 20% on the filtered
+  path); exactly cocircular
+  lattice points (2^-10 grid, every call escalates) 1380 to 1460 before, 1420
+  to 1600 after; the same points scaled to about 1e80 1800 to 1870 before (the
+  wrong Zero of the overflowing path), 6300 to 7000 after, now exact.
+- `StaticFilter::orient3d` certified a wrong sign when the declared range was
+  below about 1e-103, in every published release: the precomputed error bound
+  underflowed to zero, so every nonzero rounded determinant was accepted
+  (#429; 540 wrong signs in 3.2M fuzzed cases). `StaticFilter::new` now returns
+  `None` when a derived bound is below the normal range or not finite, the
+  same refusal it already gave an overflowing bound. The module no longer
+  claims that the static filter never certifies a sign the dynamic one would
+  reject: it certifies only exact signs, and the dynamic `orient2d` filter
+  declines more (outside [1e-90, 1e90]) since #404.
+- `orient2d` returned a wrong sign, certified as exact, for four classes of
+  input, in every published release; it now returns the exact sign for every
+  finite input (#404):
+  - Coordinate differences of about 1e154 or more: the products overflowed
+    (a debug build panicked, a release build returned a wrong sign).
+  - Coordinates of very different magnitudes (a ratio of about 1e32 or
+    more, e.g. `(1e-100, 1e-100)`, `(1.5e-100, 1e-100)`, `(-4.5e50, -1)`
+    gave Zero for a Negative triple): the expansion path lost error terms.
+  - Differences near 1e-155: the filter's products underflowed and it
+    proved a wrong sign (a Negative for a truly Positive triple).
+  - A NaN or infinite coordinate was reported as a certain Zero; it now
+    returns `Uncertain`, as `orient3d` does.
+
+  The exact path now evaluates the determinant over the original coordinates,
+  as an exact sum of expansions of the coordinate differences and their
+  rounding tails when those are in range (the usual exactly collinear case),
+  otherwise in a fixed-size dyadic accumulator. `orient2d_filter` declines
+  differences outside [1e-90, 1e90] as `Uncertain`. The cost is real for
+  exactly collinear triples: per call, 24 ns on a full-mantissa millimetre
+  grid whose differences are exact (12 ns before) and 50 ns on one crossing
+  binades, where 45% of the triples have a rounding difference (12 ns
+  before); measured with the committed `predicates` bench. Non-degenerate
+  input is unaffected (about 15 ns).
+
+### Added
+
+- The package now ships `LICENSE` and `LICENSE-COMMERCIAL` (symlinks to the
+  repository root), so the licence texts travel with the archive (#358).
 
 ### 0.3.4 - 2026-10-28
 
@@ -7970,6 +8320,13 @@ Every publishable crate versions and publishes independently ([ADR 0067](/adr/00
 
 ## axiolid-primitive
 
+### 0.3.5 - 2026-11-07
+
+### Added
+
+- The package now ships `LICENSE` and `LICENSE-COMMERCIAL` (symlinks to the
+  repository root), so the licence texts travel with the archive (#358).
+
 ### 0.3.4 - 2026-10-28
 
 ### Changed
@@ -8012,6 +8369,13 @@ Every publishable crate versions and publishes independently ([ADR 0067](/adr/00
 
 ## axiolid-profile
 
+### 0.3.4 - 2026-11-07
+
+### Added
+
+- The package now ships `LICENSE` and `LICENSE-COMMERCIAL` (symlinks to the
+  repository root), so the licence texts travel with the archive (#358).
+
 ### 0.3.3 - 2026-10-28
 
 ### Changed
@@ -8042,6 +8406,13 @@ Every publishable crate versions and publishes independently ([ADR 0067](/adr/00
 
 ## axiolid-project
 
+### 0.3.3 - 2026-11-07
+
+### Added
+
+- The package now ships `LICENSE` and `LICENSE-COMMERCIAL` (symlinks to the
+  repository root), so the licence texts travel with the archive (#358).
+
 ### 0.3.2 - 2026-10-28
 
 ### Changed
@@ -8061,6 +8432,13 @@ Every publishable crate versions and publishes independently ([ADR 0067](/adr/00
 
 
 ## axiolid-ray-mesh
+
+### 0.4.2 - 2026-11-07
+
+### Added
+
+- The package now ships `LICENSE` and `LICENSE-COMMERCIAL` (symlinks to the
+  repository root), so the licence texts travel with the archive (#358).
 
 ### 0.4.1 - 2026-10-28
 
@@ -8298,6 +8676,13 @@ Every publishable crate versions and publishes independently ([ADR 0067](/adr/00
 
 ## axiolid-refine
 
+### 0.3.4 - 2026-11-07
+
+### Added
+
+- The package now ships `LICENSE` and `LICENSE-COMMERCIAL` (symlinks to the
+  repository root), so the licence texts travel with the archive (#358).
+
 ### 0.3.3 - 2026-10-28
 
 ### Changed
@@ -8357,6 +8742,13 @@ Every publishable crate versions and publishes independently ([ADR 0067](/adr/00
 
 
 ## axiolid-route
+
+### 0.3.9 - 2026-11-07
+
+### Added
+
+- The package now ships `LICENSE` and `LICENSE-COMMERCIAL` (symlinks to the
+  repository root), so the licence texts travel with the archive (#358).
 
 ### 0.3.8 - 2026-10-28
 
@@ -8545,6 +8937,13 @@ Every publishable crate versions and publishes independently ([ADR 0067](/adr/00
 
 ## axiolid-spatial
 
+### 0.3.6 - 2026-11-07
+
+### Added
+
+- The package now ships `LICENSE` and `LICENSE-COMMERCIAL` (symlinks to the
+  repository root), so the licence texts travel with the archive (#358).
+
 ### 0.3.5 - 2026-10-28
 
 ### Changed
@@ -8599,6 +8998,13 @@ Every publishable crate versions and publishes independently ([ADR 0067](/adr/00
 
 ## axiolid-surface
 
+### 0.3.6 - 2026-11-07
+
+### Added
+
+- The package now ships `LICENSE` and `LICENSE-COMMERCIAL` (symlinks to the
+  repository root), so the licence texts travel with the archive (#358).
+
 ### 0.3.5 - 2026-10-28
 
 ### Changed
@@ -8644,6 +9050,13 @@ Every publishable crate versions and publishes independently ([ADR 0067](/adr/00
 
 ## axiolid-tessellation-contract
 
+### 0.3.4 - 2026-11-07
+
+### Added
+
+- The package now ships `LICENSE` and `LICENSE-COMMERCIAL` (symlinks to the
+  repository root), so the licence texts travel with the archive (#358).
+
 ### 0.3.3 - 2026-10-28
 
 ### Changed
@@ -8670,6 +9083,13 @@ Every publishable crate versions and publishes independently ([ADR 0067](/adr/00
 
 
 ## axiolid-tetrahedralize
+
+### 0.1.2 - 2026-11-07
+
+### Added
+
+- The package now ships `LICENSE` and `LICENSE-COMMERCIAL` (symlinks to the
+  repository root), so the licence texts travel with the archive (#358).
 
 ### 0.1.1 - 2026-10-28
 
@@ -8700,6 +9120,13 @@ Every publishable crate versions and publishes independently ([ADR 0067](/adr/00
 
 
 ## axiolid-topology
+
+### 0.3.4 - 2026-11-07
+
+### Added
+
+- The package now ships `LICENSE` and `LICENSE-COMMERCIAL` (symlinks to the
+  repository root), so the licence texts travel with the archive (#358).
 
 ### 0.3.3 - 2026-10-28
 

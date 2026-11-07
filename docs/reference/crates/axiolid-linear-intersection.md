@@ -8,7 +8,7 @@ Portable, deterministic intersections for linear geometry.
 
 | | |
 | --- | --- |
-| Latest release | 0.3.2 (2026-10-28) |
+| Latest release | 0.3.3 (2026-11-07) |
 | crates.io | [`axiolid-linear-intersection`](https://crates.io/crates/axiolid-linear-intersection) |
 | Facade | [`axiolid`](./axiolid) feature `linear-intersection` |
 | Layer | algorithms (`algorithm.query`) |
@@ -28,14 +28,11 @@ Certified 2D intersections for lines and segments, with a minimal dependency clo
 
 ## Changes
 
-Latest release, 0.3.2 (2026-10-28):
+Latest release, 0.3.3 (2026-11-07):
 
-### Changed
+### Added
 
-- The licence is now `MPL-2.0 OR LicenseRef-Commercial` (was `MPL-2.0`):
-  a commercial licence is available from the copyright holder
-  (`LICENSE-COMMERCIAL`, ADR 0089, #358).
-- The minimum supported Rust version is now 1.99 (was 1.88), and the
-  workspace builds on Rust 1.99.1 (#349).
+- The package now ships `LICENSE` and `LICENSE-COMMERCIAL` (symlinks to the
+  repository root), so the licence texts travel with the archive (#358).
 
 Full history: [`crates/algorithms/query/intersection/linear/CHANGELOG.md`](https://github.com/axiolid/kernel/blob/main/crates/algorithms/query/intersection/linear/CHANGELOG.md)

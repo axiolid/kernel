@@ -9,6 +9,8 @@ caret rule for `0.x` versions.
 
 ## [Unreleased]
 
+## [0.3.7] - 2026-11-07
+
 ### Added
 
 - The package now ships `LICENSE` (a symlink to the repository root), so the

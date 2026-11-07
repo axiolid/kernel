@@ -8,7 +8,7 @@ Portable point-sampled geometry values with optional per-point channels.
 
 | | |
 | --- | --- |
-| Latest release | 0.3.3 (2026-10-28) |
+| Latest release | 0.3.4 (2026-11-07) |
 | crates.io | [`axiolid-pointcloud`](https://crates.io/crates/axiolid-pointcloud) |
 | Facade | [`axiolid`](./axiolid) feature `pointcloud` |
 | Layer | representations (`representation.discrete`) |
@@ -31,11 +31,11 @@ ADR 0044.
 
 ## Changes
 
-Latest release, 0.3.3 (2026-10-28):
+Latest release, 0.3.4 (2026-11-07):
 
-### Changed
+### Added
 
-- The package metadata names rheonda UG (haftungsbeschränkt) as author, and commercial
-  licences are available from rheonda UG (haftungsbeschränkt) (`LICENSE-COMMERCIAL`, ADR 0089).
+- The package now ships `LICENSE` and `LICENSE-COMMERCIAL` (symlinks to the
+  repository root), so the licence texts travel with the archive (#358).
 
 Full history: [`crates/representations/discrete/pointcloud/CHANGELOG.md`](https://github.com/axiolid/kernel/blob/main/crates/representations/discrete/pointcloud/CHANGELOG.md)

@@ -8,7 +8,7 @@ Portable curve evaluation capability contract: point, tangent and oriented frame
 
 | | |
 | --- | --- |
-| Latest release | 0.3.8 (2026-10-28) |
+| Latest release | 0.3.9 (2026-11-07) |
 | crates.io | [`axiolid-curve-evaluate-contract`](https://crates.io/crates/axiolid-curve-evaluate-contract) |
 | Layer | contracts (`contract.operation`) |
 | API documentation | [rustdoc](/api/rustdoc/axiolid_curve_evaluate_contract/index.html) · [docs.rs](https://docs.rs/axiolid-curve-evaluate-contract) |
@@ -44,14 +44,11 @@ scalar implementation. See ADR 0063.
 
 ## Changes
 
-Latest release, 0.3.8 (2026-10-28):
+Latest release, 0.3.9 (2026-11-07):
 
-### Changed
+### Added
 
-- The licence is now `MPL-2.0 OR LicenseRef-Commercial` (was `MPL-2.0`):
-  a commercial licence is available from the copyright holder
-  (`LICENSE-COMMERCIAL`, ADR 0089, #358).
-- The minimum supported Rust version is now 1.99 (was 1.88), and the
-  workspace builds on Rust 1.99.1 (#349).
+- The package now ships `LICENSE` and `LICENSE-COMMERCIAL` (symlinks to the
+  repository root), so the licence texts travel with the archive (#358).
 
 Full history: [`crates/contracts/operations/curve-evaluate/CHANGELOG.md`](https://github.com/axiolid/kernel/blob/main/crates/contracts/operations/curve-evaluate/CHANGELOG.md)

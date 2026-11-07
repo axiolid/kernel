@@ -8,7 +8,7 @@ Curves, surfaces and B-reps to triangles under an explicit tolerance.
 
 | | |
 | --- | --- |
-| Latest release | 0.3.3 (2026-10-28) |
+| Latest release | 0.3.4 (2026-11-07) |
 | crates.io | [`axiolid-tessellation-contract`](https://crates.io/crates/axiolid-tessellation-contract) |
 | Facade | [`axiolid`](./axiolid) feature `tessellation` |
 | Layer | contracts (`contract.operation`) |
@@ -34,11 +34,11 @@ it.
 
 ## Changes
 
-Latest release, 0.3.3 (2026-10-28):
+Latest release, 0.3.4 (2026-11-07):
 
-### Changed
+### Added
 
-- The package metadata names rheonda UG (haftungsbeschränkt) as author, and commercial
-  licences are available from rheonda UG (haftungsbeschränkt) (`LICENSE-COMMERCIAL`, ADR 0089).
+- The package now ships `LICENSE` and `LICENSE-COMMERCIAL` (symlinks to the
+  repository root), so the licence texts travel with the archive (#358).
 
 Full history: [`crates/contracts/operations/tessellate/CHANGELOG.md`](https://github.com/axiolid/kernel/blob/main/crates/contracts/operations/tessellate/CHANGELOG.md)

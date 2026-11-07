@@ -1,7 +1,7 @@
 [package]
 name = "axiolid-mesh-boolean-boolmesh"
 description = "boolmesh-backed MeshBoolean provider"
-version = "0.3.6"
+version = "0.3.7"
 edition.workspace = true
 rust-version.workspace = true
 # Absorbed upstream code with a third-party copyright holder (ADR 0047):

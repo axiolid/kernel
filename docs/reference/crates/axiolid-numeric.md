@@ -8,7 +8,7 @@ Numeric substrate: bracketed and polynomial root finding, adaptive quadrature, d
 
 | | |
 | --- | --- |
-| Latest release | 0.1.3 (2026-10-28) |
+| Latest release | 0.1.4 (2026-11-07) |
 | crates.io | [`axiolid-numeric`](https://crates.io/crates/axiolid-numeric) |
 | Layer | algorithms (`algorithm.numeric`) |
 | API documentation | [rustdoc](/api/rustdoc/axiolid_numeric/index.html) · [docs.rs](https://docs.rs/axiolid-numeric) |
@@ -43,11 +43,11 @@ Gauss-Legendre rule in `axiolid-evaluate`, the interpolation solve in
 
 ## Changes
 
-Latest release, 0.1.3 (2026-10-28):
+Latest release, 0.1.4 (2026-11-07):
 
-### Changed
+### Added
 
-- The package metadata names rheonda UG (haftungsbeschränkt) as author, and commercial
-  licences are available from rheonda UG (haftungsbeschränkt) (`LICENSE-COMMERCIAL`, ADR 0089).
+- The package now ships `LICENSE` and `LICENSE-COMMERCIAL` (symlinks to the
+  repository root), so the licence texts travel with the archive (#358).
 
 Full history: [`crates/algorithms/numeric/CHANGELOG.md`](https://github.com/axiolid/kernel/blob/main/crates/algorithms/numeric/CHANGELOG.md)

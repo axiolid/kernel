@@ -8,7 +8,7 @@ Exact 3D Delaunay tetrahedralization with symbolic perturbation.
 
 | | |
 | --- | --- |
-| Latest release | 0.1.1 (2026-10-28) |
+| Latest release | 0.1.2 (2026-11-07) |
 | crates.io | [`axiolid-tetrahedralize`](https://crates.io/crates/axiolid-tetrahedralize) |
 | Layer | algorithms (`algorithm.discrete`) |
 | API documentation | [rustdoc](/api/rustdoc/axiolid_tetrahedralize/index.html) · [docs.rs](https://docs.rs/axiolid-tetrahedralize) |
@@ -34,14 +34,11 @@ are not recovered.
 
 ## Changes
 
-Latest release, 0.1.1 (2026-10-28):
+Latest release, 0.1.2 (2026-11-07):
 
-### Changed
+### Added
 
-- The licence is now `MPL-2.0 OR LicenseRef-Commercial` (was `MPL-2.0`):
-  a commercial licence is available from the copyright holder
-  (`LICENSE-COMMERCIAL`, ADR 0089, #358).
-- The minimum supported Rust version is now 1.99 (was 1.88), and the
-  workspace builds on Rust 1.99.1 (#349).
+- The package now ships `LICENSE` and `LICENSE-COMMERCIAL` (symlinks to the
+  repository root), so the licence texts travel with the archive (#358).
 
 Full history: [`crates/algorithms/discrete/tetrahedralize/CHANGELOG.md`](https://github.com/axiolid/kernel/blob/main/crates/algorithms/discrete/tetrahedralize/CHANGELOG.md)

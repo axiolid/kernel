@@ -8,7 +8,7 @@ Format-neutral line, ray, segment, and polyline representations.
 
 | | |
 | --- | --- |
-| Latest release | 0.3.4 (2026-10-28) |
+| Latest release | 0.3.5 (2026-11-07) |
 | crates.io | [`axiolid-linear`](https://crates.io/crates/axiolid-linear) |
 | Facade | [`axiolid`](./axiolid) feature `linear` |
 | Layer | representations (`representation.atomic`) |
@@ -43,11 +43,11 @@ Default: none.
 
 ## Changes
 
-Latest release, 0.3.4 (2026-10-28):
+Latest release, 0.3.5 (2026-11-07):
 
-### Changed
+### Added
 
-- The package metadata names rheonda UG (haftungsbeschränkt) as author, and commercial
-  licences are available from rheonda UG (haftungsbeschränkt) (`LICENSE-COMMERCIAL`, ADR 0089).
+- The package now ships `LICENSE` and `LICENSE-COMMERCIAL` (symlinks to the
+  repository root), so the licence texts travel with the archive (#358).
 
 Full history: [`crates/representations/analytic/linear/CHANGELOG.md`](https://github.com/axiolid/kernel/blob/main/crates/representations/analytic/linear/CHANGELOG.md)

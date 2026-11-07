@@ -8,7 +8,7 @@ Certified exact-arithmetic geometric predicates.
 
 | | |
 | --- | --- |
-| Latest release | 0.3.4 (2026-10-28) |
+| Latest release | 0.3.5 (2026-11-07) |
 | crates.io | [`axiolid-predicates`](https://crates.io/crates/axiolid-predicates) |
 | Facade | [`axiolid`](./axiolid) feature `predicates` |
 | Layer | algorithms (`algorithm.reference`) |
@@ -34,14 +34,76 @@ or big-integer dependency. `axiolid-reference` re-exports it unchanged
 
 ## Changes
 
-Latest release, 0.3.4 (2026-10-28):
+Latest release, 0.3.5 (2026-11-07):
 
-### Changed
+### Fixed
 
-- The licence is now `MPL-2.0 OR LicenseRef-Commercial` (was `MPL-2.0`):
-  a commercial licence is available from the copyright holder
-  (`LICENSE-COMMERCIAL`, ADR 0089, #358).
-- The minimum supported Rust version is now 1.99 (was 1.88), and the
-  workspace builds on Rust 1.99.1 (#349).
+- `incircle` and `insphere` returned a wrong sign, certified as exact, for
+  three classes of input, in every published release; each now returns the
+  exact sign for every finite input (#430):
+  - Coordinate differences of about 1e77 or more (`incircle`) or 1e61
+    (`insphere`): the exact path's degree-4 and degree-5 products
+    overflowed, and a point clearly inside or outside the circle was
+    reported as a certain Zero (`(s, 0)`, `(0, s)`, `(-s, 0)` against
+    `(0, 0)` and `(2s, 2s)` for s = 1e80, 1e100, 1e160).
+  - Very small differences (s = 1e-100 and 1e-160 failed, 1e-80 did
+    not): the products underflowed and the same Zero was reported.
+  - A NaN or infinite coordinate: it returned a certain sign; it now
+    returns `Uncertain`, as `orient3d` does.
+
+  The filters decline unless every nonzero coordinate difference has a
+  magnitude in [2^-128, 2^128), so that no product or sub-product overflows or
+  underflows (a gate on the permanent alone does not exclude a degree-2
+  sub-product that underflows and is then multiplied by a large lift). The
+  expansion stage of the exact path runs only where every difference lies in
+  [1e-60, 1e60] (`incircle`) or [1e-45, 1e45] (`insphere`) and every nonzero
+  rounding tail is at least as large as the lower bound; anything else goes
+  to a fixed-size dyadic evaluation over the original coordinates (133 and
+  166 words, the accumulator `orient2d` and `orient3d` share), which forms
+  no difference and no rounded product. Cost, measured with the committed
+  `predicates` bench on a loaded machine (ns per call, old and new binaries
+  alternated five times, minimum to typical): random points 20.6 to 23 before,
+  about 25 to 28 after (the difference gate costs about 20% on the filtered
+  path); exactly cocircular
+  lattice points (2^-10 grid, every call escalates) 1380 to 1460 before, 1420
+  to 1600 after; the same points scaled to about 1e80 1800 to 1870 before (the
+  wrong Zero of the overflowing path), 6300 to 7000 after, now exact.
+- `StaticFilter::orient3d` certified a wrong sign when the declared range was
+  below about 1e-103, in every published release: the precomputed error bound
+  underflowed to zero, so every nonzero rounded determinant was accepted
+  (#429; 540 wrong signs in 3.2M fuzzed cases). `StaticFilter::new` now returns
+  `None` when a derived bound is below the normal range or not finite, the
+  same refusal it already gave an overflowing bound. The module no longer
+  claims that the static filter never certifies a sign the dynamic one would
+  reject: it certifies only exact signs, and the dynamic `orient2d` filter
+  declines more (outside [1e-90, 1e90]) since #404.
+- `orient2d` returned a wrong sign, certified as exact, for four classes of
+  input, in every published release; it now returns the exact sign for every
+  finite input (#404):
+  - Coordinate differences of about 1e154 or more: the products overflowed
+    (a debug build panicked, a release build returned a wrong sign).
+  - Coordinates of very different magnitudes (a ratio of about 1e32 or
+    more, e.g. `(1e-100, 1e-100)`, `(1.5e-100, 1e-100)`, `(-4.5e50, -1)`
+    gave Zero for a Negative triple): the expansion path lost error terms.
+  - Differences near 1e-155: the filter's products underflowed and it
+    proved a wrong sign (a Negative for a truly Positive triple).
+  - A NaN or infinite coordinate was reported as a certain Zero; it now
+    returns `Uncertain`, as `orient3d` does.
+
+  The exact path now evaluates the determinant over the original coordinates,
+  as an exact sum of expansions of the coordinate differences and their
+  rounding tails when those are in range (the usual exactly collinear case),
+  otherwise in a fixed-size dyadic accumulator. `orient2d_filter` declines
+  differences outside [1e-90, 1e90] as `Uncertain`. The cost is real for
+  exactly collinear triples: per call, 24 ns on a full-mantissa millimetre
+  grid whose differences are exact (12 ns before) and 50 ns on one crossing
+  binades, where 45% of the triples have a rounding difference (12 ns
+  before); measured with the committed `predicates` bench. Non-degenerate
+  input is unaffected (about 15 ns).
+
+### Added
+
+- The package now ships `LICENSE` and `LICENSE-COMMERCIAL` (symlinks to the
+  repository root), so the licence texts travel with the archive (#358).
 
 Full history: [`crates/algorithms/predicates/CHANGELOG.md`](https://github.com/axiolid/kernel/blob/main/crates/algorithms/predicates/CHANGELOG.md)

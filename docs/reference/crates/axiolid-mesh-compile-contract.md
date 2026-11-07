@@ -8,7 +8,7 @@ Portable graph-to-mesh compilation contract.
 
 | | |
 | --- | --- |
-| Latest release | 0.3.5 (2026-10-28) |
+| Latest release | 0.3.6 (2026-11-07) |
 | crates.io | [`axiolid-mesh-compile-contract`](https://crates.io/crates/axiolid-mesh-compile-contract) |
 | Facade | [`axiolid`](./axiolid) feature `graph-compile` |
 | Layer | contracts (`contract.operation`) |
@@ -34,14 +34,11 @@ is the exact counterpart.
 
 ## Changes
 
-Latest release, 0.3.5 (2026-10-28):
+Latest release, 0.3.6 (2026-11-07):
 
-### Changed
+### Added
 
-- The licence is now `MPL-2.0 OR LicenseRef-Commercial` (was `MPL-2.0`):
-  a commercial licence is available from the copyright holder
-  (`LICENSE-COMMERCIAL`, ADR 0089, #358).
-- The minimum supported Rust version is now 1.99 (was 1.88), and the
-  workspace builds on Rust 1.99.1 (#349).
+- The package now ships `LICENSE` and `LICENSE-COMMERCIAL` (symlinks to the
+  repository root), so the licence texts travel with the archive (#358).
 
 Full history: [`crates/contracts/operations/compile/CHANGELOG.md`](https://github.com/axiolid/kernel/blob/main/crates/contracts/operations/compile/CHANGELOG.md)
