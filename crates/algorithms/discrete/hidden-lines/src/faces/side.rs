@@ -47,7 +47,8 @@ impl Form {
 
     /// `±orient2d(p, q, P)` for the image line `p'q'`.
     pub(crate) fn orient(verts: &[Vert], p: u32, q: u32) -> Self {
-        let c = |v: u32, axis: usize| &verts[v as usize].exact[axis];
+        // TODO(#387): affine image coordinates.
+        let c = |v: u32, axis: usize| verts[v as usize].affine(axis);
         let alpha = c(p, 1).sub(c(q, 1));
         let beta = c(q, 0).sub(c(p, 0));
         let gamma = alpha.mul(c(p, 0)).add(&beta.mul(c(p, 1))).neg();
@@ -88,7 +89,8 @@ pub(crate) struct Plane {
 impl Plane {
     /// The plane of the triangle `t`; `clockwise` is its image orientation.
     pub(crate) fn new(verts: &[Vert], t: [u32; 3], clockwise: bool) -> Self {
-        let c = |v: u32, axis: usize| &verts[v as usize].exact[axis];
+        // TODO(#387): the plane of a triangle in affine `U, V, W`.
+        let c = |v: u32, axis: usize| verts[v as usize].affine(axis);
         let d = |to: u32, axis: usize| c(to, axis).sub(c(t[0], axis));
         let (a, b) = (
             [d(t[1], 0), d(t[1], 1), d(t[1], 2)],

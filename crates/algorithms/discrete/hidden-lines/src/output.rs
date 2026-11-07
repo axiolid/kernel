@@ -16,18 +16,21 @@ use crate::view::Vert;
 
 /// The image point of the edge `start -> end` at `param`.
 pub(crate) fn endpoint(verts: &[Vert], start: u32, end: u32, param: Param) -> GeomResult<Point2> {
+    // Homogeneous: the point of vertex `v` is `exact[axis] / exact[3]`, and the
+    // point of the edge where `L` vanishes is `(a q - b p) / (a h_q - b h_p)`.
     let coord = |vertex: u32, axis: usize| &verts[vertex as usize].exact[axis];
-    let one = Dyadic::from_parts(1.into(), 0);
+    let weight = |vertex: u32| &verts[vertex as usize].exact[3];
     let mut out = [0.0; 2];
     for (axis, slot) in out.iter_mut().enumerate() {
         let rounded = match param {
-            Param::Zero => round_ratio(coord(start, axis), &one),
-            Param::One => round_ratio(coord(end, axis), &one),
+            Param::Zero => round_ratio(coord(start, axis), weight(start)),
+            Param::One => round_ratio(coord(end, axis), weight(end)),
             Param::Root(root) => {
                 let a = root.constraint.value::<Dyadic>(verts, start);
                 let b = root.constraint.value::<Dyadic>(verts, end);
                 let numerator = a.mul(coord(end, axis)).sub(&b.mul(coord(start, axis)));
-                round_ratio(&numerator, &a.sub(&b))
+                let denominator = a.mul(weight(end)).sub(&b.mul(weight(start)));
+                round_ratio(&numerator, &denominator)
             }
         };
         *slot = rounded.ok_or_else(|| {

@@ -78,7 +78,9 @@ impl Constraint {
 
     /// `L(P)` for the vertex `at`.
     pub(crate) fn value<T: Arith>(&self, verts: &[Vert], at: u32) -> T {
-        let c = |vertex: u32, axis: usize| T::from_dyadic(&verts[vertex as usize].exact[axis]);
+        // TODO(#387): affine `U, V, W`; BelowNear and AboveFar below read
+        // `W` as a depth, which a perspective view must take as `-h / W`.
+        let c = |vertex: u32, axis: usize| T::from_dyadic(verts[vertex as usize].affine(axis));
         let signed = |neg: bool, x: T| if neg { x.neg() } else { x };
         match self.kind {
             Kind::ImageSide { p, q, neg } => {
@@ -145,6 +147,8 @@ impl Constraint {
                         .add(&along.mul(&c(to, 2).sub(&c(from, 2)))),
                 )
             }
+            // TODO(#387): a depth bound compares `W`, which is `-h / W`
+            // once the view is perspective.
             Kind::BelowNear(near) => T::from_f64(near).sub(&c(at, 2)),
             Kind::AboveFar(far) => c(at, 2).sub(&T::from_f64(far)),
             Kind::Region { axis, upper, bound } => {
@@ -223,7 +227,9 @@ impl SignExpr for Orient2<'_> {
         if self.c == self.a || self.c == self.b {
             return Some(Sign::Zero);
         }
-        let c = |vertex: u32, axis: usize| T::from_dyadic(&self.verts[vertex as usize].exact[axis]);
+        // TODO(#387): the image orientation of a perspective view is the
+        // homogeneous determinant of the three vertices.
+        let c = |vertex: u32, axis: usize| T::from_dyadic(self.verts[vertex as usize].affine(axis));
         c(self.b, 0)
             .sub(&c(self.a, 0))
             .mul(&c(self.c, 1).sub(&c(self.a, 1)))
@@ -249,9 +255,10 @@ impl SignExpr for Delta<'_> {
         if self.from == self.to {
             return Some(Sign::Zero);
         }
-        T::from_dyadic(&self.verts[self.to as usize].exact[self.axis])
+        // TODO(#387): affine difference of one coordinate.
+        T::from_dyadic(self.verts[self.to as usize].affine(self.axis))
             .sub(&T::from_dyadic(
-                &self.verts[self.from as usize].exact[self.axis],
+                self.verts[self.from as usize].affine(self.axis),
             ))
             .sign()
     }

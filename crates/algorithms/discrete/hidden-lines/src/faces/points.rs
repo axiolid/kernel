@@ -22,7 +22,7 @@ impl Points {
         }
     }
 
-    /// The image `(U, V, 1)` of a scene vertex.
+    /// The homogeneous image `(U, V, h)` of a scene vertex.
     pub(crate) fn vertex(&mut self, verts: &[Vert], vertex: u32) -> GeomResult<PointId> {
         if let Some(point) = self.vertices[vertex as usize] {
             return Ok(point);
@@ -65,6 +65,9 @@ impl Points {
         let [p, q] = ends.map(|end| &verts[end as usize].exact);
         let [a, b] = values;
         let coordinate = |axis: usize| a.mul(&q[axis]).sub(&b.mul(&p[axis]));
+        // TODO(#387): a hint is a coordinate that does not move along the
+        // edge; with `h != 1` it is `U / h`.
+        debug_assert!(ends.iter().all(|&end| verts[end as usize].is_affine()));
         let hints = [0, 1].map(|axis| fixed(&p[axis], &q[axis]));
         // The third component is the weight, `h`, of the homogeneous point.
         self.store

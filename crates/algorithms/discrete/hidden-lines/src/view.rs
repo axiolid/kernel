@@ -64,6 +64,21 @@ pub(crate) fn project<T: Arith>(p: Point3, frame: &Frame3) -> [T; 3] {
 }
 
 impl Vert {
+    /// Whether the weight `h` is exactly one, as in every orthographic view.
+    pub(crate) fn is_affine(&self) -> bool {
+        self.exact[3].exponent() == 0 && *self.exact[3].mantissa() == 1.into()
+    }
+
+    /// The coordinate `axis` (0 to 2) as an affine value `U`, `V` or `W`.
+    ///
+    /// TODO(#387): a perspective vertex has `h != 1`; every caller of this
+    /// reads the coordinate as if it were, and has to use the homogeneous
+    /// form instead. The assertion makes a missed site fail in a debug build.
+    pub(crate) fn affine(&self, axis: usize) -> &Dyadic {
+        debug_assert!(self.is_affine(), "a site that assumes h == 1 met h != 1");
+        &self.exact[axis]
+    }
+
     /// The view-space vertex for a finite model point.
     pub(crate) fn new(p: Point3, frame: &Frame3) -> Self {
         let [u, v, w] = project::<Dyadic>(p, frame);
@@ -85,6 +100,9 @@ pub(crate) struct Bounds {
 impl Bounds {
     /// The box enclosing `ids`; `ids` is never empty.
     pub(crate) fn of(verts: &[Vert], ids: &[u32]) -> Self {
+        // TODO(#387): `enc` encloses `U, V, W`; a perspective box needs the
+        // enclosure of the image `U / h, V / h`.
+        debug_assert!(ids.iter().all(|&id| verts[id as usize].is_affine()));
         let mut lo = [f64::INFINITY; 3];
         let mut hi = [f64::NEG_INFINITY; 3];
         for &id in ids {
