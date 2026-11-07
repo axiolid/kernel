@@ -4559,6 +4559,20 @@ Every publishable crate versions and publishes independently ([ADR 0067](/adr/00
   than its coordinates' rounding and the exact referee cannot decide it
   (#400, ADR 0102).
 
+- B-rep faces on a `SurfaceRelation::Revolution`, `LinearExtrusion` or
+  `Ruled` mesh when every edge use carries a pcurve (#411, ADR 0103), under
+  the families `surface of revolution`, `surface of linear extrusion` and
+  `ruled surface`, with a certified deviation. The tessellator reads a face's
+  surface through a crate-private support view, and the three relations
+  evaluate and bound their derivatives in closed form from the swept curve
+  or the two sides, a line, circle, ellipse or B-spline (rational too). A
+  B-spline is read only inside its domain and a ruled surface inside its
+  unit square. Exact compilation of such a face stays refused.
+  A boolean with such a B-rep operand now meshes, reported unbounded by name
+  (`exact boolean over a B-rep operand with a face that is neither a plane
+  with straight edges nor a warped face without a surface`); it was refused
+  at tessellation before.
+
 ### Changed
 
 - A flush slab whose openings were round-tripped through world coordinates
@@ -4567,6 +4581,17 @@ Every publishable crate versions and publishes independently ([ADR 0067](/adr/00
   lidded; the exact compiler cannot classify below that feature (#457). The
   same slab placed, or with exactly turned openings, now opens every opening
   where 0.3.44 returned a self-intersecting mesh (#400, ADR 0102).
+
+- A B-rep face on a surface relation other than a revolution, a linear
+  extrusion or a ruled surface is refused as `a B-rep face on a surface
+  relation other than a revolution, a linear extrusion or a ruled surface`
+  (it was `a B-rep face on a surface relation`).
+- An edge use without a pcurve on a face over one of those relations is
+  refused as `an edge use without a pcurve on a face over a surface relation`
+  before any meshing, and a swept curve that is not a line, circle, ellipse
+  or B-spline is refused as `a swept curve other than a line, circle,
+  ellipse or B-spline` (`a swept curve that is not an atomic 3D curve` for
+  a node of another kind); a zero axis or direction is invalid input (#411).
 
 ### Fixed
 
