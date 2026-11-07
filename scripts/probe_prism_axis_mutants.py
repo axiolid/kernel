@@ -162,11 +162,13 @@ MUTANTS = [
      "                let kept = if hs.agreement { normal } else { -normal };",
      "                let kept = normal;", [DEPTH]),
     ("a bounded half-space is not routed as a clip", M,
-     "    ) && clip_tool(graph, *right).is_some()",
-     "    ) && matches!(graph.get(*right), Some(GeometryNode::HalfSpace(_)))", [DEPTH]),
+     "                if let Some(clip) = clip_of(graph, *left, *right, *operator)? {",
+     "                if let Some(clip) = clip_of(graph, *left, *right, *operator)?\n"
+     "                    .filter(|clip| clip.leaves.iter().all(|(leaf, _)| matches!(leaf, ClipTool::Unbounded(_))))\n"
+     "                {", [DEPTH]),
     ("a tool through an instance is not routed", M,
-     "                placement *= instance.transform;\n                id = instance.source;",
-     "                let _ = instance;\n                return None;", [DEPTH]),
+     "                outer *= instance.transform;\n                id = instance.source;",
+     "                let _ = instance;\n                return Ok(false);", [DEPTH]),
     ("the slab is left in the tool's own frame", M,
      "            channels::transform(&Built::leaf(local), placement, 0.0).mesh",
      "            local", [DEPTH]),

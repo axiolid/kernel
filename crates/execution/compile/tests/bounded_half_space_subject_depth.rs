@@ -214,12 +214,12 @@ fn a_small_boundary_cuts_a_tall_subject_to_its_full_height() {
     }
 }
 
-fn refused_without_a_subject(graph: &GeometryGraph, root: NodeId, case: &str) {
+fn refused_by(graph: &GeometryGraph, root: NodeId, case: &str, name: &str) {
     let error = ReferenceMeshCompiler::new(BoolmeshBoolean::new())
         .compile_mesh(graph, root, &options())
         .expect_err("refused");
     assert!(
-        matches!(&error, GeomError::UnsupportedInput { input, .. } if input.contains("without a subject")),
+        matches!(&error, GeomError::UnsupportedInput { input, .. } if input.contains(name)),
         "{case}: {error:?}"
     );
 }
@@ -237,8 +237,8 @@ fn a_bounded_half_space_without_a_subject_is_refused_by_name() {
         let column = g.column(Transform3::IDENTITY);
         let union = g.boolean(column, clip, BooleanOperator::Union);
         let graph = g.builder.finish(vec![clip, union]).expect("a valid graph");
-        refused_without_a_subject(&graph, clip, "a placed root");
-        refused_without_a_subject(&graph, union, "a union");
+        refused_by(&graph, clip, "a placed root", "without a subject");
+        refused_by(&graph, union, "a union", "that is not a clip");
         let exact = ReferenceExactCompiler::new()
             .compile_exact(&graph, clip, &options())
             .expect_err("refused");
