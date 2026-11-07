@@ -12,8 +12,8 @@ use axiolid_hidden_lines::{
 };
 use axiolid_mesh_hidden_lines_contract::conformance::perspective::PerspectiveConformanceSuite;
 use axiolid_mesh_hidden_lines_contract::{
-    EdgeSelection, HiddenLineRequest, MeshHiddenLines, MeshVisibleFaces, View, ViewProjection,
-    VisibleFaceRequest,
+    EdgeSelection, HiddenLineError, HiddenLineOutcome, HiddenLineRequest, MeshHiddenLines,
+    MeshVisibleFaces, View, ViewProjection, VisibleFaceOutcome, VisibleFaceRequest,
 };
 use common::{box_mesh, plan_frame, solids, FACE_LIMITS, LIMITS};
 
@@ -132,4 +132,83 @@ fn an_orthographic_view_is_unchanged_by_the_projection_field() {
     ScalarHiddenLines
         .hidden_lines(&request, &options())
         .expect("draws");
+}
+
+/// An in-tree provider that claims perspective, which it cannot draw.
+#[derive(Debug)]
+struct Claims;
+
+impl axiolid_contracts::Backend for Claims {
+    fn descriptor(&self) -> axiolid_contracts::BackendDescriptor {
+        ScalarHiddenLines.descriptor()
+    }
+}
+
+impl MeshHiddenLines for Claims {
+    fn supports_projection(&self, _projection: ViewProjection) -> bool {
+        true
+    }
+
+    fn hidden_lines(
+        &self,
+        request: &HiddenLineRequest<'_>,
+        options: &ExecutionOptions,
+    ) -> Result<HiddenLineOutcome, HiddenLineError> {
+        ScalarHiddenLines.hidden_lines(request, options)
+    }
+}
+
+impl MeshVisibleFaces for Claims {
+    fn supports_projection(&self, _projection: ViewProjection) -> bool {
+        true
+    }
+
+    fn visible_faces(
+        &self,
+        request: &VisibleFaceRequest<'_>,
+        options: &ExecutionOptions,
+    ) -> Result<VisibleFaceOutcome, HiddenLineError> {
+        ScalarVisibleFaces.visible_faces(request, options)
+    }
+}
+
+#[test]
+fn register_conformant_refuses_an_unverified_perspective_claim() {
+    use axiolid_mesh_hidden_lines_contract::conformance::{
+        faces::FaceConformanceFailure, ConformanceFailure,
+    };
+
+    let mut lines = MeshHiddenLinesRegistry::new();
+    let report = lines
+        .register_conformant(0, Claims)
+        .expect_err("the claim cannot be verified");
+    assert!(report.failures.iter().any(|f| matches!(
+        f,
+        ConformanceFailure::ReturnedError {
+            case: "perspective claim",
+            ..
+        }
+    )));
+    assert_eq!(lines.providers().count(), 0);
+
+    let mut faces = MeshVisibleFacesRegistry::new();
+    let report = faces
+        .register_conformant(0, Claims)
+        .expect_err("the claim cannot be verified");
+    assert!(report.failures.iter().any(|f| matches!(
+        f,
+        FaceConformanceFailure::ReturnedError {
+            case: "perspective claim",
+            ..
+        }
+    )));
+    assert_eq!(faces.providers().count(), 0);
+
+    // Without the claim the same provider registers as before.
+    lines
+        .register_conformant(0, ScalarHiddenLines::new())
+        .expect("conformant");
+    faces
+        .register_conformant(0, ScalarVisibleFaces::new())
+        .expect("conformant");
 }

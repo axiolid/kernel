@@ -12,14 +12,14 @@ use axiolid_contracts::{BackendId, ExecutionOptions, GeomError, Operation};
 use axiolid_core::Point2;
 use axiolid_mesh_hidden_lines_contract::{
     conformance::{
-        faces::{FaceConformanceReport, FaceConformanceSuite},
+        faces::{FaceConformanceFailure, FaceConformanceReport, FaceConformanceSuite},
         perspective::{
             PerspectiveConformanceFailure, PerspectiveConformanceReport,
             PerspectiveConformanceSuite,
         },
     },
     FaceGroups, FaceSource, HiddenLineError, HiddenLineMesh, MeshRole, MeshVisibleFaces,
-    VisibleFaceOutcome, VisibleFaceRequest,
+    ViewProjection, VisibleFaceOutcome, VisibleFaceRequest,
 };
 
 use crate::device::matches_device;
@@ -64,6 +64,11 @@ impl MeshVisibleFacesRegistry {
     }
 
     /// Validate a provider with the shared conformance suite before registration.
+    ///
+    /// A provider that claims perspective views (`supports_projection`) is
+    /// also run through the perspective suite, and a failure of it is
+    /// reported as a `ReturnedError` of the case `perspective claim`, so a
+    /// claim is never routed to unverified (ADR 0107).
     pub fn register_conformant<P>(
         &mut self,
         priority: i32,
@@ -72,7 +77,18 @@ impl MeshVisibleFacesRegistry {
     where
         P: MeshVisibleFaces + 'static,
     {
-        let report = FaceConformanceSuite::run(&provider);
+        let mut report = FaceConformanceSuite::run(&provider);
+        if provider.supports_projection(ViewProjection::Perspective) {
+            let perspective = PerspectiveConformanceSuite::run_faces(&provider);
+            if !perspective.is_success() {
+                report.failures.push(FaceConformanceFailure::ReturnedError {
+                    case: "perspective claim",
+                    error: HiddenLineError::request(GeomError::InvalidInput(format!(
+                        "perspective suite: {perspective}"
+                    ))),
+                });
+            }
+        }
         if !report.is_success() {
             return Err(Box::new(report));
         }

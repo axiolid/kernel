@@ -1277,3 +1277,41 @@ fn routing_by_projection_comes_before_the_topology_audit() {
         .expect_err("the audit refuses the mesh");
     assert_eq!(error.mesh, Some(MeshId(1)));
 }
+
+/// Refuses a perspective view by name, as an unclaiming provider must; its
+/// canned drawing breaks the base contract.
+fn declines_perspective(
+    request: &HiddenLineRequest<'_>,
+    _outcome: &mut HiddenLineOutcome,
+) -> Result<(), HiddenLineError> {
+    if request.view.projection == ViewProjection::Perspective {
+        return Err(GeomError::Unsupported {
+            backend: BackendId::new("declines"),
+            operation: Operation::MeshHiddenLines,
+        }
+        .into());
+    }
+    Ok(())
+}
+
+#[test]
+fn perspective_registration_also_runs_the_base_suite() {
+    use axiolid_mesh_hidden_lines_contract::conformance::perspective::PerspectiveConformanceFailure;
+
+    let calls = counter();
+    let mut registry = MeshHiddenLinesRegistry::new();
+    let report = registry
+        .register_perspective_conformant(0, Recorder::new("declines", &calls, declines_perspective))
+        .expect_err("the canned drawing breaks the base contract");
+    assert!(!report.claimed);
+    assert!(report
+        .failures
+        .iter()
+        .any(|f| matches!(f, PerspectiveConformanceFailure::HiddenLinesBase(_))));
+    // The perspective part itself passes: only the base failures remain.
+    assert!(report
+        .failures
+        .iter()
+        .all(|f| matches!(f, PerspectiveConformanceFailure::HiddenLinesBase(_))));
+    assert_eq!(registry.providers().count(), 0);
+}

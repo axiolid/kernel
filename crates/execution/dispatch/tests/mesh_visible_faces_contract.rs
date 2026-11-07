@@ -1145,3 +1145,38 @@ fn perspective_conformance_registration_follows_the_claim() {
     assert!(claimed.expect_err("unverifiable").claimed);
     assert_eq!(registry.providers().count(), 0);
 }
+
+fn declines_perspective(
+    request: &VisibleFaceRequest<'_>,
+    _outcome: &mut VisibleFaceOutcome,
+) -> Result<(), HiddenLineError> {
+    if request.view.projection == ViewProjection::Perspective {
+        return Err(GeomError::Unsupported {
+            backend: BackendId::new("declines"),
+            operation: Operation::MeshVisibleFaces,
+        }
+        .into());
+    }
+    Ok(())
+}
+
+#[test]
+fn perspective_registration_also_runs_the_base_suite() {
+    use axiolid_mesh_hidden_lines_contract::conformance::perspective::PerspectiveConformanceFailure;
+
+    let calls = counter();
+    let mut registry = MeshVisibleFacesRegistry::new();
+    let report = registry
+        .register_perspective_conformant(0, Recorder::new("declines", &calls, declines_perspective))
+        .expect_err("the canned regions break the base contract");
+    assert!(!report.claimed);
+    assert!(report
+        .failures
+        .iter()
+        .any(|f| matches!(f, PerspectiveConformanceFailure::VisibleFacesBase(_))));
+    assert!(report
+        .failures
+        .iter()
+        .all(|f| matches!(f, PerspectiveConformanceFailure::VisibleFacesBase(_))));
+    assert_eq!(registry.providers().count(), 0);
+}

@@ -11,10 +11,10 @@ use axiolid_mesh_hidden_lines_contract::{
             PerspectiveConformanceFailure, PerspectiveConformanceReport,
             PerspectiveConformanceSuite,
         },
-        ConformanceReport, ConformanceSuite,
+        ConformanceFailure, ConformanceReport, ConformanceSuite,
     },
     EdgeKind, HiddenLineError, HiddenLineOutcome, HiddenLineRequest, MeshHiddenLines, RefusedMesh,
-    Visibility,
+    ViewProjection, Visibility,
 };
 
 use crate::device::matches_device;
@@ -60,6 +60,11 @@ impl MeshHiddenLinesRegistry {
     }
 
     /// Validate a provider with the shared conformance suite before registration.
+    ///
+    /// A provider that claims perspective views (`supports_projection`) is
+    /// also run through the perspective suite, and a failure of it is
+    /// reported as a `ReturnedError` of the case `perspective claim`, so a
+    /// claim is never routed to unverified (ADR 0107).
     pub fn register_conformant<P>(
         &mut self,
         priority: i32,
@@ -68,7 +73,18 @@ impl MeshHiddenLinesRegistry {
     where
         P: MeshHiddenLines + 'static,
     {
-        let report = ConformanceSuite::run(&provider);
+        let mut report = ConformanceSuite::run(&provider);
+        if provider.supports_projection(ViewProjection::Perspective) {
+            let perspective = PerspectiveConformanceSuite::run(&provider);
+            if !perspective.is_success() {
+                report.failures.push(ConformanceFailure::ReturnedError {
+                    case: "perspective claim",
+                    error: HiddenLineError::request(GeomError::InvalidInput(format!(
+                        "perspective suite: {perspective}"
+                    ))),
+                });
+            }
+        }
         if !report.is_success() {
             return Err(Box::new(report));
         }
