@@ -9,6 +9,13 @@ caret rule for `0.x` versions.
 
 ## [Unreleased]
 
+### Added
+
+- `ExactCurveRefusal::Undecided`: the roots along a traced section could not
+  all be isolated with their multiplicity (a contact of order above eight,
+  one rounding hides, or the work budget ran out). It says nothing of
+  whether the curve meets the surface (#427).
+
 ## [0.3.9] - 2026-11-07
 
 ### Fixed
@@ -18,6 +25,12 @@ caret rule for `0.x` versions.
   changes about 2.4e-8 either side: a stretch whose second derivative along
   the curve is enclosed away from zero is settled by a Rolle certificate
   before it is bisected (#397).
+- A traced section against a surface that touches it at a higher order (a
+  cylinder osculating the section, a plane tangent at its extreme) no longer
+  hangs. Roots are certified with their multiplicity up to order 8 by a
+  Rolle chain on `det(grad F, grad H_j)`, the derivatives of the second
+  field along the curve. Higher orders and over-budget cases return
+  `Undecided` instead of a guessed touch at the depth floor (#427).
 
 ## [0.3.8] - 2026-11-03
 

@@ -302,27 +302,99 @@ is carried on both: `Curve3::PairSection` (`PairSection3`).
   `-pi` (and past a face's own seam angle), so a symmetric section's
   special points never sit on the window's edge.
 
-### Certified multiplicity of touching roots (#397)
+### Certified multiplicity of contacts (#397, #427)
 
-A second field that only touches a traced curve has a double root, and
-bisecting its stretch on the sign of the field alone read f64 noise at the
-touch as a pair of spurious sign changes about 2.4e-8 either side of it. A
-stretch whose slope bound straddles zero is now settled by a Rolle
-certificate before it is bisected: the second derivative of the field along
-the curve is enclosed over the stretch's hull, from the second partials of
-both fields and the solved parameter's first and second derivatives. When
-that enclosure excludes zero the field has at most one critical point there,
-so at most two roots counting multiplicity. Ends of opposite sign hold one
-simple root. Ends of one sign hold none, two simple roots either side of the
-critical point, or one root of multiplicity 2 at it, according to an
-enclosure of the field at the critical point (found by bisecting the sign of
-its slope); a touch, where that enclosure (which carries its own rounding margin)
-straddles zero, is reported once with multiplicity 2 and never as sign
-changes. No absolute tolerance decides it: a minimum 1e-9 away from zero
-is two crossings or none. A stretch whose second
-derivative straddles zero continues to bisect as before. The caller's merge
-of close cuts (#381) stays, as the tolerance reading for cuts that are not
-one root.
+A second field that only touches a traced curve has a root of even
+multiplicity, and one that osculates it a root of order four or more.
+Bisecting a stretch on the sign of the field alone read f64 noise at the
+touch as a pair of spurious sign changes about 2.4e-8 either side of it
+(#397), and at a contact of order four it did not finish: the second
+derivative's enclosure straddles zero out to the square root of the
+stretch's width, so the unsettled stretches multiplied with the depth until
+the depth floor, and every leaf the floor reached was labelled a certified
+touch (#427).
+
+The roots of the second field `H` along the curve `F = 0` are now isolated
+by a Rolle chain of order up to eight on the derivative tower
+`H_0 = H`, `H_{j+1} = det(grad F, grad H_j) = F_u ∂_v H_j - F_v ∂_u H_j`
+(`curve_tower.rs`, `root_chain.rs`).
+
+- **The tower.** Along the curve, `d(G|C)/ds = ±det(grad F, grad G) / |grad F|`
+  with a sign constant along a regular stretch, so `H_{j+1}|C` is `H_j|C`'s
+  derivative up to a factor that never vanishes: a zero of `H_j|C` of
+  multiplicity `m` is one of `H_{j+1}|C` of multiplicity `m - 1`, and
+  `H_{j+1}|C != 0` on a stretch makes `H_j|C` strictly monotone there. The
+  values do not depend on which parameter a cell leaves free, so a stretch
+  can cross a cell join. (Derivatives of order two and up with respect to
+  the free parameter do change at a join; a chain on those could not.) In a
+  cell the curve is `(f, w(f))` and `H_{j+1}|C = sigma F_w|C d/df (H_j|C)`,
+  `sigma = -1` for `Axis::U` and `+1` for `Axis::V`, so the tower is built
+  from univariate Taylor coefficients alone: those of `w` from the implicit
+  equation, then of `H|C` and `F_w|C`, each a polynomial of the partials up
+  to the order wanted and of the earlier coefficients. Every partial is
+  enclosed once over a box certain to hold the stretch's points (the old
+  hull, plus the error of the solved value itself), the interval Taylor
+  coefficients over the hull being the order-0 model.
+- **The chain.** `isolate` splits the parameter range until a leaf has an
+  order `k` (at most `MAX_CONTACT_ORDER = 8`) whose `H_k` excludes zero, and
+  `chain` climbs from `H_k` down to `H_0`. Between two zones of `H_{j+1}`,
+  `H_j` is strictly monotone: a sign change brackets exactly one simple
+  zero, which is bisected. A run of zones and ends whose enclosures of `H_j`
+  straddle zero is one cluster of multiplicity `1 + sum of the members'`.
+  The chain allows at most `k - j` zeros of `H_j`, and a cluster between two
+  signed neighbours must change sign exactly when its multiplicity is odd;
+  either failing refuses.
+- **Generic splits.** A stretch is cut at a cell join, or else at one of 15
+  fixed fractions (the middle first), only where `H_0`, `H_1` and `H_2` are
+  signed, so a cut never sits on a root of order two or less. A cut that
+  nonetheless straddles at a higher order refuses: no zone touches an inner
+  end, and each zero belongs to exactly one leaf.
+- **Curve ends.** The curve's own ends report. A root there carries the
+  multiplicity the chain sees at the end, which depends on how far, at
+  rounding level, the end is from the contact. A closed curve's seam is one
+  point and is reported once, with the larger of its two multiplicities.
+- **Budget and cap.** One call visits at most `ROOT_BUDGET` nodes, and
+  depth is at most 128 with leaves at least `2^-44` of a cell wide.
+  Exceeding either, a contact above order eight, or one rounding hides
+  refuses as `ExactCurveRefusal::Undecided`: it says nothing of whether the
+  curve meets the surface there. There is no degree bound to derive the cap
+  from, because the fields are trigonometric series and the curve is
+  implicit, so the cap is a named constant.
+
+Soundness:
+
+1. *Enclosure.* For every point of a stretch, `(f, w(f))` lies in the hull,
+   so the partials there lie in their enclosures, and each Taylor
+   coefficient and each `H_j|C` is a polynomial of them (with a division by
+   `F_w`, bounded away from zero over the hull) evaluated in outward-rounded
+   intervals. The result contains the true value at every point of the
+   stretch at once. The fields are the rounded compositions the module
+   already accepts.
+2. *Rolle.* If `H_k|C` has no zero on a stretch, `H_j|C` has at most `k - j`
+   there, counting multiplicity.
+3. *Completeness,* by downward induction: if the zones of `H_{j+1}` cover
+   its zeros, then `H_j` is strictly monotone between consecutive zones, a
+   zero in an open piece forces rigorously opposite signs at its ends, and
+   any other zero lies in a zone whose enclosure straddles. No zero is
+   missed.
+4. *Nothing invented beyond resolution.* A bisected zone holds a zero by the
+   intermediate value theorem. The one claim that is not rigorous is that a
+   straddling enclosure is a zero of the multiplicity the chain allows; the
+   true count is at most that, with its parity whenever both neighbours are
+   signed (checked), so crossing versus touching is always right and two
+   zeros closer than the rounding read as one touch.
+5. *Termination.* Depth, width and the budget bound the leaves; a chain
+   has at most eight levels and at most 100 bisection steps per zone.
+6. *Decided when possible.* At a contact of order `mu <= 8` with `H_mu`
+   nonzero there, the enclosures converge (they are Lipschitz inclusion
+   functions), so a certified stretch exists at finite depth as long as it
+   is wider than the contact's flat region, the width below which rounding
+   hides it. Otherwise the result is `Undecided`.
+
+The bridge cells of a crossing keep their 64-sample sign scan, which is not
+certified (#441). The caller's merge of close cuts (#381) stays, as the
+tolerance reading for cuts that are not one root; the roots themselves are
+no longer merged within 1e-9, since zones are disjoint by construction.
 
 ## Alternatives considered
 
@@ -332,6 +404,10 @@ one root.
 | Fit B-splines to the traced points | Turns an exact definition into an approximation with a tolerance, in the module that promises none; pcurves and edges would disagree by the fit error. |
 | Resultants and root isolation of the full algebraic curve | Exact topology, but the degrees are large: a torus against a torus is degree 8 in each of two variables before the resultant. Isolating the discriminant's roots with big integers per face pair is far slower than subdivision, and the curve still needs evaluating afterwards. |
 | A guide polyline with normal projection | Needs a step size to build and a certificate that the normal lines meet the curve once. Monotone cells give both by construction. |
+| A node budget alone for contacts of higher order (#427) | It terminates, but it refuses plausible geometry: a cylinder osculating a section, or a plane tangent at a section's extreme. It stays as the backstop. |
+| A Rolle chain per cell on `h^(k)` with respect to the free parameter (the direct generalisation of #397) | Derivatives of order two and up change at a cell join where the free axis changes, so a chain cannot cross a join; and a stretch end inside the contact's flat region produces spurious zeros at that end. |
+| Exact classification of `h` at the zeros of `h'` | The touch point is an irrational root of the traced field, and the exact series tier only decides at `f64` points; the algebraic route needs resultants, rejected above. |
+| Taylor models | They cut the subdivision depth but meet the same rounding floor and need a polynomial-plus-remainder composition facility. The interval Taylor coefficients over the hull are the order-0 model; a later optimisation. |
 
 ## Consequences
 
@@ -431,6 +507,11 @@ one root.
   `spline_pair_intersection` and B-spline curve/surface crossings.
 - `crates/algorithms/parametric/nurbs/src/pair_certify.rs`: enclosures,
   chord proofs and certified crossing isolation.
+- `crates/algorithms/parametric/nurbs/src/interval.rs`: the outward-rounded
+  interval of those certificates.
+- `crates/algorithms/parametric/nurbs/src/root_chain.rs` and
+  `curve_tower.rs`: the Rolle chain and the derivative tower along a traced
+  curve (`implicit_ops::roots_along`).
 - `crates/algorithms/parametric/evaluate/src/curve.rs`: evaluation and
   inversion of the new families. Inversion now also covers the ADR 0076
   graphs.
