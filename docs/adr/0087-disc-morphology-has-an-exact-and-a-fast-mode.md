@@ -135,9 +135,10 @@ filled and the sum kept its quadratic cost.
   fills of the needle walls measured here come from the gap bound (the
   tips lie on the chord), not from `e_W`, which only competes with it; for
   a notch deeper than `t` inside the slab (reached since #428), the
-  minimum is of `e_W` and the depth. A notch
-  that overhangs the chord's ends and is deeper than `t` is refused as
-  before. The triage's first formula, the sagitta
+  minimum is of `e_W` and the depth. A notch deeper than `t` whose overhang
+  beyond the chord's ends lies in a deep piece, or which has no vertex
+  exactly on its chord to cut at, is refused (since #428 an overhang in a
+  shallow piece is bounded by that piece's own bounds). The triage's first formula, the sagitta
   `t - sqrt(t^2 - g^2 / 4)` of a disc over the mouth, says how far a disc
   enters the notch, not how far the sum grows, which needs every centre
   within `t` of a point of the notch; it is also larger than `e_W` (by
@@ -182,8 +183,7 @@ Nothing proposed a chord over a needle deeper than `t`, and `excess`
 would have bounded one by the whole wall: for a wall of needles 0.25 m deep
 and 2e-4 apart, 2.5e-4 over 100 of them (2.06 m over a 4.5 m wall), where
 one needle's slab bound is 2.5e-8. #340's room with a column and 124 such
-needles gave 562 corners in 0.42 s, as `Exact`, and 500 needles 2,066
-corners in 5.0 s.
+needles gave 562 corners, as `Exact`, and 500 needles 2,066.
 
 - **Reach.** Past `t`, a proposal still pops a vertex when the chord is no
   longer than `needle_width(t, budget) = 2 sqrt(2 t budget + budget^2)`,
@@ -203,8 +203,8 @@ corners in 5.0 s.
 - **Contract.** Unchanged: every chord still goes through the proof, the
   budget and the check for rings in its notch, so the side and the stated
   deviation hold. The 30 earlier `fast` bench cases give the same hashes.
-- **Cost.** The 124 needles give 68 and 72 corners in 0.005 s. The numbers
-  are in `docs/research/fast-morphology-on-deep-needles.md`.
+- **Cost.** The 124 needles give 68 and 72 corners. The timings of the
+  committed `deep` bench cases are in `docs/research/fast-morphology-on-deep-needles.md`.
 - **Limit.** A join needs a vertex exactly on the chord, as the exact proof
   does. Valleys collinear only up to rounding, as on a wall rotated by
   30 degrees, are not joined: each needle is filled alone but the valleys
