@@ -19,7 +19,10 @@ fn boolean_operator(value: AxiolidBooleanOperator) -> Option<axiolid::core::Bool
     }
 }
 
-fn insert_result(context: &mut Context, result: StoredResult) -> Result<u64, AxiolidStatus> {
+pub(crate) fn insert_result(
+    context: &mut Context,
+    result: StoredResult,
+) -> Result<u64, AxiolidStatus> {
     if context.results.live_count() >= context.config.max_results as usize {
         return Err(AxiolidStatus::LimitExceeded);
     }
@@ -257,6 +260,7 @@ pub unsafe extern "C" fn axiolid_v0_4_result_kind(
                 let _ = exact.topology();
                 AxiolidGeometryKind::ExactBrep
             }
+            StoredResult::HiddenLines(_) => AxiolidGeometryKind::HiddenLines,
         };
         // SAFETY: null was rejected; caller provides one writable enum value.
         unsafe { out_kind.write(kind) };

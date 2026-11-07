@@ -43,6 +43,20 @@ int main(void) {
   CHECK(axiolid_v0_4_context_last_error_info(context, &error));
   if (error.status != AxiolidStatus_UnsupportedExact) return 5;
 
+  AxiolidViewMesh view_mesh = {mesh, 1, NULL, 0, AXIOLID_MESH_ROLE_SHEET,
+                                AXIOLID_GROUP_MODE_SINGLE};
+  AxiolidView plan = {{{0, 0, 0}, {1, 0, 0}, {0, 1, 0}, {0, 0, 1}},
+                      0, 0, AXIOLID_PROJECTION_ORTHOGRAPHIC, 0, 0, {0, 0}};
+  AxiolidEdgeSelection edges = {0.5, 1, 1, 1, 1, 0, {0, 0, 0}};
+  AxiolidHiddenLineLimits line_limits = {8, 1000, 1000, 100000, 1000};
+  AxiolidResultHandle drawing = AxiolidResultHandle_INVALID;
+  CHECK(axiolid_v0_4_hidden_lines(context, &view_mesh, 1, &plan, &edges, NULL,
+                                  &line_limits, tolerance, &drawing));
+  size_t segment_count = 0;
+  CHECK(axiolid_v0_4_hidden_lines_count(context, drawing, &segment_count));
+  if (segment_count != 3) return 6;
+  CHECK(axiolid_v0_4_result_destroy(context, drawing));
+
   CHECK(axiolid_v0_4_result_destroy(context, exact));
   CHECK(axiolid_v0_4_mesh_destroy(context, mesh));
   CHECK(axiolid_v0_4_context_destroy(context));

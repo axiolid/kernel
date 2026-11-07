@@ -449,5 +449,6 @@ impl AxiolidResultHandle {
 pub enum AxiolidGeometryKind {
     TriangleMesh = 1,
     ExactBrep = 2,
+    HiddenLines = 3,
     Unknown = 255,
 }

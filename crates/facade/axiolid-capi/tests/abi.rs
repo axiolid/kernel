@@ -68,7 +68,7 @@ fn capabilities_and_indexed_mesh_round_trip_without_rust_ownership() {
             axiolid_v0_4_capability_count(context, &mut capability_count),
             AxiolidStatus::Ok
         );
-        assert_eq!(capability_count, 4);
+        assert_eq!(capability_count, 5);
         let mut descriptor = AxiolidCapabilityDescriptor::default();
         assert_eq!(
             axiolid_v0_4_capability_get(context, 0, &mut descriptor),

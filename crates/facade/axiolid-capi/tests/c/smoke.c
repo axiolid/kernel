@@ -24,7 +24,17 @@ ASSERT_SIZE(AxiolidOperation, 4);
 ASSERT_SIZE(AxiolidRepresentation, 4);
 ASSERT_SIZE(AxiolidExactness, 4);
 ASSERT_SIZE(AxiolidGeometryKind, 4);
+ASSERT_SIZE(AxiolidViewFrame, 96);
+ASSERT_SIZE(AxiolidView, 120);
+ASSERT_SIZE(AxiolidImageBox, 32);
+ASSERT_SIZE(AxiolidEdgeSelection, 16);
+ASSERT_SIZE(AxiolidEdgeKind, 4);
+ASSERT_SIZE(AxiolidVisibility, 4);
+ASSERT_SIZE(AxiolidHiddenLineSegment, 56);
 #if SIZE_MAX == UINT64_MAX
+ASSERT_SIZE(AxiolidViewMesh, 40);
+ASSERT_SIZE(AxiolidHiddenLineLimits, 40);
+ASSERT_SIZE(AxiolidHiddenLineEvidence, 80);
 ASSERT_SIZE(AxiolidMeshAudit, 24);
 ASSERT_SIZE(AxiolidErrorInfo, 104);
 #endif
@@ -74,7 +84,7 @@ int main(void) {
 
   size_t capability_count = 0;
   CHECK(axiolid_v0_4_capability_count(context, &capability_count));
-  if (capability_count != 4) return 3;
+  if (capability_count != 5) return 3;
 
   AxiolidMeshHandle subject = AxiolidMeshHandle_INVALID;
   CHECK(axiolid_v0_4_mesh_import(context, CUBE_POSITIONS, 8, CUBE_INDICES, 12, &subject));
@@ -130,6 +140,35 @@ int main(void) {
   invalid_positions[0] = NAN;
   AxiolidMeshHandle invalid = AxiolidMeshHandle_INVALID;
   if (axiolid_v0_4_mesh_import(context, invalid_positions, 8, CUBE_INDICES, 12, &invalid) != AxiolidStatus_InvalidArgument) return 10;
+
+  AxiolidViewMesh view_mesh = {subject, 7, NULL, 0, AXIOLID_MESH_ROLE_SOLID, AXIOLID_GROUP_MODE_SINGLE};
+  AxiolidView plan = {{{0,0,0}, {1,0,0}, {0,1,0}, {0,0,1}}, 0, 0, AXIOLID_PROJECTION_ORTHOGRAPHIC, 0, 0, {0, 0}};
+  AxiolidEdgeSelection edges = {0.5, 1, 1, 1, 1, 0, {0, 0, 0}};
+  AxiolidHiddenLineLimits line_limits = {8, 1000, 1000, 100000, 1000};
+  AxiolidResultHandle drawing = AxiolidResultHandle_INVALID;
+  CHECK(axiolid_v0_4_hidden_lines(context, &view_mesh, 1, &plan, &edges, NULL, &line_limits, tolerance, &drawing));
+  size_t segment_count = 0;
+  CHECK(axiolid_v0_4_hidden_lines_count(context, drawing, &segment_count));
+  if (segment_count != 8) return 17;
+  AxiolidHiddenLineSegment segments[8];
+  if (axiolid_v0_4_hidden_lines_copy(context, drawing, segments, 7) != AxiolidStatus_BufferTooSmall) return 18;
+  CHECK(axiolid_v0_4_hidden_lines_copy(context, drawing, segments, 8));
+  if (segments[0].mesh_id != 7 || segments[0].kind != AxiolidEdgeKind_Silhouette || segments[0].visibility != AxiolidVisibility_Hidden) return 19;
+  AxiolidHiddenLineEvidence evidence = {0};
+  CHECK(axiolid_v0_4_hidden_lines_evidence(context, drawing, &evidence));
+  if (evidence.visible_segments != 4 || evidence.hidden_segments != 4) return 20;
+  view_mesh.id = 9;
+  view_mesh.mesh = tool;
+  AxiolidResultHandle second_drawing = AxiolidResultHandle_INVALID;
+  if (axiolid_v0_4_hidden_lines(context, &view_mesh, 1, &plan, &edges, NULL, &line_limits, tolerance, &second_drawing) != AxiolidStatus_Ok) return 21;
+  CHECK(axiolid_v0_4_result_destroy(context, second_drawing));
+  plan.projection = 0;
+  if (axiolid_v0_4_hidden_lines(context, &view_mesh, 1, &plan, &edges, NULL, &line_limits, tolerance, &second_drawing) != AxiolidStatus_InvalidArgument) return 22;
+  uint8_t has_mesh = 7;
+  uint64_t named_mesh = 7;
+  CHECK(axiolid_v0_4_context_last_error_mesh(context, &has_mesh, &named_mesh));
+  if (has_mesh != 0 || named_mesh != 0) return 23;
+  CHECK(axiolid_v0_4_result_destroy(context, drawing));
 
   CHECK(axiolid_v0_4_result_destroy(context, exact));
   if (axiolid_v0_4_result_destroy(context, exact) != AxiolidStatus_InvalidHandle) return 11;

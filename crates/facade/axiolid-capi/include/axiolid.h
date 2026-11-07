@@ -59,6 +59,8 @@ enum AxiolidOperation
   AxiolidOperation_Measurement = 9,
   AxiolidOperation_Healing = 10,
   AxiolidOperation_GraphCompilation = 11,
+  AxiolidOperation_MeshHiddenLines = 12,
+  AxiolidOperation_MeshVisibleFaces = 13,
   AxiolidOperation_Unknown = 255,
 };
 #ifndef __cplusplus
@@ -120,6 +122,48 @@ typedef int32_t AxiolidExactness;
 #endif // __cplusplus
 
 /**
+ * Why an edge is drawn.
+ */
+enum AxiolidEdgeKind
+#if defined(__cplusplus) || __STDC_VERSION__ >= 202311L
+  : int32_t
+#endif // defined(__cplusplus) || __STDC_VERSION__ >= 202311L
+ {
+  AxiolidEdgeKind_Boundary = 1,
+  AxiolidEdgeKind_Silhouette = 2,
+  AxiolidEdgeKind_Crease = 3,
+  AxiolidEdgeKind_GroupBoundary = 4,
+  AxiolidEdgeKind_Unknown = 255,
+};
+#ifndef __cplusplus
+#if __STDC_VERSION__ >= 202311L
+typedef enum AxiolidEdgeKind AxiolidEdgeKind;
+#else
+typedef int32_t AxiolidEdgeKind;
+#endif // __STDC_VERSION__ >= 202311L
+#endif // __cplusplus
+
+/**
+ * Whether a piece of an edge can be seen.
+ */
+enum AxiolidVisibility
+#if defined(__cplusplus) || __STDC_VERSION__ >= 202311L
+  : int32_t
+#endif // defined(__cplusplus) || __STDC_VERSION__ >= 202311L
+ {
+  AxiolidVisibility_Visible = 1,
+  AxiolidVisibility_Hidden = 2,
+  AxiolidVisibility_Unknown = 255,
+};
+#ifndef __cplusplus
+#if __STDC_VERSION__ >= 202311L
+typedef enum AxiolidVisibility AxiolidVisibility;
+#else
+typedef int32_t AxiolidVisibility;
+#endif // __STDC_VERSION__ >= 202311L
+#endif // __cplusplus
+
+/**
  * Representation stored by an operation result.
  */
 enum AxiolidGeometryKind
@@ -129,6 +173,7 @@ enum AxiolidGeometryKind
  {
   AxiolidGeometryKind_TriangleMesh = 1,
   AxiolidGeometryKind_ExactBrep = 2,
+  AxiolidGeometryKind_HiddenLines = 3,
   AxiolidGeometryKind_Unknown = 255,
 };
 #ifndef __cplusplus
@@ -219,6 +264,130 @@ typedef struct {
 } AxiolidErrorInfo;
 
 /**
+ * Occlusion role of an input mesh.
+ */
+typedef int32_t AxiolidMeshRole;
+
+/**
+ * How the triangles of an input mesh are grouped.
+ */
+typedef int32_t AxiolidGroupMode;
+
+/**
+ * One input mesh of a drawing. `groups` is borrowed for the call.
+ */
+typedef struct {
+  AxiolidMeshHandle mesh;
+  /**
+   * Caller-chosen id, unique within the call, echoed in every segment.
+   */
+  uint64_t id;
+  const uint32_t *groups;
+  size_t group_count;
+  AxiolidMeshRole role;
+  AxiolidGroupMode group_mode;
+} AxiolidViewMesh;
+
+/**
+ * Right-handed view frame: origin and three axes in model space.
+ */
+typedef struct {
+  double origin[3];
+  double x[3];
+  double y[3];
+  double z[3];
+} AxiolidViewFrame;
+
+/**
+ * Stable projection selector. Only orthographic is defined.
+ */
+typedef int32_t AxiolidProjection;
+
+/**
+ * A view: frame, depth range and projection. `near` and `far` are read only
+ * when their `has_*` flag is 1.
+ */
+typedef struct {
+  AxiolidViewFrame frame;
+  double near;
+  double far;
+  AxiolidProjection projection;
+  uint8_t has_near;
+  uint8_t has_far;
+  /**
+   * Must be zero.
+   */
+  uint8_t reserved[2];
+} AxiolidView;
+
+/**
+ * Which edges to draw. Flags are 0 or 1; `crease_cosine` is read only when
+ * `has_crease` is 1.
+ */
+typedef struct {
+  double crease_cosine;
+  uint8_t has_crease;
+  uint8_t boundary;
+  uint8_t silhouette;
+  uint8_t hidden;
+  uint8_t group_boundary;
+  /**
+   * Must be zero.
+   */
+  uint8_t reserved[3];
+} AxiolidEdgeSelection;
+
+/**
+ * Closed image-plane crop box.
+ */
+typedef struct {
+  double min[2];
+  double max[2];
+} AxiolidImageBox;
+
+/**
+ * Hard bounds for one drawing.
+ */
+typedef struct {
+  size_t max_meshes;
+  size_t max_source_vertices;
+  size_t max_source_triangles;
+  size_t max_candidate_pairs;
+  size_t max_output_segments;
+} AxiolidHiddenLineLimits;
+
+/**
+ * One piece of a source edge in image coordinates.
+ */
+typedef struct {
+  uint64_t mesh_id;
+  /**
+   * Position indices of the source edge, ascending.
+   */
+  uint32_t vertices[2];
+  double start[2];
+  double end[2];
+  AxiolidEdgeKind kind;
+  AxiolidVisibility visibility;
+} AxiolidHiddenLineSegment;
+
+/**
+ * Auditable counts of one drawing.
+ */
+typedef struct {
+  size_t source_meshes;
+  size_t source_triangles;
+  size_t selected_edges;
+  size_t point_edges;
+  size_t clipped_edges;
+  size_t candidate_pairs;
+  size_t exact_escalations;
+  size_t collapsed_segments;
+  size_t visible_segments;
+  size_t hidden_segments;
+} AxiolidHiddenLineEvidence;
+
+/**
  * Stable mesh-audit summary.
  */
 typedef struct {
@@ -275,6 +444,33 @@ typedef struct {
 #define AXIOLID_BOOLEAN_SYMMETRIC_DIFFERENCE 4
 
 #define AXIOLID_BOOLEAN_UNION 1
+
+/**
+ * One id per triangle in `groups`; `group_count` is the triangle count.
+ */
+#define AXIOLID_GROUP_MODE_PER_TRIANGLE 2
+
+/**
+ * Planar patches derived exactly from the geometry; `groups` is not read.
+ */
+#define AXIOLID_GROUP_MODE_PLANAR 3
+
+/**
+ * Every triangle is in group 0; `groups` is not read.
+ */
+#define AXIOLID_GROUP_MODE_SINGLE 1
+
+/**
+ * Edge-manifold with consistent winding, open or closed.
+ */
+#define AXIOLID_MESH_ROLE_SHEET 2
+
+/**
+ * Closed, consistently wound two-manifold.
+ */
+#define AXIOLID_MESH_ROLE_SOLID 1
+
+#define AXIOLID_PROJECTION_ORTHOGRAPHIC 1
 
 #define AXIOLID_PROVIDER_PORTABLE 1
 
@@ -336,6 +532,18 @@ AxiolidStatus axiolid_v0_4_context_last_error_info(AxiolidContextHandle context,
                                                    AxiolidErrorInfo *out_info);
 
 /**
+ * The input mesh the context's most recent error names.
+ *
+ * `out_has_mesh` is 1 and `out_mesh_id` the caller's id when the error names
+ * a mesh, otherwise 0 and 0. Returns `NoError` when no error was recorded.
+ * # Safety
+ * Every non-null pointer must be aligned and valid for the documented read or write extent.
+ */
+AxiolidStatus axiolid_v0_4_context_last_error_mesh(AxiolidContextHandle context,
+                                                   uint8_t *out_has_mesh,
+                                                   uint64_t *out_mesh_id);
+
+/**
  * Copy the last error message into a caller-owned UTF-8 buffer.
  *
  * `out_required` receives the byte count including the trailing NUL. Passing a
@@ -379,6 +587,56 @@ AxiolidStatus axiolid_v0_4_exact_extrude_rectangle(AxiolidContextHandle context,
                                                    double depth,
                                                    AxiolidTolerance tolerance_value,
                                                    AxiolidResultHandle *out_result);
+
+/**
+ * Draw the edges of borrowed meshes with hidden-line removal and return an
+ * owned result handle (read it with the `hidden_lines_*` functions).
+ *
+ * `meshes` and every `groups` array are borrowed for this call. A null
+ * `region` is no crop. The context's `max_meshes` bounds `mesh_count`.
+ * # Safety
+ * Every non-null pointer must be aligned and valid for the documented read or write extent.
+ */
+AxiolidStatus axiolid_v0_4_hidden_lines(AxiolidContextHandle context,
+                                        const AxiolidViewMesh *meshes,
+                                        size_t mesh_count,
+                                        const AxiolidView *view,
+                                        const AxiolidEdgeSelection *edges,
+                                        const AxiolidImageBox *region,
+                                        const AxiolidHiddenLineLimits *limits,
+                                        AxiolidTolerance tolerance_value,
+                                        AxiolidResultHandle *out_result);
+
+/**
+ * Copy the segments of a hidden-line result, in the outcome's order, into
+ * caller-owned storage.
+ *
+ * A `capacity` below the count returns `BufferTooSmall` and writes nothing.
+ * # Safety
+ * Every non-null pointer must be aligned and valid for the documented read or write extent.
+ */
+AxiolidStatus axiolid_v0_4_hidden_lines_copy(AxiolidContextHandle context,
+                                             AxiolidResultHandle result,
+                                             AxiolidHiddenLineSegment *out,
+                                             size_t capacity);
+
+/**
+ * Query the number of segments of a hidden-line result.
+ * # Safety
+ * Every non-null pointer must be aligned and valid for the documented read or write extent.
+ */
+AxiolidStatus axiolid_v0_4_hidden_lines_count(AxiolidContextHandle context,
+                                              AxiolidResultHandle result,
+                                              size_t *out_count);
+
+/**
+ * Copy the evidence of a hidden-line result.
+ * # Safety
+ * Every non-null pointer must be aligned and valid for the documented read or write extent.
+ */
+AxiolidStatus axiolid_v0_4_hidden_lines_evidence(AxiolidContextHandle context,
+                                                 AxiolidResultHandle result,
+                                                 AxiolidHiddenLineEvidence *out);
 
 /**
  * Audit mesh topology under an explicit tolerance.

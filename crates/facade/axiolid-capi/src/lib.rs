@@ -91,6 +91,7 @@ struct Context {
 enum StoredResult {
     Mesh(TriMesh),
     Exact(Box<axiolid::brep::ExactBRep>),
+    HiddenLines(axiolid::mesh_hidden_lines::HiddenLineOutcome),
 }
 
 struct ErrorRecord {
@@ -99,6 +100,8 @@ struct ErrorRecord {
     tolerance: AxiolidTolerance,
     provider: String,
     message: String,
+    /// The caller's id of the input mesh the error names, if it names one.
+    mesh: Option<u64>,
 }
 
 struct HandleTable<T> {
@@ -179,7 +182,7 @@ pub unsafe extern "C" fn axiolid_v0_4_version(out_version: *mut AxiolidVersion) 
         let version = AxiolidVersion {
             abi_major: 0,
             abi_minor: 4,
-            abi_patch: 0,
+            abi_patch: 1,
             crate_major: env!("CARGO_PKG_VERSION_MAJOR").parse().unwrap_or(0),
             crate_minor: env!("CARGO_PKG_VERSION_MINOR").parse().unwrap_or(0),
             crate_patch: env!("CARGO_PKG_VERSION_PATCH").parse().unwrap_or(0),
@@ -278,6 +281,8 @@ pub enum AxiolidOperation {
     Measurement = 9,
     Healing = 10,
     GraphCompilation = 11,
+    MeshHiddenLines = 12,
+    MeshVisibleFaces = 13,
     Unknown = 255,
 }
 
@@ -362,6 +367,8 @@ fn operation(value: axiolid::contracts::Operation) -> AxiolidOperation {
         Operation::Measurement => AxiolidOperation::Measurement,
         Operation::Healing => AxiolidOperation::Healing,
         Operation::GraphCompilation => AxiolidOperation::GraphCompilation,
+        Operation::MeshHiddenLines => AxiolidOperation::MeshHiddenLines,
+        Operation::MeshVisibleFaces => AxiolidOperation::MeshVisibleFaces,
         _ => AxiolidOperation::Unknown,
     }
 }
@@ -418,6 +425,7 @@ fn c_capabilities(
                 axiolid::contracts::Operation::Healing
                     | axiolid::contracts::Operation::Measurement
                     | axiolid::contracts::Operation::MeshBoolean
+                    | axiolid::contracts::Operation::MeshHiddenLines
                     | axiolid::contracts::Operation::Sweep
             )
         })
@@ -491,6 +499,7 @@ fn record_error(
         tolerance,
         provider: provider.into(),
         message: message.into(),
+        mesh: None,
     });
     status
 }
@@ -546,9 +555,11 @@ impl Default for AxiolidErrorInfo {
 }
 
 mod diagnostics;
+mod drawing;
 mod mesh;
 mod operations;
 
 pub use diagnostics::*;
+pub use drawing::*;
 pub use mesh::*;
 pub use operations::*;

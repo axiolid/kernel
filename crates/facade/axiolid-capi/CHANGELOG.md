@@ -9,6 +9,19 @@ caret rule for `0.x` versions.
 
 ## [Unreleased]
 
+### Added
+
+- Hidden lines through the C ABI (#473): `axiolid_v0_4_hidden_lines` with
+  `AxiolidView`, `AxiolidViewMesh` (roles, group modes including planar),
+  `AxiolidEdgeSelection` (including group boundaries) and
+  `AxiolidHiddenLineLimits`; the result is read with
+  `axiolid_v0_4_hidden_lines_count`, `_copy` and `_evidence`.
+  `axiolid_v0_4_context_last_error_mesh` returns the id of the input mesh a
+  refusal names. `AxiolidOperation` gains `MeshHiddenLines` and
+  `MeshVisibleFaces`, `AxiolidGeometryKind` gains `HiddenLines`, and the
+  capability table lists `MeshHiddenLines`. All arguments are validated at the
+  boundary. `abi_patch` is 1; existing symbols and layouts are unchanged.
+
 ## [0.3.4] - 2026-11-07
 
 ### Added
