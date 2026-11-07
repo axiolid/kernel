@@ -221,7 +221,7 @@ mod tests {
     use axiolid_surface::{Plane, Surface};
     use axiolid_topology::{Edge, EdgeUse, Face, FaceBound, Loop, Orientation, Vertex};
 
-    use super::super::{closed, search_with, Found, Metric, MAX_STEPS};
+    use super::super::{closed, search_with, witnessed_upper, Found, Metric, MAX_STEPS};
     use super::{segment_parameters, touch, within_rounding};
     use crate::exact_distance::fixtures::{cuboid, unit_box};
     use crate::exact_distance::{Side, FLOOR_EPSILONS, RATIO_EPSILONS};
@@ -345,7 +345,16 @@ mod tests {
             within_rounding(bounds.point_a, bounds.point_b),
             "{bounds:?}"
         );
-        assert_eq!(bounds.upper, (bounds.point_a - bounds.point_b).length());
+        // The upper bound is the witnesses' distance and their rounding (#439).
+        let error = |brep: &ExactBRep| {
+            Side::new(brep, tol().linear(), Metric::Space)
+                .expect("a side")
+                .witness_error()
+        };
+        assert_eq!(
+            bounds.upper,
+            witnessed_upper((bounds.point_a - bounds.point_b).length(), error(a) + error(b))
+        );
         assert!(
             early.steps <= steps,
             "{} steps, the full search {}",
@@ -675,9 +684,8 @@ mod tests {
         );
         let found = distance(&a, &b, 1e-6, true);
         let bounds = &found.bounds;
-        let slack = 32.0 * f64::EPSILON * (bounds.point_a.length() + bounds.point_b.length());
         assert!(
-            bounds.lower <= 0.5 && 0.5 <= bounds.upper + slack,
+            bounds.lower <= 0.5 && 0.5 <= bounds.upper,
             "{bounds:?}"
         );
         assert!(bounds.upper - bounds.lower <= 1e-6, "{bounds:?}");

@@ -208,9 +208,11 @@ fn touching(c: &mut Criterion) {
     let tolerance = Tolerance::METRE;
     for (name, a, b, expected, accuracy) in pairs() {
         let bounds = boundary_distance(&a, &b, accuracy, tolerance).expect("bounded");
+        // The upper bound covers the witnesses and their rounding (#439).
         let width = (bounds.point_a - bounds.point_b).length();
+        let rounding = 1e-12 * (1.0 + bounds.point_a.length() + bounds.point_b.length());
         assert!(
-            (width - bounds.upper).abs() <= 1e-12,
+            width <= bounds.upper && bounds.upper - width <= rounding,
             "{name}: witnesses {width} apart, upper {}",
             bounds.upper
         );

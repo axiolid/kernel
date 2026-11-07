@@ -58,7 +58,8 @@ fn rect(x0: f64, y0: f64, x1: f64, y1: f64) -> Vec<Point2> {
 }
 
 /// The interval holds `expected`, and the witnesses are on the
-/// boundaries, their projections `upper` apart.
+/// boundaries within rounding, their projections `upper` apart up to the
+/// witnesses' rounding, which `upper` includes (#439).
 fn holds(bounds: &DistanceBounds, expected: f64, width: f64) {
     assert!(
         bounds.lower <= expected + 1e-12 && expected <= bounds.upper + 1e-12,
@@ -68,7 +69,11 @@ fn holds(bounds: &DistanceBounds, expected: f64, width: f64) {
     );
     assert!(bounds.upper - bounds.lower <= width, "{bounds:?}");
     let d = bounds.point_a - bounds.point_b;
-    assert!((d.x.hypot(d.y) - bounds.upper).abs() < 1e-12, "{bounds:?}");
+    let magnitude = 1.0 + bounds.point_a.length() + bounds.point_b.length();
+    assert!(
+        (d.x.hypot(d.y) - bounds.upper).abs() < 1e-12 * magnitude,
+        "{bounds:?}"
+    );
 }
 
 #[test]

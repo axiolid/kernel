@@ -62,8 +62,11 @@ fn contains(bounds: &axiolid_measure::DistanceBounds, expected: f64) {
         bounds.lower,
         bounds.upper
     );
-    // The witnesses are on the boundaries, `upper` apart.
-    assert!(((bounds.point_a - bounds.point_b).length() - bounds.upper).abs() < 1e-12);
+    // The witnesses are within rounding of the boundaries, which `upper`
+    // includes (#439).
+    let gap = (bounds.point_a - bounds.point_b).length();
+    let magnitude = 1.0 + bounds.point_a.length() + bounds.point_b.length();
+    assert!(gap <= bounds.upper && bounds.upper - gap < 1e-12 * magnitude);
 }
 
 #[test]

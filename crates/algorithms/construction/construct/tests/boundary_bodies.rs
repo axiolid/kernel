@@ -137,8 +137,11 @@ fn holds(bounds: &DistanceBounds, expected: f64, accuracy: f64) {
         bounds.lower,
         bounds.upper
     );
+    // The witnesses are within rounding of the boundaries, which `upper`
+    // includes (#439).
     let gap = (bounds.point_a - bounds.point_b).length();
-    assert!((gap - bounds.upper).abs() <= 1e-12 * (1.0 + gap));
+    let magnitude = 1.0 + bounds.point_a.length() + bounds.point_b.length();
+    assert!((gap - bounds.upper).abs() <= 1e-12 * magnitude);
 }
 
 fn contains(bounds: &HausdorffBounds, expected: f64, accuracy: f64) {

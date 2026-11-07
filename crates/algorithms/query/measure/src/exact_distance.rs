@@ -587,6 +587,8 @@ pub(crate) struct Side<'a> {
     /// search over this side. Every element is padded by it, so the pads
     /// cannot reorder the queue (#318).
     pub(crate) scale: Scalar,
+    /// `W`: the largest `M` of a point evaluated on this side, at least `S`.
+    pub(crate) witness_scale: Scalar,
 }
 
 impl<'a> Side<'a> {
@@ -603,6 +605,7 @@ impl<'a> Side<'a> {
             edges_bounded: Vec::with_capacity(topology.faces().len()),
             elements: Vec::new(),
             scale: 0.0,
+            witness_scale: 0.0,
         };
         for face in topology.faces() {
             let mut bounded = true;
@@ -639,6 +642,7 @@ impl<'a> Side<'a> {
                 ))?,
             };
             side.scale = side.scale.max(patch_scale(surface, lo, hi)?);
+            side.witness_scale = side.witness_scale.max(witness_scale(surface, lo, hi)?);
             roots.push((index, lo, hi));
         }
         let mut spans = Vec::new();
@@ -654,10 +658,11 @@ impl<'a> Side<'a> {
             };
             if let Some(scale) = span_scale(curve, span.start, span.end) {
                 side.scale = side.scale.max(scale);
+                side.witness_scale = side.witness_scale.max(scale);
             }
             spans.push((curve, index, span));
         }
-        if !side.scale.is_finite() {
+        if !(side.scale.is_finite() && side.witness_scale.is_finite()) {
             return Err(crate::exact::EVALUATION);
         }
         for (index, lo, hi) in roots {
@@ -726,6 +731,17 @@ impl<'a> Side<'a> {
             plan_radius,
             witness,
         }))
+    }
+
+    /// How far a point evaluated on this side may lie from the exact point.
+    pub(crate) fn witness_error(&self) -> Scalar {
+        POINT_EPSILONS * Scalar::EPSILON * self.witness_scale
+    }
+
+    /// What [`Side::witness_error`] adds to the floor beyond the
+    /// `POINT eps S` it already holds: zero but for B-spline faces.
+    pub(crate) fn witness_excess(&self) -> Scalar {
+        POINT_EPSILONS * Scalar::EPSILON * (self.witness_scale - self.scale)
     }
 
     /// The radius a search by this side's metric refines by.
@@ -1067,6 +1083,37 @@ fn patch_scale(surface: &Surface, lo: Point2, hi: Point2) -> Result<Scalar, Exac
     } else {
         Err(crate::exact::EVALUATION)
     }
+}
+
+/// `M` of the points evaluated on a patch as witnesses: [`patch_scale`]'s,
+/// except for a B-spline (#439).
+fn witness_scale(surface: &Surface, lo: Point2, hi: Point2) -> Result<Scalar, ExactMeasureError> {
+    let Surface::BSpline(spline) = surface else {
+        return patch_scale(surface, lo, hi);
+    };
+    let largest = spline.control_points.iter().flatten().map(|p| p.length()).fold(0.0, Scalar::max);
+    let ratio = match &spline.weights {
+        None => 1.0,
+        Some(weights) => {
+            let (mut lo, mut hi) = (Scalar::INFINITY, 0.0_f64);
+            for w in weights.iter().flatten() {
+                if w.is_nan() || *w <= 0.0 {
+                    return Err(ExactMeasureError::NonPlanarFace("non-positive-weight B-spline"));
+                }
+                lo = lo.min(*w);
+                hi = hi.max(*w);
+            }
+            hi / lo
+        }
+    };
+    let levels = Scalar::from(spline.u_degree) + Scalar::from(spline.v_degree) + 1.0;
+    let scale = levels * ratio * largest;
+    if scale.is_finite() { Ok(scale) } else { Err(crate::exact::EVALUATION) }
+}
+
+/// The upper bound reported for witnesses computed `distance` apart.
+pub(crate) fn witnessed_upper(distance: Scalar, error: Scalar) -> Scalar {
+    distance * (1.0 + RATIO_EPSILONS * Scalar::EPSILON) + error
 }
 
 /// `M` of an edge span, or `None` for a curve family with no bound here.
@@ -1538,6 +1585,8 @@ fn search_with(
     let side_a = Side::new(a, linear, metric)?;
     let side_b = Side::new(b, linear, metric)?;
     let scale = side_a.scale + side_b.scale;
+    let error = side_a.witness_error() + side_b.witness_error();
+    let excess = side_a.witness_excess() + side_b.witness_excess();
     let apart = |p: Point3, q: Point3| match metric {
         Metric::Space => (p - q).length(),
         Metric::Plan => flat_length(p - q),
@@ -1606,8 +1655,8 @@ fn search_with(
                 }
             }
         }
-        let upper = best.map_or(Scalar::INFINITY, |(d, ..)| d);
-        if upper.is_finite() && (bound >= upper || done(bound, upper, floor(scale, upper))) {
+        let upper = best.map_or(Scalar::INFINITY, |(d, ..)| witnessed_upper(d, error));
+        if upper.is_finite() && (bound >= upper || done(bound, upper, floor(scale, upper) + excess)) {
             break;
         }
         steps += 1;
@@ -1661,10 +1710,13 @@ fn search_with(
     if let Some(Reverse((Key(bound), _, _))) = heap.peek() {
         lower = lower.min(*bound);
     }
-    let (upper, point_a, point_b, on) = best.ok_or(crate::exact::NOT_CONVERGED)?;
-    if overlap.is_some() {
+    let (distance, point_a, point_b, on) = best.ok_or(crate::exact::NOT_CONVERGED)?;
+    let upper = if overlap.is_some() {
         lower = 0.0;
-    }
+        0.0
+    } else {
+        witnessed_upper(distance, error)
+    };
     Ok(Found {
         bounds: DistanceBounds {
             lower: lower.min(upper),
@@ -1903,7 +1955,8 @@ mod tests {
 
     use super::{
         critical_possible, flat_length, floor, normal_spread, pad, patch_plan_radius, patch_scale,
-        patch_sphere, plan_lipschitz, Element, Metric, Shape, Side, PROJECTION_EPSILONS,
+        patch_sphere, plan_lipschitz, witness_scale, witnessed_upper, Element, Metric, Shape, Side,
+        PROJECTION_EPSILONS,
     };
     use axiolid_core::{Frame3, Point2, Point3, Vec3};
     use axiolid_evaluate::surface::partials;
@@ -1995,10 +2048,140 @@ mod tests {
         })
     }
 
+    /// Walls side by side at georeferenced coordinates, turned off the
+    /// axes so that the witnesses round across the gap (#439): the upper
+    /// bound covers the distance, and a limit just below it is never
+    /// `Below`.
+    #[test]
+    fn a_far_clearance_is_never_below_a_limit_the_distance_reaches() {
+        use super::fixtures::cuboid;
+        use super::{boundary_clearance, boundary_distance, Clearance};
+        use axiolid_core::Tolerance;
+        let (x, y, z) = (Vec3::new(0.6, 0.8, 0.0), Vec3::new(-0.8, 0.6, 0.0), Vec3::Z);
+        for k in 0..40_i32 {
+            let o = Point3::new(
+                450_000.0 + f64::from(k) * 0.0137,
+                5_600_000.0 + f64::from(k) * 0.0291,
+                0.0,
+            );
+            let a = cuboid(o, x * 4.0, y, z * 2.0);
+            let ob = o
+                + y * 1.5
+                + x * (0.5 + f64::from(k % 3) * 0.75)
+                + z * (0.25 + f64::from(k % 4) * 0.125);
+            let b = cuboid(ob, x, y, z * 0.5);
+            // b's -y face lies over a's +y face, parallel: both planes carry
+            // the unit axis of `x * 4`, and the far differences are exact.
+            let ux = (x * 4.0) / (x * 4.0).length();
+            let n = Vec3::new(ux.y, -ux.x, 0.0);
+            let truth = (ob - (o + y)).dot(n / n.length()).abs();
+            let d = boundary_distance(&a, &b, 1e-9, Tolerance::METRE).expect("bounded");
+            assert!(d.lower <= truth && truth <= d.upper, "{k}: {truth} {d:?}");
+            assert!((d.point_a - d.point_b).length() <= d.upper, "{k}: {d:?}");
+            let verdict = |limit: f64| {
+                boundary_clearance(&a, &b, limit, Tolerance::METRE)
+                    .expect("bounded")
+                    .1
+            };
+            assert_eq!(verdict(truth - 1e-15), Clearance::Indeterminate, "{k}: {truth}");
+            assert_eq!(verdict(truth + 1e-6), Clearance::Below, "{k}");
+            assert_eq!(verdict(truth - 1e-6), Clearance::Above, "{k}");
+        }
+    }
+
+    /// A B-spline's points are summed over `p_u + p_v` levels of de Boor
+    /// and divided by the weight: its witnesses' `M` counts the levels and
+    /// the weights' spread, not only the largest control point (#439).
+    #[test]
+    fn a_spline_witness_scale_counts_its_degrees_and_weights() {
+        use axiolid_curve::{BSplineSurface, KnotSpec};
+        let net = |weights: Option<Vec<Vec<f64>>>| {
+            Surface::BSpline(BSplineSurface {
+                u_degree: 1,
+                v_degree: 1,
+                control_points: vec![
+                    vec![Point3::new(0.0, 0.0, 0.0), Point3::new(0.0, 1.0, 0.0)],
+                    vec![Point3::new(1.0, 0.0, 0.0), Point3::new(3.0, 4.0, 0.0)],
+                ],
+                u_knots: vec![0.0, 1.0],
+                u_multiplicities: vec![2, 2],
+                v_knots: vec![0.0, 1.0],
+                v_multiplicities: vec![2, 2],
+                weights,
+                u_closed: false,
+                v_closed: false,
+                knot_spec: KnotSpec::Unspecified,
+                self_intersect: None,
+            })
+        };
+        let (lo, hi) = (Point2::new(0.0, 0.0), Point2::new(1.0, 1.0));
+        assert_eq!(patch_scale(&net(None), lo, hi).expect("bounded"), 5.0);
+        assert_eq!(witness_scale(&net(None), lo, hi).expect("bounded"), 15.0);
+        let rational = net(Some(vec![vec![1.0, 2.0], vec![4.0, 1.0]]));
+        assert_eq!(witness_scale(&rational, lo, hi).expect("bounded"), 60.0);
+        // Every other family's witnesses are its patches' points.
+        for (surface, lo, hi) in families_at(FAR) {
+            assert_eq!(
+                witness_scale(&surface, lo, hi).expect("bounded"),
+                patch_scale(&surface, lo, hi).expect("bounded")
+            );
+        }
+    }
+
+    /// A rational bicubic net moved far away by an exact shift: every point
+    /// evaluated there lies within the witness error of the same point
+    /// evaluated at the origin and shifted (#439).
+    #[test]
+    fn far_spline_points_lie_within_their_witness_error() {
+        use axiolid_curve::{BSplineSurface, KnotSpec};
+        let net = |shift: Vec3| {
+            let control_points = (0..4)
+                .map(|i| {
+                    (0..4)
+                        .map(|j| {
+                            let (u, v) = (f64::from(i) * 0.37, f64::from(j) * 0.29);
+                            Point3::new(u, v, 0.1 * (u * 3.1).sin() * (v * 2.3).cos()) + shift
+                        })
+                        .collect()
+                })
+                .collect();
+            let weights = (0..4)
+                .map(|i| (0..4).map(|j| 1.0 + 0.25 * f64::from((i * 3 + j) % 5)).collect())
+                .collect();
+            Surface::BSpline(BSplineSurface {
+                u_degree: 3,
+                v_degree: 3,
+                control_points,
+                u_knots: vec![0.0, 1.0],
+                u_multiplicities: vec![4, 4],
+                v_knots: vec![0.0, 1.0],
+                v_multiplicities: vec![4, 4],
+                weights: Some(weights),
+                u_closed: false,
+                v_closed: false,
+                knot_spec: KnotSpec::Unspecified,
+                self_intersect: None,
+            })
+        };
+        let (near, far) = (net(Vec3::ZERO), net(FAR));
+        let (lo, hi) = (Point2::new(0.0, 0.0), Point2::new(1.0, 1.0));
+        let error = 16.0 * f64::EPSILON * witness_scale(&far, lo, hi).expect("bounded");
+        let mut worst: f64 = 0.0;
+        for p in samples(lo, hi) {
+            let there = evaluate(&far, p.x, p.y).expect("point");
+            let here = evaluate(&near, p.x, p.y).expect("point") + FAR;
+            worst = worst.max((there - here).length());
+        }
+        // `here` carries the rounding of the shift itself, half an ulp a coordinate.
+        assert!(worst <= error, "{worst} > {error}");
+        eprintln!("worst {worst:e} error {error:e}");
+    }
+
     #[test]
     fn rounding_margins_are_the_derived_constants() {
         assert_eq!(pad(0.0, 1.0), 16.0 * f64::EPSILON + f64::MIN_POSITIVE);
         assert_eq!(floor(3.0, 0.0), 128.0 * f64::EPSILON * 3.0);
+        assert_eq!(witnessed_upper(0.5, 1e-9), 0.5 * (1.0 + 8.0 * f64::EPSILON) + 1e-9);
         let origin = Point3::new(450_000.0, 5_600_000.0, 0.0);
         let plane = Surface::Plane(Plane {
             frame: Frame3 {

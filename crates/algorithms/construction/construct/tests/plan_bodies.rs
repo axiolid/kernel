@@ -114,7 +114,9 @@ fn holds(
         bounds.upper
     );
     let d = bounds.point_a - bounds.point_b;
-    assert!((d.x.hypot(d.y) - bounds.upper).abs() <= 1e-12 * (1.0 + bounds.upper));
+    // Within rounding of the boundaries, which `upper` includes (#439).
+    let magnitude = 1.0 + bounds.point_a.length() + bounds.point_b.length();
+    assert!((d.x.hypot(d.y) - bounds.upper).abs() <= 1e-12 * magnitude);
     assert_eq!((found.item_a, found.item_b), items, "{found:?}");
     on_item(bounds.point_a, &a[found.item_a]);
     on_item(bounds.point_b, &b[found.item_b]);
@@ -259,7 +261,9 @@ fn overlap_is_found_between_items_of_different_bodies() {
         tol(),
     )
     .expect("bounded");
-    assert_eq!((found.bounds.lower, found.bounds.upper), (0.0, 0.0));
+    // Witnesses that meet in plan: `[0, e]`, `e` their rounding (#439).
+    assert_eq!(found.bounds.lower, 0.0, "{found:?}");
+    assert!(found.bounds.upper <= 1e-12, "{found:?}");
     assert_eq!((found.item_a, found.item_b), (1, 1), "{found:?}");
     match body_plan_overlap(
         PlacedBody::new(&a, turn()),
