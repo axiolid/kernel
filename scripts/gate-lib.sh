@@ -66,6 +66,7 @@ gate_acquire_slot() {
         export CARGO_TARGET_DIR
         mkdir -p "$CARGO_TARGET_DIR" || return 1
         echo "gate slot: $n of $slots (CARGO_TARGET_DIR=$CARGO_TARGET_DIR)"
+        gate_claim_slot_tree "$CARGO_TARGET_DIR" || return 1
         gate_limit_resources
         return 0
       fi
@@ -76,6 +77,30 @@ gate_acquire_slot() {
     fi
     sleep "${GATE_SLOT_POLL:-2}"
   done
+}
+
+# Make a slot build this worktree's sources, not another's. Cargo records a
+# workspace member's sources by path relative to the workspace and judges
+# them by modification time, so a slot last built from another worktree
+# reuses that build for every file not modified here since: different code,
+# and `env!("CARGO_MANIFEST_DIR")` naming the other tree. When the slot's
+# last tree is not this one, every file of this worktree is touched, so each
+# workspace member rebuilds from it; registry dependencies stay cached.
+# GATE_DRY=1 only reports what it would touch.
+gate_claim_slot_tree() {
+  local owner="$1/.gate-tree" tree last=""
+  tree="$(git rev-parse --show-toplevel)" || return 1
+  [ -f "$owner" ] && last="$(cat "$owner")"
+  if [ "$last" != "$tree" ]; then
+    local count
+    count="$(git -C "$tree" ls-files --cached --others --exclude-standard | wc -l)"
+    echo "gate slot: last built from ${last:-an unknown tree}, rebuilding this tree's $count files"
+    if [ -z "${GATE_DRY:-}" ]; then
+      git -C "$tree" ls-files -z --cached --others --exclude-standard |
+        (cd "$tree" && xargs -0 touch -c --) || return 1
+    fi
+  fi
+  printf '%s\n' "$tree" >"$owner"
 }
 
 # Share the machine between slots: each gate gets nproc / GATE_SLOTS build and

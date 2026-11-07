@@ -4,6 +4,17 @@ All notable changes to Axiolid are documented in this file.
 
 ## [Unreleased]
 
+### Fixed
+
+- A gate slot no longer reuses a build made from another worktree's sources
+  (#456). Cargo judges a workspace member's sources by path relative to the
+  workspace and by modification time, so a slot last built from another
+  worktree reused that build for every file not modified since, and
+  `env!("CARGO_MANIFEST_DIR")` named the other tree: the capability ledger
+  probe read another worktree's ledger. The gate now records which worktree
+  built each slot and, when it changes, touches every file of the new one so
+  each workspace member rebuilds; registry dependencies stay cached.
+
 ### Added
 
 - The gate runs its tests under `cargo-nextest` (#444), which runs the test

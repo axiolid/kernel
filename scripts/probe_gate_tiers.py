@@ -93,6 +93,20 @@ MUTANTS = [
         "    *) return 1 ;;\n",
         tiers("TierTests.test_undecidable_change_counts_as_infrastructure_changed"),
     ),
+    (
+        "a slot built from another tree is reused as it is",
+        LIB,
+        '  if [ "$last" != "$tree" ]; then\n',
+        "  if false; then\n",
+        tiers("SlotTests.test_a_slot_last_built_from_another_tree_rebuilds_this_one"),
+    ),
+    (
+        "a slot never records the tree it built",
+        LIB,
+        '  printf \'%s\\n\' "$tree" >"$owner"\n',
+        "  :\n",
+        tiers("SlotTests.test_a_slot_last_built_from_another_tree_rebuilds_this_one"),
+    ),
 ]
 
 probe_lib.main(MUTANTS, tests=AFFECTED_TESTS, command=(), timeout=900, baseline=False)

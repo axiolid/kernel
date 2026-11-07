@@ -244,6 +244,23 @@ class SlotTests(GateCase):
         self.assertEqual(code, 0, out)
         self.assertNotIn("taken", out)
 
+    def test_a_slot_last_built_from_another_tree_rebuilds_this_one(self):
+        slot = self.dir / "root" / "slot-1"
+        slot.mkdir(parents=True)
+        (slot / ".gate-tree").write_text("/elsewhere\n")
+        code, out = self.run_gate(GATE_SLOTS="1")
+        self.assertEqual(code, 0, out)
+        self.assertIn("last built from /elsewhere, rebuilding this tree's", out)
+        # The slot now belongs to this tree: the next gate here reuses it.
+        code, out = self.run_gate(GATE_SLOTS="1")
+        self.assertEqual(code, 0, out)
+        self.assertNotIn("rebuilding", out)
+
+    def test_a_new_slot_rebuilds_this_tree(self):
+        code, out = self.run_gate(GATE_SLOTS="1")
+        self.assertEqual(code, 0, out)
+        self.assertIn("last built from an unknown tree, rebuilding", out)
+
     def test_bad_slot_count_is_refused(self):
         for bad in ("0", "x", "-1"):
             with self.subTest(slots=bad):
