@@ -66,6 +66,7 @@
 //! samples; its 3D chord bound is then known only for a straight edge, and a
 //! curved one is reported unbounded by name.
 
+use super::support::Support;
 use super::view::Pcurve;
 use axiolid_contracts::{GeomError, GeomResult};
 use axiolid_core::{Point2, Scalar, Tolerance, Vec3};
@@ -130,7 +131,8 @@ struct SplineSearch {
 }
 
 impl<'s> SurfaceInverter<'s> {
-    pub(super) fn new(surface: &'s Surface, tolerance: Tolerance) -> GeomResult<Self> {
+    pub(super) fn new(support: Support<'s>, tolerance: Tolerance) -> GeomResult<Self> {
+        let Support::Surface(surface) = support;
         let Surface::BSpline(spline) = surface else {
             return Ok(Self {
                 surface,
@@ -490,9 +492,10 @@ impl FaceBound<'_> {
     /// across the lens is at most `2 W` long, and the surface strays from
     /// that segment's chord by `q(2 W) / 8` at most.
     fn lens(&self, a: Point2, b: Point2, arc: Scalar, near: Scalar) -> Option<Scalar> {
+        let Support::Surface(surface) = self.surface;
         let oracle = self.oracle.as_ref()?;
         let m = (a + b) * 0.5;
-        let (su, sv) = axiolid_reference::surface::partials(self.surface, m.x, m.y).ok()?;
+        let (su, sv) = axiolid_reference::surface::partials(surface, m.x, m.y).ok()?;
         let (alpha, beta) = (su.length(), sv.length());
         if !(alpha > 0.0 && beta > 0.0 && alpha.is_finite() && beta.is_finite()) {
             return None;
@@ -500,7 +503,7 @@ impl FaceBound<'_> {
         // The scaled Gram matrix is [[1, c], [c, 1]]: eigenvalues 1 +- c.
         let c = (su.dot(sv) / (alpha * beta)).abs();
         let sigma_m = (1.0 - c).max(0.0).sqrt();
-        let ((u0, u1), (v0, v1)) = parameter_domain(self.surface);
+        let ((u0, u1), (v0, v1)) = parameter_domain(surface);
         let mut sigma = 0.5 * sigma_m;
         for _ in 0..LENS_ATTEMPTS {
             if sigma.is_nan() || sigma <= 0.0 {
@@ -1003,7 +1006,8 @@ mod tests {
             },
             radius: 0.3,
         });
-        let inverter = SurfaceInverter::new(&surface, Tolerance::MILLIMETRE).unwrap();
+        let inverter =
+            SurfaceInverter::new(Support::Surface(&surface), Tolerance::MILLIMETRE).unwrap();
         let quarter = core::f64::consts::FRAC_PI_2;
         let turn = |d: Scalar| [Point2::new(0.0, 0.0), Point2::new(d, 0.1)];
         assert!(turns_within_quarter(&inverter, &turn(0.99 * quarter)));
@@ -1039,7 +1043,8 @@ mod tests {
             knot_spec: axiolid_curve::KnotSpec::Unspecified,
             self_intersect: None,
         });
-        let inverter = SurfaceInverter::new(&surface, Tolerance::MILLIMETRE).unwrap();
+        let inverter =
+            SurfaceInverter::new(Support::Surface(&surface), Tolerance::MILLIMETRE).unwrap();
         for (u, v) in [(0.31, 0.77), (0.5, 0.0), (0.9, 0.42)] {
             let point = axiolid_reference::surface::evaluate(&surface, u, v).unwrap();
             let uv = inverter.invert(point).unwrap();
@@ -1082,7 +1087,9 @@ mod tests {
             knot_spec: axiolid_curve::KnotSpec::Unspecified,
             self_intersect: None,
         });
-        let inverter = SurfaceInverter::new(&bump, Tolerance::new(1e-4, 1e-9).unwrap()).unwrap();
+        let inverter =
+            SurfaceInverter::new(Support::Surface(&bump), Tolerance::new(1e-4, 1e-9).unwrap())
+                .unwrap();
         let point = axiolid_reference::surface::evaluate(&bump, 0.5, 0.5).unwrap();
         let uv = inverter
             .invert(point)

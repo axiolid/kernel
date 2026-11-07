@@ -32,6 +32,7 @@
 use axiolid_contracts::{GeomError, GeomResult};
 use axiolid_core::{Point2, Scalar, Vec3};
 
+use super::support::Support;
 use super::view::Pcurve;
 
 /// Why a shared sample has no place on a neighbouring pcurve.
@@ -83,20 +84,16 @@ fn uniform(pcurve: &Pcurve<'_>, i: usize, n: usize) -> Scalar {
 }
 
 /// The pcurve's point at `t` and the surface point over it.
-fn image(
-    pcurve: &Pcurve<'_>,
-    surface: &axiolid_surface::Surface,
-    t: Scalar,
-) -> GeomResult<(Point2, Vec3)> {
+fn image(pcurve: &Pcurve<'_>, surface: Support<'_>, t: Scalar) -> GeomResult<(Point2, Vec3)> {
     let p = axiolid_reference::curve::evaluate2(pcurve.curve, t)?;
-    Ok((p, axiolid_reference::surface::evaluate(surface, p.x, p.y)?))
+    Ok((p, surface.evaluate(p.x, p.y)?))
 }
 
 /// Locate `targets` (both ends included, in the use's direction) on
 /// `pcurve` over `surface`, or refuse by name.
 pub(super) fn locate_samples(
     pcurve: &Pcurve<'_>,
-    surface: &axiolid_surface::Surface,
+    surface: Support<'_>,
     targets: &[Vec3],
     limits: Limits,
 ) -> GeomResult<Located> {
@@ -174,7 +171,7 @@ pub(super) fn locate_samples(
 /// is not.
 fn search(
     pcurve: &Pcurve<'_>,
-    surface: &axiolid_surface::Surface,
+    surface: Support<'_>,
     (before, target): (Vec3, Vec3),
     previous: Scalar,
     (i, n): (usize, usize),
@@ -291,6 +288,7 @@ fn minimise(
 
 #[cfg(test)]
 mod tests {
+    use super::Support;
     use super::*;
     use axiolid_core::{Frame3, Interval, Point3};
     use axiolid_curve::{Curve2, Polyline2};
@@ -332,7 +330,7 @@ mod tests {
         let curve = line();
         locate_samples(
             &pcurve(&curve),
-            &plane(),
+            Support::Surface(&plane()),
             &targets(xs),
             Limits {
                 interior: limit,
@@ -369,10 +367,16 @@ mod tests {
             interior: 1e-2,
             end: 1e-2,
         };
-        locate_samples(&pcurve(&curve), &plane(), &targets, limits).unwrap();
+        locate_samples(
+            &pcurve(&curve),
+            Support::Surface(&plane()),
+            &targets,
+            limits,
+        )
+        .unwrap();
         let error = locate_samples(
             &pcurve(&curve),
-            &plane(),
+            Support::Surface(&plane()),
             &targets,
             Limits {
                 interior: 2e-3,
@@ -394,7 +398,7 @@ mod tests {
         let at = |interior, end| {
             locate_samples(
                 &pcurve(&curve),
-                &plane(),
+                Support::Surface(&plane()),
                 &targets,
                 Limits { interior, end },
             )
@@ -430,7 +434,7 @@ mod tests {
         let xs: Vec<Scalar> = (0..=200).map(|i| i as Scalar / 200.0).collect();
         let error = locate_samples(
             &pcurve(&curve),
-            &plane(),
+            Support::Surface(&plane()),
             &targets(&xs),
             Limits {
                 interior: 1.0,
@@ -461,7 +465,7 @@ mod tests {
         let xs: Vec<Scalar> = (0..=400).map(|i| i as Scalar / 400.0).collect();
         let located = locate_samples(
             &pcurve(&curve),
-            &plane(),
+            Support::Surface(&plane()),
             &targets(&xs),
             Limits {
                 interior: 1e-9,
@@ -488,7 +492,7 @@ mod tests {
         let xs = [1.0, 0.6, 0.3, 0.0];
         let located = locate_samples(
             &reversed,
-            &plane(),
+            Support::Surface(&plane()),
             &targets(&xs),
             Limits {
                 interior: 1e-9,
@@ -519,7 +523,7 @@ mod tests {
         let xs = [0.0, 0.1, 0.2, 0.3, 0.37, 0.5, 0.7, 0.9, 1.0];
         let located = locate_samples(
             &pcurve(&curve),
-            &plane(),
+            Support::Surface(&plane()),
             &targets(&xs),
             Limits {
                 interior: 1e-9,
@@ -550,7 +554,7 @@ mod tests {
         // the uniform parameters of the samples are not where they lie.
         let located = locate_samples(
             &pcurve(&curve),
-            &plane(),
+            Support::Surface(&plane()),
             &targets(&xs),
             Limits {
                 interior: 1e-9,
@@ -570,7 +574,7 @@ mod tests {
             .collect();
         let located = locate_samples(
             &pcurve(&curve),
-            &plane(),
+            Support::Surface(&plane()),
             &own,
             Limits {
                 interior: 1e-9,

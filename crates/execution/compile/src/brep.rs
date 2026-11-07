@@ -121,9 +121,9 @@
 //! a trim edge is sampled until its certified chord bound fits, both up to
 //! caps beyond which the bound is reported as it stands.
 
+use self::support::{Support, SupportOracle};
 use axiolid_contracts::{GeomError, GeomResult};
 use axiolid_core::{Point2, Scalar, Vec3};
-use axiolid_reference::bound::SurfaceBoundOracle;
 
 use crate::deviation::{Deviation, DeviationBound, DeviationPath};
 use axiolid_mesh::TriMesh;
@@ -140,6 +140,7 @@ use crate::weld::EdgeSplits;
 mod edges;
 mod inversion;
 mod locate;
+mod support;
 mod trim;
 mod view;
 
@@ -565,7 +566,7 @@ impl FaceContext<'_> {
 fn append_face(
     mesh: &mut TriMesh,
     ctx: &FaceContext<'_>,
-    face: &axiolid_topology::Face<&axiolid_surface::Surface>,
+    face: &axiolid_topology::Face<Support<'_>>,
     flip: bool,
     welded: &mut std::collections::HashMap<axiolid_topology::VertexId, u32>,
     cache: &mut EdgeSamples,
@@ -590,18 +591,20 @@ fn append_face(
                 (ctx.chord_error, ctx.endpoint_limit()),
                 |state| append_curved_face(state, ctx, face, surface, flip, &mut bound),
             )?;
-            deviation.add(
-                DeviationPath::BRepFace,
-                surface_family(surface),
-                bound.finish(),
-            );
+            deviation.add(DeviationPath::BRepFace, surface.family(), bound.finish());
             return Ok(());
         }
     }
     deviation.add(
         DeviationPath::BRepFace,
         "plane",
-        planar_face_bound(ctx, face, support, cache, &mesh.positions)?,
+        planar_face_bound(
+            ctx,
+            face,
+            support.and_then(Support::atomic),
+            cache,
+            &mesh.positions,
+        )?,
     );
     // An edge the edge pass sampled is taken with its samples, straight or
     // not (#336): the face then runs along it in the pieces the face
@@ -732,7 +735,7 @@ type SampledEdges<'a> = (&'a EdgeSamples, &'a [Vec3]);
 /// edge pass sampled contributes its interior samples too (#336).
 fn planar_rings(
     brep: &ResolvedBRep<'_>,
-    face: &axiolid_topology::Face<&axiolid_surface::Surface>,
+    face: &axiolid_topology::Face<Support<'_>>,
     samples: Option<SampledEdges<'_>>,
 ) -> GeomResult<Vec<Ring>> {
     let mut rings: Vec<Ring> = Vec::new();
@@ -950,16 +953,16 @@ fn loop_points(
 /// so those faces stay on the fast path. Every other surface family
 /// curves away from the boundary plane, and projecting it there is a
 /// silent modelling error.
-fn surface_is_planar(surface: &axiolid_surface::Surface) -> bool {
-    matches!(surface, axiolid_surface::Surface::Plane(_))
+fn surface_is_planar(surface: Support<'_>) -> bool {
+    matches!(surface.atomic(), Some(axiolid_surface::Surface::Plane(_)))
 }
 
 /// Whether a face with the support `surface` is meshed as a curved face:
 /// its surface curves, or it is a plane with an edge that follows a curve.
 fn takes_curved_path(
     brep: &ResolvedBRep<'_>,
-    face: &axiolid_topology::Face<&axiolid_surface::Surface>,
-    surface: &axiolid_surface::Surface,
+    face: &axiolid_topology::Face<Support<'_>>,
+    surface: Support<'_>,
 ) -> bool {
     !surface_is_planar(surface) || curved_plane(brep, face)
 }
@@ -971,10 +974,7 @@ fn takes_curved_path(
 /// shared by index with the wall across the edge, and its report is the
 /// edges' chord bounds plus each sample's distance from the plane. A face
 /// that declares no surface keeps the planar path.
-fn curved_plane(
-    brep: &ResolvedBRep<'_>,
-    face: &axiolid_topology::Face<&axiolid_surface::Surface>,
-) -> bool {
+fn curved_plane(brep: &ResolvedBRep<'_>, face: &axiolid_topology::Face<Support<'_>>) -> bool {
     face.bounds
         .iter()
         .filter_map(|bound| brep.loops().get(bound.loop_id.index()))
@@ -988,7 +988,7 @@ fn seed_grid_vertices(
     state: &mut CurvedMeshState<'_>,
     boundary: &CurvedBoundary,
     patch: &GridPatch,
-    surface: &axiolid_surface::Surface,
+    surface: Support<'_>,
 ) -> GeomResult<Option<(Vec<SurfaceVertex>, u32)>> {
     let columns = patch.nu.checked_add(1).ok_or(GeomError::BudgetExceeded {
         resource: "curved-face grid columns",
@@ -1043,7 +1043,7 @@ fn seed_grid_vertices(
             let u = patch.u_start + patch.du * iu as Scalar;
             let v = patch.v_start + patch.dv * iv as Scalar;
             let uv = Point2::new(u, v);
-            let point = axiolid_reference::surface::evaluate(surface, u, v)?;
+            let point = surface.evaluate(u, v)?;
             let mesh = state.push_face_position(point)?;
             let local = take_local_vertex(&mut next_local)?;
             grid.push(SurfaceVertex { uv, mesh, local });
@@ -1226,7 +1226,7 @@ const MAX_CURVED_FACE_VERTICES: usize = 1 << 18;
 /// Subdivide until the mapped midpoint is within tolerance of the chord.
 fn edge_sample_count(
     pcurve: &Pcurve<'_>,
-    surface: &axiolid_surface::Surface,
+    surface: Support<'_>,
     tolerance: Scalar,
 ) -> GeomResult<usize> {
     if !(tolerance.is_finite() && tolerance > 0.0) {
@@ -1237,7 +1237,7 @@ fn edge_sample_count(
     let domain = pcurve.span;
     let at = |t: Scalar| -> GeomResult<Vec3> {
         let p = axiolid_reference::curve::evaluate2(pcurve.curve, t)?;
-        axiolid_reference::surface::evaluate(surface, p.x, p.y)
+        surface.evaluate(p.x, p.y)
     };
     // Powers of two keep the count stable: a face arriving later computes
     // the same value from the same inputs.
@@ -1277,11 +1277,11 @@ fn edge_sample_count(
 /// triangles' bounds wide.
 fn certified_edge_count(
     pcurve: &Pcurve<'_>,
-    surface: &axiolid_surface::Surface,
+    surface: Support<'_>,
     tolerance: Scalar,
     n: usize,
 ) -> usize {
-    let Some(oracle) = SurfaceBoundOracle::new(surface) else {
+    let Some(oracle) = SupportOracle::new(surface) else {
         return n;
     };
     let (curve, domain) = (pcurve.curve, pcurve.span);
@@ -1363,7 +1363,7 @@ fn chord_bound_across_breaks(
 /// within `tolerance` (the terms [`certified_edge_count`] describes), or
 /// `None` when the bound cannot be had.
 fn span_fits(
-    oracle: &SurfaceBoundOracle<'_>,
+    oracle: &SupportOracle<'_>,
     (curve, breaks): (&axiolid_curve::Curve2, &[Scalar]),
     t0: Scalar,
     t1: Scalar,
@@ -1607,8 +1607,8 @@ fn distinct_steps(values: &mut Vec<Scalar>, start: Scalar, span: Scalar) -> Opti
 fn curved_boundary(
     state: &mut CurvedMeshState<'_>,
     ctx: &FaceContext<'_>,
-    face: &axiolid_topology::Face<&axiolid_surface::Surface>,
-    surface: &axiolid_surface::Surface,
+    face: &axiolid_topology::Face<Support<'_>>,
+    surface: Support<'_>,
     bound: &mut FaceBound<'_>,
 ) -> GeomResult<CurvedBoundary> {
     let brep = ctx.brep;
@@ -1681,7 +1681,7 @@ fn curved_boundary(
                     // 3D points, and they are interned under the edge.
                     let points: Vec<Vec3> = params
                         .iter()
-                        .map(|p| axiolid_reference::surface::evaluate(surface, p.x, p.y))
+                        .map(|p| surface.evaluate(p.x, p.y))
                         .collect::<GeomResult<_>>()?;
                     let edge = brep
                         .edges()
@@ -1844,8 +1844,8 @@ fn welded_vertex(
 fn append_curved_face(
     state: &mut CurvedMeshState<'_>,
     ctx: &FaceContext<'_>,
-    face: &axiolid_topology::Face<&axiolid_surface::Surface>,
-    surface: &axiolid_surface::Surface,
+    face: &axiolid_topology::Face<Support<'_>>,
+    surface: Support<'_>,
     flip: bool,
     bound: &mut FaceBound<'_>,
 ) -> GeomResult<()> {
@@ -1996,7 +1996,7 @@ fn local_boundary_edges(
 /// alone, as before, its bound then reported as it is.
 fn refine_curved_face(
     state: &mut CurvedMeshState<'_>,
-    surface: &axiolid_surface::Surface,
+    surface: Support<'_>,
     triangles: Vec<SurfaceTriangle>,
     next_local: u32,
     flip: bool,
@@ -2030,7 +2030,7 @@ fn refine_curved_face(
 #[allow(clippy::too_many_arguments)]
 fn refine_pass(
     state: &mut CurvedMeshState<'_>,
-    surface: &axiolid_surface::Surface,
+    surface: Support<'_>,
     mut triangles: Vec<SurfaceTriangle>,
     mut next_local: u32,
     flip: bool,
@@ -2164,7 +2164,7 @@ fn refine_pass(
 
 fn split_at_centroid(
     state: &mut CurvedMeshState<'_>,
-    surface: &axiolid_surface::Surface,
+    surface: Support<'_>,
     triangle: SurfaceTriangle,
     next_local: &mut u32,
     out: &mut Vec<SurfaceTriangle>,
@@ -2172,7 +2172,7 @@ fn split_at_centroid(
     let [a, b, c] = triangle.vertices;
     let uv = (a.uv + b.uv + c.uv) / 3.0;
     state.reserve_face_vertices(1)?;
-    let exact = axiolid_reference::surface::evaluate(surface, uv.x, uv.y)?;
+    let exact = surface.evaluate(uv.x, uv.y)?;
     let center = SurfaceVertex {
         uv,
         mesh: state.push_face_position(exact)?,
@@ -2202,7 +2202,7 @@ fn split_at_centroid(
 #[allow(clippy::too_many_arguments)]
 fn split_requested_edges(
     state: &mut CurvedMeshState<'_>,
-    surface: &axiolid_surface::Surface,
+    surface: Support<'_>,
     triangle: SurfaceTriangle,
     mask: u8,
     cache: &mut HashMap<LocalEdgeKey, SurfaceVertex>,
@@ -2355,7 +2355,7 @@ fn parameter_chart_center(points: &[Point2]) -> Option<Point2> {
 }
 
 fn unwrap_parameter_ring(
-    surface: &axiolid_surface::Surface,
+    surface: Support<'_>,
     ring: &mut [Point2],
     outer_anchor: Option<Point2>,
 ) -> GeomResult<()> {
@@ -2364,7 +2364,7 @@ fn unwrap_parameter_ring(
             "curved trim ring is empty".to_owned(),
         ));
     };
-    let (u_period, v_period) = surface_periods(surface);
+    let (u_period, v_period) = surface.periods();
     if let Some(anchor) = outer_anchor {
         let aligned = Point2::new(
             localized_parameter(anchor.x, first.x, u_period),
@@ -2404,14 +2404,14 @@ fn localized_parameter(base: Scalar, value: Scalar, period: Option<Scalar>) -> S
 
 fn curved_triangle_errors(
     mesh: &TriMesh,
-    surface: &axiolid_surface::Surface,
+    surface: Support<'_>,
     vertices: [SurfaceVertex; 3],
 ) -> GeomResult<([Scalar; 3], Scalar)> {
     let mut edge_errors = [0.0; 3];
     for (edge, edge_error) in edge_errors.iter_mut().enumerate() {
         let (a, b) = triangle_edge(vertices, edge);
         let uv = (a.uv + b.uv) * 0.5;
-        let exact = axiolid_reference::surface::evaluate(surface, uv.x, uv.y)?;
+        let exact = surface.evaluate(uv.x, uv.y)?;
         let chord = (mesh.positions[a.mesh as usize] + mesh.positions[b.mesh as usize]) * 0.5;
         *edge_error = (exact - chord).length();
         if !edge_error.is_finite() {
@@ -2422,7 +2422,7 @@ fn curved_triangle_errors(
     }
 
     let uv = (vertices[0].uv + vertices[1].uv + vertices[2].uv) / 3.0;
-    let exact = axiolid_reference::surface::evaluate(surface, uv.x, uv.y)?;
+    let exact = surface.evaluate(uv.x, uv.y)?;
     let linear = (mesh.positions[vertices[0].mesh as usize]
         + mesh.positions[vertices[1].mesh as usize]
         + mesh.positions[vertices[2].mesh as usize])
@@ -2438,14 +2438,14 @@ fn curved_triangle_errors(
 
 fn refinement_midpoint(
     state: &mut CurvedMeshState<'_>,
-    surface: &axiolid_surface::Surface,
+    surface: Support<'_>,
     a: SurfaceVertex,
     b: SurfaceVertex,
     cache: &mut HashMap<LocalEdgeKey, SurfaceVertex>,
     next_local: &mut u32,
 ) -> GeomResult<SurfaceVertex> {
     let uv = (a.uv + b.uv) * 0.5;
-    let exact = axiolid_reference::surface::evaluate(surface, uv.x, uv.y)?;
+    let exact = surface.evaluate(uv.x, uv.y)?;
     let key = local_edge_key(a, b);
     if let Some(existing) = cache.get(&key).copied() {
         let distance = (state.mesh.positions[existing.mesh as usize] - exact).length();
@@ -2492,7 +2492,7 @@ pub(crate) fn surface_family(surface: &axiolid_surface::Surface) -> &'static str
 /// polygon's corners are within that of the exact face's boundary.
 fn planar_face_bound(
     ctx: &FaceContext<'_>,
-    face: &axiolid_topology::Face<&axiolid_surface::Surface>,
+    face: &axiolid_topology::Face<Support<'_>>,
     support: Option<&axiolid_surface::Surface>,
     cache: &EdgeSamples,
     positions: &[Vec3],
@@ -2579,8 +2579,8 @@ fn segment_distance(point: Vec3, a: Vec3, b: Vec3) -> Scalar {
 
 /// The bound of one curved face, gathered while it is meshed (#232).
 struct FaceBound<'s> {
-    surface: &'s axiolid_surface::Surface,
-    oracle: Option<SurfaceBoundOracle<'s>>,
+    surface: Support<'s>,
+    oracle: Option<SupportOracle<'s>>,
     /// The worst triangle bound: interpolation plus vertex offsets.
     interior: Scalar,
     /// The worst trim lens or pcurve gap term.
@@ -2589,8 +2589,8 @@ struct FaceBound<'s> {
 }
 
 impl<'s> FaceBound<'s> {
-    fn new(surface: &'s axiolid_surface::Surface) -> Self {
-        let oracle = SurfaceBoundOracle::new(surface);
+    fn new(surface: Support<'s>) -> Self {
+        let oracle = SupportOracle::new(surface);
         Self {
             surface,
             unbounded: oracle
@@ -2650,11 +2650,11 @@ impl<'s> FaceBound<'s> {
     }
 
     /// A gap between one pcurve's end and the next one's start.
-    fn gap(&mut self, end: Point2, start: Point2, surface: &axiolid_surface::Surface) {
+    fn gap(&mut self, end: Point2, start: Point2, surface: Support<'_>) {
         if self.unbounded.is_some() || end == start {
             return;
         }
-        let (u_period, v_period) = surface_periods(surface);
+        let (u_period, v_period) = surface.periods();
         let near = Point2::new(
             localized_parameter(end.x, start.x, u_period),
             localized_parameter(end.y, start.y, v_period),
@@ -2673,7 +2673,7 @@ impl<'s> FaceBound<'s> {
     fn triangles(
         &mut self,
         mesh: &TriMesh,
-        surface: &axiolid_surface::Surface,
+        surface: Support<'_>,
         triangles: &[SurfaceTriangle],
     ) -> GeomResult<()> {
         if self.unbounded.is_some() {
@@ -2711,11 +2711,7 @@ impl<'s> FaceBound<'s> {
                 let value = match offsets.get(&key) {
                     Some(&value) => value,
                     None => {
-                        let exact = axiolid_reference::surface::evaluate(
-                            surface,
-                            vertex.uv.x,
-                            vertex.uv.y,
-                        )?;
+                        let exact = surface.evaluate(vertex.uv.x, vertex.uv.y)?;
                         let value = (mesh.positions[vertex.mesh as usize] - exact).length();
                         offsets.insert(key, value);
                         value
@@ -2804,7 +2800,7 @@ impl<'s> FaceBound<'s> {
     fn triangle_bound(
         &self,
         mesh: &TriMesh,
-        surface: &axiolid_surface::Surface,
+        surface: Support<'_>,
         vertices: [SurfaceVertex; 3],
     ) -> GeomResult<Option<Scalar>> {
         if self.unbounded.is_some() {
@@ -2812,7 +2808,7 @@ impl<'s> FaceBound<'s> {
         }
         let mut offset: Scalar = 0.0;
         for vertex in vertices {
-            let exact = axiolid_reference::surface::evaluate(surface, vertex.uv.x, vertex.uv.y)?;
+            let exact = surface.evaluate(vertex.uv.x, vertex.uv.y)?;
             offset = offset.max((mesh.positions[vertex.mesh as usize] - exact).length());
         }
         Ok(self
@@ -2840,8 +2836,8 @@ const CERTIFIED_FACE_VERTICES: usize = 1 << 15;
 /// Scales for u and v that make them about equally long on the surface:
 /// the bounds of `|S_u|` and `|S_v|` over the trim's box, or unit scales
 /// when the surface has none.
-fn parameter_metric(surface: &axiolid_surface::Surface, uv: &[Point2]) -> (Scalar, Scalar) {
-    let Some(oracle) = SurfaceBoundOracle::new(surface) else {
+fn parameter_metric(surface: Support<'_>, uv: &[Point2]) -> (Scalar, Scalar) {
+    let Some(oracle) = SupportOracle::new(surface) else {
         return (1.0, 1.0);
     };
     let lo = uv
@@ -3016,7 +3012,7 @@ mod tests {
             curve: &trim,
             key: 0,
         };
-        let error = edge_sample_count(&pcurve, &surface, 1.0e-20)
+        let error = edge_sample_count(&pcurve, Support::Surface(&surface), 1.0e-20)
             .expect_err("the boundary sampler must not return an unverified polyline");
         assert!(matches!(
             error,
@@ -3084,8 +3080,16 @@ mod tests {
             },
         ];
 
-        let mut bound = FaceBound::new(&surface);
-        refine_curved_face(&mut state, &surface, triangles, 4, false, &mut bound).unwrap();
+        let mut bound = FaceBound::new(Support::Surface(&surface));
+        refine_curved_face(
+            &mut state,
+            Support::Surface(&surface),
+            triangles,
+            4,
+            false,
+            &mut bound,
+        )
+        .unwrap();
 
         let shared = (0_u32, 1_u32);
         let uses = state
@@ -3195,7 +3199,7 @@ mod tests {
         let mut first_next = 2;
         let first = refinement_midpoint(
             &mut state,
-            &cylinder,
+            Support::Surface(&cylinder),
             a,
             b,
             &mut first_face_cache,
@@ -3207,7 +3211,7 @@ mod tests {
         let mut second_next = 2;
         let second = refinement_midpoint(
             &mut state,
-            &plane,
+            Support::Surface(&plane),
             a,
             b,
             &mut second_face_cache,
@@ -3295,7 +3299,7 @@ mod tests {
             curve: &spiral,
             key: 0,
         };
-        let mut bound = FaceBound::new(&surface);
+        let mut bound = FaceBound::new(Support::Surface(&surface));
         let params = [Point2::new(0.0, 0.0), Point2::new(0.5, 0.1)];
         bound.trim(&pcurve, &[0.0, 0.5], &params);
         assert_eq!(
@@ -3395,8 +3399,10 @@ mod tests {
             boundary: [false; 3],
             depth: 0,
         };
-        let mut bound = FaceBound::new(&surface);
-        bound.triangles(&mesh, &surface, &[triangle]).unwrap();
+        let mut bound = FaceBound::new(Support::Surface(&surface));
+        bound
+            .triangles(&mesh, Support::Surface(&surface), &[triangle])
+            .unwrap();
         assert!(bound.interior >= 0.01, "{}", bound.interior);
         assert!(bound.interior < 0.0101, "{}", bound.interior);
     }

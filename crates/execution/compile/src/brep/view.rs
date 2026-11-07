@@ -23,17 +23,17 @@
 //! pcurve handles of the B-rep, so an edge shared by several uses keeps the
 //! pcurve of the smallest handle ([`super::edges`]).
 
+use super::support::Support;
 use axiolid_brep::{Curve2Id, ExactBRep};
 use axiolid_contracts::{GeomError, GeomResult, Operation};
 use axiolid_core::Interval;
 use axiolid_curve::{Curve2, Curve3};
 use axiolid_model::{GeometryGraph, GeometryNode, NodeId};
-use axiolid_surface::Surface;
 use axiolid_topology::{BRep, Edge, EdgeUse, Face, Loop};
 use std::collections::{BTreeSet, HashMap};
 
 /// A B-rep whose supports are borrowed values.
-pub(crate) type ResolvedBRep<'a> = BRep<&'a Curve3, Pcurve<'a>, &'a Surface>;
+pub(crate) type ResolvedBRep<'a> = BRep<&'a Curve3, Pcurve<'a>, Support<'a>>;
 
 /// A pcurve with the parameter span one edge use runs over.
 #[derive(Debug, Clone, Copy, PartialEq)]
@@ -190,6 +190,7 @@ pub(crate) fn from_exact(exact: &ExactBRep) -> GeomResult<ResolvedBRep<'_>> {
                 exact
                     .surfaces()
                     .get(id.index())
+                    .map(Support::Surface)
                     .ok_or_else(|| missing("face surface"))
             })
             .transpose()?;
@@ -235,12 +236,12 @@ fn use_pcurve(graph: &GeometryGraph, id: NodeId) -> GeomResult<&Curve2> {
 fn face_surface<'g>(
     graph: &'g GeometryGraph,
     face: &Face<NodeId>,
-) -> GeomResult<Option<&'g Surface>> {
+) -> GeomResult<Option<Support<'g>>> {
     let Some(id) = face.surface else {
         return Ok(None);
     };
     match graph.get(id) {
-        Some(GeometryNode::Surface(s)) => Ok(Some(s)),
+        Some(GeometryNode::Surface(s)) => Ok(Some(Support::Surface(s))),
         // A relation (a ruled or swept surface) is a model node with no
         // `Surface` value to tessellate a face over; a refusal by name, not
         // a malformed graph (#402).
@@ -264,7 +265,7 @@ mod tests {
     use axiolid_core::{Frame3, Point2, Point3, Vec3};
     use axiolid_curve::{Polyline2, Polyline3};
     use axiolid_model::GeometryGraphBuilder;
-    use axiolid_surface::Plane;
+    use axiolid_surface::{Plane, Surface};
     use axiolid_topology::{FaceBound, Orientation, Shell, Vertex};
 
     fn pcurve(length: f64) -> Polyline2 {

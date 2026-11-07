@@ -57,7 +57,7 @@ MUTANTS = [
      "            bound.trim(&pcurve, &ts, &params);\n",
      "            bound.trim(&pcurve, &ts, &params);\n"
      "            for (&index, p) in shared.iter().zip(&params) {\n"
-     "                let exact = axiolid_reference::surface::evaluate(surface, p.x, p.y)?;\n"
+     "                let exact = surface.evaluate(p.x, p.y)?;\n"
      "                bound.trim += (state.mesh.positions[index as usize] - exact).length();\n"
      "            }\n"),
     ("the trim is bounded over the uniform parameters, not the located ones", B,

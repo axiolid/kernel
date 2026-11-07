@@ -55,6 +55,7 @@ use axiolid_topology::Orientation;
 
 use super::inversion::{self, EdgeTrace, SurfaceInverter};
 use super::locate::{locate_samples, Limits};
+use super::support::{Support, SupportOracle};
 use super::view::Pcurve;
 use super::{
     edge_sample_count, edge_samples, span_fits, takes_curved_path, trim_samples,
@@ -62,7 +63,6 @@ use super::{
     MAX_CURVED_EDGE_SEGMENTS,
 };
 use axiolid_mesh::TriMesh;
-use axiolid_reference::bound::SurfaceBoundOracle;
 
 /// What the faces using one edge need of it.
 struct EdgePlan<'g> {
@@ -90,7 +90,7 @@ enum Requirement {
 #[derive(Clone, Copy)]
 struct PcurveSource<'g> {
     pcurve: Pcurve<'g>,
-    surface: &'g axiolid_surface::Surface,
+    surface: Support<'g>,
     sense: Orientation,
 }
 
@@ -142,10 +142,7 @@ fn plan_edges<'g>(
     shells: &[(&axiolid_topology::Shell, bool)],
 ) -> GeomResult<BTreeMap<usize, EdgePlan<'g>>> {
     let brep = ctx.brep;
-    let mut faces: Vec<(
-        &axiolid_surface::Surface,
-        Vec<&axiolid_topology::EdgeUse<Pcurve<'g>>>,
-    )> = Vec::new();
+    let mut faces: Vec<(Support<'g>, Vec<&axiolid_topology::EdgeUse<Pcurve<'g>>>)> = Vec::new();
     for &(face_id, _) in shells.iter().flat_map(|(shell, _)| shell.faces.iter()) {
         let face = brep
             .faces()
@@ -296,7 +293,7 @@ fn planned_samples(
     loop {
         let points = trim_samples(&source.pcurve, n)?
             .iter()
-            .map(|p| axiolid_reference::surface::evaluate(source.surface, p.x, p.y))
+            .map(|p| source.surface.evaluate(p.x, p.y))
             .collect::<GeomResult<Vec<_>>>()?;
         if n >= MAX_CURVED_EDGE_SEGMENTS || located_within_budget(ctx, plan, source, &points)? {
             return Ok((points, source.sense, Err(inversion::THROUGH_PCURVE)));
@@ -322,11 +319,11 @@ fn located_within_budget(
     for other in &plan.uses {
         if other.pcurve.key == source.pcurve.key
             && other.sense == source.sense
-            && std::ptr::eq(other.surface, source.surface)
+            && other.surface.same(source.surface)
         {
             continue;
         }
-        let Some(oracle) = SurfaceBoundOracle::new(other.surface) else {
+        let Some(oracle) = SupportOracle::new(other.surface) else {
             continue;
         };
         let mut targets = points.to_vec();
