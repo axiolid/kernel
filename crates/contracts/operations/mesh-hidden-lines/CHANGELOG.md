@@ -44,12 +44,6 @@ caret rule for `0.x` versions.
   output is unchanged (ADR 0106, #385). Conformance gains the planar
   isometric cube and a two-group square sheet.
 
-### Changed
-
-- `OrthographicView` is renamed `View`, because a view can now be
-  perspective. The old name stays as a deprecated type alias, so existing code
-  compiles with a deprecation warning (ADR 0107, #387).
-
 ## [0.1.4] - 2026-11-07
 
 ### Added
