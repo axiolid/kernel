@@ -23,8 +23,8 @@ profiles, sweeps, B-reps and authored meshes, and hands booleans to whichever
 `MeshBoolean` provider it is given. `ReferenceExactCompiler` compiles the
 families it supports to exact B-reps, places instances under rigid
 transforms, unites, intersects and cuts placed extrusions, revolutions and
-booleans with the general exact boolean, clips them by half-spaces
-through the same boolean, and refuses the rest by name. `ReferenceMeshCompiler` also compiles curve
+booleans with the general exact boolean, clips them by half-spaces and
+intersections of half-spaces through the same boolean, and refuses the rest by name. `ReferenceMeshCompiler` also compiles curve
 nodes (atomic 2D and 3D curves, their trims, composites and offsets,
 open profiles, and their placements) to polylines within a certified chord
 bound (`PolylineCompiler`). This crate
@@ -78,6 +78,18 @@ owns graph traversal and dispatch; the construction algorithms themselves
   exact compiler reads them (ADR 0080), and the tolerance-free mesh boolean
   left them apart (#356, #357; ADR 0096). Bodies further apart are
   authored and kept.
+- An intersection of half-spaces, read through instances, is the tool of a
+  difference or an intersection in both compilers, and a half-space or such
+  a region on the left of an intersection with a solid clips it (an
+  intersection commutes). Each further half-space is built over the
+  stand-in so far, so the result does not depend on how far the stand-ins
+  reach, and a region of one is the single clip unchanged (#326, ADR 0080).
+  A boolean with an empty operand (a clip that leaves nothing, disjoint
+  solids' intersection) is decided by one identity table in both compilers
+  (`S - 0 = S`, `0 - T = 0`, `S & 0 = 0`, `S | 0 = S`). The mesh compiler's
+  root may be empty; the exact compiler's is refused as `Degenerate`, an
+  `ExactBRep` being unable to be empty. A boolean whose exact result and
+  mesh are both empty is certified at `0` (`deviation::EMPTY_RESULT`).
 
 ## Depends on
 
@@ -145,6 +157,8 @@ Latest release, 0.3.45 (2026-11-07):
   plus the planar faces between the two sides' cuts; the bound is closed form
   per cell and the mesh is unchanged. The openbimrs/ifc#443 deck, unbounded
   by name in 0.3.44, reports `Certified(4.88e-4)`, within its 1e-3 request.
+- `deviation::EMPTY_RESULT`: the detail of a boolean whose exact result is
+  empty and whose mesh is too, certified at `0` (#326).
 
 ### Changed
 
@@ -180,6 +194,22 @@ Latest release, 0.3.45 (2026-11-07):
 - An exact boolean whose result has a vertex off its edge's curve beyond
   what its report allows is refused by name (#445). It needs
   `axiolid-brep-boolean` with `BooleanError::VertexOffCurve`.
+- An intersection of half-spaces (read through instances) is the tool of a
+  difference or an intersection in both compilers, and so is a single
+  half-space on the left of an intersection with a solid, which commutes
+  (#326). Each further half-space's stand-in is sized by the stand-in so
+  far, so a region of one is the single clip it was, bit for bit. The mesh
+  stand-in of two or more passes the snap perturbations of cutting them
+  together (`SNAPPED_OPERANDS`) into the result's deviation. A region is cut
+  in its subject's frame too (ADR 0102), each leaf relative to it.
+- A half-space on its own, or in a boolean that is no clip, is refused by
+  name in the mesh compiler as `UnsupportedInput` (`half-space without a
+  subject to size it by: ...`, `boolean of a half-space that is not a
+  clip: ...`), where it was `Unsupported` with no input. The exact compiler
+  names the new cases: `exact intersection of half-spaces without a
+  subject: ...` and `exact symmetric difference with a half-space, which is
+  unbounded`. A symmetric difference's refusal now comes after the empty
+  operands' identities, so an operand's own refusal comes first.
 
 - A cell beside a mitre that 0.3.44 reported unbounded ("a cell beside a
   mitred seam on a curved piece, or with a section that changes across it")
@@ -280,5 +310,17 @@ Latest release, 0.3.45 (2026-11-07):
   0.2236), and a longitudinal offset at the mitre, which it reported at 3.6e-11
   while the exact walls stray 0.5 (now 0.5). Both may stop meeting the
   requested chord error.
+- A boolean with an operand that leaves nothing (a clip that misses its
+  subject, an intersection of disjoint solids) is decided by an identity in
+  both compilers (`S - 0 = S`, `0 - T = 0`, `S & 0 = 0`, `S | 0 = S`;
+  #326). It was refused as `tool: mesh has no triangles` or `subject: mesh
+  has no triangles` (mesh), or as `Degenerate` (exact). The exact compiler
+  still refuses an empty root, `Degenerate`, since an `ExactBRep` cannot be
+  empty; the mesh compiler returns an empty mesh, `MeshClosure::Solid`, as
+  before. A skin a subject has pending (#400) passes through an identity to
+  the root of its chain, where the referee decides it. A boolean whose
+  exact result and mesh are both empty reports `EMPTY_RESULT` at `0`; an
+  empty exact result against a mesh with triangles, or the reverse, is
+  unbounded by name.
 
 Full history: [`crates/execution/compile/CHANGELOG.md`](https://github.com/axiolid/kernel/blob/main/crates/execution/compile/CHANGELOG.md)

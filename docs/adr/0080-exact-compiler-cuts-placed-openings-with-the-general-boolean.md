@@ -927,3 +927,54 @@ and at 1e-7 and `Tolerance::ZERO` it was returned with a vertex 3.0e-7 and
   the sub-ulp tolerance refused by name), `tests/tangent_contact.rs` (a far
   tangent hole refused by name); probe
   `scripts/probe_result_consistency_mutants.py`.
+
+## Amendment 2026-11-07: half-space regions as clip tools, and empty operands (#326)
+
+A wall less the intersection of two roof planes was refused by name in both
+compilers ("exact boolean whose subject is a half-space"; the mesh compiler
+`Unsupported` with no input), and an empty intermediate (a clip that misses
+its subject, disjoint solids' intersection) was refused as `tool: mesh has no
+triangles` or `Degenerate` where it should be the identity of the boolean it
+sits in. The interim lowering `wall - ((wall & H1) & H2)` already compiled
+exactly since #378; the gaps were the region as a tool and the empty operand.
+
+- **Regions.** A region is a half-space (unbounded, bounded, or along its
+  placement's `z`) or an intersection of regions, read through instances. It
+  is accepted as the tool of a difference or an intersection, and, an
+  intersection being commutative, as the left operand of an intersection
+  with a solid, in both compilers. The exact stand-in is built leaf by leaf:
+  the first crossing leaf over the subject's envelope, as a single clip is,
+  each further leaf over the box of the stand-in so far and intersected with
+  it through `boolean_with_report`, every leaf deciding early on that box (it
+  misses it, or it holds all of it); then one boolean of the subject with the
+  tool. The margin argument of #234 holds at each step, so the result does
+  not depend on the margins, and a region of one leaf is today's path bit for
+  bit. The mesh compiler mirrors it: the first leaf's slab is sized by the
+  subject (`clip_tool_mesh`), each further by the stand-in so far, and they
+  are cut together with `boolean_of(Intersection)`, whose snap perturbations
+  (`SNAPPED_OPERANDS`) the result carries. The leaves are bounded by the
+  graph's size.
+- **Empty operands.** One identity table (`src/empty.rs`) is read by both
+  compilers: `S - 0 = S`, `0 - T = 0`, `S & 0 = 0`, `S | 0 = S`, `S ^ 0 = S`.
+  The exact compiler holds an empty node as `Body::Empty` and absorbs it; an
+  empty root stays a named `Degenerate`, since an `ExactBRep` cannot be empty
+  (`ExactBRepError::Empty`). The mesh compiler decides an identity before any
+  frame or cut, and a skin the subject has pending passes through to the root
+  of its chain. The deviation report certifies "both empty" at `0`
+  (`EMPTY_RESULT`) and names the two mismatches unbounded.
+- **Rejected.** Rewriting `S - R` to `S - (S & R)`: it works, but costs one
+  more boolean whose faces all coincide with the subject's. Sizing every leaf
+  over the subject's envelope: the far faces then coincide, the report stops
+  reading exact (`linear` 2.2e-15) and the wall takes 22 ms instead of 12 ms.
+  Returning an empty `ExactBRep`: a change of the representation for a value
+  no consumer asked for. Refusing regions by name: the result is exactly
+  computable.
+- **Measured.** `wall - (H1 & H2)` for `H1` above `z = 2 + 0.2 x` and `H2`
+  `x <= 1` on a `6 x 0.3 x 3` wall turned 0.6 rad at (12.5, -4, 3.2): 3.96 in
+  both compilers with an exact report, the deviation certified, with
+  `MESH_TO_EXACT`. At a site (6e5, 5.6e6, 200): exact 3.960000001439, mesh
+  3.9599999937 (relative to a local origin).
+- **Tests and probe.** `tests/half_space_region.rs`, `tests/empty_operand.rs`,
+  `tests/turned_clip.rs` (a pending skin under an empty tool), the unit tests
+  of `empty.rs` and `deviation::boolean`; probe
+  `scripts/probe_half_space_region_mutants.py`.

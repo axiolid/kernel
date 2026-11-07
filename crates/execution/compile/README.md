@@ -7,8 +7,8 @@ profiles, sweeps, B-reps and authored meshes, and hands booleans to whichever
 `MeshBoolean` provider it is given. `ReferenceExactCompiler` compiles the
 families it supports to exact B-reps, places instances under rigid
 transforms, unites, intersects and cuts placed extrusions, revolutions and
-booleans with the general exact boolean, clips them by half-spaces
-through the same boolean, and refuses the rest by name. `ReferenceMeshCompiler` also compiles curve
+booleans with the general exact boolean, clips them by half-spaces and
+intersections of half-spaces through the same boolean, and refuses the rest by name. `ReferenceMeshCompiler` also compiles curve
 nodes (atomic 2D and 3D curves, their trims, composites and offsets,
 open profiles, and their placements) to polylines within a certified chord
 bound (`PolylineCompiler`). This crate
@@ -70,3 +70,15 @@ cargo add axiolid-mesh-compile
   exact compiler reads them (ADR 0080), and the tolerance-free mesh boolean
   left them apart (#356, #357; ADR 0096). Bodies further apart are
   authored and kept.
+- An intersection of half-spaces, read through instances, is the tool of a
+  difference or an intersection in both compilers, and a half-space or such
+  a region on the left of an intersection with a solid clips it (an
+  intersection commutes). Each further half-space is built over the
+  stand-in so far, so the result does not depend on how far the stand-ins
+  reach, and a region of one is the single clip unchanged (#326, ADR 0080).
+  A boolean with an empty operand (a clip that leaves nothing, disjoint
+  solids' intersection) is decided by one identity table in both compilers
+  (`S - 0 = S`, `0 - T = 0`, `S & 0 = 0`, `S | 0 = S`). The mesh compiler's
+  root may be empty; the exact compiler's is refused as `Degenerate`, an
+  `ExactBRep` being unable to be empty. A boolean whose exact result and
+  mesh are both empty is certified at `0` (`deviation::EMPTY_RESULT`).

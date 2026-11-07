@@ -141,3 +141,15 @@ the same slab placed, and with exactly turned openings, opens every opening),
   `src/skin.rs`.
 - `src/referee.rs` (`boolean`, its `rounding` parameter).
 - `crates/algorithms/query/inspect/src/sheet.rs`.
+
+## Amendment 2026-11-07: regions in the subject's frame (#326)
+
+D1 covers a region, an intersection of half-spaces used as a clip's tool
+(ADR 0080, #326): each leaf is placed relative to the subject's frame by
+`frame::relative`, the stand-in is built there leaf by leaf and cut with the
+subject, and a leaf with no finite form in that frame, or a region that
+leaves nothing of the subject, falls back to the world cut as before. A
+region of one leaf is the single clip of D1, unchanged. Without it a region
+of two half-spaces on a turned wall is cut in the world frame, and its mesh
+is not the whole's cut in its own frame, placed (it is, bit for bit, with
+it: `tests/half_space_region.rs`, five angles from 0.3 to 2.5 rad).

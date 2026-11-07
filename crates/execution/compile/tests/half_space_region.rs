@@ -436,6 +436,10 @@ fn near_named(name: &str, g: Graph, root: NodeId, expected: f64) -> (ExactBRep, 
         (measured - expected).abs() <= 1e-9 * expected,
         "{name}: volume {measured}, expected {expected}"
     );
+    // Each leaf is sized by the stand-in so far: sized over the subject's
+    // envelope, the far faces of two stand-ins coincide and are read within
+    // tolerance.
+    assert!(exact, "{name}: the report reads exact");
     (body, exact)
 }
 
