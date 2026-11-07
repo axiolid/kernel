@@ -47,6 +47,12 @@
 //! to its own vertices, each open stretch lies wholly in `S` or wholly
 //! outside it, and (1) and (2) put the start of each in `S`.
 //!
+//! Proposals are a choice only, so they may reach further without
+//! weakening the proof. [`Reach`] lets [`proposals`] pass `depth` over a
+//! needle no wider than `Reach::needle` whose spanned vertices project
+//! onto the chord, or over a vertex exactly on it (#428). [`crate::fill`]
+//! sets it; [`chords`] reaches none, so the exact route is unchanged.
+//!
 //! The trimmed hulls and the chord hulls are rounded exactly as the edge
 //! hulls were: each vertex a vertex sum, rounded once, and containment in
 //! the chord's hull is decided by exact orientations of those rounded
@@ -91,7 +97,7 @@ fn between(a: Point2, b: Point2, c: Point2) -> bool {
 }
 
 /// Whether `p` lies on the closed segment `a b`, exactly.
-fn on_segment(a: Point2, b: Point2, p: Point2) -> bool {
+pub(crate) fn on_segment(a: Point2, b: Point2, p: Point2) -> bool {
     orient(a, b, p) == Sign::Zero
         && p.x >= a.x.min(b.x)
         && p.x <= a.x.max(b.x)
@@ -177,16 +183,101 @@ pub(crate) fn chords(
     depth: f64,
     index: &Index<'_>,
 ) -> Vec<Chord> {
-    proposals(boundary, side, depth)
+    proposals(boundary, side, Reach::within(depth))
         .into_iter()
         .filter(|&chord| proved(ring, boundary, chord, side, index))
         .collect()
 }
 
+/// How far [`proposals`] reach from a chord's line (#428).
+#[derive(Debug, Clone, Copy)]
+pub(crate) struct Reach {
+    /// A chord is proposed while every vertex it spans lies within about
+    /// this distance of its line (an `f64` bound, a choice only).
+    pub(crate) depth: f64,
+    /// Past `depth`, a chord is still proposed over a needle: when it is
+    /// at most this long and the vertices it spans project onto it, or
+    /// when the vertex it is extended over lies exactly on it, between its
+    /// ends. Zero proposes none.
+    pub(crate) needle: f64,
+}
+
+impl Reach {
+    /// Chords within `depth` of the vertices they span, and no needle.
+    pub(crate) const fn within(depth: f64) -> Self {
+        Self { depth, needle: 0.0 }
+    }
+}
+
+/// The extent along a chord of the vertices it spans, from its start;
+/// empty (`lo > hi`) when it spans none.
+#[derive(Debug, Clone, Copy)]
+struct Along {
+    lo: f64,
+    hi: f64,
+}
+
+impl Along {
+    const NONE: Self = Self {
+        lo: f64::INFINITY,
+        hi: f64::NEG_INFINITY,
+    };
+
+    /// The extent along `u v` of `w` and of what `u w` and `w v` span,
+    /// each part given with its extent along its own chord and its bound
+    /// either side of it: the corners of that box, projected. A superset,
+    /// whatever the angle between the chords; NaN when `u` and `v`
+    /// coincide.
+    fn merged(u: Point2, w: Point2, v: Point2, first: (Self, f64), second: (Self, f64)) -> Self {
+        let (dx, dy) = (v.x - u.x, v.y - u.y);
+        let len = dx.hypot(dy);
+        if len == 0.0 || len.is_nan() {
+            return Self {
+                lo: f64::NAN,
+                hi: f64::NAN,
+            };
+        }
+        let along = |q: Point2| ((q.x - u.x) * dx + (q.y - u.y) * dy) / len;
+        let (mut lo, mut hi) = (along(w), along(w));
+        for (from, to, (part, side)) in [(u, w, first), (w, v, second)] {
+            if part.lo > part.hi {
+                continue;
+            }
+            let (ex, ey) = (to.x - from.x, to.y - from.y);
+            let l = ex.hypot(ey);
+            let (cx, cy) = (ex / l, ey / l);
+            for s in [part.lo, part.hi] {
+                for h in [-side, side] {
+                    let corner = Point2::new(from.x + s * cx - h * cy, from.y + s * cy + h * cx);
+                    lo = lo.min(along(corner));
+                    hi = hi.max(along(corner));
+                }
+            }
+        }
+        Self { lo, hi }
+    }
+}
+
+/// Whether the chord `u v`, deeper than `reach.depth`, is still proposed
+/// over `w` (#428): `w` lies exactly on it between its ends, or it is at
+/// most `reach.needle` long and `spans`, the extent of what it spans,
+/// lies on it.
+fn needle(reach: Reach, u: Point2, w: Point2, v: Point2, spans: Along) -> bool {
+    if reach.needle.is_nan() || reach.needle <= 0.0 {
+        return false;
+    }
+    if orient(u, w, v) == Sign::Zero && between(u, w, v) {
+        return true;
+    }
+    let len = (v.x - u.x).hypot(v.y - u.y);
+    len <= reach.needle && spans.lo >= 0.0 && spans.hi <= len
+}
+
 /// The chords [`chords`] proposes, before their proof.
-pub(crate) fn proposals(boundary: &Boundary, side: Sign, depth: f64) -> Vec<Chord> {
+pub(crate) fn proposals(boundary: &Boundary, side: Sign, reach: Reach) -> Vec<Chord> {
     let p = &boundary.points;
     let n = p.len();
+    let depth = reach.depth;
     if side == Sign::Zero || n < 4 || depth.is_nan() || depth <= 0.0 {
         return Vec::new();
     }
@@ -196,25 +287,30 @@ pub(crate) fn proposals(boundary: &Boundary, side: Sign, depth: f64) -> Vec<Chor
     let start = (0..n).find(|&i| turn(i) == away).unwrap_or(0);
     let at = |t: usize| p[(start + t) % n];
     // Positions along the ring from `start`, with a bound on how far the
-    // chord ending at each lies from the vertices it spans.
-    let mut stack: Vec<(usize, f64)> = vec![(0, 0.0)];
+    // chord ending at each lies from the vertices it spans, and their
+    // extent along it.
+    let mut stack: Vec<(usize, f64, Along)> = vec![(0, 0.0, Along::NONE)];
     for t in 1..=n {
         let v = at(t);
         let mut bound = 0.0_f64;
+        let mut along = Along::NONE;
         while stack.len() >= 2 {
-            let (u, _) = stack[stack.len() - 2];
-            let (w, below) = stack[stack.len() - 1];
+            let (u, _, _) = stack[stack.len() - 2];
+            let (w, below, before) = stack[stack.len() - 1];
             if orient(at(u), at(w), v) == away {
                 break;
             }
             let wider = below.max(bound) + off_line(at(w), at(u), v);
-            if wider.is_nan() || wider > depth {
+            let spans = Along::merged(at(u), at(w), v, (before, below), (along, bound));
+            let within = !wider.is_nan() && wider <= depth;
+            if !(within || needle(reach, at(u), at(w), v, spans)) {
                 break;
             }
             stack.pop();
             bound = wider;
+            along = spans;
         }
-        stack.push((t, bound));
+        stack.push((t, bound, along));
     }
     stack
         .windows(2)
@@ -603,5 +699,126 @@ mod tests {
             kept,
             points(&[(0.0, 0.0), (0.7, -0.4), (2.0, 0.0), (2.0, 2.0), (0.0, 2.0)])
         );
+    }
+
+    /// A room's bottom wall of needles `(mouth, depth, lean)` (the tip
+    /// `lean` past the middle of its mouth), counter-clockwise.
+    fn needle_wall(needles: &[(f64, f64, f64)]) -> Vec<Point2> {
+        let mut ring = vec![Point2::new(0.0, 0.0)];
+        let mut x = 0.0;
+        for &(mouth, depth, lean) in needles {
+            ring.push(Point2::new(x + 0.5 * mouth + lean, depth));
+            x += mouth;
+            ring.push(Point2::new(x, 0.0));
+        }
+        ring.extend([Point2::new(x, 3.0), Point2::new(0.0, 3.0)]);
+        ring
+    }
+
+    /// The proposals for a disc of `0.2`, reaching needles up to `needle`
+    /// wide, the set inside the room (chords outside it).
+    fn reached(ring: &[Point2], needle: f64) -> Vec<(usize, usize)> {
+        proposals(&merged(ring), Sign::Negative, Reach { depth: 0.2, needle })
+            .iter()
+            .map(|c| (c.from, c.span))
+            .collect()
+    }
+
+    #[test]
+    fn a_wall_of_needles_deeper_than_the_reach_is_one_proposal() {
+        // 100 needles 0.25 deep, 2e-4 wide: one chord along the valleys.
+        let wall = needle_wall(&[(2e-4, 0.25, 0.0); 100]);
+        assert_eq!(reached(&wall, 0.04), vec![(0, 200)]);
+        // Without the needle reach, as `chords` proposes: none.
+        assert_eq!(reached(&wall, 0.0), vec![]);
+    }
+
+    #[test]
+    fn needles_too_wide_or_leaning_past_their_mouth_are_not_proposed() {
+        assert_eq!(
+            reached(&needle_wall(&[(0.041, 0.25, 0.0); 10]), 0.04),
+            vec![]
+        );
+        // The middle needle's tip lies past its mouth: its neighbours are
+        // proposed alone, and no chord spans it.
+        let leaning = needle_wall(&[(2e-4, 0.25, 0.0), (2e-4, 0.25, 1.5e-4), (2e-4, 0.25, 0.0)]);
+        assert_eq!(reached(&leaning, 0.04), vec![(0, 2), (4, 2)]);
+        // A pocket 1 m wide and deep: no needle.
+        assert_eq!(reached(&needle_wall(&[(1.0, 1.0, 0.0)]), 0.04), vec![]);
+    }
+
+    #[test]
+    fn a_proposal_past_the_reach_lies_in_its_slab() {
+        // Walls of needles deeper than the reach, each side a polyline that
+        // leans by up to half the mouth either way: every proposal deeper
+        // than the reach holds its spanned vertices between the
+        // perpendiculars at its ends.
+        let mut state = 0x0428_u64;
+        let mut next = || {
+            state = state
+                .wrapping_mul(6_364_136_223_846_793_005)
+                .wrapping_add(1_442_695_040_888_963_407);
+            (state >> 11) as f64 / (1u64 << 53) as f64
+        };
+        let mut deep = 0;
+        for _ in 0..400 {
+            let mut ring = vec![Point2::new(0.0, 0.0)];
+            let mut x = 0.0;
+            for _ in 0..1 + (next() * 12.0) as usize {
+                let mouth = 1e-3 + 0.045 * next();
+                let depth = 0.25 + 0.3 * next();
+                let sides = [(next() * 3.0) as usize, (next() * 3.0) as usize];
+                let lean = |u: f64| (u - 0.5) * mouth;
+                for k in 1..=sides[0] {
+                    let f = k as f64 / (sides[0] + 1) as f64;
+                    ring.push(Point2::new(
+                        x + f * 0.5 * mouth + lean(next()) * f,
+                        f * depth,
+                    ));
+                }
+                ring.push(Point2::new(x + 0.5 * mouth + lean(next()), depth));
+                for k in (1..=sides[1]).rev() {
+                    let f = k as f64 / (sides[1] + 1) as f64;
+                    ring.push(Point2::new(
+                        x + mouth - f * 0.5 * mouth + lean(next()) * f,
+                        f * depth,
+                    ));
+                }
+                x += mouth;
+                ring.push(Point2::new(x, 0.0));
+            }
+            ring.extend([Point2::new(x, 3.0), Point2::new(0.0, 3.0)]);
+            let boundary = merged(&ring);
+            let p = &boundary.points;
+            let n = p.len();
+            for chord in proposals(
+                &boundary,
+                Sign::Negative,
+                Reach {
+                    depth: 0.2,
+                    needle: 0.04,
+                },
+            ) {
+                let (a, b) = (p[chord.from], p[(chord.from + chord.span) % n]);
+                let (dx, dy) = (b.x - a.x, b.y - a.y);
+                let len = dx.hypot(dy);
+                let spanned = (1..chord.span).map(|k| p[(chord.from + k) % n]);
+                let off = spanned.clone().fold(0.0_f64, |m, v| {
+                    m.max(((v.x - a.x) * dy - (v.y - a.y) * dx).abs() / len)
+                });
+                if off <= 0.2 {
+                    continue;
+                }
+                deep += 1;
+                for v in spanned {
+                    let s = ((v.x - a.x) * dx + (v.y - a.y) * dy) / len;
+                    assert!(
+                        s >= -1e-12 && s <= len + 1e-12,
+                        "{v:?} at {s} of {len}: {ring:?}"
+                    );
+                }
+            }
+        }
+        assert!(deep > 100, "{deep} proposals past the reach");
     }
 }

@@ -374,7 +374,7 @@ pub(crate) fn fill(
         };
         // The chords used and their excess.
         let mut used: Vec<(Chord, f64)> = Vec::new();
-        let mut pending = cover::proposals(&boundary, outside, t);
+        let mut pending = cover::proposals(&boundary, outside, cover::Reach::within(t));
         pending.reverse();
         while let Some(chord) = pending.pop() {
             if chord.span < 2 {
