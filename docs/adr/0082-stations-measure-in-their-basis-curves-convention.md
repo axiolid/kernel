@@ -2004,7 +2004,10 @@ the mesh's mitre row is not on each side's own cut.
   halves of a cell between two mitres have one mitre each. A cell is also refined
   while its bound exceeds the budget unless its floor, the largest `D`
   (the mesh's mitre row's distance from the projection), already exceeds it:
-  no splitting removes that gap. Refinement reads a mitre's knot as the
+  no splitting removes that gap. A run with a longitudinal offset whose far
+  row lies between the mesher's unshifted mitre plane and the bound's shifted
+  one stays unbounded (`MITRE_NOT_TRANSVERSAL`), because the two cuts
+  disagree (#484). Refinement reads a mitre's knot as the
   mitred row the mesh stands, not the plain section of the piece next to it;
   the chord of a cell beside a mitre is measured from the exact section of
   its own side there.

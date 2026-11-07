@@ -7,9 +7,13 @@ replaced by the mesh's mitred row, the outgoing side's `toward` or `normal`
 sign flipped. The terms: the in-plane kink dropped (`kink`), the general
 cell's gap between the mesh row and the side's projection dropped, the
 straight cell's gap dropped, a changing section bounded as a straight one,
-each chord end at a mitre taken from the mesh's row. The reach past the
+each chord end at a mitre taken from the mesh's row, an orientation that
+turns not counted as a change, the straight cell bounded without its chord
+and breakpoint terms. The reach past the
 plane: the crossing of `reach_past` dropped. The refusals: the
-transversality check disabled, the cell between two mitres bounded as one,
+transversality check and the far row's clearance (`clear`, reachable when the
+mesher's unshifted plane and the bound's shifted one disagree, #484) each
+disabled, the cell between two mitres bounded as one,
 `refinable` returning false (in `within` and in its own definition), a cell
 past the budget refined for ever whatever its floor. The refinement's rows:
 the plain section at a mitre's knot given to `accept` in place of the mitred
@@ -28,9 +32,6 @@ Not probed, because no test can tell them apart:
   closed form and about `1e-9` on the two read by quadrature (the deck and
   the B-spline), below the tolerance their values are pinned to; pinning
   them tighter would pin the quadrature's certified error, not the bound;
-- the far row's clearance of the plane (`clear`): a vertex that crosses the
-  plane at the rate the other check demands also starts clear of it on every
-  test cell, and a cell that does not is refused by the rate first;
 - the general cell's wall (`wall`, with its `clamp` and `quad`): the cut
   dominates it on every cell the tests build, their quads being planar and
   the faces' `reach_past` reaching at least the clamp.
@@ -79,6 +80,12 @@ MUTANTS = [
     ('the chord end at a mitre ahead is the mesh\'s row', BOUND,
      '            Some(_) => self.exact_at(hi, SeamSide::Incoming)?,',
      '            Some(_) => at_hi.to_vec(),', [CELLS]),
+    ('a turning orientation is not a change', BOUND,
+     '            || turn.lateral[0] > 0.0\n',
+     '', [CELLS]),
+    ('the straight cell drops the chord and breakpoint terms', MITRE,
+     'let along = inputs.eta[k].max(inputs.eta[l]) + extension;',
+     'let along = inputs.slide[k].max(inputs.slide[l]) + extension;', [CELLS]),
     ('a changing section is bounded as a straight one', BOUND,
      '            if straight && !changes && inside.is_empty() {',
      '            if straight && inside.is_empty() {', [CELLS]),
@@ -90,6 +97,9 @@ MUTANTS = [
     ('the transversality check is disabled', MITRE,
      '            if !positive(rate) || !clear {',
      '            if false {', [CELLS]),
+    ('the far row\'s clearance is not checked', MITRE,
+     '            if !positive(rate) || !clear {',
+     '            if !positive(rate) {', [CELLS]),
     ('a cell between two mitres is bounded as one', BOUND,
      '                (Some(_), Some(_)) => Ok(Err(MITRE_ON_BOTH_ENDS)),',
      '                (Some(mitre), Some(_)) => self.mitre_cell(&inputs, mitre, SeamSide::Outgoing),',
