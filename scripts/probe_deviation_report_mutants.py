@@ -21,6 +21,7 @@ import probe_lib
 
 ROOT = pathlib.Path(__file__).resolve().parents[1]
 E = "crates/algorithms/parametric/evaluate/src/bound.rs"
+C = "crates/algorithms/parametric/evaluate/src/bound/carrier.rs"
 F = "crates/algorithms/parametric/evaluate/src/curve.rs"
 B = "crates/execution/compile/src/brep.rs"
 K = "crates/execution/compile/src/certify.rs"
@@ -48,9 +49,9 @@ MUTANTS = [
     ('cylinder curvature halved', E,
      '                    duu: s * c.radius.abs(),',
      '                    duu: 0.5 * s * c.radius.abs(),', [BOUND, REPORT]),
-    ('torus twist term dropped', E,
-     '                    duv: s * r * max_abs_sin(v0, v1),',
-     '                    duv: 0.0,', [BOUND, REPORT]),
+    ('torus twist term dropped', C,
+     '        s * r * max_abs_sin(v0, v1),\n        s * r,',
+     '        0.0,\n        s * r,', [BOUND, REPORT]),
     ('B-rep interpolation lemma halved', B,
      '                best = best.min(0.5 * radius * radius);',
      '                best = best.min(0.25 * radius * radius);', [REPORT]),
