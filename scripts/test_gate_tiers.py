@@ -190,6 +190,19 @@ class SlotTests(GateCase):
         self.assertIn("all 2 taken", out)
         self.assertEqual(third.returncode, 0, out)
 
+    def test_threads_are_split_between_slots_unless_preset(self):
+        share = max(1, (os.cpu_count() or 1) // 2)
+        _, out = self.run_gate(GATE_SLOTS="2")
+        self.assertIn(f"CARGO_BUILD_JOBS={share} RUST_TEST_THREADS={share}", out)
+        _, out = self.run_gate(GATE_SLOTS="2", CARGO_BUILD_JOBS="7", RUST_TEST_THREADS="5")
+        self.assertIn("CARGO_BUILD_JOBS=7 RUST_TEST_THREADS=5", out)
+
+    def test_steps_run_niced_unless_disabled(self):
+        _, out = self.run_gate()
+        self.assertIn("nice -n 10", out)
+        _, out = self.run_gate(GATE_NICE="0")
+        self.assertIn("unniced", out)
+
     def test_a_failed_gate_releases_its_slot(self):
         code, out = self.run_gate(GATE_SLOTS="1", GATE_DRY_FAIL="fmt --check")
         self.assertEqual(code, 1, out)

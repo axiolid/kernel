@@ -90,7 +90,9 @@ The gate's own mutation probes run only on such a change or with
 `GATE_META=1` (always set it for a release). A gate holds one of
 `GATE_SLOTS` (default 3) machine-wide slots with its own persistent
 `CARGO_TARGET_DIR` under `gate-target/`, and waits when all are taken; its
-log path is the first line. `docs/guide/contributing.md` has the details.
+log path is the first line. Each gets `nproc / GATE_SLOTS` build and test
+threads (unless `CARGO_BUILD_JOBS`/`RUST_TEST_THREADS` are set) and runs
+niced (`GATE_NICE=0` disables). `docs/guide/contributing.md` has the details.
 
 It needs `cargo-semver-checks`, pinned so the gate is reproducible and
 built by the pinned rustc:

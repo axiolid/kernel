@@ -66,6 +66,7 @@ gate_acquire_slot() {
         export CARGO_TARGET_DIR
         mkdir -p "$CARGO_TARGET_DIR" || return 1
         echo "gate slot: $n of $slots (CARGO_TARGET_DIR=$CARGO_TARGET_DIR)"
+        gate_limit_resources
         return 0
       fi
     done
@@ -75,6 +76,23 @@ gate_acquire_slot() {
     fi
     sleep "${GATE_SLOT_POLL:-2}"
   done
+}
+
+# Share the machine between slots: each gate gets nproc / GATE_SLOTS build and
+# test threads (unless the caller set them) and runs below interactive work
+# (nice 10, ionice idle where available). GATE_NICE=0 turns the niceness off.
+gate_limit_resources() {
+  local slots="${GATE_SLOTS:-3}" share
+  share=$(($(nproc) / slots))
+  [ "$share" -ge 1 ] || share=1
+  export CARGO_BUILD_JOBS="${CARGO_BUILD_JOBS:-$share}"
+  export RUST_TEST_THREADS="${RUST_TEST_THREADS:-$share}"
+  gate_wrap=()
+  if [ "${GATE_NICE:-1}" != 0 ]; then
+    gate_wrap=(nice -n 10)
+    command -v ionice >/dev/null 2>&1 && gate_wrap=(ionice -c3 nice -n 10)
+  fi
+  echo "gate resources: CARGO_BUILD_JOBS=$CARGO_BUILD_JOBS RUST_TEST_THREADS=$RUST_TEST_THREADS ${gate_wrap[*]:-unniced}"
 }
 
 # One gate step: print its name, run it, show the tail of its output on
@@ -89,7 +107,7 @@ step() {
     set -- sleep "${GATE_DRY_SLEEP:-0}"
     [ "${GATE_DRY_FAIL:-}" = "$name" ] && set -- false
   fi
-  if "$@" 9>&- >"$gate_out" 2>&1; then
+  if "${gate_wrap[@]}" "$@" 9>&- >"$gate_out" 2>&1; then
     echo ok
   else
     echo "FAIL (exit $?)"

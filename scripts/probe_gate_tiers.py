@@ -40,8 +40,8 @@ MUTANTS = [
     (
         "slot not released: the lock descriptor leaks into the steps",
         LIB,
-        'if "$@" 9>&- >"$gate_out" 2>&1; then',
-        'if "$@" >"$gate_out" 2>&1; then',
+        'if "${gate_wrap[@]}" "$@" 9>&- >"$gate_out" 2>&1; then',
+        'if "${gate_wrap[@]}" "$@" >"$gate_out" 2>&1; then',
         tiers("SlotTests.test_a_straggling_step_process_does_not_keep_the_slot"),
     ),
     (
@@ -57,6 +57,20 @@ MUTANTS = [
         "                affected.add(name)\n                grew = True\n",
         "                affected.add(name)\n                grew = False\n",
         AFFECTED_TESTS,
+    ),
+    (
+        "thread share not divided between slots",
+        LIB,
+        "  share=$(($(nproc) / slots))\n",
+        "  share=$(nproc)\n",
+        tiers("SlotTests.test_threads_are_split_between_slots_unless_preset"),
+    ),
+    (
+        "steps not niced",
+        LIB,
+        "    gate_wrap=(nice -n 10)\n    command -v ionice >/dev/null 2>&1 && gate_wrap=(ionice -c3 nice -n 10)\n",
+        "    gate_wrap=()\n",
+        tiers("SlotTests.test_steps_run_niced_unless_disabled"),
     ),
     (
         "meta probes skipped although infrastructure changed",
