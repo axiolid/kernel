@@ -8,7 +8,7 @@ Portable orthographic hidden-line drawing request, result, and conformance contr
 
 | | |
 | --- | --- |
-| Latest release | 0.1.4 (2026-11-07) |
+| Latest release | 0.1.5 (2026-11-07) |
 | crates.io | [`axiolid-mesh-hidden-lines-contract`](https://crates.io/crates/axiolid-mesh-hidden-lines-contract) |
 | Facade | [`axiolid`](./axiolid) feature `mesh-hidden-lines` |
 | Layer | contracts (`contract.operation`) |
@@ -35,23 +35,20 @@ frontmost. See ADR 0094.
 
 ## Changes
 
-Latest release, 0.1.4 (2026-11-07):
+Latest release, 0.1.5 (2026-11-07):
 
 ### Added
 
-- `VisibleFaceEvidence::snap_displacement`, `rerouted_edges`,
-  `collapsed_regions` and `collapsed_holes` (#410, ADR 0100): how far snap
-  rounding moved region boundaries, as a `DisplacementBound`, and how many
-  edges it rerouted and regions and holes it collapsed. `input_mesh` starts
-  them at zero. The conformance suite requires zero in every exact case.
-
-### Changed
-
-- `MeshVisibleFaces` regions are the exact regions snap-rounded to the
-  binary64 grid (ADR 0100): a region whose area collapses under rounding is
-  dropped and counted, never refused; rings are weakly simple; and
-  `VisibleRegion::triangles` lists the triangles frontmost somewhere in an
-  exact region it was snapped from. Where no edge is rerouted the vertices
-  are still the exact points rounded once.
+- `FaceGroups::Planar` and `HiddenLineMesh::with_planar_groups`: the groups are
+  the edge-connected components of triangles joined across an edge of exactly
+  two triangles with parallel, same-facing normals, decided exactly, each named
+  by its smallest triangle (ADR 0106, #384). Conformance gains the planar
+  isometric cube, a flat sheet and a fold.
+- `EdgeKind::GroupBoundary` and `EdgeSelection::group_boundary` (default
+  `false`) with `EdgeSelection::with_group_boundary`: an edge between two
+  triangles of different face groups that is neither a silhouette nor a
+  selected crease. With the selection off the groups stay ignored and the
+  output is unchanged (ADR 0106, #385). Conformance gains the planar
+  isometric cube and a two-group square sheet.
 
 Full history: [`crates/contracts/operations/mesh-hidden-lines/CHANGELOG.md`](https://github.com/axiolid/kernel/blob/main/crates/contracts/operations/mesh-hidden-lines/CHANGELOG.md)

@@ -9,6 +9,8 @@ caret rule for `0.x` versions.
 
 ## [Unreleased]
 
+## [0.1.5] - 2026-11-07
+
 ### Added
 
 - `FaceGroups::Planar` and `HiddenLineMesh::with_planar_groups`: the groups are

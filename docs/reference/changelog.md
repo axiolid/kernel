@@ -3670,6 +3670,18 @@ Every publishable crate versions and publishes independently ([ADR 0067](/adr/00
 
 ## axiolid-hidden-lines
 
+### 0.1.4 - 2026-11-07
+
+### Added
+
+- `ScalarVisibleFaces` resolves `FaceGroups::Planar` exactly before labelling
+  (new `groups` module: union-find over edges of exactly two triangles with
+  parallel, same-facing normals, polled for cancellation, memory-budgeted;
+  ADR 0106, #384).
+- `ScalarHiddenLines` draws `EdgeKind::GroupBoundary` when
+  `EdgeSelection::group_boundary` is set, resolving the groups only then;
+  with it off the output is unchanged (ADR 0106, #385).
+
 ### 0.1.3 - 2026-11-03
 
 ### Added
@@ -6851,6 +6863,22 @@ Every publishable crate versions and publishes independently ([ADR 0067](/adr/00
 
 
 ## axiolid-mesh-hidden-lines-contract
+
+### 0.1.5 - 2026-11-07
+
+### Added
+
+- `FaceGroups::Planar` and `HiddenLineMesh::with_planar_groups`: the groups are
+  the edge-connected components of triangles joined across an edge of exactly
+  two triangles with parallel, same-facing normals, decided exactly, each named
+  by its smallest triangle (ADR 0106, #384). Conformance gains the planar
+  isometric cube, a flat sheet and a fold.
+- `EdgeKind::GroupBoundary` and `EdgeSelection::group_boundary` (default
+  `false`) with `EdgeSelection::with_group_boundary`: an edge between two
+  triangles of different face groups that is neither a silhouette nor a
+  selected crease. With the selection off the groups stay ignored and the
+  output is unchanged (ADR 0106, #385). Conformance gains the planar
+  isometric cube and a two-group square sheet.
 
 ### 0.1.4 - 2026-11-07
 
