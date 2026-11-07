@@ -6,6 +6,17 @@ All notable changes to Axiolid are documented in this file.
 
 ### Added
 
+- Gate tiers, slots and the gate's own probes on demand (#443).
+  `scripts/gate.sh --branch` checks the crates changed since the merge base
+  with `origin/main` and their dependents, and runs the full gate when gate
+  infrastructure changed. The gate's own mutation probes run only on such a
+  change or with `GATE_META=1` (always for a release). A gate holds one of
+  `GATE_SLOTS` (default 3) machine-wide slots with a persistent build
+  directory, uses `nproc / GATE_SLOTS` build and test threads, runs niced,
+  logs to a file and prints each step's wall time. Measured on a loaded
+  machine: the full gate with every probe took 2889 s, of which the two test
+  steps took 1806 s and the gate's own probes 458 s; `--branch` on a change to
+  one leaf crate took 29 s with a warm slot (112 s cold).
 - A capability ledger, `architecture/capability-ledger.toml`, grading 95
   geometry capabilities from OCCT and CGAL against Axiolid, with evidence,
   reference packages at pinned commits and tracking issues (#111,
