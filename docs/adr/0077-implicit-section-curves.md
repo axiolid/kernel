@@ -364,11 +364,20 @@ by a Rolle chain of order up to eight, where the enclosures resolve it, on the d
   against the cluster's multiplicity. At `H_0` a cluster's extent is halved
   while the enclosure straddles, to the part that does; if the work runs out
   with the value at the cluster signed, the leaf is refused, not reported.
+  On a piece where `H_1` is signed `H_0` is monotone, so the halving
+  decides it from the values at its ends. A run of two or more zones of
+  `H_{j+1}` whose enclosures of `H_j` all straddle zero (distinct critical
+  points the enclosures cannot tell from a zero) refuses, instead of being
+  read as one root of the summed order. An inner end that
+  straddles zero at an order the chain climbs refuses its leaf before the
+  chain starts.
 - **Curve ends.** The curve's own ends report. A root there carries the
   multiplicity the chain sees at the end, which depends on how far, at
   rounding level, the end is from the contact. A closed curve's seam is one
   point and is reported once, with the larger of its two multiplicities.
-- **Budget and cap.** One call visits at most `ROOT_BUDGET` nodes, and
+- **Budget and cap.** One call asks at most `ROOT_BUDGET` enclosures (each node costs one more
+  than the enclosures it asked), one leaf's chain at most `CHAIN_EVALS` before
+  the leaf is split instead, and
   depth is at most 128 with leaves at least `2^-44` of a cell wide.
   Exceeding either, a contact above order eight, or one rounding hides
   refuses as `ExactCurveRefusal::Undecided`: it says nothing of whether the
