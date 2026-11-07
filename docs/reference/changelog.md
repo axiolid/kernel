@@ -3897,6 +3897,32 @@ Every publishable crate versions and publishes independently ([ADR 0067](/adr/00
 - The package now ships `LICENSE` and `LICENSE-COMMERCIAL` (symlinks to the
   repository root), so the licence texts travel with the archive (#358).
 
+### Fixed
+
+- The exact boundary distance and Hausdorff distance carry rounding margins
+  derived from the magnitudes their numbers are computed from, in ulps of the
+  coordinates, instead of `1e-12` of them. At georeferenced coordinates
+  (450000, 5600000) the old margins left an interval about `1e-5` wide that
+  never closed to the accuracy asked; a search now settles at a floor of
+  128 ulps of its scale, about `3.2e-7` there and `6e-14` at unit scale, and
+  an accuracy below the floor is never reported as met (#318).
+- The distance search closes gaps along a planar face's normal on certified
+  foot witnesses (the foot of a witness on a planar face, the closest points
+  of two line edges) instead of waiting for patch centres to line up, and
+  the point queries of the Hausdorff search pop equal bounds first in, first
+  out (#318).
+- The margin for taking two boundary points as touching is 128 ulps of their
+  magnitudes, not `1e-12` of them: items of one body apart by more than that
+  are measured instead of refused as `ItemsNearlyShareFace`, and at unit scale
+  a `1e-13` gap is now a gap (#318).
+- The sphere and torus branches of a projected range carried no rounding pad
+  at all (#318).
+- The Hausdorff matched bound, a translate's re-charted surface and cone pole,
+  and the displacement gate use the same derived margins, and a plane,
+  cylinder or elliptical cylinder is Lipschitz by its axes rather than
+  `1 + |v|` times as steep, which had inflated the bound of patches charted
+  in world coordinates (#318).
+
 ### 0.3.13 - 2026-10-28
 
 ### Changed
