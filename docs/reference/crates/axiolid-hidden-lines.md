@@ -8,7 +8,7 @@ Exact scalar hidden-line drawings of triangle meshes in orthographic views.
 
 | | |
 | --- | --- |
-| Latest release | 0.1.4 (2026-11-07) |
+| Latest release | 0.1.3 (2026-11-03) |
 | crates.io | [`axiolid-hidden-lines`](https://crates.io/crates/axiolid-hidden-lines) |
 | Facade | [`axiolid`](./axiolid) feature `hidden-lines-provider` |
 | Layer | algorithms (`algorithm.discrete`) |
@@ -58,7 +58,23 @@ evidence, never refused.
 
 ## Changes
 
-Latest release, 0.1.4 (2026-11-07):
+Latest release, 0.1.3 (2026-11-03):
+
+### Added
+
+- The package now ships `LICENSE` and `LICENSE-COMMERCIAL` (symlinks to the
+  repository root), so the licence texts travel with the archive (#358).
+- `ScalarVisibleFaces`, the exact provider for `MeshVisibleFaces` (ADR 0094,
+  #383): the visible face regions of caller-grouped triangles in the view of
+  the hidden-line provider, decided in the exact planar arrangement of
+  `axiolid-exact-arrangement`, with region vertices that are exact points
+  rounded once. Checked by the faces conformance suite, an independent
+  binary64 ray-casting oracle and a mutation probe. On
+  `scenario/visible-faces` (a loaded machine, ranges over three runs) the BVH
+  beats a full scan on a cut plan by 1.4-2.1x at 400 boxes and 4.1-6.6x at
+  2,500 boxes, and the depth prune of hidden edges saves 2.7-3.2x in an
+  isometric view at 400 boxes; the BVH is not consistently faster than the
+  scan in an isometric view or on interpenetrating boxes.
 
 ### Fixed
 
@@ -74,6 +90,16 @@ Latest release, 0.1.4 (2026-11-07):
   pinned, with frozen copies in the conformance suite.
 
 ### Changed
+
+- Request validation, the mesh audit and the building of view-space
+  vertices, triangles and near-plane caps moved into one `prepare` step that
+  the visible-face provider will share (ADR 0094, #383). The drawings and
+  the refusals are unchanged, except that a crease cosine outside `[-1, 1]`
+  is now refused before the other request checks, not after the depth range.
+- The rounding of an exact ratio to binary64 moved into
+  `axiolid-exact-arrangement` (`round_ratio`), so that the endpoints of
+  hidden lines and the vertices of visible-face regions round alike. The
+  drawings are unchanged.
 
 - Hidden-line drawing does less exact work for the same output (#369): an
   edge stops looking at further candidates, and skips the near-plane caps,
