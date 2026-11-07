@@ -4592,6 +4592,9 @@ Every publishable crate versions and publishes independently ([ADR 0067](/adr/00
   or B-spline is refused as `a swept curve other than a line, circle,
   ellipse or B-spline` (`a swept curve that is not an atomic 3D curve` for
   a node of another kind); a zero axis or direction is invalid input (#411).
+- An exact boolean whose result has a vertex off its edge's curve beyond
+  what its report allows is refused by name (#445). It needs
+  `axiolid-brep-boolean` with `BooleanError::VertexOffCurve`.
 
 ### Fixed
 

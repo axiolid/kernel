@@ -191,6 +191,9 @@ both apply, which becomes a differential test.
   move exactly, or whose recentred cut is refused (planar faces charted in
   world coordinates keep their far parameters), are cut where they are; no symbolic perturbation was
   needed, since no refusal of either class remained.
+  **Amended (#445):** a result is checked against its own curves before it
+  is returned, and a window's end never replaces a feature cut; see
+  [ADR 0080](./0080-exact-compiler-cuts-placed-openings-with-the-general-boolean.md).
 
 ## Relation to existing code
 

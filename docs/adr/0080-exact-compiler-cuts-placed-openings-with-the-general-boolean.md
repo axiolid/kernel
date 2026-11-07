@@ -886,3 +886,44 @@ union that still leaves two bodies within it is refused by name. And the #276
 known limit (a boolean under a general rotation cannot land on tilted planes)
 is superseded where the operands share their linear part bit for bit: such a
 boolean is cut in the shared frame and the result placed.
+
+## Amendment 2026-11-07: a result is checked against its own curves (#445)
+
+The column less a corbel at `(6e5, 5.6e6, 200)` returned a vertex 1.2e-6 off
+its edge's curve with an empty report; the union was refused as not sewing,
+and at 1e-7 and `Tolerance::ZERO` it was returned with a vertex 3.0e-7 and
+2.0e-7 off and a volume 1.8e-8 wrong.
+
+- **Why it failed.** The window's crossings are added after the merge of the
+  feature cuts, and the faces' common box is widened by its pad, so they
+  sit up to 1.2e-6 (3.0e-7, 2.0e-7) past the faces. `pieces` then
+  deduplicated cuts with a slack of `1e-12 * (1 + |t|)`, which at a
+  world-charted parameter of 5.6e6 is 5.6e-6. After sorting, the crossing
+  came first and the feature cut, the corbel's own vertex, was dropped. The
+  dedup is bookkeeping and records no reading, and the rounding floor
+  (`2^-40` times the extent, 5.09e-6 here) is above the caller's tolerance
+  beyond extents of `2^40 * eps`, so nothing reported it.
+- **Decision.** (a) A crossing of the window within the dedup slack of a
+  feature cut is dropped (`window_ends`): the cut ends the piece, and the
+  corners are the corbel's vertices bit for bit. (c) Every result is
+  checked before it is returned (`consistency.rs`): each vertex against the
+  3D curve of each edge it bounds, and against each edge use's pcurve
+  lifted through its face's surface, at the ends. The bound is
+  `min(eps, floor)` for an exact report, the floor alone at
+  `Tolerance::ZERO`, `eps` for a report with readings. A result over it is
+  refused by name (`BooleanError::VertexOffCurve`), not by a debug
+  assertion: a caller asking for 1e-10 at 5.6e6, where an ulp is 9.3e-10,
+  is refused legitimately and must not panic. The check sits in `run`, so
+  the finer, extending and rounding-end retries apply, and again after
+  `recentre::restore`. Without (a) the check cannot see the defect at
+  `Tolerance::ZERO` (2e-7 is under the floor), so both are needed.
+- **Not changed.** The rounding floor and the readings: far out the floor
+  still exceeds the caller's tolerance (#461 tracks stating slacks and the
+  floor in ulps). Other parameter-relative slacks (`pieces_within`,
+  `on_span`) are unchanged; the check backstops their effect on vertices.
+- **Tests and probe.** `section::tests::a_window_end_never_replaces_a_cut`,
+  `consistency::tests`, `report::tests`, and `tests/far_origin.rs` (the
+  corbel at four sites, three tolerances, both orders and every operator;
+  the sub-ulp tolerance refused by name), `tests/tangent_contact.rs` (a far
+  tangent hole refused by name); probe
+  `scripts/probe_result_consistency_mutants.py`.

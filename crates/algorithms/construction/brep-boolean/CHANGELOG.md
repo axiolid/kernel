@@ -9,7 +9,27 @@ caret rule for `0.x` versions.
 
 ## [Unreleased]
 
+### Added
+
+- `BooleanError::VertexOffCurve` (#445): a result is checked before it is
+  returned, and refused by name when a vertex lies off the curve of an edge
+  it bounds, or off an edge use's pcurve lifted at its end, by more than
+  `min(eps, rounding floor)` for an exact report, the floor alone at
+  `Tolerance::ZERO`, and `eps` otherwise. The check runs inside the cut, so
+  the finer, extending and rounding-end retries apply to it, and again
+  after the result is moved back from a recentred cut.
+
 ### Fixed
+
+- A difference or union far from the origin returned a vertex off its
+  curve with an exact report (#445): a window's crossing 1.2e-6 past a face
+  replaced a feature cut within the parameter-relative dedup slack of
+  `pieces` (5.6e-6 at a parameter of 5.6e6), so the column less a corbel at
+  `(6e5, 5.6e6, 200)` had a vertex 1.2e-6 off its edge, the union was
+  refused as not sewing at `Tolerance::METRE`, and at 1e-7 and
+  `Tolerance::ZERO` the union's volume was 1.8e-8 off. A window end never
+  replaces a feature cut now; the corners are the corbel's own vertices bit
+  for bit and every volume is exact.
 
 - Unions far from the origin sew their kept faces and classify points near
   a face boundary (#418, #419): operands whose common vertex box lies four

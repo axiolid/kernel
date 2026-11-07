@@ -207,9 +207,25 @@
 //! the classifier cannot decide them there. Operands nearer the origin on
 //! every axis are cut bit for bit as without it.
 //!
+//! **Checked before it is returned (#445).** Every vertex of a result lies
+//! on the curve of each edge it bounds, and on each edge use's pcurve lifted
+//! through its face's surface at the use's ends, within the caller's linear
+//! tolerance and, for an exact report, within the rounding floor too (at
+//! [`Tolerance::ZERO`] the floor alone). A result over that bound is refused
+//! ([`BooleanError::VertexOffCurve`]) rather than returned with a report that
+//! misdescribes it; the check runs inside the cut, so the retries above
+//! apply to its refusal. Far from the origin the floor can exceed the
+//! caller's tolerance (a tolerance within a few ulps of the coordinates is
+//! refused this way); the check caps what reaches a vertex, it does not
+//! tighten the floor.
+//!
 //! Bookkeeping in a face's parameters (ordering pieces leaving a vertex,
 //! naming a point's parameters on the surface it was evaluated from) uses
-//! fixed relative slacks far below any tolerance; two piece ends weld into
+//! fixed relative slacks. Relative to a parameter they are far below any
+//! tolerance only near the origin: in world-charted parameters such as a
+//! line's `-y = 5.6e6` they span 5.6e-6, more than a tolerance. So a
+//! window's end never replaces a feature cut within the slack of it (#445),
+//! and the check above refuses what a slack leaves. Two piece ends weld into
 //! one vertex of a split face only where they also lie within the
 //! tolerance on the surface (#332), so a slack spanning more of a long arc
 //! than a fine tolerance never joins what a split kept apart. It never
