@@ -37,6 +37,16 @@ pub(crate) struct Scene<'a> {
     /// Whether a triangle seen edge-on occludes through the depth range it
     /// spans. Hidden lines: yes. Regions see it as covering no area.
     pub edge_on_occludes: bool,
+    /// Whether the view is perspective (ADR 0107): every constraint is the
+    /// eye-ray reading and the caps are decided along the eye ray.
+    pub perspective: bool,
+}
+
+impl Scene<'_> {
+    /// A constraint of this scene's view.
+    pub(crate) fn constraint(&self, kind: Kind, strict: bool) -> Constraint {
+        Constraint::in_view(kind, strict, self.perspective)
+    }
 }
 
 /// A piece of an edge with one visibility.
@@ -98,6 +108,7 @@ fn resolve_with(
             from: start,
             to: end,
             axis,
+            perspective: scene.perspective,
         };
         if decide(&delta, &mut solver.escalations)? != Ordering::Equal {
             break;
@@ -194,10 +205,10 @@ fn covers_kept(solver: &mut Solver<'_>, hidden: &[Span], kept: Span) -> GeomResu
 pub(crate) fn kept_constraints(scene: &Scene<'_>) -> Vec<Constraint> {
     let mut out = Vec::new();
     if let Some(near) = scene.near {
-        out.push(Constraint::new(Kind::BelowNear(near), false));
+        out.push(scene.constraint(Kind::BelowNear(near), false));
     }
     if let Some(far) = scene.far {
-        out.push(Constraint::new(Kind::AboveFar(far), false));
+        out.push(scene.constraint(Kind::AboveFar(far), false));
     }
     if let Some(region) = scene.region {
         for (axis, lower, upper) in [
@@ -205,7 +216,7 @@ pub(crate) fn kept_constraints(scene: &Scene<'_>) -> Vec<Constraint> {
             (1, region.min.y, region.max.y),
         ] {
             for (upper_side, bound) in [(false, lower), (true, upper)] {
-                out.push(Constraint::new(
+                out.push(scene.constraint(
                     Kind::Region {
                         axis,
                         upper: upper_side,
@@ -230,7 +241,7 @@ fn facing(
 ) -> GeomResult<Option<Span>> {
     let [v0, v1, v2] = tri.v;
     let clockwise = tri.sigma == Ordering::Less;
-    let in_front = Constraint::new(
+    let in_front = scene.constraint(
         Kind::PlaneAbove {
             t: tri.v,
             neg: !clockwise,
@@ -245,7 +256,7 @@ fn facing(
     }
     let mut span = kept;
     for (p, q) in [(v0, v1), (v1, v2), (v2, v0)] {
-        let side = Constraint::new(
+        let side = scene.constraint(
             Kind::ImageSide {
                 p,
                 q,
@@ -262,11 +273,12 @@ fn facing(
         return Ok(None);
     };
     if let Some(near) = scene.near {
-        // The triangle's point must not be removed by the near plane.
-        let not_cut = Constraint::new(
+        // The triangle's point must not be removed by the near plane. The
+        // sign flips with the eye ray: the plane is reached at `P / s`.
+        let not_cut = scene.constraint(
             Kind::PlaneAbove {
                 t: tri.v,
-                neg: clockwise,
+                neg: clockwise != scene.perspective,
                 lift: Lift::Near(near),
             },
             false,
@@ -301,6 +313,7 @@ fn edge_on(
             a: start,
             b: end,
             c: corner,
+            perspective: scene.perspective,
         };
         if decide(&side, &mut solver.escalations)? != Ordering::Equal {
             return Ok(Vec::new());
@@ -318,6 +331,7 @@ fn edge_on(
                 from,
                 to,
                 axis,
+                perspective: scene.perspective,
             };
             if decide(&delta, &mut solver.escalations)? != Ordering::Equal {
                 point_image = false;
@@ -330,17 +344,17 @@ fn edge_on(
         let mut within = Some(kept);
         for kind in [Kind::ExtentFrom { from, to }, Kind::ExtentTo { from, to }] {
             within = match within {
-                Some(span) => solver.clip(span, &Constraint::new(kind, false))?,
+                Some(span) => solver.clip(span, &scene.constraint(kind, false))?,
                 None => break,
             };
         }
         let Some(within) = within else { continue };
-        let above = Constraint::new(Kind::SegmentAbove { from, to }, true);
+        let above = scene.constraint(Kind::SegmentAbove { from, to }, true);
         if let Some(span) = solver.clip(within, &above)? {
             solver.insert(&mut in_front, span)?;
         }
         if let Some(near) = scene.near {
-            let at_or_below = Constraint::new(Kind::SegmentAtOrBelow { from, to, near }, false);
+            let at_or_below = scene.constraint(Kind::SegmentAtOrBelow { from, to, near }, false);
             if let Some(span) = solver.clip(within, &at_or_below)? {
                 solver.insert(&mut reaches_kept, span)?;
             }
@@ -350,7 +364,7 @@ fn edge_on(
         return Ok(in_front);
     };
     let both = solver.intersect(&in_front, &reaches_kept)?;
-    solver.clip_all(both, &Constraint::new(Kind::BelowNear(near), true))
+    solver.clip_all(both, &scene.constraint(Kind::BelowNear(near), true))
 }
 
 #[cfg(test)]
@@ -398,6 +412,7 @@ mod tests {
                 a: 0,
                 b: 1,
                 c: 2,
+                perspective: false,
             },
             &mut 0,
         )
@@ -425,6 +440,7 @@ mod tests {
             caps: &[],
             broad: &broad,
             edge_on_occludes,
+            perspective: false,
         };
         match resolve(&scene, &edge, usize::MAX, &mut Work::default()).expect("resolved") {
             Resolved::Pieces(pieces) => pieces

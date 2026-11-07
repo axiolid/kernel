@@ -9,6 +9,20 @@ caret rule for `0.x` versions.
 
 ## [Unreleased]
 
+### Added
+
+- `ScalarHiddenLines` and `ScanHiddenLines` draw perspective views and claim
+  them through `supports_projection`, replacing the by-name refusal of 0.1.4:
+  a pinhole at the frame origin, image `(U / -W, V / -W)`, `near` required
+  and below zero. Every visibility predicate is an exact determinant of
+  vectors from the eye, so triangles behind the eye need no case, endpoints
+  are the exact rationals rounded once, and the near-plane cap is decided by
+  ray parity along the eye ray. The perspective conformance fixtures and a
+  binary64 eye-ray oracle (seeded scenes, eyes outside and inside) check it;
+  the provider refuses a perspective view whose `near` is missing, zero,
+  positive or not finite with `InvalidInput` (ADR 0107, #387).
+- The visible-face providers still refuse a perspective view by name.
+
 ## [0.1.4] - 2026-11-13
 
 ### Added

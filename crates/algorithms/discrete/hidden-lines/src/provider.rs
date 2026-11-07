@@ -2,11 +2,11 @@
 
 use axiolid_contracts::{
     Backend, BackendDescriptor, BackendId, CancellationGranularity, ExecutionOptions,
-    ExecutionTarget, GeomError, Operation, ScratchRequirement,
+    ExecutionTarget, GeomError, ScratchRequirement,
 };
 use axiolid_mesh_hidden_lines_contract::{
     HiddenLineError, HiddenLineEvidence, HiddenLineOutcome, HiddenLineRequest, HiddenLineSegment,
-    MeshHiddenLines, SourceEdge, Visibility,
+    MeshHiddenLines, SourceEdge, ViewProjection, Visibility,
 };
 
 use crate::broad::{Broad, BroadPhase};
@@ -15,9 +15,8 @@ use crate::groups::resolve_groups;
 use crate::occlusion::{resolve, Resolved, Scene, Work};
 use crate::output::endpoint;
 use crate::prepare::{prepare, Prepared, ResourceNames, SharedLimits};
-use crate::view::require_orthographic;
 
-/// Portable exact orthographic hidden-line provider.
+/// Portable exact hidden-line provider for orthographic and perspective views.
 ///
 /// Visibility is decided exactly in the view's affine frame: nothing is
 /// rounded before a decision, only the endpoints of the output pieces are
@@ -65,12 +64,15 @@ impl MeshHiddenLines for ScalarHiddenLines {
         CancellationGranularity::Incremental
     }
 
+    fn supports_projection(&self, _projection: ViewProjection) -> bool {
+        true
+    }
+
     fn hidden_lines(
         &self,
         request: &HiddenLineRequest<'_>,
         options: &ExecutionOptions,
     ) -> Result<HiddenLineOutcome, HiddenLineError> {
-        require_orthographic(&request.view, Self::ID, Operation::MeshHiddenLines)?;
         draw(BroadPhase::Tree, request, options)
     }
 }
@@ -151,6 +153,7 @@ fn draw(
         caps: &caps,
         broad: &broad,
         edge_on_occludes: true,
+        perspective: request.view.projection == ViewProjection::Perspective,
     };
     let mut evidence = HiddenLineEvidence::input_mesh(request.meshes.len(), total_triangles);
     evidence.selected_edges = edges.len();
@@ -263,16 +266,15 @@ impl MeshHiddenLines for ScanHiddenLines {
         CancellationGranularity::Incremental
     }
 
+    fn supports_projection(&self, _projection: ViewProjection) -> bool {
+        true
+    }
+
     fn hidden_lines(
         &self,
         request: &HiddenLineRequest<'_>,
         options: &ExecutionOptions,
     ) -> Result<HiddenLineOutcome, HiddenLineError> {
-        require_orthographic(
-            &request.view,
-            self.descriptor().id,
-            Operation::MeshHiddenLines,
-        )?;
         draw(BroadPhase::Scan, request, options)
     }
 }

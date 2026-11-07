@@ -19,7 +19,7 @@ use axiolid_exact::{sign_root, Arith, SignExpr};
 use axiolid_guarantees::Sign;
 use axiolid_mesh::TriMesh;
 use axiolid_mesh_hidden_lines_contract::{
-    EdgeKind, EdgeSelection, FaceGroup, HiddenLineError, MeshId, MeshRole,
+    EdgeKind, EdgeSelection, FaceGroup, HiddenLineError, HiddenLineMesh, MeshId, MeshRole,
 };
 
 use crate::decide::decide;
@@ -108,14 +108,15 @@ pub(crate) struct MeshEdges<'a> {
 /// Append the mesh's triangles to `tris`, each with its exact image
 /// orientation. A triangle that is exactly collinear is refused.
 pub(crate) fn push_triangles(
-    id: MeshId,
-    mesh: &TriMesh,
+    entry: &HiddenLineMesh<'_>,
     base: u32,
     verts: &[Vert],
     options: &ExecutionOptions,
+    perspective: bool,
     escalations: &mut usize,
     tris: &mut Vec<Tri>,
 ) -> Result<(), HiddenLineError> {
+    let (id, mesh) = (entry.id, entry.mesh);
     let refuse = |error: GeomError| HiddenLineError::mesh(id, error);
     let memory = || HiddenLineError::from(GeomError::BudgetExceeded { resource: "memory" });
     tris.try_reserve(mesh.triangle_count())
@@ -150,6 +151,7 @@ pub(crate) fn push_triangles(
                 a: v[0],
                 b: v[1],
                 c: v[2],
+                perspective,
             },
             escalations,
         )

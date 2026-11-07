@@ -14,6 +14,12 @@
 //! triangles lies in exactly one of them. Triangles seen edge-on are skipped
 //! for the same reason (they cover no area).
 //!
+//! A perspective view runs the same parity along the eye ray instead: the point
+//! of the plane on the eye ray through `P` is inside `M` exactly when the ray
+//! away from the eye, from that point on, crosses the triangles of `M` strictly
+//! beyond the plane (`near·s - W_P > 0`, see `recipe`) an odd number of times.
+//! Those triangles are found among all that reach the kept side of the plane.
+//!
 //! A triangle `T` of `M` whose plane is exactly at `near` over the edge's
 //! image is not a crossing (the strict clip is empty), and needs no
 //! refusal. Over the image of `T` every point `P` with `W_P < near` is
@@ -30,7 +36,7 @@ use crate::broad::Query;
 use crate::edges::DrawEdge;
 use crate::occlusion::Scene;
 use crate::param::{Param, Solver, Span};
-use crate::recipe::{Constraint, Kind, Lift};
+use crate::recipe::{Kind, Lift};
 use std::cmp::Ordering;
 
 /// A solid the near plane cuts.
@@ -56,8 +62,19 @@ pub(crate) fn hidden_by_caps(
     }
     let query = Query {
         image: edge.bounds,
-        w_lo: near,
-        w_hi: f64::INFINITY,
+        // Orthographic: the triangles beyond the plane, crossed by the ray
+        // towards the viewer. Perspective: the ray runs away from the eye, so
+        // the triangles the plane has not removed.
+        w_lo: if scene.perspective {
+            f64::NEG_INFINITY
+        } else {
+            near
+        },
+        w_hi: if scene.perspective {
+            near
+        } else {
+            f64::INFINITY
+        },
     };
     let found = scene.broad.candidates(scene.tris, &query);
     for cap in scene.caps {
@@ -80,7 +97,7 @@ pub(crate) fn hidden_by_caps(
             let mut span = kept;
             let mut covered = true;
             for (p, q) in [(v0, v1), (v1, v2), (v2, v0)] {
-                let side = Constraint::new(
+                let side = scene.constraint(
                     Kind::ImageSide {
                         p,
                         q,
@@ -99,7 +116,7 @@ pub(crate) fn hidden_by_caps(
             if !covered {
                 continue;
             }
-            let above = Constraint::new(
+            let above = scene.constraint(
                 Kind::PlaneAbove {
                     t: tri.v,
                     neg: !clockwise,
@@ -124,7 +141,7 @@ pub(crate) fn hidden_by_caps(
             }
         }
         // Equal depth does not occlude: not on the plane itself.
-        let below = Constraint::new(Kind::BelowNear(near), true);
+        let below = scene.constraint(Kind::BelowNear(near), true);
         for span in solver.clip_all(odd, &below)? {
             solver.insert(&mut hidden, span)?;
         }

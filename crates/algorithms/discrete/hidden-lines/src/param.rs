@@ -163,6 +163,7 @@ impl<'a> Solver<'a> {
                     from: p,
                     to: q,
                     axis,
+                    perspective: constraint.perspective,
                 },
                 &mut self.escalations,
             )
@@ -509,6 +510,7 @@ mod tests {
             a: 0,
             b: 1,
             c,
+            perspective: false,
         };
         for c in [0, 1] {
             assert_eq!(escalations_of(&orient(c)), (Ordering::Equal, 0));
@@ -521,6 +523,7 @@ mod tests {
             from,
             to,
             axis: 0,
+            perspective: false,
         };
         assert_eq!(escalations_of(&delta(2, 2)), (Ordering::Equal, 0));
         assert!(escalations_of(&delta(0, 3)).1 > 0);

@@ -1,6 +1,7 @@
-//! Perspective views are refused by name (ADR 0107): by the providers when
-//! called directly, and before them by the registries, which find no provider
-//! that supports the projection.
+//! Perspective routing and refusals (ADR 0107). The hidden-line providers
+//! claim perspective and pass its fixtures; the visible-face providers refuse
+//! it by name when called directly, and the registries find no visible-face
+//! provider that supports the projection.
 
 mod common;
 
@@ -33,7 +34,7 @@ fn is_named_refusal(error: &GeomError, operation: Operation) -> bool {
 }
 
 #[test]
-fn no_in_tree_provider_supports_perspective() {
+fn only_the_hidden_line_providers_support_perspective() {
     let lines: [&dyn MeshHiddenLines; 2] = [&ScalarHiddenLines, &ScanHiddenLines];
     let faces: [&dyn MeshVisibleFaces; 3] = [
         &ScalarVisibleFaces,
@@ -42,9 +43,9 @@ fn no_in_tree_provider_supports_perspective() {
     ];
     for provider in lines {
         assert!(provider.supports_projection(ViewProjection::Orthographic));
-        assert!(!provider.supports_projection(ViewProjection::Perspective));
+        assert!(provider.supports_projection(ViewProjection::Perspective));
         let report = PerspectiveConformanceSuite::run(provider);
-        assert!(!report.claimed && report.is_success(), "{report}");
+        assert!(report.claimed && report.is_success(), "{report}");
     }
     for provider in faces {
         assert!(provider.supports_projection(ViewProjection::Orthographic));
@@ -54,21 +55,37 @@ fn no_in_tree_provider_supports_perspective() {
     }
 }
 
+/// A hidden-line provider that leaves the claim at its default.
+#[derive(Debug)]
+struct Plain;
+
+impl axiolid_contracts::Backend for Plain {
+    fn descriptor(&self) -> axiolid_contracts::BackendDescriptor {
+        ScalarHiddenLines.descriptor()
+    }
+}
+
+impl MeshHiddenLines for Plain {
+    fn hidden_lines(
+        &self,
+        request: &HiddenLineRequest<'_>,
+        options: &ExecutionOptions,
+    ) -> Result<HiddenLineOutcome, HiddenLineError> {
+        ScalarHiddenLines.hidden_lines(request, options)
+    }
+}
+
 #[test]
-fn providers_called_directly_refuse_a_perspective_view_by_name() {
+fn a_provider_that_leaves_the_claim_at_its_default_claims_orthographic_only() {
+    assert!(Plain.supports_projection(ViewProjection::Orthographic));
+    assert!(!Plain.supports_projection(ViewProjection::Perspective));
+}
+
+#[test]
+fn visible_face_providers_called_directly_refuse_a_perspective_view_by_name() {
     let boxes = [box_mesh([-1.0, -1.0, -4.0], [1.0, 1.0, -2.0])];
     let meshes = solids(&boxes);
-    let lines = HiddenLineRequest::new(&meshes, perspective(), EdgeSelection::new(None), LIMITS);
     let faces = VisibleFaceRequest::new(&meshes, perspective(), FACE_LIMITS);
-    for provider in [&ScalarHiddenLines as &dyn MeshHiddenLines, &ScanHiddenLines] {
-        let error = provider
-            .hidden_lines(&lines, &options())
-            .expect_err("refused");
-        assert!(
-            is_named_refusal(&error.error, Operation::MeshHiddenLines),
-            "{error}"
-        );
-    }
     for provider in [
         &ScalarVisibleFaces as &dyn MeshVisibleFaces,
         &ScanVisibleFaces,
@@ -85,7 +102,7 @@ fn providers_called_directly_refuse_a_perspective_view_by_name() {
 }
 
 #[test]
-fn registries_report_unsupported_for_a_perspective_view() {
+fn the_hidden_line_registry_draws_a_perspective_view_and_the_face_registry_declines() {
     let boxes = [box_mesh([-1.0, -1.0, -4.0], [1.0, 1.0, -2.0])];
     let meshes = solids(&boxes);
 
@@ -94,16 +111,9 @@ fn registries_report_unsupported_for_a_perspective_view() {
         .register_perspective_conformant(0, ScalarHiddenLines::new())
         .unwrap_or_else(|report| panic!("{report}"));
     let request = HiddenLineRequest::new(&meshes, perspective(), EdgeSelection::new(None), LIMITS);
-    let error = lines
-        .hidden_lines(&request, &options())
-        .expect_err("unsupported");
-    assert!(matches!(
-        error.error,
-        GeomError::Unsupported {
-            operation: Operation::MeshHiddenLines,
-            ..
-        }
-    ));
+    let drawn = lines.hidden_lines(&request, &options()).expect("draws");
+    assert_eq!(drawn.view, perspective());
+    assert!(!drawn.segments.is_empty());
 
     let mut faces = MeshVisibleFacesRegistry::new();
     faces
@@ -134,7 +144,7 @@ fn an_orthographic_view_is_unchanged_by_the_projection_field() {
         .expect("draws");
 }
 
-/// An in-tree provider that claims perspective, which it cannot draw.
+/// An in-tree face provider that claims perspective, which it cannot draw.
 #[derive(Debug)]
 struct Claims;
 
@@ -144,7 +154,18 @@ impl axiolid_contracts::Backend for Claims {
     }
 }
 
-impl MeshHiddenLines for Claims {
+/// A hidden-line provider that claims perspective and ignores the
+/// projection: it draws the orthographic picture.
+#[derive(Debug)]
+struct Ignores;
+
+impl axiolid_contracts::Backend for Ignores {
+    fn descriptor(&self) -> axiolid_contracts::BackendDescriptor {
+        ScalarHiddenLines.descriptor()
+    }
+}
+
+impl MeshHiddenLines for Ignores {
     fn supports_projection(&self, _projection: ViewProjection) -> bool {
         true
     }
@@ -154,7 +175,9 @@ impl MeshHiddenLines for Claims {
         request: &HiddenLineRequest<'_>,
         options: &ExecutionOptions,
     ) -> Result<HiddenLineOutcome, HiddenLineError> {
-        ScalarHiddenLines.hidden_lines(request, options)
+        let mut orthographic = request.clone();
+        orthographic.view = View::new(request.view.frame);
+        ScalarHiddenLines.hidden_lines(&orthographic, options)
     }
 }
 
@@ -178,10 +201,11 @@ fn register_conformant_refuses_an_unverified_perspective_claim() {
         faces::FaceConformanceFailure, ConformanceFailure,
     };
 
+    // A hidden-line provider that ignores the projection fails the fixtures.
     let mut lines = MeshHiddenLinesRegistry::new();
     let report = lines
-        .register_conformant(0, Claims)
-        .expect_err("the claim cannot be verified");
+        .register_conformant(0, Ignores)
+        .expect_err("the claim is false");
     assert!(report.failures.iter().any(|f| matches!(
         f,
         ConformanceFailure::ReturnedError {

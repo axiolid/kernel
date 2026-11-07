@@ -17,7 +17,9 @@ use std::ops::Range;
 use axiolid_contracts::{ExecutionOptions, GeomError, GeomResult};
 use axiolid_core::{Aabb2, Frame3, SpaceFrame, Tolerance};
 use axiolid_mesh::try_audit_mesh;
-use axiolid_mesh_hidden_lines_contract::{HiddenLineError, HiddenLineMesh, MeshRole, View};
+use axiolid_mesh_hidden_lines_contract::{
+    HiddenLineError, HiddenLineMesh, MeshRole, View, ViewProjection,
+};
 
 use crate::caps::Cap;
 use crate::decide::decide;
@@ -113,6 +115,7 @@ pub(crate) fn prepare(
     ranges
         .try_reserve_exact(meshes.len())
         .map_err(|_| memory())?;
+    let perspective = view.projection == ViewProjection::Perspective;
     let mut escalations = 0;
     for entry in meshes {
         let base = u32::try_from(verts.len()).map_err(|_| {
@@ -120,27 +123,21 @@ pub(crate) fn prepare(
                 resource: names.vertices,
             })
         })?;
-        verts.extend(
-            entry
-                .mesh
-                .positions
-                .iter()
-                .map(|p| Vert::new(*p, &view.frame)),
-        );
+        verts.extend(entry.mesh.positions.iter().map(|p| Vert::in_view(*p, view)));
         let cut = match (view.near, entry.role) {
             (Some(near), MeshRole::Solid) => {
-                cut_by_near(&verts[base as usize..], near, &mut escalations)
+                cut_by_near(&verts[base as usize..], near, perspective, &mut escalations)
                     .map_err(|error| HiddenLineError::mesh(entry.id, error))?
             }
             _ => false,
         };
         let first_triangle = tris.len();
         push_triangles(
-            entry.id,
-            entry.mesh,
+            entry,
             base,
             &verts,
             options,
+            perspective,
             &mut escalations,
             &mut tris,
         )?;
@@ -165,10 +162,15 @@ pub(crate) fn prepare(
 
 /// Whether the plane `W = near` cuts the vertices: one has `W > near` and one
 /// has `W <= near`, each decided exactly.
-fn cut_by_near(verts: &[Vert], near: f64, escalations: &mut usize) -> GeomResult<bool> {
+fn cut_by_near(
+    verts: &[Vert],
+    near: f64,
+    perspective: bool,
+    escalations: &mut usize,
+) -> GeomResult<bool> {
     let (mut beyond, mut kept) = (false, false);
     for at in 0..verts.len() as u32 {
-        let constraint = Constraint::new(Kind::BelowNear(near), false);
+        let constraint = Constraint::in_view(Kind::BelowNear(near), false, perspective);
         let side = decide(
             &ValueSign {
                 verts,
@@ -244,6 +246,19 @@ fn validate_shape(
     }
 
     validate_frame(&view.frame, options.tolerance(), label)?;
+    match view.projection {
+        ViewProjection::Orthographic => {}
+        ViewProjection::Perspective => {
+            // The eye is the frame origin and everything kept lies in front
+            // of it (ADR 0107); a non-finite depth is refused below.
+            if !view.near.is_some_and(|near| near < 0.0) {
+                return Err(invalid(format!(
+                    "{label} perspective view needs a finite near depth below zero"
+                )));
+            }
+        }
+        _ => return Err(invalid(format!("{label} view projection is not known"))),
+    }
     for (name, bound) in [("near", view.near), ("far", view.far)] {
         if bound.is_some_and(|value| !value.is_finite()) {
             return Err(invalid(format!("{label} {name} depth is not finite")));

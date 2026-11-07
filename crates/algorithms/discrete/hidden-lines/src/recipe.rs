@@ -4,6 +4,16 @@
 //! view space. It is evaluated at the edge's two end vertices; the sign pair
 //! decides where along the edge it holds (see `param`). Constants such as the
 //! occluder's vertices enter as exact view-space values.
+//!
+//! A perspective view (ADR 0107) keeps every question affine in the edge
+//! parameter by asking it of vectors from the eye, which is the origin of
+//! view space. The image of `X` is `(U, V) / h` with `h = -W`, so the side of
+//! an image line is the determinant of the rows `(h, U, V)`. The eye ray
+//! through `P` hits a triangle exactly when `P = a·t0 + b·t1 + c·t2` with
+//! `a, b, c >= 0`, and then reaches the triangle's plane at `P / s` with
+//! `s = a + b + c`: the plane is in front of `P` when `s > 1`, and the hit is
+//! not past the near plane when `near·s - W_P >= 0`. No determinant divides
+//! by a vertex weight, so a triangle behind the eye needs no special case.
 
 use axiolid_exact::{Arith, SignExpr};
 use axiolid_guarantees::Sign;
@@ -51,15 +61,26 @@ pub(crate) enum Kind {
 /// An affine constraint `L(P) >= 0`, or `L(P) > 0` when `strict`.
 ///
 /// Strictness only matters where `L` is identically zero along the edge.
+/// `perspective` selects the eye-ray reading of the same question.
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub(crate) struct Constraint {
     pub kind: Kind,
     pub strict: bool,
+    pub perspective: bool,
 }
 
 impl Constraint {
     pub(crate) const fn new(kind: Kind, strict: bool) -> Self {
-        Self { kind, strict }
+        Self::in_view(kind, strict, false)
+    }
+
+    /// The constraint in a view that is perspective or not.
+    pub(crate) const fn in_view(kind: Kind, strict: bool, perspective: bool) -> Self {
+        Self {
+            kind,
+            strict,
+            perspective,
+        }
     }
 
     /// Whether `L` is zero at `at` by vertex identity alone: the image point
@@ -78,8 +99,9 @@ impl Constraint {
 
     /// `L(P)` for the vertex `at`.
     pub(crate) fn value<T: Arith>(&self, verts: &[Vert], at: u32) -> T {
-        // TODO(#387): affine `U, V, W`; BelowNear and AboveFar below read
-        // `W` as a depth, which a perspective view must take as `-h / W`.
+        if self.perspective {
+            return self.eye_value(verts, at);
+        }
         let c = |vertex: u32, axis: usize| T::from_dyadic(verts[vertex as usize].affine(axis));
         let signed = |neg: bool, x: T| if neg { x.neg() } else { x };
         match self.kind {
@@ -147,8 +169,6 @@ impl Constraint {
                         .add(&along.mul(&c(to, 2).sub(&c(from, 2)))),
                 )
             }
-            // TODO(#387): a depth bound compares `W`, which is `-h / W`
-            // once the view is perspective.
             Kind::BelowNear(near) => T::from_f64(near).sub(&c(at, 2)),
             Kind::AboveFar(far) => c(at, 2).sub(&T::from_f64(far)),
             Kind::Region { axis, upper, bound } => {
@@ -160,6 +180,128 @@ impl Constraint {
             }
         }
     }
+}
+
+type Vec3x<T> = [T; 3];
+
+fn sub3<T: Arith>(a: &Vec3x<T>, b: &Vec3x<T>) -> Vec3x<T> {
+    [a[0].sub(&b[0]), a[1].sub(&b[1]), a[2].sub(&b[2])]
+}
+
+fn scale3<T: Arith>(k: &T, a: &Vec3x<T>) -> Vec3x<T> {
+    [k.mul(&a[0]), k.mul(&a[1]), k.mul(&a[2])]
+}
+
+fn dot3<T: Arith>(a: &Vec3x<T>, b: &Vec3x<T>) -> T {
+    a[0].mul(&b[0]).add(&a[1].mul(&b[1])).add(&a[2].mul(&b[2]))
+}
+
+fn cross3<T: Arith>(a: &Vec3x<T>, b: &Vec3x<T>) -> Vec3x<T> {
+    [
+        a[1].mul(&b[2]).sub(&a[2].mul(&b[1])),
+        a[2].mul(&b[0]).sub(&a[0].mul(&b[2])),
+        a[0].mul(&b[1]).sub(&a[1].mul(&b[0])),
+    ]
+}
+
+/// The view-space vector from the eye to the vertex.
+fn from_eye<T: Arith>(verts: &[Vert], at: u32) -> Vec3x<T> {
+    let exact = &verts[at as usize].exact;
+    [
+        T::from_dyadic(&exact[0]),
+        T::from_dyadic(&exact[1]),
+        T::from_dyadic(&exact[2]),
+    ]
+}
+
+/// The determinant of the rows `(h, U, V)` of three vertices: the image
+/// orientation of a perspective view, up to the positive weights `h`.
+pub(crate) fn image_orient<T: Arith>(verts: &[Vert], a: u32, b: u32, c: u32) -> T {
+    let row = |v: u32| {
+        let exact = &verts[v as usize].exact;
+        [
+            T::from_dyadic(&exact[3]),
+            T::from_dyadic(&exact[0]),
+            T::from_dyadic(&exact[1]),
+        ]
+    };
+    dot3(&row(a), &cross3(&row(b), &row(c)))
+}
+
+/// `h_from·X_to - h_to·X_from`: the difference of one image coordinate
+/// between two perspective vertices, up to the positive weights `h`.
+pub(crate) fn image_delta<T: Arith>(verts: &[Vert], from: u32, to: u32, axis: usize) -> T {
+    let (f, t) = (&verts[from as usize].exact, &verts[to as usize].exact);
+    T::from_dyadic(&f[3])
+        .mul(&T::from_dyadic(&t[axis]))
+        .sub(&T::from_dyadic(&t[3]).mul(&T::from_dyadic(&f[axis])))
+}
+
+impl Constraint {
+    /// `L(P)` of a perspective view, for the vertex `at`.
+    fn eye_value<T: Arith>(&self, verts: &[Vert], at: u32) -> T {
+        let v = |vertex: u32| from_eye::<T>(verts, vertex);
+        let signed = |neg: bool, x: T| if neg { x.neg() } else { x };
+        match self.kind {
+            Kind::ImageSide { p, q, neg } => signed(neg, image_orient(verts, p, q, at)),
+            Kind::PlaneAbove {
+                t: [t0, t1, t2],
+                neg,
+                lift,
+            } => {
+                let (a, b) = (sub3(&v(t1), &v(t0)), sub3(&v(t2), &v(t0)));
+                // `P - t0`; or, at the near plane, `near·P - W_P·t0`, the
+                // eye ray's point at depth `near` scaled by `W_P` to stay
+                // affine.
+                let c = match lift {
+                    Lift::Own => sub3(&v(at), &v(t0)),
+                    Lift::Near(near) => {
+                        let p = v(at);
+                        sub3(&scale3(&T::from_f64(near), &p), &scale3(&p[2], &v(t0)))
+                    }
+                };
+                signed(neg, dot3(&a, &cross3(&b, &c)))
+            }
+            Kind::ExtentFrom { from, to } => {
+                let (c, d) = (v(from), v(to));
+                dot3(&cross3(&c, &v(at)), &cross3(&c, &d))
+            }
+            Kind::ExtentTo { from, to } => {
+                let (c, d) = (v(from), v(to));
+                dot3(&cross3(&v(at), &d), &cross3(&c, &d))
+            }
+            Kind::SegmentAbove { from, to } => {
+                let (s, normal) = segment_scale(&v(from), &v(to), &v(at));
+                s.sub(&dot3(&normal, &normal))
+            }
+            Kind::SegmentAtOrBelow { from, to, near } => {
+                let (s, normal) = segment_scale(&v(from), &v(to), &v(at));
+                T::from_f64(near)
+                    .mul(&s)
+                    .sub(&dot3(&normal, &normal).mul(&v(at)[2]))
+            }
+            Kind::BelowNear(near) => T::from_f64(near).sub(&v(at)[2]),
+            Kind::AboveFar(far) => v(at)[2].sub(&T::from_f64(far)),
+            Kind::Region { axis, upper, bound } => {
+                let exact = &verts[at as usize].exact;
+                let coordinate = T::from_dyadic(&exact[axis]);
+                let scaled = T::from_f64(bound).mul(&T::from_dyadic(&exact[3]));
+                if upper {
+                    scaled.sub(&coordinate)
+                } else {
+                    coordinate.sub(&scaled)
+                }
+            }
+        }
+    }
+}
+
+/// For the segment `CD` and the point `P` in one plane through the eye:
+/// `(P × (D - C))·(C × D)`, which is `s·|C × D|²` when `P / s` is on `CD`,
+/// and the normal `C × D`.
+fn segment_scale<T: Arith>(c: &Vec3x<T>, d: &Vec3x<T>, p: &Vec3x<T>) -> (T, Vec3x<T>) {
+    let normal = cross3(c, d);
+    (dot3(&cross3(p, &sub3(d, c)), &normal), normal)
 }
 
 /// `|F'|²` and `(P' - C')·F'` for the segment `CD` and the point `at`.
@@ -220,6 +362,7 @@ pub(crate) struct Orient2<'a> {
     pub a: u32,
     pub b: u32,
     pub c: u32,
+    pub perspective: bool,
 }
 
 impl SignExpr for Orient2<'_> {
@@ -227,8 +370,9 @@ impl SignExpr for Orient2<'_> {
         if self.c == self.a || self.c == self.b {
             return Some(Sign::Zero);
         }
-        // TODO(#387): the image orientation of a perspective view is the
-        // homogeneous determinant of the three vertices.
+        if self.perspective {
+            return image_orient::<T>(self.verts, self.a, self.b, self.c).sign();
+        }
         let c = |vertex: u32, axis: usize| T::from_dyadic(self.verts[vertex as usize].affine(axis));
         c(self.b, 0)
             .sub(&c(self.a, 0))
@@ -248,6 +392,7 @@ pub(crate) struct Delta<'a> {
     pub from: u32,
     pub to: u32,
     pub axis: usize,
+    pub perspective: bool,
 }
 
 impl SignExpr for Delta<'_> {
@@ -255,7 +400,9 @@ impl SignExpr for Delta<'_> {
         if self.from == self.to {
             return Some(Sign::Zero);
         }
-        // TODO(#387): affine difference of one coordinate.
+        if self.perspective {
+            return image_delta::<T>(self.verts, self.from, self.to, self.axis).sign();
+        }
         T::from_dyadic(self.verts[self.to as usize].affine(self.axis))
             .sub(&T::from_dyadic(
                 self.verts[self.from as usize].affine(self.axis),

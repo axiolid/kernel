@@ -1,5 +1,6 @@
 #![forbid(unsafe_code)]
-//! Exact orthographic hidden-line drawings of triangle meshes (ADR 0090).
+//! Exact orthographic and perspective hidden-line drawings of triangle meshes
+//! (ADR 0090, 0107).
 //!
 //! [`ScalarHiddenLines`] implements
 //! [`MeshHiddenLines`](axiolid_mesh_hidden_lines_contract::MeshHiddenLines).
@@ -12,6 +13,14 @@
 //! each the exact point rounded once to the nearest binary64. With
 //! `EdgeSelection::group_boundary` it also draws the edges between face
 //! groups, and `FaceGroups::Planar` derives the groups exactly (ADR 0106).
+//!
+//! A perspective view (ADR 0107) is a pinhole at the frame origin: the image
+//! of `(U, V, W)` is `(U / -W, V / -W)`. Every sign question is then an exact
+//! determinant of view-space vectors from the eye (`recipe`), affine in the
+//! edge parameter as before, so nothing divides before it is decided and a
+//! triangle behind the eye needs no case; the endpoints are the exact
+//! rationals rounded once, and a near-plane cap is decided by ray parity along
+//! the eye ray (`caps`). The visible-face provider below is orthographic only.
 //!
 //! [`ScalarVisibleFaces`] implements
 //! [`MeshVisibleFaces`](axiolid_mesh_hidden_lines_contract::MeshVisibleFaces)
