@@ -23,6 +23,7 @@ SHEET = "crates/algorithms/query/inspect/src/sheet.rs"
 
 T = ["-p", "axiolid-mesh-compile", "--test", "turned_clip"]
 L = ["-p", "axiolid-mesh-compile", "--lib"]
+F = ["-p", "axiolid-mesh-compile", "--test", "flush_through_cut"]
 S = ["-p", "axiolid-inspect", "--test", "sheet"]
 
 GUARD_HEAD = (
@@ -49,7 +50,7 @@ MUTANTS = [
      GUARD_HEAD.replace(
          "axiolid_core::BooleanOperator::Difference | axiolid_core::BooleanOperator::Intersection",
          "axiolid_core::BooleanOperator::Union"),
-     [T]),
+     [T, F]),
     ("the skin guard reads the tolerance, not the rounding reach", COMPILER,
      "axiolid_inspect::thin_sheet(&outcome.mesh, reach)",
      "axiolid_inspect::thin_sheet(&outcome.mesh, crate::snap::contact_reach(options.tolerance()))",
@@ -69,11 +70,11 @@ MUTANTS = [
     ("the referee is accepted above the rounding reach", REFEREE,
      "        if !within_reach(report.linear(), reach) {",
      "        if false && !within_reach(report.linear(), reach) {",
-     [T]),
+     [T, F]),
     ("a skin never reaches the referee", COMPILER,
      "                skin: Some(skin),\n                ..\n            }) => {",
      "                skin: Some(skin),\n                ..\n            }) if false => {",
-     [T]),
+     [T, F]),
     ("every skin is refereed where it is cut, not at the chain's root", COMPILER,
      "    if id == root || graph.roots().contains(&id) {\n        return false;\n    }",
      "    if true || id == root || graph.roots().contains(&id) {\n        return false;\n    }",

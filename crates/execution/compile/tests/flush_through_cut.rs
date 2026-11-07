@@ -23,11 +23,13 @@ use std::f64::consts::PI;
 use axiolid_contracts::{ExecutionOptions, GeomError};
 use axiolid_core::{BooleanOperator, Interval, Point2, Scalar, Tolerance, Transform3, Vec3};
 use axiolid_curve::{Curve2, Line2};
-use axiolid_inspect::{enclosed_volume, VolumeInterval};
+use axiolid_inspect::{enclosed_volume, thin_sheet, VolumeInterval};
 use axiolid_mesh::TriMesh;
 use axiolid_mesh_boolean_boolmesh::BoolmeshBoolean;
 use axiolid_mesh_compile::deviation::SNAPPED_OPERANDS;
-use axiolid_mesh_compile::{DeviationBound, DeviationReport, ReferenceMeshCompiler};
+use axiolid_mesh_compile::{
+    DeviationBound, DeviationReport, ReferenceMeshCompiler, SKIN_WITHIN_ROUNDING,
+};
 use axiolid_mesh_compile_contract::MeshCompiler;
 use axiolid_model::{
     GeometryGraph, GeometryGraphBuilder, GeometryNode, Instance, NodeId, SolidOperation,
@@ -335,29 +337,100 @@ fn a_downward_slab_with_flush_through_openings_has_its_closed_form_volume() {
     }
 }
 
+/// The openings (not [`OUTSIDE`], which cuts nothing) that `mesh` still
+/// covers: the vertical line through an opening's centre, placed by
+/// `placement` when given, crosses a triangle that is not vertical. A lid
+/// across an opening is such a triangle; a through-opening has none.
+fn lidded(mesh: &TriMesh, placement: Option<Transform3>) -> Vec<usize> {
+    let triangles: Vec<[Vec3; 3]> = mesh
+        .indices
+        .as_chunks::<3>()
+        .0
+        .iter()
+        .map(|t| t.map(|i| mesh.positions[i as usize]))
+        .filter(|t| (t[1] - t[0]).cross(t[2] - t[0]).z != 0.0)
+        .collect();
+    let side = |a: Vec3, b: Vec3, p: Vec3| (b.x - a.x) * (p.y - a.y) - (b.y - a.y) * (p.x - a.x);
+    OPENINGS
+        .iter()
+        .enumerate()
+        .filter(|&(i, _)| i != OUTSIDE)
+        .filter(|&(_, &(x0, x1, y0, y1))| {
+            let centre = Vec3::new((x0 + x1) / 2.0, (y0 + y1) / 2.0, DEPTH / 2.0);
+            let centre = placement.map_or(centre, |at| at.transform_point3(centre));
+            triangles.iter().any(|t| {
+                let signs = [
+                    side(t[0], t[1], centre),
+                    side(t[1], t[2], centre),
+                    side(t[2], t[0], centre),
+                ];
+                signs.iter().all(|&s| s >= 0.0) || signs.iter().all(|&s| s <= 0.0)
+            })
+        })
+        .map(|(i, _)| i)
+        .collect()
+}
+
+/// The slab's bottom face tilts by the rounded sine of the half turn,
+/// `1.22e-16`, and the openings' bottoms sit at `z = 0`: in exact arithmetic
+/// every opening keeps a lid up to `8.6e-15` thick across the slab's bottom.
+/// The mesh cut returned all of them lidded (the volume agrees, a lid has
+/// none) and, placed, a self-intersecting mesh. The exact referee cannot
+/// decide it either: the round trip through world coordinates also moved the
+/// openings' sides by `2^-30`, `9.3e-10`, authored at the slab's scale, and
+/// the exact compiler cannot classify below that. The cut is refused by
+/// name, and the refusal is the skin's, not the void tangent to its host's
+/// face the #276 snap once caused (#291).
+// TODO(#457): decided once brep-boolean classifies at the reach.
 #[test]
-fn a_slab_under_a_rounded_half_turn_is_not_refused() {
-    // The reproduction: its bottom face tilts by the rounded sine, and the
-    // openings come back from world coordinates `1e-10` off. The #276 snap
-    // moved their bottoms onto the tilted plane within rounding, some
-    // vertices above it, some below, and the result was refused as "touches
-    // itself along the edge (69.99.., 28.65.., -3.5e-15) to (73.64..,
-    // 28.65.., -3.5e-15)". Nothing lands on a face axis-aligned only within
-    // rounding now; the residues stay as the operands give them.
+fn a_slab_under_a_rounded_half_turn_with_round_tripped_openings_is_refused_by_name() {
     let openings = Openings {
         frame: Frame::HalfTurn,
         storey: false,
         round_trip: true,
     };
     let (graph, root) = slab(Frame::RoundedHalfTurn, openings, None);
-    let host = mesh(&graph, root).unwrap_or_else(|e| panic!("{e}"));
-    let volume = enclosed_volume(&host).expect("a valid solid");
-    // The round trip moved the openings by up to `1e-10`.
-    assert_volume(volume, net(), SLAB_AREA * 1e-9, "rounded half turn");
-    // Placed, its `1e-10` residues are below the placement's rounding:
-    // not certifiable, but never refused by the snap.
+    let Err(GeomError::Degenerate(text)) = mesh(&graph, root) else {
+        panic!("a skin within rounding is refused by name");
+    };
+    assert!(text.starts_with(SKIN_WITHIN_ROUNDING), "{text}");
+    assert!(text.contains("the exact referee refused"), "{text}");
+    assert!(!text.contains("touches itself"), "{text}");
+}
+
+/// Placed at the site, the same slab is decided by the exact referee, which
+/// opens every opening where the mesh cut left them lidded and
+/// self-intersecting.
+#[test]
+fn a_placed_slab_under_a_rounded_half_turn_opens_every_opening() {
+    let openings = Openings {
+        frame: Frame::HalfTurn,
+        storey: false,
+        round_trip: true,
+    };
     let (graph, root) = slab(Frame::RoundedHalfTurn, openings, Some(site()));
-    mesh(&graph, root).unwrap_or_else(|e| panic!("placed: {e}"));
+    let placed = mesh(&graph, root).unwrap_or_else(|e| panic!("{e}"));
+    let volume = enclosed_volume(&placed).expect("a valid solid");
+    assert_volume(volume, net(), SLAB_AREA * 1e-9, "placed");
+    assert_eq!(thin_sheet(&placed, 2e-8), None);
+    assert_eq!(lidded(&placed, Some(site())), Vec::<usize>::new());
+}
+
+/// Exactly turned openings leave no `2^-30` sliver: the exact referee decides
+/// the slab and opens every opening.
+#[test]
+fn a_slab_under_a_rounded_half_turn_with_exactly_turned_openings_opens_every_opening() {
+    let openings = Openings {
+        frame: Frame::HalfTurn,
+        storey: false,
+        round_trip: false,
+    };
+    let (graph, root) = slab(Frame::RoundedHalfTurn, openings, None);
+    let solid = mesh(&graph, root).unwrap_or_else(|e| panic!("{e}"));
+    let volume = enclosed_volume(&solid).expect("a valid solid");
+    assert_volume(volume, net(), SLAB_AREA * 4.0 * ulp(140.0), "unplaced");
+    assert_eq!(thin_sheet(&solid, 16.0 * Scalar::EPSILON * 133.4), None);
+    assert_eq!(lidded(&solid, None), Vec::<usize>::new());
 }
 
 /// A small deterministic generator (xorshift64*).

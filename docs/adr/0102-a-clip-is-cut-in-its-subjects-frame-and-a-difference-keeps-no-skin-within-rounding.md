@@ -106,10 +106,17 @@ as the next subject pinches the next opening.
   decided; at a site 600 km out the exact compiler cannot classify a point
   near a face boundary and the skin is refused by name.
 - One BVH pass over the result of every difference and intersection cut.
+- A chain whose residue skin lies beside a feature above the reach but below
+  the tolerance is refused by name: the round-tripped flush slab, whose
+  openings the round trip also moved by `9.3e-10`. The exact compiler reads
+  that feature as one at the tolerance and cannot classify below it (#457).
+  mesh-compile 0.3.44 returned that slab with every opening lidded, and
+  placed it self-intersecting.
 
 **Follow-ups / risks to watch**
 
 - Whether the guard applies to unions: #434.
+- The exact compiler classifying below a feature it would read as one: #457.
 
 ## Tests
 
@@ -122,7 +129,9 @@ solid or refused by `SKIN_WITHIN_ROUNDING`; a pinned angle the referee
 decides, an authored skin it keeps, a pinned site where the exact compiler
 refuses, and a pinned site where it reads above the reach), the
 `frame::relative` unit
-tests, `axiolid-inspect`'s `tests/sheet.rs`, and
+tests, `tests/flush_through_cut.rs` (the round-tripped slab refused by name;
+the same slab placed, and with exactly turned openings, opens every opening),
+`axiolid-inspect`'s `tests/sheet.rs`, and
 `scripts/probe_clip_skin_mutants.py`.
 
 ## Relation to existing code

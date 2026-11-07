@@ -4559,6 +4559,15 @@ Every publishable crate versions and publishes independently ([ADR 0067](/adr/00
   than its coordinates' rounding and the exact referee cannot decide it
   (#400, ADR 0102).
 
+### Changed
+
+- A flush slab whose openings were round-tripped through world coordinates
+  (their sides moved by `9.3e-10`) is refused by name, `SKIN_WITHIN_ROUNDING`
+  with the referee's reason, where 0.3.44 returned it with every opening
+  lidded; the exact compiler cannot classify below that feature (#457). The
+  same slab placed, or with exactly turned openings, now opens every opening
+  where 0.3.44 returned a self-intersecting mesh (#400, ADR 0102).
+
 ### Fixed
 
 - A half-space clip is cut in its subject's frame, so a wall turned by a
