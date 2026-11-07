@@ -256,10 +256,10 @@
       "description": "Mesh queries: clearance, containment, ray casting, and genus",
       "layer": "algorithms",
       "path": "crates/algorithms/query/inspect",
-      "released": "0.3.9",
-      "released_date": "2026-11-04",
+      "released": "0.3.10",
+      "released_date": "2026-11-07",
       "role": "algorithm.query",
-      "version": "0.3.9"
+      "version": "0.3.10"
     },
     "axiolid-levelset": {
       "description": "Level-set extraction: a closed manifold mesh from a sampled scalar field",
@@ -328,10 +328,10 @@
       "description": "Scalar reference MeshCompiler: profiles, extrusion, transforms, boolean dispatch.",
       "layer": "execution",
       "path": "crates/execution/compile",
-      "released": "0.3.44",
-      "released_date": "2026-11-03",
+      "released": "0.3.45",
+      "released_date": "2026-11-07",
       "role": "execution.orchestration",
-      "version": "0.3.44"
+      "version": "0.3.45"
     },
     "axiolid-mesh-compile-contract": {
       "description": "Portable graph-to-mesh compilation contract",

@@ -9,7 +9,23 @@ caret rule for `0.x` versions.
 
 ## [Unreleased]
 
+## [0.3.45] - 2026-11-07
+
+### Added
+
+- `SKIN_WITHIN_ROUNDING`: the start of the `Degenerate` message a difference
+  or an intersection is refused with when its result holds a skin thinner
+  than its coordinates' rounding and the exact referee cannot decide it
+  (#400, ADR 0102).
+
 ### Fixed
+
+- A half-space clip is cut in its subject's frame, so a wall turned by a
+  placement no longer comes back as a `Solid` with a lid thinner than
+  rounding across a slot the clip opens (#400, ADR 0102). A difference or
+  intersection whose result still holds such a skin is decided by the exact
+  referee, bounded half-space tools included, where it reads nothing above
+  the rounding reach, and refused by name otherwise.
 
 - A sectioned surface and an open-section run (`SurfaceRelation::SectionedSurface`,
   `OpenSectionsAtStations`) whose section planes stop advancing are refused
@@ -60,11 +76,6 @@ caret rule for `0.x` versions.
   a composite measured in plan distance, holding an instanced or parameter
   curve, or ending inside an offset segment, and an offset of a trimmed
   composite cut inside a quadrature piece. Requires `axiolid-evaluate` 0.3.20.
-
-- `SKIN_WITHIN_ROUNDING`: the start of the `Degenerate` message a difference
-  or an intersection is refused with when its result holds a skin thinner
-  than its coordinates' rounding and the exact referee cannot decide it
-  (#400, ADR 0102).
 
 - `station::placement_accuracy`, `PlacementAccuracy` and `PlacementBound`
   (#405): how far a node placed at a station lies from its exact
@@ -211,13 +222,6 @@ caret rule for `0.x` versions.
   tolerance a length is accepted to, no longer to the linear tolerance taken
   as a parameter. Where no speed bound is known the window is read to
   `1e-12 * max(1, |x|)`, failing closed.
-
-- A half-space clip is cut in its subject's frame, so a wall turned by a
-  placement no longer comes back as a `Solid` with a lid thinner than
-  rounding across a slot the clip opens (#400, ADR 0102). A difference or
-  intersection whose result still holds such a skin is decided by the exact
-  referee, bounded half-space tools included, where it reads nothing above
-  the rounding reach, and refused by name otherwise.
 
 - A station-placed spine whose section planes fold is refused as invalid
   input, by the mesh and the exact compiler alike (#361). A section vertex

@@ -9,7 +9,7 @@ caret rule for `0.x` versions.
 
 ## [Unreleased]
 
-## [0.3.9] - 2026-11-04
+## [0.3.10] - 2026-11-07
 
 ### Added
 
@@ -17,6 +17,10 @@ caret rule for `0.x` versions.
   face each other within a linear distance on one plane and overlap in more
   than an edge. A boolean whose operand lands a rounding residue off the
   face it should meet leaves such a lid in a Solid (#400).
+
+## [0.3.9] - 2026-11-04
+
+### Added
 
 - `near_coplanar` and `NearCoplanar`: the first pair of triangles of two
   meshes that nearly share a plane within a linear distance, not exactly

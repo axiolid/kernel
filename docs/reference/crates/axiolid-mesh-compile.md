@@ -8,7 +8,7 @@ Scalar reference MeshCompiler: profiles, extrusion, transforms, boolean dispatch
 
 | | |
 | --- | --- |
-| Latest release | 0.3.44 (2026-11-03) |
+| Latest release | 0.3.45 (2026-11-07) |
 | crates.io | [`axiolid-mesh-compile`](https://crates.io/crates/axiolid-mesh-compile) |
 | Layer | execution (`execution.orchestration`) |
 | API documentation | [rustdoc](/api/rustdoc/axiolid_mesh_compile/index.html) · [docs.rs](https://docs.rs/axiolid-mesh-compile) |
@@ -104,174 +104,16 @@ owns graph traversal and dispatch; the construction algorithms themselves
 
 ## Changes
 
-Latest release, 0.3.44 (2026-11-03):
+Latest release, 0.3.45 (2026-11-07):
 
 ### Added
-
-- `PolylineCompiler` compiles a trim of a trim, of an offset, of a placed
-  curve and of a composite (#424, ADR 0101). A trim reads its basis's
-  parameter, an offset its basis's, a placed curve its source's and a
-  composite its 3D arc length, as a swept directrix does: a window a trim
-  above keeps narrows the inner trim's span, modulo the period on a closed
-  conic. A trim of a composite is cut through the station flattening, each
-  piece flattened between the native parameters a station reads, and the
-  bound adds the certified error of a cut inside an ellipse or B-spline
-  piece. Refused by name: a point or arc-length selector on a relation
-  (#432), a trim across a closed composite's closing joint (#433), a trim of
-  a composite measured in plan distance, holding an instanced or parameter
-  curve, or ending inside an offset segment, and an offset of a trimmed
-  composite cut inside a quadrature piece. Requires `axiolid-evaluate` 0.3.20.
 
 - `SKIN_WITHIN_ROUNDING`: the start of the `Degenerate` message a difference
   or an intersection is refused with when its result holds a skin thinner
   than its coordinates' rounding and the exact referee cannot decide it
   (#400, ADR 0102).
 
-- `station::placement_accuracy`, `PlacementAccuracy` and `PlacementBound`
-  (#405): how far a node placed at a station lies from its exact
-  placement, `Exact` on a line, `Certified` with the error of the
-  placement's point and of each axis (`PlacementBound::displacement` for a
-  local point), or `Unbounded` by name. Requires `axiolid-evaluate` 0.3.20.
-- `SurfaceRelation::Ruled` (#402) compiles to an open sheet
-  (`MeshClosure::Surface`) with a certified deviation, the new
-  `DeviationPath::RuledSurface`. A side is a line, circle, ellipse or
-  B-spline (rational too) over an oriented interval, or an apex point; the
-  bound is the sides' curve term plus the rulings' twist term, derived in
-  `ruled.rs`. A side on another curve family, a conic over more than one
-  turn, a B-spline interval outside its domain and sides that coincide are
-  refused by name.
-
-- A union whose operands are placed by linear parts that differ in a bit,
-  and whose contact the mesh cut cannot settle, is decided by the exact
-  compiler (#391, ADR 0098): the union node is compiled exactly and the
-  exact result tessellated through a resolved view of its own catalogs and
-  pcurve intervals. The trigger is geometry: faces of the two operands that
-  nearly share a plane within the linear tolerance
-  (`axiolid_inspect::near_coplanar`), or a pinch (#194) or
-  `UNMERGED_UNION_CONTACT` refusal. The result is accepted only as a closed
-  solid that passes both guards, and is reported under the new details
-  `deviation::REFEREED_UNION` and `deviation::REFEREED_UNION_EXACT`, with
-  `COINCIDENT_OPERANDS` where the exact compiler read a feature within the
-  tolerance. Its operands' attribute channels are dropped by name,
-  `ProviderLimitation`.
-
-- A stationed spine whose sections are different curved profiles that pair
-  segment for segment (lines, circular and elliptic arcs: a disk growing, a
-  rounded rectangle whose corners grow, an ellipse becoming a disk) reports
-  a `Certified` deviation instead of `Unbounded` (#361, ADR 0082): the
-  profiles are flattened together by `paired_profile_rings`, so the bound of
-  the flattening holds for every interpolated section, and it is the
-  profile's share and the fold margin. A polyline or B-spline segment or a
-  different segment structure stays unbounded by name, and the exact
-  compiler still refuses a curved section that changes. Requires
-  `axiolid-construct` with `paired_profile_rings`.
-
-- `deviation::TOLERANCE_READINGS` and `deviation::BOOLEAN_ROUNDING_FLOOR`
-  (#421): the details under which a boolean measured against its exact
-  result names the furthest any kind of reading within tolerance moved a
-  feature, and the report's rounding floor.
-- `deviation::REFEREED_DIFFERENCE`, `REFEREED_DIFFERENCE_EXACT`,
-  `REFEREED_INTERSECTION` and `REFEREED_INTERSECTION_EXACT` (#423): the
-  details of a difference or an intersection the exact compiler decided.
-
-### Changed
-
-- A station on a trim of a trim (or of a trim placed at a station) reads
-  the outer trim's parameter selectors in the inner trim's basis's
-  parameter, as a swept directrix and a polyline do (#424, the ADR 0082
-  amendment of 2026-11-06), no longer as a distance along the inner trim.
-  A nested trim's outer selectors that were distances along the inner trim
-  name the basis's parameters now, so the point of every station on one
-  moves, through `station::resolve`, `station::curve_path` and every run
-  on it. Selectors other than parameters on such a trim are refused by name
-  (#432). A window may lie past the inner trim by the linear tolerance along
-  the curve (the tolerance over a certified upper bound of the carrier's
-  speed, in parameter units; for a station basis, which has no options, by
-  `1e-12 * max(1, |x|)`, the evaluator's rule for a distance); by more it is
-  `InvalidInput`.
-
-- A node placed at a station on a circle, a polyline, an elevated or
-  banked curve over a line or a circle, an intrinsic plan alone or under a
-  closed-form profile, or a composite of them reports its placement
-  certified (#405), where it was unbounded on every basis but a line: the
-  frame's error `F` grows every contribution of the instance, as the
-  placement's rounding does, and is named once as a certified
-  `StationPlacement` contribution. The source is re-meshed with room for
-  the rounding and `F` when they would carry it over the budget. Frames
-  read by quadrature, chains, a basis itself placed inexactly and a station
-  beside a seam it is not read on stay unbounded, now with their reasons
-  named; the exact compiler still refuses every basis but a line.
-- The B-rep tessellator reads its supports through a resolved view, an
-  edge's 3D curve, a use's pcurve with its parameter span and a face's
-  surface, instead of looking each handle up in the graph (#412). A handle
-  that does not resolve to a node of its kind (an edge curve, a pcurve or a
-  face surface) is now refused up front by name with
-  `GeomError::InvalidInput`, whether or not any face reads the handle. A
-  shelled planar face whose edge use carries a pcurve handle to a Curve3
-  node, or whose edge curve handle points at a Surface node, was meshed (or
-  reported Unbounded) before and is refused now. A B-rep with broken
-  topology is still reported as such first.
-- A B-rep face whose support is a surface relation (a ruled, swept or
-  revolved surface) is refused as `UnsupportedInput` for `Tessellation`
-  (`a B-rep face on a surface relation`), no longer as `InvalidInput`; it
-  was never a malformed graph (#402).
-- A curve-bounded surface over a surface relation, and a sweep whose
-  reference surface is one, are refused as `UnsupportedInput` for
-  `SurfaceEvaluation` (`a curve-bounded surface over a surface relation`,
-  `a surface relation as a reference surface`), no longer as `InvalidInput`
-  (#402).
-
-- A union of differently composed turns that was refused by name
-  (`UNMERGED_UNION_CONTACT` or a pinch) now fuses where the exact compiler
-  fuses it, and one that came back as a body with sub-rounding wedge cracks
-  is replaced by the exact union's tessellation. Where the exact compiler
-  refuses too, the refusal keeps its message and ends with "; the exact
-  referee refused: {reason}"; an unsettled but valid mesh result is
-  returned as before. Mesh operands are never refereed.
-
-- An edge curve without a p-curve is sampled at its derivative breaks first
-  (#342): a polyline's corners, a B-spline's full-multiplicity knots and a
-  closed curve's seam are samples, with uniform power-of-two spans inside
-  each piece between them, shared by the faces using the edge. A straight
-  polyline piece is one span with a chord bound of zero, so a sharp polyline
-  edge no longer exhausts the segment cap and fails with `BudgetExceeded`
-  at a tight budget (a closed square compiles at 1e-4 and 1e-6 with its
-  four corners and its vertex, and a zero bound). An edge some use runs
-  through a p-curve is sampled whole, uniformly, as before.
-- The exact referee decides a difference or an intersection whose mesh
-  holds a void the exact result lacks, bounded by skins within rounding of
-  each other (#423, ADR 0098): a flush door cutter placed with its wall no
-  longer leaves the cut-out void. It fires only when faces of the operands
-  nearly share a plane within the linear tolerance, the mesh has more
-  than one component and more shells than the exact result, and the exact
-  compiler read the operands' faces no further than their rounding. The
-  mesh is then the tessellation of the exact result, accepted only as a
-  closed solid, or empty, with no pinch and no two bodies within the
-  tolerance. Otherwise the mesh result stands and a measured deviation
-  names the extra shell as unbounded (#392). A skin or void thinner than
-  the tolerance but above rounding stays as authored (ADR 0096, D7, #291),
-  and a half-space tool is not refereed. Unions keep their trigger.
-- A measured boolean is `Unbounded` ("boolean: the mesh has more shells
-  than the exact result") when its mesh has more connected components,
-  with bit-equal positions taken as one vertex, than the exact result has
-  shells (#392). The measured distance is one-sided and cannot see an extra
-  shell; fewer components are no refusal.
-
 ### Fixed
-
-- A trim of a full-turn trim of a closed conic kept the wrong arc when an
-  outer selector landed on the seam: `trim(trim(circle, 0, 2 pi), pi, 2 pi)`
-  was the near half `[0, pi]`, and a swept directrix's `parameter_range` on
-  a full-turn trim read the same way (#424). An end that lands on the start
-  of a full turn is its end when it is the larger one asked. The window of a
-  nested trim and the sweep range of a directrix on a trimmed conic or a
-  trim of a trim are read to the linear tolerance along the curve (the
-  tolerance over a certified upper bound of the carrier's speed: `1/r` of a
-  circle, `1/|d|` of a line, `1/max semi-axis` of an ellipse, the evaluator's
-  derivative bound of a B-spline, `1` of a composite's arc length), as the
-  tolerance a length is accepted to, no longer to the linear tolerance taken
-  as a parameter. Where no speed bound is known the window is read to
-  `1e-12 * max(1, |x|)`, failing closed.
 
 - A half-space clip is cut in its subject's frame, so a wall turned by a
   placement no longer comes back as a `Solid` with a lid thinner than
@@ -279,55 +121,5 @@ Latest release, 0.3.44 (2026-11-03):
   intersection whose result still holds such a skin is decided by the exact
   referee, bounded half-space tools included, where it reads nothing above
   the rounding reach, and refused by name otherwise.
-
-- A station-placed spine whose section planes fold is refused as invalid
-  input, by the mesh and the exact compiler alike (#361). A section vertex
-  on the inner side of a bend at or past its centre of curvature (the plan
-  arc's radius against the section's lateral extent, a vertical arc's
-  against its up extent in the section frame), or one receding along the
-  tangent faster than the basis advances, makes the sections cross: the
-  loft was meshed into a self-intersecting shell and reported certified.
-  The check is exact where the frame law has a closed-form bend (unturned
-  sections along a line, circle, polyline, elevated or banked curve over
-  those, or an intrinsic curve; a touch within rounding is refused too) and
-  conservative elsewhere (a turned section, a frame read by quadrature):
-  there it never refuses and reports the run unbounded by name when a fold
-  cannot be excluded. A fold between two far-apart parts of the run is not
-  detected.
-
-- An extrusion of a polyline profile with runs of collinear vertices avoids
-  degenerate cap triangles whatever its placement whenever a triangulation
-  avoids them, and a cap triangle that is a sliver and flat to rounding is
-  refused by name (#415, in `axiolid-construct`).
-
-- A run of sections along a curve that is itself placed at a station whose
-  frame is not exact is unbounded by name (#408), where it was certified
-  against the read placement rather than the exact one, a run of 130 or
-  more sections included. Its folds are still decided, on the frames as
-  read, and refused. Requires `axiolid-evaluate` 0.3.20 for
-  `FrameLaw::atomic_placed` and `FrameLaw::with_placements_read_as_exact`.
-- A boolean's deviation report (and the exact union referee's, #391) covers
-  the boolean of the operands as read (#421), each moved by at most the
-  named readings, which may change the topology against the operands as
-  given: the furthest any kind of
-  reading within tolerance moved a feature (an angle turned counts as a
-  distance over the operands' extent) and the report's rounding floor are
-  added to the measured distance, not combined with it by worst, and are
-  named as contributions of their own next to the coincident supports'. A
-  report whose merged points, contacts or incident points moved further
-  than its coincident supports no longer yields a bound below the move.
-  The bound of a boolean measured against an exact result grows by those
-  two terms.
-
-- A closed B-spline edge whose span crosses the seam past a C0 knot such as
-  0.1, 0.2 or 1/3 keeps its chord bound: the copy of the knot one period on
-  is mapped back to the knot exactly, not by `(t + period) - period`, which
-  left the piece ending an ulp past the knot (#426).
-
-- A curved face's Delaunay flips (#425) visit interior edges in key order, not
-  in a `HashMap`'s: compiling the same B-rep twice gave different triangles
-  (a cap bounded by a circle, whose corners are cocircular) or the same
-  triangles in a different order (a unique triangulation), from call to call
-  and process to process. Each flip's decision is unchanged.
 
 Full history: [`crates/execution/compile/CHANGELOG.md`](https://github.com/axiolid/kernel/blob/main/crates/execution/compile/CHANGELOG.md)

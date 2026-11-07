@@ -8,7 +8,7 @@ Mesh queries: clearance, containment, ray casting, and genus.
 
 | | |
 | --- | --- |
-| Latest release | 0.3.9 (2026-11-04) |
+| Latest release | 0.3.10 (2026-11-07) |
 | crates.io | [`axiolid-inspect`](https://crates.io/crates/axiolid-inspect) |
 | Layer | algorithms (`algorithm.query`) |
 | API documentation | [rustdoc](/api/rustdoc/axiolid_inspect/index.html) · [docs.rs](https://docs.rs/axiolid-inspect) |
@@ -30,7 +30,7 @@ Queries over triangle meshes: clearance between meshes, faces that nearly share 
 
 ## Changes
 
-Latest release, 0.3.9 (2026-11-04):
+Latest release, 0.3.10 (2026-11-07):
 
 ### Added
 
@@ -38,20 +38,5 @@ Latest release, 0.3.9 (2026-11-04):
   face each other within a linear distance on one plane and overlap in more
   than an edge. A boolean whose operand lands a rounding residue off the
   face it should meet leaves such a lid in a Solid (#400).
-
-- `near_coplanar` and `NearCoplanar`: the first pair of triangles of two
-  meshes that nearly share a plane within a linear distance, not exactly
-  coplanar. Placement leaves such a residue where faces meet in exact
-  arithmetic; a boolean that decides on the raw values cannot settle it
-  (#391).
-
-- `certify_unit_winding` and `WindingError`: bracket the winding excess
-  `E = integral of w(w-1)/2 = (integral of w^2 - integral of w) / 2` of a
-  closed oriented cycle, an upper bound on the volume where its winding
-  number is neither 0 nor 1 (equal to it where `w` is in {-1..2}), and
-  accept it within a positive budget.
-  Edge-touching shells and cavities pass; duplicated, overlapping and
-  inverted shells are refused, so `cycle_volume_properties` can be trusted
-  as the enclosed volume (#420).
 
 Full history: [`crates/algorithms/query/inspect/CHANGELOG.md`](https://github.com/axiolid/kernel/blob/main/crates/algorithms/query/inspect/CHANGELOG.md)
