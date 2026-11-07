@@ -77,6 +77,35 @@ impl Iv {
         }
     }
 
+    /// `self / o` for an `o` holding no zero, `NaN` ends otherwise.
+    pub(super) fn div(self, o: Self) -> Self {
+        if o.straddles_zero() {
+            return Self {
+                lo: Scalar::NAN,
+                hi: Scalar::NAN,
+            };
+        }
+        let p = [
+            self.lo / o.lo,
+            self.lo / o.hi,
+            self.hi / o.lo,
+            self.hi / o.hi,
+        ];
+        Self {
+            lo: p.iter().copied().fold(Scalar::INFINITY, Scalar::min),
+            hi: p.iter().copied().fold(Scalar::NEG_INFINITY, Scalar::max),
+        }
+        .widen()
+    }
+
+    /// The square root of the non-negative part.
+    pub(super) fn sqrt(self) -> Self {
+        Self {
+            lo: self.lo.max(0.0).sqrt().next_down().max(0.0),
+            hi: self.hi.max(0.0).sqrt().next_up(),
+        }
+    }
+
     pub(super) fn straddles_zero(self) -> bool {
         self.lo <= 0.0 && self.hi >= 0.0
     }

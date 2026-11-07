@@ -75,11 +75,13 @@ mod intrinsic;
 mod offset;
 mod position_table;
 mod positions;
+mod separation;
 
 pub use intrinsic::{intrinsic_chord_bound2, intrinsic_chord_bound3, intrinsic_derivative_bounds2};
 pub use offset::{offset_chord_bound2, offset_chord_bound3, offset_point2, offset_point3};
 pub use position_table::{IntrinsicPositionTable, MAX_TABLE_PANELS};
 pub use positions::{IntrinsicPositions, MAX_POSITION_PANELS};
+pub use separation::ParameterSeparation;
 
 /// Relative inflation applied to every returned bound, so the rounding of
 /// the bound's own arithmetic cannot make it undershoot.
