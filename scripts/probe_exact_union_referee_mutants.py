@@ -22,6 +22,17 @@ edge contact is exactly what it refuses. Nor is the extra-shell guard
 of a difference on its own: the reading gate refuses every fixture with an
 authored void, and no fixture holds two components, near contact and no
 extra shell together.
+
+Also not probed, since the skin trigger of #400 (ADR 0102) took the same
+cases: the extra-shell trigger of a difference or an intersection (its
+component pre-check, its shell test, and the half-space short-circuit of its
+own trigger). A cut whose mesh keeps an extra shell, where the exact compiler
+read the operands' faces within the reach, holds the slug's skin and the
+hole's wall facing each other across that same residue, which `thin_sheet`
+reads at the reach before the extra-shell trigger is asked: the skin trigger
+decides first, so no fixture reaches the extra-shell trigger alone, and
+every test of the suite passes through either. Mutants that disable that
+trigger therefore survive; they are left out rather than claimed.
 """
 import probe_lib
 
@@ -50,21 +61,9 @@ MUTANTS = [
      "            if bounded_tool.is_some() && rounding.is_none() {",
      "            if bounded_tool.is_some() && rounding.is_none() || operator != axiolid_core::BooleanOperator::Union {",
      [D]),
-    ("referee is asked of a half-space tool", COMPILER,
-     "            if bounded_tool.is_some() && rounding.is_none() {",
-     "            if false && bounded_tool.is_some() && rounding.is_none() {",
-     [D]),
     ("a difference is refereed whatever its reading", REFEREE,
      "        if !within_reach(report.linear(), against.reach) {",
      "        if false && !within_reach(report.linear(), against.reach) {",
-     [D]),
-    ("a difference with one component is compiled exactly", COMPILER,
-     "                || crate::deviation::geometric_components(&outcome.mesh) > 1)",
-     "                || crate::deviation::geometric_components(&outcome.mesh) > 0)",
-     [D]),
-    ("a difference is never refereed", REFEREE,
-     "        if !crate::deviation::extra_shells(&exact, against.mesh) {",
-     "        if true {",
      [D]),
     ("referee swaps the difference's and the intersection's details", REFEREE,
      "        BooleanOperator::Difference => (REFEREED_DIFFERENCE, REFEREED_DIFFERENCE_EXACT),",
