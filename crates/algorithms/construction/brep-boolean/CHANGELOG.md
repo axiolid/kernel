@@ -13,6 +13,20 @@ caret rule for `0.x` versions.
 
 ### Fixed
 
+- Unions far from the origin sew their kept faces and classify points near
+  a face boundary (#418, #419): operands whose common vertex box lies four
+  or more diagonals from the origin on an axis are recentred on that axis
+  exactly before the cut and the result moved back
+  (`ExactBRep::translated_exactly` proves every coordinate moves with no
+  rounding, else the operands are cut where they are; so are operands
+  whose recentred cut is refused, as planar faces charted in world
+  coordinates, #227, keep parameters as far out as before). The #356 column and corbel at `(6e5, 5.6e6, 200)` was refused in 132
+  of 200 turns (117 "do not sew", 15 "too close to a face boundary to
+  classify"); every turn is now one solid. The report refers to the
+  operands as given; operands nearer the origin are cut bit for bit as
+  before. The next release needs `axiolid-brep` with
+  `translated_exactly`.
+
 - `BooleanReport::rounding_floor` adds the move of an angular residue at
   the rounding floor (`2^-40` rad, read without a decision) over the
   operands' extent, `2 sqrt(3)` times it (#421): a consumer widening by the

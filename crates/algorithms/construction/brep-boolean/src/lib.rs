@@ -185,6 +185,28 @@
 //! cylinder, off the contact ruling) is then decided at the caller's
 //! tolerance, for the operands as given.
 //!
+//! **Operands far from the origin (#418, #419).** A coordinate a million
+//! metres out has a nanometre ulp, and the certified decisions work at the
+//! scale of the operands: the same union that sews at the origin was
+//! refused ("the kept faces do not sew", "a point too close to a face
+//! boundary to classify") at `(6e5, 5.6e6, 200)`. Operands whose common
+//! vertex box lies at least four diagonals from the origin are moved by
+//! `-c` first, `c` its centre rounded to the ulp of the largest
+//! coordinate, and the result is moved back by `+c`. The move is taken only
+//! where [`ExactBRep::translated_exactly`] proves that every vertex, frame
+//! origin, curve origin and control point moves with no rounding: the
+//! recentred operands are then the same solids, shifted, and a vertex of an
+//! operand that survives returns to its own coordinates. A new vertex is
+//! rounded once, to the ulp of its far coordinate. The report refers to the
+//! operands as given, whose extent scales the rounding floor. An axis whose
+//! centre lies within four diagonals of zero is not moved. Operands that
+//! do not move exactly (a curve or control point whose sum with `c`
+//! rounds, an elevated or banked curve), and operands whose recentred cut
+//! is refused, are cut where they are, as before: planar faces charted in
+//! world coordinates (#227) keep parameters as far out as they were, and
+//! the classifier cannot decide them there. Operands nearer the origin on
+//! every axis are cut bit for bit as without it.
+//!
 //! Bookkeeping in a face's parameters (ordering pieces leaving a vertex,
 //! naming a point's parameters on the surface it was evaluated from) uses
 //! fixed relative slacks far below any tolerance; two piece ends weld into
@@ -199,6 +221,7 @@ mod bounds;
 mod classify;
 mod contact;
 mod predicate;
+mod recentre;
 mod report;
 mod seams;
 mod section;
@@ -265,9 +288,38 @@ pub fn boolean_with_report(
     operator: BooleanOperator,
     tolerance: Tolerance,
 ) -> Result<(ExactBRep, BooleanReport), BooleanError> {
+    // The session reads the operands as given: its readings and rounding
+    // floor refer to them, recentred or not.
     let session = report::open(&[a, b], tolerance);
-    let refused = match attempt(&session, a, b, operator, tolerance) {
-        Ok(result) => return Ok((result, session.finish()?)),
+    // Only an owned session can be started over for the fallback below.
+    let near = session.owns().then(|| recentre::operands(a, b)).flatten();
+    if let Some((near_a, near_b, centre)) = near {
+        let moved = solve(&session, &near_a, &near_b, operator, tolerance)
+            .and_then(|near| recentre::restore(&near, centre))
+            .ok()
+            .filter(|_| !session.exceeded());
+        if let Some(result) = moved {
+            return Ok((result, session.finish()?));
+        }
+        // Never worse than the operands as given: planar faces charted in
+        // world coordinates (#227) keep parameters as far out as before the
+        // move, so a refusal here may be the move's. Cut them where they are,
+        // in a session as it was opened.
+        session.restart(tolerance);
+    }
+    solve(&session, a, b, operator, tolerance).and_then(|result| Ok((result, session.finish()?)))
+}
+
+/// The attempts of [`boolean_with_report`], each in the open session.
+fn solve(
+    session: &report::Guard,
+    a: &ExactBRep,
+    b: &ExactBRep,
+    operator: BooleanOperator,
+    tolerance: Tolerance,
+) -> Result<ExactBRep, BooleanError> {
+    let refused = match attempt(session, a, b, operator, tolerance) {
+        Ok(result) => return Ok(result),
         Err(refused) => refused,
     };
     // Finer where the tolerance's readings fail (#332): see
@@ -280,8 +332,8 @@ pub fn boolean_with_report(
             && finer.angular() > 0.0
             && session.retry_at(finer)
         {
-            if let Ok(result) = attempt(&session, a, b, operator, finer) {
-                return Ok((result, session.finish()?));
+            if let Ok(result) = attempt(session, a, b, operator, finer) {
+                return Ok(result);
             }
         }
     }
@@ -294,9 +346,7 @@ pub fn boolean_with_report(
     {
         // Not `attempt`: its fallback to ends merged only within the
         // rounding floor is the cut the first attempt already made.
-        return run(a, b, operator, tolerance)
-            .map_err(|_| refused)
-            .and_then(|result| Ok((result, session.finish()?)));
+        return run(a, b, operator, tolerance).map_err(|_| refused);
     }
     Err(refused)
 }

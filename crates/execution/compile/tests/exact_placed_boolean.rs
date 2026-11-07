@@ -1097,45 +1097,27 @@ fn column_and_corbel(theta: f64, face: usize, site: Vec3) -> (GeometryGraph, Nod
 }
 
 /// The exact compiler reads the same union however the turn was computed
-/// (ADR 0096, D8): one audited shell of the column and one corbel, or a
-/// refusal that names its reason. At the origin every turn fuses. At a
-/// site `6e5, 5.6e6, 200` away, most turns are refused whether or not the
-/// two linear parts differ in bits (a `brep-boolean` limit, the same count
-/// with one composition), so each refusal is pinned by name and by count
-/// per face and the pin must move when `brep-boolean` improves.
+/// (ADR 0096, D8): one audited shell of the column and one corbel. At the
+/// origin and at a site `6e5, 5.6e6, 200` away, every turn fuses whether or
+/// not the two linear parts differ in bits: far out, `brep-boolean` recentres
+/// the operands exactly before it cuts them (#418, #419), where 132 of the
+/// 200 turns were refused ("do not sew into a solid", "too close to a face
+/// boundary to classify").
 #[test]
 fn a_union_under_differently_composed_turns_is_one_solid() {
     let sites = [Vec3::ZERO, Vec3::new(6e5, 5.6e6, 200.0)];
     let mut differing = 0usize;
-    // Per face: refused as "do not sew", refused as "too close to classify".
-    let mut refused = [[0usize; 2]; CORBEL_FACES.len()];
     for site in sites {
-        for (face, counts) in refused.iter_mut().enumerate() {
+        for face in 0..CORBEL_FACES.len() {
             for k in 0..50 {
                 let theta = 0.001 + k as f64 * 0.031_415_9;
                 let (graph, root, differ) = column_and_corbel(theta, face, site);
                 differing += usize::from(differ);
                 let what = format!("site {site:?}, face {face}, theta {theta}");
-                let solids = ReferenceExactCompiler::new().compile_exact_batch_with_reports(
-                    &graph,
-                    &[root],
-                    &options(),
-                );
-                let mut solids = match solids {
-                    Ok(solids) => solids,
-                    Err(error) => {
-                        assert!(site != Vec3::ZERO, "{what}: refused: {error}");
-                        if named_by(&error, "do not sew into a solid") {
-                            counts[0] += 1;
-                        } else {
-                            named(&error, "too close to a face boundary to classify");
-                            counts[1] += 1;
-                        }
-                        continue;
-                    }
-                };
+                let mut solids = ReferenceExactCompiler::new()
+                    .compile_exact_batch_with_reports(&graph, &[root], &options())
+                    .unwrap_or_else(|error| panic!("{what}: refused: {error}"));
                 let (brep, _) = solids.remove(0);
-                let scale = site.abs().max_element().max(1.0);
                 let health = geometric_audit(&brep, Tolerance::METRE);
                 assert!(health.is_consistent(), "{what}: {:?}", health.defects());
                 let topology = axiolid_topology::audit_brep(brep.topology());
@@ -1143,20 +1125,11 @@ fn a_union_under_differently_composed_turns_is_one_solid() {
                 assert_eq!(brep.topology().shells().len(), 1, "{what}");
                 let measured = volume(&brep);
                 assert!(
-                    (measured - 1.225).abs() <= 1e-9 * scale,
+                    (measured - 1.225).abs() <= 1e-6,
                     "{what}: volume {measured}"
                 );
             }
         }
     }
     assert!(differing > 0, "no case composed its turn differently");
-    assert_eq!(
-        refused,
-        [[27, 4], [28, 3], [31, 4], [31, 4]],
-        "the refused turns changed"
-    );
-}
-
-fn named_by(error: &GeomError, part: &str) -> bool {
-    matches!(error, GeomError::UnsupportedInput { input, .. } if input.contains(part))
 }

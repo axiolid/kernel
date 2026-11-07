@@ -179,6 +179,18 @@ both apply, which becomes a differential test.
   tolerance) are refused by name; features further apart than the
   tolerance still go through the exact predicates. The decisions and the
   guarantee are listed in the crate docs of `axiolid-brep-boolean`.
+  **Amended (#418, #419):** operands far from the origin relative to
+  their size are cut recentred: moved by `-c` (the centre of their vertex
+  box, rounded to the ulp of the largest coordinate) only where
+  `ExactBRep::translated_exactly` proves every coordinate moves with no
+  rounding, and the result moved back by `+c`. The decisions then work at
+  the operands' own scale, with no change to a predicate, a slack or a
+  tolerance: at `(6e5, 5.6e6, 200)` the column and corbel unions, 132 of
+  200 refused for sewing or for a point near a face boundary, are all one
+  solid. The report refers to the operands as given. Operands that do not
+  move exactly, or whose recentred cut is refused (planar faces charted in
+  world coordinates keep their far parameters), are cut where they are; no symbolic perturbation was
+  needed, since no refusal of either class remained.
 
 ## Relation to existing code
 

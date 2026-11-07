@@ -355,6 +355,39 @@ impl Guard {
         self.owner && SESSION.with(|s| s.borrow().as_ref().is_some_and(|s| s.merged_an_end))
     }
 
+    /// Whether this guard owns its session, so that it can be restarted.
+    pub(crate) fn owns(&self) -> bool {
+        self.owner
+    }
+
+    /// Whether a decision the caller's tolerance does not admit was asked
+    /// for in this guard's own session ([`Guard::finish`] would refuse).
+    pub(crate) fn exceeded(&self) -> bool {
+        self.owner && SESSION.with(|s| s.borrow().as_ref().is_some_and(|s| s.exceeded))
+    }
+
+    /// Start this guard's own session over as it was opened, at the
+    /// caller's `tolerance`: no decision, no retry flag (#418, the cut of
+    /// operands as given after a recentred cut was refused). `false` for a
+    /// joined session.
+    pub(crate) fn restart(&self, tolerance: Tolerance) -> bool {
+        if !self.owner {
+            return false;
+        }
+        SESSION.with(|s| {
+            if let Some(s) = s.borrow_mut().as_mut() {
+                s.tolerance = tolerance;
+                s.report = BooleanReport::default();
+                s.exceeded = false;
+                s.ends_within_tolerance = true;
+                s.merged_an_end = false;
+                s.finer = false;
+                s.extends_ends = false;
+            }
+        });
+        true
+    }
+
     /// Start this guard's own session over at `tolerance`, its decisions
     /// dropped and imprinted edges' ends merged within it again: the retry
     /// of a boolean at a finer tolerance (#332). `false` for a joined
@@ -664,6 +697,35 @@ mod tests {
         let report = guard.finish().expect("nothing recorded");
         assert_eq!((report.extent(), report.rounding_floor()), (0.0, 0.0));
         assert_eq!(ROUNDING_FACTOR, (2.0 as Scalar).powi(-40));
+    }
+
+    #[test]
+    fn a_restarted_session_is_as_it_was_opened() {
+        let tol = Tolerance::METRE;
+        let guard = open(&[], tol);
+        let finer = Tolerance::new(tol.linear() / 1024.0, tol.angular()).expect("a tolerance");
+        assert!(guard.retry_at(finer));
+        guard.retry_with_rounding_ends();
+        assert!(guard.retry_extending(tol));
+        assert!(extends_ends());
+        assert_eq!(imprint_end_tolerance(tol), tol);
+        guard.retry_with_rounding_ends();
+        assert_eq!(imprint_end_tolerance(tol), Tolerance::ZERO);
+        assert!(guard.restart(tol));
+        assert!(!extends_ends());
+        assert_eq!(imprint_end_tolerance(tol), tol);
+        assert!(!guard.exceeded());
+        let report = guard.finish().expect("nothing recorded");
+        assert!(!report.finer());
+        assert!(report.decisions().is_empty());
+    }
+
+    #[test]
+    fn a_joined_session_cannot_be_restarted() {
+        let outer = open(&[], Tolerance::METRE);
+        let inner = open(&[], Tolerance::METRE);
+        assert!(!inner.owns() && outer.owns());
+        assert!(!inner.restart(Tolerance::METRE));
     }
 
     #[test]
