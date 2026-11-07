@@ -35,6 +35,11 @@
 //!   regions have disjoint interiors. The returned points are those exact
 //!   points computed in binary64, so rings that touch may cross or overlap by
 //!   rounding error in the returned coordinates.
+//! - Where the cut's boundary meets itself at a vertex (a pinch), the rings
+//!   are split there: each region is one connected piece of the cut's inside,
+//!   written as simple rings that may touch each other, or other regions'
+//!   rings, at that vertex (two corners touching give two regions; a hole
+//!   touching its outer ring is a hole that touches it).
 //! - A ring keeps a collinear vertex only where something else does: a
 //!   junction of a chain and a region edge, a vertex that a region ring keeps,
 //!   or a chain vertex that chain simplification keeps (a vertex of an
@@ -64,7 +69,9 @@
 
 use axiolid_core::Point2;
 
-/// Refusal detail: the cut boundary touches itself at a vertex.
+/// Refusal detail: the cut boundary meets itself at a vertex in a way the
+/// provider does not pair: two edges along one ray, or a chain through the
+/// vertex that the rings would part; a provider may also refuse every pinch.
 pub const REFUSED_PINCHED_CUT_REGION: &str = "cut region boundary pinches at a vertex";
 /// Refusal detail: rings of the cut cross or overlap each other.
 pub const REFUSED_CROSSING_CUT_RINGS: &str = "cut rings cross or overlap";

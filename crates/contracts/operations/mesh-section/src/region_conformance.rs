@@ -13,7 +13,8 @@
 //! without cut regions (it predates them), does not claim them
 //! (`cut_regions_claimed == false`) and the rest is skipped. Otherwise
 //! the answer must equal the plain one, plus the fixture's cut regions and
-//! the cut evidence; a plain refusal must be repeated; a sheet is invalid
+//! the cut evidence; a plain refusal must be repeated; a pinched cut may instead be refused by
+//! name (#373); a sheet is invalid
 //! input; the cut rings must cover the chains bit for bit; and every `Both`
 //! region must be a cut region.
 
@@ -275,7 +276,9 @@ fn check_cut_case(
     }
     match (&case.cut, first) {
         (Cut::Invalid, Err(GeomError::InvalidInput(_))) => {}
-        (Cut::Regions(_), Err(error)) if plain.as_ref().is_err_and(|p| same_error(p, &error)) => {}
+        (Cut::Regions(_) | Cut::RegionsOrRefused(..), Err(error))
+            if plain.as_ref().is_err_and(|p| same_error(p, &error)) => {}
+        (Cut::RegionsOrRefused(family, _), Err(error)) if is_refusal(&error, family) => {}
         (_, Err(error)) => {
             report
                 .failures
@@ -284,7 +287,7 @@ fn check_cut_case(
                     error: error.to_string(),
                 });
         }
-        (Cut::Regions(expected), Ok(got)) => {
+        (Cut::Regions(expected) | Cut::RegionsOrRefused(_, expected), Ok(got)) => {
             if !plain
                 .as_ref()
                 .is_ok_and(|plain| cut_answer_matches(case, plain, expected, &got))

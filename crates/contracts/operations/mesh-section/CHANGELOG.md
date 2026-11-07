@@ -9,6 +9,19 @@ caret rule for `0.x` versions.
 
 ## [Unreleased]
 
+### Added
+
+- Three conformance fixtures with a pinched cut boundary (piers meeting at a
+  corner, three piers at one vertex, a block with a void touching its wall).
+  A provider may answer them with the split cut or with
+  `REFUSED_PINCHED_CUT_REGION` (#373).
+
+### Changed
+
+- The cut invariants document the pinch rule: rings are split where the
+  boundary meets itself at a vertex, so each region is one connected piece
+  written as simple rings that may touch (#373).
+
 ## [0.3.8] - 2026-11-07
 
 ### Added

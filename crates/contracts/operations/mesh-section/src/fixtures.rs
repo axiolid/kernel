@@ -11,7 +11,7 @@
 use axiolid_core::{Frame3, Point2, Point3, Vec3};
 use axiolid_mesh::TriMesh;
 
-use crate::cut::CutRegion;
+use crate::cut::{CutRegion, REFUSED_PINCHED_CUT_REGION};
 use crate::request::{
     ChainEnd, InPlaneRegion, InPlaneSide, SectionChain, SectionRole,
     REFUSED_IN_PLANE_FACES_ON_BOTH_SIDES, REFUSED_OVERLAPPING_IN_PLANE_FACES,
@@ -52,6 +52,9 @@ pub(crate) enum Cut {
     /// These cut regions; the output otherwise equals the plain request's,
     /// which may be a refusal the cut request must repeat.
     Regions(Vec<CutRegion>),
+    /// Either the refusal or these cut regions: a provider may refuse a cut
+    /// whose boundary pinches at a vertex instead of splitting it there.
+    RegionsOrRefused(&'static str, Vec<CutRegion>),
     /// `GeomError::InvalidInput`: a sheet has no cut.
     Invalid,
 }
@@ -413,6 +416,132 @@ fn slab_with_corner_post() -> TriMesh {
     }
     m.tri([at(a, 2.0), at(f, 2.0), at(e, 2.0)]);
     m.finish()
+}
+
+/// Triangles fanned from the first point of a convex face, counter-clockwise
+/// seen from outside.
+fn fan(b: &mut Builder, face: &[[f64; 3]]) {
+    for k in 1..face.len() - 1 {
+        b.tri([face[0], face[k], face[k + 1]]);
+    }
+}
+
+/// A pier from `z = 1` to `z = 2` over a convex counter-clockwise footprint,
+/// its top shifted by `lean`, so piers that share a footprint corner meet
+/// only there.
+fn add_leaning_pier(b: &mut Builder, footprint: &[(f64, f64)], lean: (f64, f64)) {
+    let foot = |(x, y): (f64, f64)| [x, y, 1.0];
+    let top = |(x, y): (f64, f64)| [x + lean.0, y + lean.1, 2.0];
+    for k in 0..footprint.len() {
+        let (p, q) = (footprint[k], footprint[(k + 1) % footprint.len()]);
+        b.quad([foot(p), foot(q), top(q), top(p)]);
+    }
+    let roof: Vec<[f64; 3]> = footprint.iter().map(|&p| top(p)).collect();
+    fan(b, &roof);
+}
+
+/// A plinth `[0,2]^2 x [0,1]` with two piers on the footprints `[0,1]^2` and
+/// `[1,2]^2`, leaning apart, one closed solid: 21 vertices, 38 triangles. The
+/// plinth top is the other two unit squares, and each side carries the
+/// midpoint of its top edge.
+fn piers_meeting_at_a_corner() -> TriMesh {
+    let at = |(x, y): (f64, f64), z: f64| [x, y, z];
+    let mut b = Builder::default();
+    z_minus(&mut b, 0.0, (0.0, 2.0), (0.0, 2.0));
+    for [p, m, q] in [
+        [(0.0, 0.0), (1.0, 0.0), (2.0, 0.0)],
+        [(2.0, 0.0), (2.0, 1.0), (2.0, 2.0)],
+        [(2.0, 2.0), (1.0, 2.0), (0.0, 2.0)],
+        [(0.0, 2.0), (0.0, 1.0), (0.0, 0.0)],
+    ] {
+        fan(
+            &mut b,
+            &[at(p, 0.0), at(q, 0.0), at(q, 1.0), at(m, 1.0), at(p, 1.0)],
+        );
+    }
+    z_plus(&mut b, 1.0, (1.0, 2.0), (0.0, 1.0));
+    z_plus(&mut b, 1.0, (0.0, 1.0), (1.0, 2.0));
+    add_leaning_pier(
+        &mut b,
+        &[(0.0, 0.0), (1.0, 0.0), (1.0, 1.0), (0.0, 1.0)],
+        (-0.5, -0.5),
+    );
+    add_leaning_pier(
+        &mut b,
+        &[(1.0, 1.0), (2.0, 1.0), (2.0, 2.0), (1.0, 2.0)],
+        (0.5, 0.5),
+    );
+    b.finish()
+}
+
+/// A hexagonal plinth `(2,0) (2,2) (0,2) (-2,0) (-2,-2) (0,-2)` from `z = 0`
+/// to `1`, cut into six triangles around the origin; the three triangles
+/// from `(2,0)`, `(0,2)` and `(-2,-2)` carry piers leaning away from the
+/// origin, the other three are the plinth top. 22 vertices, 40 triangles.
+fn three_piers_at_one_vertex() -> TriMesh {
+    let outline = [
+        (2.0, 0.0),
+        (2.0, 2.0),
+        (0.0, 2.0),
+        (-2.0, 0.0),
+        (-2.0, -2.0),
+        (0.0, -2.0),
+    ];
+    let leans = [
+        Some((0.5, 0.25)),
+        None,
+        Some((-0.25, 0.5)),
+        None,
+        Some((-0.25, -0.5)),
+        None,
+    ];
+    let at = |(x, y): (f64, f64), z: f64| [x, y, z];
+    let mut b = Builder::default();
+    let bottom: Vec<[f64; 3]> = outline.iter().rev().map(|&p| at(p, 0.0)).collect();
+    fan(&mut b, &bottom);
+    for k in 0..6 {
+        let (p, q) = (outline[k], outline[(k + 1) % 6]);
+        b.quad([at(p, 0.0), at(q, 0.0), at(q, 1.0), at(p, 1.0)]);
+        match leans[k] {
+            Some(lean) => add_leaning_pier(&mut b, &[(0.0, 0.0), p, q], lean),
+            None => b.tri([at((0.0, 0.0), 1.0), at(p, 1.0), at(q, 1.0)]),
+        }
+    }
+    b.finish()
+}
+
+/// A block `[0,3]^2 x [0,2]` with a closed void: a pyramid over the floor
+/// V = (1.5,0), Q = (2.5,2), R = (0.5,2) at `z = 1` with its apex at
+/// (1.5, 1.25, 1.5). V lies on the wall `y = 0`, which is fanned around it,
+/// so the void touches the outside at V only. 12 vertices, 18 triangles.
+fn block_with_a_void_touching_its_wall() -> TriMesh {
+    let (v, q, r, apex) = (
+        [1.5, 0.0, 1.0],
+        [2.5, 2.0, 1.0],
+        [0.5, 2.0, 1.0],
+        [1.5, 1.25, 1.5],
+    );
+    let wall = [
+        [0.0, 0.0, 0.0],
+        [3.0, 0.0, 0.0],
+        [3.0, 0.0, 2.0],
+        [0.0, 0.0, 2.0],
+    ];
+    let mut b = Builder::default();
+    for k in 0..4 {
+        b.tri([wall[k], wall[(k + 1) % 4], v]);
+    }
+    y_plus(&mut b, 3.0, (0.0, 3.0), (0.0, 2.0));
+    x_minus(&mut b, 0.0, (0.0, 3.0), (0.0, 2.0));
+    x_plus(&mut b, 3.0, (0.0, 3.0), (0.0, 2.0));
+    z_minus(&mut b, 0.0, (0.0, 3.0), (0.0, 3.0));
+    z_plus(&mut b, 2.0, (0.0, 3.0), (0.0, 3.0));
+    // The void's faces face into it: the floor up, the walls inwards.
+    b.tri([v, q, r]);
+    b.tri([v, apex, q]);
+    b.tri([q, apex, r]);
+    b.tri([r, apex, v]);
+    b.finish()
 }
 
 /// Triangular prism whose lower edge is `v0 - v3` and whose top is the
@@ -1159,6 +1288,129 @@ pub(crate) fn cases() -> Vec<Case> {
                     vec![ring(&[(3.0, 3.0), (3.0, 4.0), (4.0, 4.0), (4.0, 3.0)])],
                 ),
             ]),
+        },
+        // Pinched cuts (#373). At z = 1 the plinth top is two Below squares
+        // that touch at (1,1); the piers rise from the other two squares, and
+        // their walls x = 1 and y = 1 rise from the top's edges there, so
+        // those edges bound the cut. The outer walls cross the plane along
+        // the plinth's sides: an open chain around each pier between corners
+        // of the top. The cut boundary meets itself at (1,1): paired there,
+        // it is two squares that touch.
+        Case {
+            name: "piers meeting at a corner",
+            role: SectionRole::Solid,
+            boundary_edges: 0,
+            cut: Cut::RegionsOrRefused(
+                REFUSED_PINCHED_CUT_REGION,
+                vec![
+                    CutRegion::new(unit_square(), vec![]),
+                    CutRegion::new(square(1.0, 1.0, 2.0, 2.0), vec![]),
+                ],
+            ),
+            mesh: piers_meeting_at_a_corner(),
+            frame: h(1.0),
+            expected: Expected::Output(output(
+                vec![
+                    SectionChain::open(
+                        ring(&[(0.0, 1.0), (0.0, 0.0), (1.0, 0.0)]),
+                        ChainEnd::InPlaneRegion,
+                        ChainEnd::InPlaneRegion,
+                    ),
+                    SectionChain::open(
+                        ring(&[(1.0, 2.0), (2.0, 2.0), (2.0, 1.0)]),
+                        ChainEnd::InPlaneRegion,
+                        ChainEnd::InPlaneRegion,
+                    ),
+                ],
+                vec![
+                    region(Below, square(0.0, 1.0, 1.0, 2.0), vec![]),
+                    region(Below, square(1.0, 0.0, 2.0, 1.0), vec![]),
+                ],
+                4,
+                0,
+            )),
+        },
+        // Three piers and three Below triangles alternate around the origin;
+        // each pier is cut along its outer edge, and its two edges through
+        // the origin are edges of the neighbouring tops. Three pinches at one
+        // vertex: three triangles that touch there.
+        Case {
+            name: "three piers at one vertex",
+            role: SectionRole::Solid,
+            boundary_edges: 0,
+            cut: Cut::RegionsOrRefused(
+                REFUSED_PINCHED_CUT_REGION,
+                vec![
+                    CutRegion::new(ring(&[(-2.0, -2.0), (0.0, -2.0), (0.0, 0.0)]), vec![]),
+                    CutRegion::new(ring(&[(-2.0, 0.0), (0.0, 0.0), (0.0, 2.0)]), vec![]),
+                    CutRegion::new(ring(&[(0.0, 0.0), (2.0, 0.0), (2.0, 2.0)]), vec![]),
+                ],
+            ),
+            mesh: three_piers_at_one_vertex(),
+            frame: h(1.0),
+            expected: Expected::Output(output(
+                vec![
+                    SectionChain::open(
+                        ring(&[(-2.0, -2.0), (0.0, -2.0)]),
+                        ChainEnd::InPlaneRegion,
+                        ChainEnd::InPlaneRegion,
+                    ),
+                    SectionChain::open(
+                        ring(&[(-2.0, 0.0), (0.0, 2.0)]),
+                        ChainEnd::InPlaneRegion,
+                        ChainEnd::InPlaneRegion,
+                    ),
+                    SectionChain::open(
+                        ring(&[(2.0, 0.0), (2.0, 2.0)]),
+                        ChainEnd::InPlaneRegion,
+                        ChainEnd::InPlaneRegion,
+                    ),
+                ],
+                vec![
+                    region(
+                        Below,
+                        ring(&[(-2.0, -2.0), (0.0, 0.0), (-2.0, 0.0)]),
+                        vec![],
+                    ),
+                    region(Below, ring(&[(0.0, -2.0), (2.0, 0.0), (0.0, 0.0)]), vec![]),
+                    region(Below, ring(&[(0.0, 0.0), (2.0, 2.0), (0.0, 2.0)]), vec![]),
+                ],
+                3,
+                0,
+            )),
+        },
+        // The void's floor is a Below triangle whose corner (1.5,0) lies on
+        // the closed chain of the walls. The cut is the square less the
+        // floor: paired at (1.5,0), an outer ring and a hole that touch there.
+        Case {
+            name: "block with a void touching its wall",
+            role: SectionRole::Solid,
+            boundary_edges: 0,
+            cut: Cut::RegionsOrRefused(
+                REFUSED_PINCHED_CUT_REGION,
+                vec![CutRegion::new(
+                    ring(&[(0.0, 0.0), (1.5, 0.0), (3.0, 0.0), (3.0, 3.0), (0.0, 3.0)]),
+                    vec![ring(&[(0.5, 2.0), (2.5, 2.0), (1.5, 0.0)])],
+                )],
+            ),
+            mesh: block_with_a_void_touching_its_wall(),
+            frame: h(1.0),
+            expected: Expected::Output(output(
+                vec![SectionChain::closed(ring(&[
+                    (0.0, 0.0),
+                    (1.5, 0.0),
+                    (3.0, 0.0),
+                    (3.0, 3.0),
+                    (0.0, 3.0),
+                ]))],
+                vec![region(
+                    Below,
+                    ring(&[(0.5, 2.0), (1.5, 0.0), (2.5, 2.0)]),
+                    vec![],
+                )],
+                1,
+                0,
+            )),
         },
         // Sheets (open meshes). Terrain on the plane x = 0.5 (local (x, y) =
         // model (y, z)): only cell column i = 0 is cut. Its edges crossing
