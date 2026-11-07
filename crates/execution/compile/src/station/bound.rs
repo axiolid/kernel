@@ -93,13 +93,9 @@
 //!
 //! # Mitres
 //!
-//! A cell beside a mitre ends on the mitre's plane. Where the piece it
-//! lies on is straight and the section constant across the cell (a
-//! constant section along a polyline's legs), every vertex runs on a
-//! line through the plane and the wall is a planar strip cut by it: the
-//! mesh quad is the exact wall, and only its `quad_deviation` counts.
-//! Any other cell beside a mitre is not bounded:
-//! [`MITRED_SECTIONS`].
+//! A cell beside a mitre ends on the mitre's plane; the `mitre` module
+//! bounds it (#335), or names why it cannot yet: [`MITRE_NOT_TRANSVERSAL`]
+//! and [`MITRE_ON_BOTH_ENDS`], which refinement splits.
 
 mod fold;
 mod mitre;
@@ -111,11 +107,6 @@ use axiolid_reference::station::{FrameLaw, FrameLawBounds, FrameReading, Mitre};
 
 use self::mitre::MitreInputs;
 use super::{interval, lerp, lerp_offsets, oriented, place_turned, seam_slack, Run};
-
-/// Why a run crossing a mitre is not bounded.
-pub(crate) const MITRED_SECTIONS: &str =
-    "stationed sections: a cell beside a mitred seam on a curved piece, or with a section that \
-     changes across it: the mitre's cut of the surface is not bounded";
 
 /// Why a cell beside a mitre is not bounded yet (#335): a vertex does not
 /// cross the mitre plane transversally over the cell, so the plane's cut
@@ -362,9 +353,6 @@ impl<'r, 'g> SectionLaw<'r, 'g> {
             .copied()
             .filter(|&c| c > lo + seam_slack(lo) && c < hi - seam_slack(hi))
             .collect();
-        if mitred && !inside.is_empty() {
-            return Ok(Err(MITRED_SECTIONS));
-        }
         let mut cuts = Vec::with_capacity(inside.len() + 2);
         cuts.push(lo);
         cuts.extend(&inside);
@@ -374,9 +362,6 @@ impl<'r, 'g> SectionLaw<'r, 'g> {
             let Some(bounds) = self.frames.bounds(pair[0], pair[1], reading) else {
                 return Ok(Err(UNCERTIFIED_FRAMES));
             };
-            if mitred && !bounds.is_straight() {
-                return Ok(Err(MITRED_SECTIONS));
-            }
             pieces.push((pair[1] - pair[0], bounds));
         }
         // The local coordinates: offsets in the base frame, profile points
@@ -416,12 +401,16 @@ impl<'r, 'g> SectionLaw<'r, 'g> {
                 .iter()
                 .zip(&self.locals[i + 1])
                 .any(|(p, q)| p != q);
-        if mitred && changes {
-            return Ok(Err(MITRED_SECTIONS));
-        }
         let count = at_lo.len();
         let mut chord = vec![0.0 as Scalar; count];
         let mut slide = vec![0.0 as Scalar; count];
+        // Each vertex's largest second derivative over the pieces, and the
+        // largest read measure: a mitred cell's plane crossing needs both.
+        let mut curvature = vec![0.0 as Scalar; count];
+        let measure = pieces
+            .iter()
+            .map(|(_, bounds)| bounds.measure)
+            .fold(0.0, Scalar::max);
         for (length, bounds) in &pieces {
             let (f1, f2) = (rss(bounds, 0), rss(bounds, 1));
             let (lt, ut) = if plain {
@@ -449,6 +438,7 @@ impl<'r, 'g> SectionLaw<'r, 'g> {
                     + y * ut[1]
                     + 2.0 * (xr * lt[0] + yr * ut[0]);
                 chord[k] = chord[k].max(0.125 * span * span * second);
+                curvature[k] = curvature[k].max(second);
                 // A read point and axes off the exact law's (#316).
                 let lever = if plain { 1.0 } else { Scalar::sqrt(3.0) };
                 let read = bounds.point_error
@@ -471,32 +461,39 @@ impl<'r, 'g> SectionLaw<'r, 'g> {
             }
         }
         // Breakpoints: seams inside the cell from both sides, and an end
-        // on a seam from inside the cell, against the mesh's chord.
+        // on a seam from inside the cell, against the mesh's chord. A
+        // mitre's end is the cell's own side there (#335).
         let mut ends: Vec<(Scalar, SeamSide)> = Vec::new();
-        if !mitred {
-            if self.on_seam(lo) {
-                ends.push((lo, SeamSide::Outgoing));
-            }
-            for &c in &inside {
-                ends.push((c, SeamSide::Incoming));
-                ends.push((c, SeamSide::Outgoing));
-            }
-            if self.on_seam(hi) {
-                ends.push((hi, SeamSide::Incoming));
-            }
+        if mitre_lo.is_none() && self.on_seam(lo) {
+            ends.push((lo, SeamSide::Outgoing));
         }
+        for &c in &inside {
+            ends.push((c, SeamSide::Incoming));
+            ends.push((c, SeamSide::Outgoing));
+        }
+        if mitre_hi.is_none() && self.on_seam(hi) {
+            ends.push((hi, SeamSide::Incoming));
+        }
+        // The chord's ends: the mesh's rows, or at a mitre the exact
+        // section of the cell's own side, which the mitred row is not.
+        let v_lo = match mitre_lo {
+            Some(_) => self.exact_at(lo, SeamSide::Outgoing)?,
+            None => at_lo.to_vec(),
+        };
+        let v_hi = match mitre_hi {
+            Some(_) => self.exact_at(hi, SeamSide::Incoming)?,
+            None => at_hi.to_vec(),
+        };
         let mut corner = vec![0.0 as Scalar; count];
         for (c, side) in ends {
             let exact = self.exact_at(c, side)?;
             let t = (c - lo) / (hi - lo);
             for k in 0..count {
-                let on_chord = at_lo[k] + (at_hi[k] - at_lo[k]) * t;
+                let on_chord = v_lo[k] + (v_hi[k] - v_lo[k]) * t;
                 corner[k] = corner[k].max((exact[k] - on_chord).length());
             }
         }
         if mitred {
-            // Only a straight piece with a constant section is bounded so
-            // far; the early returns above refuse the rest.
             let eta: Vec<Scalar> = (0..count)
                 .map(|k| chord[k] + corner[k] + slide[k])
                 .collect();
@@ -507,12 +504,25 @@ impl<'r, 'g> SectionLaw<'r, 'g> {
                 at_hi,
                 eta: &eta,
                 slide: &slide,
+                second: &curvature,
+                measure,
                 first: &pieces[0].1,
                 last: &pieces[pieces.len() - 1].1,
                 reading,
                 long: [o0.longitudinal, o1.longitudinal],
             };
-            return self.straight_mitre_cell(&inputs, mitre_lo, mitre_hi);
+            // A constant section on a straight piece runs on lines through
+            // the plane; any other cell is bounded through the plane's cut.
+            let straight = pieces.iter().all(|(_, bounds)| bounds.is_straight());
+            if straight && !changes && inside.is_empty() {
+                return self.straight_mitre_cell(&inputs, mitre_lo, mitre_hi);
+            }
+            return match (mitre_lo, mitre_hi) {
+                (Some(_), Some(_)) => Ok(Err(MITRE_ON_BOTH_ENDS)),
+                (Some(mitre), None) => self.mitre_cell(&inputs, mitre, SeamSide::Outgoing),
+                (None, Some(mitre)) => self.mitre_cell(&inputs, mitre, SeamSide::Incoming),
+                (None, None) => unreachable!("a mitred cell has a mitre at an end"),
+            };
         }
         let mut worst: Scalar = 0.0;
         for &(k, l) in self.edges {

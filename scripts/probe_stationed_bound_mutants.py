@@ -6,7 +6,7 @@ frame law's derivative bounds (a circle's curvature, the reference-up
 frame's normalisation, the plan frame, the rolled frame, the roll's cant
 term, an elevated curve's tangent and point laws), the per-cell bound
 (the chord term, the wall quad, the breakpoints at seams, splitting at
-seams, the mitre rules, the turning orientation, the offsets' rate), the
+seams, the turning orientation, the offsets' rate), the
 refinement against the bound, the profile's share, and the exact
 compiler's extrusion length, revolution angle and axis, straight
 polyline test, curved-taper refusal, and the loft's planarity test and
@@ -16,6 +16,9 @@ compare the bounds with second differences of the frames, and
 within its budget, that a dense sampling of the exact surface never
 exceeds the bound, the unbounded reasons, and the exact bodies' volumes,
 areas and refusals.
+
+The cells beside a mitre (#335) are probed by
+`probe_station_mitre_mutants.py`.
 
 Not probed, because no test can tell them apart: the arc-length inverse's
 measure slack (it is `1e-12` relative, below the rounding every sampled
@@ -104,12 +107,8 @@ MUTANTS = [
     ('cells not split at seams', SB,
      '            .filter(|&c| c > lo + seam_slack(lo) && c < hi - seam_slack(hi))',
      '            .filter(|_| false)', [BOUND]),
-    ('mitre beside a curved piece bounded', SB,
-     '            if mitred && !bounds.is_straight() {',
-     '            if false {', [BOUND]),
-    ('mitre beside a changing section bounded', SB,
-     '        if mitred && changes {',
-     '        if false {', [BOUND]),
+    # The mitre rules (a cell beside a mitre on a curved piece or with a
+    # changing section) moved to probe_station_mitre_mutants.py (#335).
     ('turning orientation adds nothing to the lateral', SB,
      '        lateral: [n1 + x1, n2 + 2.0 * n1 * x1 + x2],',
      '        lateral: [0.0, 0.0],', [BOUND]),

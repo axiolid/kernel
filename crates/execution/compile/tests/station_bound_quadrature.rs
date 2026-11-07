@@ -388,16 +388,15 @@ fn deck(b: &mut GeometryGraphBuilder, at: [Scalar; 2]) -> (NodeId, Vec<SectionAt
 }
 
 #[test]
-fn the_ifc_443_deck_is_framed_and_names_its_mitre() {
+fn the_ifc_443_deck_is_framed_and_certified_across_its_mitre() {
     let mut b = GeometryGraphBuilder::new();
     let (root, _) = deck(&mut b, [0.0, 5.0]);
     let graph = b.finish(vec![root]).unwrap();
-    // Its frames are certified now: what remains is the cell beside the
-    // mitre where the law starts to widen, at station 2, a corner of the
-    // offset on a curved piece.
-    let reason = unbounded(&graph, root);
-    assert!(reason.contains("mitred seam"), "{reason}");
-    let mesh = run_bound(&graph, root).0;
+    // Its frames are certified, and so is the cell beside the mitre where
+    // the law starts to widen, at station 2 (#335).
+    let (mesh, bound, meets) = run_bound(&graph, root);
+    assert!(matches!(bound, DeviationBound::Certified(_)), "{bound:?}");
+    assert!(meets, "{bound:?}");
     let volume = volume_properties(&mesh, Tolerance::MILLIMETRE)
         .unwrap()
         .signed_volume;

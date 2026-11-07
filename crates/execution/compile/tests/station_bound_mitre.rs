@@ -7,23 +7,31 @@
 //! the longitudinal offset along the plane's normal (each side keeps its
 //! own half space), plus the planar faces of that plane inside one side's
 //! cut but not the other's. The oracle samples its walls, its extrusions
-//! and its faces; every test asserts the measured deviation of that solid
-//! from the mesh stays within the reported bound.
+//! and its faces, piece by piece between the knots; every test asserts the
+//! measured deviation of that solid from the mesh stays within the
+//! reported bound, and the value the bound takes.
 
 use axiolid_contracts::ExecutionOptions;
-use axiolid_core::{Point3, Scalar, Tolerance, Vec3};
-use axiolid_curve::{Curve3, Polyline3};
+use axiolid_core::{Frame2, Point2, Point3, Scalar, Tolerance, Vec2, Vec3};
+use axiolid_curve::{
+    Circle2, Curve2, Curve3, Elevated3, ElevationLaw, Line2, Polyline2, Polyline3,
+};
 use axiolid_mesh::TriMesh;
 use axiolid_mesh_boolean_boolmesh::BoolmeshBoolean;
 use axiolid_mesh_compile::{DeviationBound, DeviationPath, ReferenceMeshCompiler};
 use axiolid_model::{
-    GeometryGraph, GeometryGraphBuilder, GeometryNode, NodeId, SeamSide, SectionAtStation,
-    SolidOperation, Station, StationFrame, StationOffsets, StationOrientation,
+    CurveRelation, CurveSegment, GeometryGraph, GeometryGraphBuilder, GeometryNode, NodeId,
+    OpenProfile, SeamSide, SectionAtStation, SolidOperation, Station, StationFrame, StationOffsets,
+    StationOrientation, SurfaceRelation, Transition, TrimSelector, TrimmingPreference,
 };
 use axiolid_profile::{Profile, RectangleProfile};
-use axiolid_reference::station::{station_section3_on, Mitre, SectionFrame};
+use axiolid_reference::station::{
+    station_section2, station_section2_on, station_section3_on, Mitre, SectionFrame,
+};
 
-/// A run compiled, with what its report says of the stationed spine.
+const PI: Scalar = core::f64::consts::PI;
+
+/// A run compiled, with what its report says of its path.
 struct Compiled {
     mesh: TriMesh,
     bound: DeviationBound,
@@ -37,9 +45,13 @@ impl Compiled {
             other => panic!("not certified: {other:?}"),
         }
     }
+
+    fn vertices(&self) -> usize {
+        self.mesh.positions.len()
+    }
 }
 
-fn compile(graph: &GeometryGraph, root: NodeId, chord: Scalar) -> Compiled {
+fn compile_on(graph: &GeometryGraph, root: NodeId, chord: Scalar, path: DeviationPath) -> Compiled {
     let options = ExecutionOptions::new(Tolerance::MILLIMETRE)
         .with_chord_error(chord)
         .unwrap();
@@ -49,7 +61,7 @@ fn compile(graph: &GeometryGraph, root: NodeId, chord: Scalar) -> Compiled {
     let bound = report
         .contributions
         .iter()
-        .find(|c| c.path == DeviationPath::StationedSpine)
+        .find(|c| c.path == path)
         .expect("the run reports its path")
         .bound;
     Compiled {
@@ -57,6 +69,10 @@ fn compile(graph: &GeometryGraph, root: NodeId, chord: Scalar) -> Compiled {
         bound,
         meets: report.meets_requested(),
     }
+}
+
+fn compile(graph: &GeometryGraph, root: NodeId, chord: Scalar) -> Compiled {
+    compile_on(graph, root, chord, DeviationPath::StationedSpine)
 }
 
 /// A rectangle `x` wide and one high.
@@ -107,21 +123,74 @@ fn spine(
     .unwrap()
 }
 
-/// The exact mitred solid across one corner, sampled against a mesh.
-struct Mitred<'a> {
-    /// The section frames of the piece ending at the knot and of the one
-    /// starting there.
-    incoming: &'a dyn Fn(Scalar) -> SectionFrame,
-    outgoing: &'a dyn Fn(Scalar) -> SectionFrame,
-    knot: Scalar,
+/// A section frame as a function of the distance along a piece.
+type Frame = Box<dyn Fn(Scalar) -> SectionFrame>;
+
+/// One piece of the basis between two knots: its frames over `[from, to]`.
+struct Piece {
+    frame: Frame,
+    from: Scalar,
+    to: Scalar,
+}
+
+/// A 2D curve's frames, reading `side` of a seam.
+fn on2(curve: Curve2, side: SeamSide) -> Frame {
+    Box::new(move |s| station_section2_on(&curve, s, side).unwrap())
+}
+
+/// A 3D curve's frames, reading `side` of a seam.
+fn on3(curve: Curve3, side: SeamSide) -> Frame {
+    Box::new(move |s| station_section3_on(&curve, s, side).unwrap())
+}
+
+/// A curve's frames, `shift` added to the distance asked for.
+fn shifted(curve: Curve2, shift: Scalar) -> Frame {
+    Box::new(move |s| station_section2(&curve, s + shift).unwrap())
+}
+
+/// The profile of a section for the oracle: `locals` at the two stations
+/// (linear between), joined in a ring or as an open polyline.
+struct Section {
+    locals: [Vec<(Scalar, Scalar)>; 2],
+    closed: bool,
+}
+
+impl Section {
+    /// A rectangle `widths` wide and one high.
+    fn rectangle(widths: [Scalar; 2]) -> Self {
+        let ring = |w: Scalar| {
+            vec![
+                (-0.5 * w, -0.5),
+                (0.5 * w, -0.5),
+                (0.5 * w, 0.5),
+                (-0.5 * w, 0.5),
+            ]
+        };
+        Self {
+            locals: [ring(widths[0]), ring(widths[1])],
+            closed: true,
+        }
+    }
+
+    fn edges(&self) -> Vec<(usize, usize)> {
+        let n = self.locals[0].len();
+        let count = if self.closed { n } else { n - 1 };
+        (0..count).map(|k| (k, (k + 1) % n)).collect()
+    }
+}
+
+/// The exact mitred solid along pieces joined at mitres, sampled against
+/// a mesh.
+struct Mitred {
+    pieces: Vec<Piece>,
     at: [Scalar; 2],
-    widths: [Scalar; 2],
+    section: Section,
     long: Scalar,
     turn: Option<StationOrientation>,
 }
 
 /// How far the exact solid strays from a mesh: its walls (with their
-/// extrusions to the plane) and its faces in the plane.
+/// extrusions to the planes) and its faces in the planes.
 #[derive(Debug, Clone, Copy)]
 struct Strays {
     walls: Scalar,
@@ -133,9 +202,6 @@ impl Strays {
         self.walls.max(self.faces)
     }
 }
-
-/// The wall edges of a rectangle section, as corner pairs of `(x, y)`.
-const CORNERS: [(Scalar, Scalar); 4] = [(-1.0, -1.0), (1.0, -1.0), (1.0, 1.0), (-1.0, 1.0)];
 
 fn lerp(a: Scalar, b: Scalar, u: Scalar) -> Scalar {
     a + (b - a) * u
@@ -163,12 +229,35 @@ fn inside(ring: &[(Scalar, Scalar)], q: (Scalar, Scalar)) -> bool {
     in_ring
 }
 
-impl Mitred<'_> {
-    /// The profile corner `(x, y)` of the section at `s` placed in the
-    /// frame `f`: half the width and half the height out, turned.
-    fn corner(&self, s: Scalar, (x, y): (Scalar, Scalar), f: &SectionFrame) -> Point3 {
+/// A mitre plane of the exact solid.
+struct Cut {
+    /// The seam point moved by the longitudinal offset along the normal.
+    origin: Point3,
+    normal: Vec3,
+    /// The tangents of the piece ending there and of the one starting.
+    incoming: Vec3,
+    outgoing: Vec3,
+}
+
+impl Cut {
+    fn height(&self, p: Point3) -> Scalar {
+        (p - self.origin).dot(self.normal)
+    }
+}
+
+impl Mitred {
+    /// The profile vertex `k` at `s`.
+    fn local(&self, s: Scalar, k: usize) -> (Scalar, Scalar) {
         let u = (s - self.at[0]) / (self.at[1] - self.at[0]);
-        let half = 0.5 * lerp(self.widths[0], self.widths[1], u);
+        let (a, b) = (self.section.locals[0][k], self.section.locals[1][k]);
+        (lerp(a.0, b.0, u), lerp(a.1, b.1, u))
+    }
+
+    /// The point `v` of the way along the profile edge `(k, l)` at `s`,
+    /// placed in the frame `f` (turned, with the longitudinal offset).
+    fn point(&self, s: Scalar, (k, l): (usize, usize), v: Scalar, f: &SectionFrame) -> Point3 {
+        let (a, b) = (self.local(s, k), self.local(s, l));
+        let (x, y) = (lerp(a.0, b.0, v), lerp(a.1, b.1, v));
         let turned = match self.turn {
             Some(o) => {
                 let (axis, reference) = o.unit_axes().unwrap();
@@ -176,10 +265,71 @@ impl Mitred<'_> {
             }
             None => *f,
         };
-        f.point + f.tangent * self.long + turned.lateral * (x * half) + turned.up * (y * 0.5)
+        f.point + f.tangent * self.long + turned.lateral * x + turned.up * y
     }
 
-    fn measure(&self, mesh: &TriMesh) -> Strays {
+    fn cuts(&self) -> Vec<Cut> {
+        self.pieces
+            .windows(2)
+            .map(|pair| {
+                let (a, b) = (&pair[0], &pair[1]);
+                let mitre = Mitre::between(&(a.frame)(a.to), &(b.frame)(b.from))
+                    .unwrap()
+                    .unwrap();
+                Cut {
+                    origin: mitre.incoming.point + mitre.normal * self.long,
+                    normal: mitre.normal,
+                    incoming: mitre.incoming.tangent,
+                    outgoing: mitre.outgoing.tangent,
+                }
+            })
+            .collect()
+    }
+
+    /// Where piece `i`'s profile point standing at its end (`ending`) or
+    /// its start meets the plane `cut`: the end section carried along its
+    /// tangent, or, where the wall crosses the plane first, the wall's
+    /// crossing point.
+    fn cut_point(
+        &self,
+        i: usize,
+        cut: &Cut,
+        ending: bool,
+        edge: (usize, usize),
+        v: Scalar,
+    ) -> Point3 {
+        let piece = &self.pieces[i];
+        let (knot, tangent, sign) = if ending {
+            (piece.to, cut.incoming, 1.0)
+        } else {
+            (piece.from, cut.outgoing, -1.0)
+        };
+        let at_knot = self.point(knot, edge, v, &(piece.frame)(knot));
+        let h = cut.height(at_knot);
+        if h * sign <= 0.0 {
+            return at_knot - tangent * (h / tangent.dot(cut.normal));
+        }
+        // The wall itself crosses the plane before the knot.
+        let (mut near, mut far) = if ending {
+            (piece.from, piece.to)
+        } else {
+            (piece.to, piece.from)
+        };
+        for _ in 0..100 {
+            let mid = 0.5 * (near + far);
+            if cut.height(self.point(mid, edge, v, &(piece.frame)(mid))) * sign > 0.0 {
+                far = mid;
+            } else {
+                near = mid;
+            }
+        }
+        let s = 0.5 * (near + far);
+        self.point(s, edge, v, &(piece.frame)(s))
+    }
+
+    /// The largest distance of the exact solid from `mesh`, with `steps`
+    /// distances along each piece and `per_edge` points along each edge.
+    fn measure(&self, mesh: &TriMesh, steps: usize, per_edge: usize) -> Strays {
         let triangles: Vec<[Point3; 3]> = mesh
             .indices
             .as_chunks::<3>()
@@ -187,95 +337,82 @@ impl Mitred<'_> {
             .iter()
             .map(|t| [0, 1, 2].map(|k| mesh.positions[t[k] as usize]))
             .collect();
-        let mitre = Mitre::between(&(self.incoming)(self.knot), &(self.outgoing)(self.knot))
-            .unwrap()
-            .unwrap();
-        let n = mitre.normal;
-        // The plane the solid is cut at: the seam point moved along n.
-        let q0 = mitre.incoming.point + n * self.long;
-        let height = |p: Point3| (p - q0).dot(n);
-        let (t_in, t_out) = (mitre.incoming.tangent, mitre.outgoing.tangent);
-        let (steps, per_edge) = (600, 24);
+        let cuts = self.cuts();
+        let last = self.pieces.len() - 1;
+        let edges = self.section.edges();
         let mut walls: Scalar = 0.0;
-        for e in 0..4 {
-            let (a, c) = (CORNERS[e], CORNERS[(e + 1) % 4]);
-            for iv in 0..=per_edge {
-                let v = iv as Scalar / per_edge as Scalar;
-                let xy = (lerp(a.0, c.0, v), lerp(a.1, c.1, v));
-                for j in 0..=steps {
-                    let u = j as Scalar / steps as Scalar;
-                    // Each wall on its own side of the plane.
-                    let s = lerp(self.at[0], self.knot, u);
-                    let p = self.corner(s, xy, &(self.incoming)(s));
-                    if height(p) <= 0.0 {
-                        walls = walls.max(nearest(&triangles, p));
+        for (i, piece) in self.pieces.iter().enumerate() {
+            // The plane ahead (the piece ends on it) and behind (it starts
+            // on it).
+            let ahead = (i < last).then(|| &cuts[i]);
+            let behind = (i > 0).then(|| &cuts[i - 1]);
+            for &edge in &edges {
+                for iv in 0..=per_edge {
+                    let v = iv as Scalar / per_edge as Scalar;
+                    for j in 0..=steps {
+                        let s = lerp(piece.from, piece.to, j as Scalar / steps as Scalar);
+                        let p = self.point(s, edge, v, &(piece.frame)(s));
+                        if ahead.is_none_or(|c| c.height(p) <= 0.0)
+                            && behind.is_none_or(|c| c.height(p) >= 0.0)
+                        {
+                            walls = walls.max(nearest(&triangles, p));
+                        }
                     }
-                    let s = lerp(self.knot, self.at[1], u);
-                    let p = self.corner(s, xy, &(self.outgoing)(s));
-                    if height(p) >= 0.0 {
-                        walls = walls.max(nearest(&triangles, p));
+                    // The end sections extruded to the planes.
+                    if let Some(c) = ahead {
+                        let end = self.point(piece.to, edge, v, &(piece.frame)(piece.to));
+                        if c.height(end) < 0.0 {
+                            let reach = -c.height(end) / c.incoming.dot(c.normal);
+                            for j in 0..=40 {
+                                let p = end + c.incoming * (reach * j as Scalar / 40.0);
+                                walls = walls.max(nearest(&triangles, p));
+                            }
+                        }
                     }
-                }
-                // Each side's end section extruded to the plane.
-                let c_in = self.corner(self.knot, xy, &(self.incoming)(self.knot));
-                if height(c_in) < 0.0 {
-                    let reach = -height(c_in) / t_in.dot(n);
-                    for j in 0..=40 {
-                        let at = c_in + t_in * (reach * j as Scalar / 40.0);
-                        walls = walls.max(nearest(&triangles, at));
-                    }
-                }
-                let c_out = self.corner(self.knot, xy, &(self.outgoing)(self.knot));
-                if height(c_out) > 0.0 {
-                    let reach = height(c_out) / t_out.dot(n);
-                    for j in 0..=40 {
-                        let at = c_out - t_out * (reach * j as Scalar / 40.0);
-                        walls = walls.max(nearest(&triangles, at));
+                    if let Some(c) = behind {
+                        let start = self.point(piece.from, edge, v, &(piece.frame)(piece.from));
+                        if c.height(start) > 0.0 {
+                            let reach = c.height(start) / c.outgoing.dot(c.normal);
+                            for j in 0..=40 {
+                                let p = start - c.outgoing * (reach * j as Scalar / 40.0);
+                                walls = walls.max(nearest(&triangles, p));
+                            }
+                        }
                     }
                 }
             }
         }
-        // The faces: coordinates in the plane through q0.
+        let mut faces: Scalar = 0.0;
+        if self.section.closed {
+            for (m, cut) in cuts.iter().enumerate() {
+                faces = faces.max(self.faces(&triangles, m, cut, &edges));
+            }
+        }
+        Strays { walls, faces }
+    }
+
+    /// How far the planar faces of the plane `cut` between pieces `m` and
+    /// `m + 1` stray from the mesh: the points inside one side's cut ring
+    /// but not the other's, on the shifted plane.
+    fn faces(
+        &self,
+        triangles: &[[Point3; 3]],
+        m: usize,
+        cut: &Cut,
+        edges: &[(usize, usize)],
+    ) -> Scalar {
+        let n = cut.normal;
         let helper = if n.x.abs() < 0.9 { Vec3::X } else { Vec3::Y };
         let e1 = n.cross(helper).normalize();
         let e2 = n.cross(e1);
-        let to_plane = |p: Point3| ((p - q0).dot(e1), (p - q0).dot(e2));
-        // Where a side's section, cut by the plane, crosses it.
-        let cut = |incoming: bool, xy: (Scalar, Scalar)| -> Point3 {
-            let (frame, sign, tangent, from, to): (&dyn Fn(Scalar) -> SectionFrame, _, _, _, _) =
-                if incoming {
-                    (self.incoming, 1.0, t_in, self.at[0], self.knot)
-                } else {
-                    (self.outgoing, -1.0, t_out, self.knot, self.at[1])
-                };
-            let at_knot = self.corner(self.knot, xy, &frame(self.knot));
-            let h = height(at_knot);
-            if h * sign <= 0.0 {
-                return at_knot - tangent * (h / tangent.dot(n));
-            }
-            // The wall itself crosses the plane before the knot.
-            let (mut near, mut far) = if incoming { (from, to) } else { (to, from) };
-            for _ in 0..100 {
-                let mid = 0.5 * (near + far);
-                if height(self.corner(mid, xy, &frame(mid))) * sign > 0.0 {
-                    far = mid;
-                } else {
-                    near = mid;
-                }
-            }
-            let s = 0.5 * (near + far);
-            self.corner(s, xy, &frame(s))
-        };
-        let ring = |incoming: bool| -> Vec<(Scalar, Scalar)> {
+        let to_plane = |p: Point3| ((p - cut.origin).dot(e1), (p - cut.origin).dot(e2));
+        let ring = |ending: bool| -> Vec<(Scalar, Scalar)> {
+            let i = if ending { m } else { m + 1 };
             let mut out = Vec::new();
-            for e in 0..4 {
-                let (a, c) = (CORNERS[e], CORNERS[(e + 1) % 4]);
-                for i in 0..64 {
-                    let v = i as Scalar / 64.0;
-                    out.push(to_plane(cut(
-                        incoming,
-                        (lerp(a.0, c.0, v), lerp(a.1, c.1, v)),
-                    )));
+            for &edge in edges {
+                for q in 0..64 {
+                    let v = q as Scalar / 64.0;
+                    out.push(to_plane(self.cut_point(i, cut, ending, edge, v)));
                 }
             }
             out
@@ -297,62 +434,13 @@ impl Mitred<'_> {
                 );
                 if inside(&ring_in, q) != inside(&ring_out, q) {
                     // On the shifted plane, where the faces stand.
-                    let p = q0 + e1 * q.0 + e2 * q.1;
-                    faces = faces.max(nearest(&triangles, p));
+                    let p = cut.origin + e1 * q.0 + e2 * q.1;
+                    faces = faces.max(nearest(triangles, p));
                 }
             }
         }
-        Strays { walls, faces }
+        faces
     }
-}
-
-/// A polyline of two legs and its frames on each side of the corner.
-fn legs(
-    points: [Point3; 3],
-) -> (
-    Curve3,
-    impl Fn(Scalar) -> SectionFrame,
-    impl Fn(Scalar) -> SectionFrame,
-) {
-    let curve = Curve3::Polyline(Polyline3 {
-        points: points.to_vec(),
-        closed: false,
-    });
-    let (a, b) = (curve.clone(), curve.clone());
-    (
-        curve,
-        move |s| station_section3_on(&a, s, SeamSide::Incoming).unwrap(),
-        move |s| station_section3_on(&b, s, SeamSide::Outgoing).unwrap(),
-    )
-}
-
-/// An L of two legs of ten metres, over a rise of `rise` on the second,
-/// with `long` as the longitudinal offset, compiled at a 0.01 chord with
-/// stations at 2 and 18; the sampled strays beside it.
-fn ell(rise: Scalar, long: Scalar) -> (Compiled, Strays) {
-    let points = [
-        Point3::ZERO,
-        Point3::new(10.0, 0.0, 0.0),
-        Point3::new(10.0, 10.0, rise),
-    ];
-    let (curve, incoming, outgoing) = legs(points);
-    let mut b = GeometryGraphBuilder::new();
-    let directrix = b.push_value(curve).unwrap();
-    let at = [2.0, 18.0];
-    let root = spine(&mut b, directrix, at, [2.0, 2.0], long, None);
-    let graph = b.finish(vec![root]).unwrap();
-    let compiled = compile(&graph, root, 0.01);
-    let strays = Mitred {
-        incoming: &incoming,
-        outgoing: &outgoing,
-        knot: 10.0,
-        at,
-        widths: [2.0, 2.0],
-        long,
-        turn: None,
-    }
-    .measure(&compiled.mesh);
-    (compiled, strays)
 }
 
 fn assert_holds(compiled: &Compiled, strays: &Strays) {
@@ -363,15 +451,62 @@ fn assert_holds(compiled: &Compiled, strays: &Strays) {
     );
 }
 
+fn assert_value(compiled: &Compiled, expected: Scalar, tolerance: Scalar) {
+    let bound = compiled.certified();
+    assert!(
+        (bound - expected).abs() <= tolerance,
+        "{bound} != {expected} (+-{tolerance})"
+    );
+}
+
+/// An L of two legs of ten metres, over a rise of `rise` on the second,
+/// with `long` as the longitudinal offset, compiled at a 0.01 chord with
+/// stations at 2 and 18; the sampled strays beside it.
+fn ell(rise: Scalar, long: Scalar) -> (Compiled, Strays) {
+    let curve = Curve3::Polyline(Polyline3 {
+        points: vec![
+            Point3::ZERO,
+            Point3::new(10.0, 0.0, 0.0),
+            Point3::new(10.0, 10.0, rise),
+        ],
+        closed: false,
+    });
+    let mut b = GeometryGraphBuilder::new();
+    let directrix = b.push_value(curve.clone()).unwrap();
+    let at = [2.0, 18.0];
+    let root = spine(&mut b, directrix, at, [2.0, 2.0], long, None);
+    let graph = b.finish(vec![root]).unwrap();
+    let compiled = compile(&graph, root, 0.01);
+    let strays = Mitred {
+        pieces: vec![
+            Piece {
+                frame: on3(curve.clone(), SeamSide::Incoming),
+                from: at[0],
+                to: 10.0,
+            },
+            Piece {
+                frame: on3(curve, SeamSide::Outgoing),
+                from: 10.0,
+                to: at[1],
+            },
+        ],
+        at,
+        section: Section::rectangle([2.0, 2.0]),
+        long,
+        turn: None,
+    }
+    .measure(&compiled.mesh, 600, 24);
+    (compiled, strays)
+}
+
 #[test]
 fn a_turn_on_a_grade_reports_the_gap_between_the_planes_cuts() {
     // The mesh's mitre row is the midpoint of the two sides' projections;
     // on a grade the two sides' cuts differ, and each lies 0.12 m from it.
     let (compiled, strays) = ell(2.0, 0.0);
     assert_holds(&compiled, &strays);
-    let bound = compiled.certified();
-    assert!((bound - 0.22356947).abs() <= 1e-8, "{bound}");
-    assert_eq!(compiled.mesh.positions.len(), 12);
+    assert_value(&compiled, 0.22356947, 1e-8);
+    assert_eq!(compiled.vertices(), 12);
     assert!(!compiled.meets);
     assert!(strays.walls >= 0.1006, "{strays:?}");
 }
@@ -382,9 +517,8 @@ fn a_longitudinal_offset_at_a_mitre_reports_its_shift() {
     // exact solid is cut at the moved plane, and the walls end on it.
     let (compiled, strays) = ell(0.0, 0.5);
     assert_holds(&compiled, &strays);
-    let bound = compiled.certified();
-    assert!((bound - 0.5).abs() <= 1e-8, "{bound}");
-    assert_eq!(compiled.mesh.positions.len(), 12);
+    assert_value(&compiled, 0.5, 1e-8);
+    assert_eq!(compiled.vertices(), 12);
     assert!((strays.walls - 0.5).abs() <= 1e-3, "{strays:?}");
 }
 
@@ -393,6 +527,429 @@ fn a_flat_turn_without_an_offset_is_exact() {
     let (compiled, strays) = ell(0.0, 0.0);
     assert_holds(&compiled, &strays);
     assert!(compiled.certified() <= 1e-9, "{}", compiled.certified());
-    assert_eq!(compiled.mesh.positions.len(), 12);
+    assert_eq!(compiled.vertices(), 12);
     assert!(compiled.meets);
+}
+
+// --- curved pieces, changing sections ---------------------------------------
+
+fn circle(cx: Scalar, cy: Scalar, radius: Scalar) -> Curve2 {
+    Curve2::Circle(Circle2 {
+        frame: Frame2 {
+            origin: Point2::new(cx, cy),
+            x: Vec2::X,
+            y: Vec2::Y,
+        },
+        radius,
+    })
+}
+
+fn line_along_x() -> Curve2 {
+    Curve2::Line(Line2 {
+        origin: Point2::ZERO,
+        direction: Vec2::X,
+    })
+}
+
+/// A composite directrix of pieces, each trimmed by parameter.
+fn composite(b: &mut GeometryGraphBuilder, pieces: &[(Curve2, Scalar, Scalar)]) -> NodeId {
+    let segments = pieces
+        .iter()
+        .map(|(curve, start, end)| {
+            let basis = b.push_value(curve.clone()).unwrap();
+            let curve = b
+                .push(GeometryNode::CurveRelation(CurveRelation::Trimmed {
+                    basis,
+                    start: vec![TrimSelector::Parameter(*start)],
+                    end: vec![TrimSelector::Parameter(*end)],
+                    sense_agreement: true,
+                    preference: TrimmingPreference::Parameter,
+                }))
+                .unwrap();
+            CurveSegment {
+                curve,
+                same_sense: true,
+                transition: Transition::Continuous,
+            }
+        })
+        .collect();
+    b.push(GeometryNode::CurveRelation(CurveRelation::Composite {
+        segments,
+    }))
+    .unwrap()
+}
+
+/// Two arcs of one radius joined at a corner.
+struct TwoArcs {
+    directrix: NodeId,
+    first: Curve2,
+    second: Curve2,
+    /// The radius, the second circle's start angle and the first arc's
+    /// length.
+    radius: Scalar,
+    second_start: Scalar,
+    length: Scalar,
+}
+
+/// An arc of `sweep` radians turning left from the origin along +X, a
+/// corner of `corner` degrees turning left after it, then a second arc of
+/// `sweep2`.
+fn two_arcs(
+    b: &mut GeometryGraphBuilder,
+    r: Scalar,
+    sweep: Scalar,
+    corner: Scalar,
+    sweep2: Scalar,
+) -> TwoArcs {
+    let end = (sweep.sin() * r, r - sweep.cos() * r);
+    let corner = corner.to_radians();
+    let tangent = (sweep.cos(), sweep.sin());
+    let (tx, ty) = (
+        tangent.0 * corner.cos() - tangent.1 * corner.sin(),
+        tangent.0 * corner.sin() + tangent.1 * corner.cos(),
+    );
+    let centre = (end.0 - ty * r, end.1 + tx * r);
+    let mut second_start = (end.1 - centre.1).atan2(end.0 - centre.0);
+    if second_start < 0.0 {
+        second_start += 2.0 * PI;
+    }
+    let (first, second) = (circle(0.0, r, r), circle(centre.0, centre.1, r));
+    let directrix = composite(
+        b,
+        &[
+            (first.clone(), 1.5 * PI, 1.5 * PI + sweep),
+            (second.clone(), second_start, second_start + sweep2),
+        ],
+    );
+    TwoArcs {
+        directrix,
+        first,
+        second,
+        radius: r,
+        second_start,
+        length: r * sweep,
+    }
+}
+
+/// The oracle's pieces of the two arcs, over the stations `at`.
+fn arc_pieces(arcs: &TwoArcs, at: [Scalar; 2]) -> Vec<Piece> {
+    vec![
+        Piece {
+            frame: shifted(arcs.first.clone(), arcs.radius * 1.5 * PI),
+            from: at[0],
+            to: arcs.length,
+        },
+        Piece {
+            frame: shifted(
+                arcs.second.clone(),
+                arcs.radius * arcs.second_start - arcs.length,
+            ),
+            from: arcs.length,
+            to: at[1],
+        },
+    ]
+}
+
+/// Two radius-20 arcs of 0.3 rad with a 10 degree corner, stations 1 and
+/// 11, a 2 by 1 section, compiled at a 0.01 chord.
+fn two_arcs_run(long: Scalar, turn: Option<StationOrientation>) -> (Compiled, Strays) {
+    let mut b = GeometryGraphBuilder::new();
+    let arcs = two_arcs(&mut b, 20.0, 0.3, 10.0, 0.3);
+    let at = [1.0, 11.0];
+    let root = spine(&mut b, arcs.directrix, at, [2.0, 2.0], long, turn);
+    let graph = b.finish(vec![root]).unwrap();
+    let compiled = compile(&graph, root, 0.01);
+    let strays = Mitred {
+        pieces: arc_pieces(&arcs, at),
+        at,
+        section: Section::rectangle([2.0, 2.0]),
+        long,
+        turn,
+    }
+    .measure(&compiled.mesh, 400, 12);
+    (compiled, strays)
+}
+
+#[test]
+fn two_arcs_beside_a_small_corner_are_certified_within_the_request() {
+    let (compiled, strays) = two_arcs_run(0.0, None);
+    assert_holds(&compiled, &strays);
+    assert_value(&compiled, 2.5635e-3, 1e-7);
+    assert!(compiled.meets);
+}
+
+#[test]
+fn a_turned_section_across_a_mitre_on_arcs_is_certified() {
+    let turn = StationOrientation::new(
+        Some(Vec3::new(0.0, 0.15, 1.0)),
+        Some(Vec3::new(1.0, 0.0, 0.1)),
+    );
+    let (compiled, strays) = two_arcs_run(0.0, Some(turn));
+    assert_holds(&compiled, &strays);
+    assert_value(&compiled, 2.7691e-3, 1e-7);
+    assert!(compiled.meets);
+}
+
+#[test]
+fn a_longitudinal_offset_across_a_mitre_on_arcs_reports_the_gap() {
+    let (compiled, strays) = two_arcs_run(0.2, None);
+    assert_holds(&compiled, &strays);
+    assert_value(&compiled, 0.025014, 1e-6);
+    assert!(!compiled.meets);
+}
+
+#[test]
+fn a_line_then_a_tight_arc_across_a_right_angle_is_certified() {
+    let mut b = GeometryGraphBuilder::new();
+    let arc = circle(8.0, 0.0, 5.0);
+    let directrix = composite(
+        &mut b,
+        &[(line_along_x(), 0.0, 3.0), (arc.clone(), PI, 1.5 * PI)],
+    );
+    let at = [1.0, 6.0];
+    let root = spine(&mut b, directrix, at, [2.0, 2.0], 0.0, None);
+    let graph = b.finish(vec![root]).unwrap();
+    let compiled = compile(&graph, root, 0.01);
+    let strays = Mitred {
+        pieces: vec![
+            Piece {
+                frame: on2(line_along_x(), SeamSide::Incoming),
+                from: at[0],
+                to: 3.0,
+            },
+            Piece {
+                frame: shifted(arc, 5.0 * PI - 3.0),
+                from: 3.0,
+                to: at[1],
+            },
+        ],
+        at,
+        section: Section::rectangle([2.0, 2.0]),
+        long: 0.0,
+        turn: None,
+    }
+    .measure(&compiled.mesh, 400, 12);
+    assert_holds(&compiled, &strays);
+    assert_value(&compiled, 0.3486, 5e-5);
+    assert_eq!(compiled.vertices(), 28);
+    assert!(!compiled.meets);
+}
+
+#[test]
+fn a_widening_section_across_a_corner_is_certified() {
+    let curve = Curve2::Polyline(Polyline2 {
+        points: vec![
+            Point2::ZERO,
+            Point2::new(10.0, 0.0),
+            Point2::new(10.0, 10.0),
+        ],
+        closed: false,
+    });
+    let mut b = GeometryGraphBuilder::new();
+    let directrix = b.push_value(curve.clone()).unwrap();
+    let (at, widths) = ([2.0, 18.0], [2.0, 3.0]);
+    let root = spine(&mut b, directrix, at, widths, 0.0, None);
+    let graph = b.finish(vec![root]).unwrap();
+    let compiled = compile(&graph, root, 0.01);
+    let strays = Mitred {
+        pieces: vec![
+            Piece {
+                frame: on2(curve.clone(), SeamSide::Incoming),
+                from: at[0],
+                to: 10.0,
+            },
+            Piece {
+                frame: on2(curve, SeamSide::Outgoing),
+                from: 10.0,
+                to: at[1],
+            },
+        ],
+        at,
+        section: Section::rectangle(widths),
+        long: 0.0,
+        turn: None,
+    }
+    .measure(&compiled.mesh, 400, 12);
+    assert_holds(&compiled, &strays);
+    assert_value(&compiled, 0.0570247, 1e-6);
+    assert!(!compiled.meets);
+}
+
+#[test]
+fn a_grade_break_over_a_circular_plan_is_certified() {
+    let crest = Curve3::Elevated(Elevated3::new(
+        circle(0.0, 0.0, 80.0),
+        ElevationLaw::Piecewise {
+            breaks: vec![20.0],
+            laws: vec![
+                ElevationLaw::constant_grade(0.0, 0.0),
+                ElevationLaw::constant_grade(0.0, 0.08),
+            ],
+        },
+    ));
+    let mut b = GeometryGraphBuilder::new();
+    let directrix = b.push_value(crest.clone()).unwrap();
+    let at = [0.0, 40.0];
+    let root = spine(&mut b, directrix, at, [2.0, 2.0], 0.0, None);
+    let graph = b.finish(vec![root]).unwrap();
+    let compiled = compile(&graph, root, 0.01);
+    let strays = Mitred {
+        pieces: vec![
+            Piece {
+                frame: on3(crest.clone(), SeamSide::Incoming),
+                from: at[0],
+                to: 20.0,
+            },
+            Piece {
+                frame: on3(crest, SeamSide::Outgoing),
+                from: 20.0,
+                to: at[1],
+            },
+        ],
+        at,
+        section: Section::rectangle([2.0, 2.0]),
+        long: 0.0,
+        turn: None,
+    }
+    .measure(&compiled.mesh, 120, 6);
+    assert_holds(&compiled, &strays);
+    assert_value(&compiled, 4.87e-3, 1e-5);
+    assert!(compiled.meets);
+    assert_eq!(compiled.vertices(), 140);
+}
+
+#[test]
+fn a_short_arc_between_two_mitres_is_refined_until_certified() {
+    // A line, an arc of radius 500 and four metres, a line, each corner 10
+    // degrees: the arc's cells lie between two mitres, and are split.
+    let r = 500.0;
+    let corner = 10.0_f64.to_radians();
+    let centre = (5.0 - corner.sin() * r, corner.cos() * r);
+    let mut start = (0.0 - centre.1).atan2(5.0 - centre.0);
+    if start < 0.0 {
+        start += 2.0 * PI;
+    }
+    let sweep = 4.0 / r;
+    let end_angle = start + sweep;
+    let end = (
+        centre.0 + r * end_angle.cos(),
+        centre.1 + r * end_angle.sin(),
+    );
+    let heading = corner + sweep + corner;
+    let second_line = Curve2::Line(Line2 {
+        origin: Point2::new(end.0, end.1),
+        direction: Vec2::new(heading.cos(), heading.sin()),
+    });
+    let arc = circle(centre.0, centre.1, r);
+    let mut b = GeometryGraphBuilder::new();
+    let directrix = composite(
+        &mut b,
+        &[
+            (line_along_x(), 0.0, 5.0),
+            (arc.clone(), start, end_angle),
+            (second_line.clone(), 0.0, 5.0),
+        ],
+    );
+    let at = [1.0, 13.0];
+    let root = spine(&mut b, directrix, at, [2.0, 2.0], 0.0, None);
+    let graph = b.finish(vec![root]).unwrap();
+    let compiled = compile(&graph, root, 0.01);
+    let strays = Mitred {
+        pieces: vec![
+            Piece {
+                frame: on2(line_along_x(), SeamSide::Incoming),
+                from: at[0],
+                to: 5.0,
+            },
+            Piece {
+                frame: shifted(arc, r * start - 5.0),
+                from: 5.0,
+                to: 9.0,
+            },
+            Piece {
+                frame: shifted(second_line, -9.0),
+                from: 9.0,
+                to: at[1],
+            },
+        ],
+        at,
+        section: Section::rectangle([2.0, 2.0]),
+        long: 0.0,
+        turn: None,
+    }
+    .measure(&compiled.mesh, 200, 8);
+    assert_holds(&compiled, &strays);
+    assert_value(&compiled, 2.184e-3, 1e-6);
+    assert!(compiled.meets);
+    assert_eq!(compiled.vertices(), 20);
+}
+
+#[test]
+fn a_corner_too_sharp_for_its_cells_is_unbounded_by_name() {
+    // Two radius-5 arcs, 120 degrees apart, a 1 by 1 section.
+    let mut b = GeometryGraphBuilder::new();
+    let arcs = two_arcs(&mut b, 5.0, 0.6, 120.0, 0.9);
+    let at = [0.2, arcs.length + 0.85 * 5.0 * 0.9];
+    let root = spine(&mut b, arcs.directrix, at, [1.0, 1.0], 0.0, None);
+    let graph = b.finish(vec![root]).unwrap();
+    let compiled = compile(&graph, root, 0.01);
+    match compiled.bound {
+        DeviationBound::Unbounded(reason) => {
+            assert!(
+                reason.contains("does not advance across the mitre plane"),
+                "{reason}"
+            );
+        }
+        other => panic!("not unbounded by name: {other:?}"),
+    }
+}
+
+#[test]
+fn a_sheet_across_a_mitre_on_arcs_is_certified() {
+    let mut b = GeometryGraphBuilder::new();
+    let arcs = two_arcs(&mut b, 20.0, 0.3, 10.0, 0.3);
+    let points = vec![
+        Point2::new(-1.0, -0.04),
+        Point2::ZERO,
+        Point2::new(1.0, -0.04),
+    ];
+    let path = b
+        .push_value(Curve2::Polyline(Polyline2 {
+            points: points.clone(),
+            closed: false,
+        }))
+        .unwrap();
+    let open = b
+        .push(GeometryNode::OpenProfile(OpenProfile { path }))
+        .unwrap();
+    let at = [1.0, 11.0];
+    let sections = at
+        .iter()
+        .map(|&d| SectionAtStation::new(open, Station::new(d, StationOffsets::ZERO)))
+        .collect();
+    let root = b
+        .push(GeometryNode::SurfaceRelation(
+            SurfaceRelation::OpenSectionsAtStations {
+                directrix: arcs.directrix,
+                sections,
+                frame: StationFrame::Section,
+            },
+        ))
+        .unwrap();
+    let graph = b.finish(vec![root]).unwrap();
+    let compiled = compile_on(&graph, root, 0.01, DeviationPath::SectionedSurface);
+    let local: Vec<(Scalar, Scalar)> = points.iter().map(|p| (p.x, p.y)).collect();
+    let strays = Mitred {
+        pieces: arc_pieces(&arcs, at),
+        at,
+        section: Section {
+            locals: [local.clone(), local],
+            closed: false,
+        },
+        long: 0.0,
+        turn: None,
+    }
+    .measure(&compiled.mesh, 400, 12);
+    assert_holds(&compiled, &strays);
+    assert!(compiled.meets, "{:?}", compiled.bound);
 }

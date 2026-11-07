@@ -1169,59 +1169,6 @@ fn a_constant_section_along_an_arc_compiles_to_its_revolution() {
     }
 }
 
-#[test]
-fn a_mitre_on_a_curved_piece_or_with_a_changing_section_is_unbounded_by_name() {
-    let mut b = GeometryGraphBuilder::new();
-    // A grade break on a curved plan: the run is mitred between two
-    // curved pieces.
-    let crest = b
-        .push_value(Curve3::Elevated(Elevated3::new(
-            plan_circle(80.0),
-            ElevationLaw::Piecewise {
-                breaks: vec![20.0],
-                laws: vec![
-                    ElevationLaw::constant_grade(0.0, 0.0),
-                    ElevationLaw::constant_grade(0.0, 0.08),
-                ],
-            },
-        )))
-        .unwrap();
-    let bend = b
-        .push_value(Curve2::Polyline(Polyline2 {
-            points: vec![
-                Point2::ZERO,
-                Point2::new(10.0, 0.0),
-                Point2::new(10.0, 10.0),
-            ],
-            closed: false,
-        }))
-        .unwrap();
-    let (rect, wide) = (rectangle(&mut b, 2.0, 1.0), rectangle(&mut b, 3.0, 1.0));
-    let curved = spine(
-        &mut b,
-        crest,
-        vec![
-            section(rect, 0.0, StationOffsets::ZERO),
-            section(rect, 40.0, StationOffsets::ZERO),
-        ],
-        StationFrame::Section,
-    );
-    let tapered = spine(
-        &mut b,
-        bend,
-        vec![
-            section(rect, 2.0, StationOffsets::ZERO),
-            section(wide, 18.0, StationOffsets::ZERO),
-        ],
-        StationFrame::Section,
-    );
-    let graph = b.finish(vec![curved, tapered]).unwrap();
-    for root in [curved, tapered] {
-        let reason = unbounded_reason(&graph, root);
-        assert!(reason.contains("mitred seam"), "{reason}");
-    }
-}
-
 fn refusal(graph: &GeometryGraph, root: NodeId) -> &'static str {
     match ReferenceExactCompiler::new().compile_exact(graph, root, &options()) {
         Err(GeomError::UnsupportedInput { input, .. }) => input,
