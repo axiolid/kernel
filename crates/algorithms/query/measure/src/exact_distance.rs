@@ -106,6 +106,7 @@ use crate::exact::ExactMeasureError;
 use crate::exact_domain::Domain;
 
 mod touch;
+pub(crate) mod witness;
 
 /// Pairs refined before a query stops and reports what it has.
 const MAX_STEPS: usize = 400_000;
@@ -1260,7 +1261,7 @@ pub(crate) fn point_lower_bound(
 
 /// Total order on finite lower bounds for the heap.
 #[derive(Debug, Clone, Copy, PartialEq)]
-struct Key(Scalar);
+pub(crate) struct Key(pub(crate) Scalar);
 
 impl Eq for Key {}
 
@@ -1328,6 +1329,18 @@ fn search_with(
         Metric::Space => (p - q).length(),
         Metric::Plan => flat_length(p - q),
     };
+    // A witness counts as soon as its pair is queued, not when it is popped
+    // (#318): refining pairs whose bound cannot rise never runs ahead of the
+    // witnesses in hand. Ties keep the first.
+    let offer =
+        |best: &mut Option<(Scalar, Point3, Point3, (Shape, Shape))>, a: &Element, b: &Element| {
+            if let (Some(wa), Some(wb)) = (a.witness, b.witness) {
+                let d = apart(wa, wb);
+                if best.is_none_or(|(current, ..)| d < current) {
+                    *best = Some((d, wa, wb, (a.shape, b.shape)));
+                }
+            }
+        };
     let mut elements_a = side_a.elements.clone();
     let mut elements_b = side_b.elements.clone();
 
@@ -1340,6 +1353,7 @@ fn search_with(
         for (j, eb) in elements_b.iter().enumerate() {
             if viable(ea, eb) {
                 heap.push(Reverse((Key(lower_bound(&side_a, ea, &side_b, eb)?), i, j)));
+                offer(&mut best, ea, eb);
             }
         }
     }
@@ -1368,10 +1382,15 @@ fn search_with(
                 break;
             }
         }
-        if let (Some(wa), Some(wb)) = (ea.witness, eb.witness) {
-            let d = apart(wa, wb);
-            if best.is_none_or(|(current, ..)| d < current) {
-                best = Some((d, wa, wb, (ea.shape, eb.shape)));
+        // Where the bound is positive and still short of what is in hand, the
+        // boundary point of each element nearest the other's witness may close
+        // the gap at once (#318); a pair at zero is the touch check's.
+        if bound > 0.0 && best.is_none_or(|(current, ..)| bound < current) {
+            if let Some((wa, wb, on)) = witness::pair(&side_a, &ea, &side_b, &eb)? {
+                let d = apart(wa, wb);
+                if best.is_none_or(|(current, ..)| d < current) {
+                    best = Some((d, wa, wb, on));
+                }
             }
         }
         let upper = best.map_or(Scalar::INFINITY, |(d, ..)| d);
@@ -1409,6 +1428,7 @@ fn search_with(
                         index,
                         j,
                     )));
+                    offer(&mut best, &child, &eb);
                 }
             } else {
                 elements_b.push(child);
@@ -1419,6 +1439,7 @@ fn search_with(
                         i,
                         index,
                     )));
+                    offer(&mut best, &ea, &child);
                 }
             }
         }
@@ -1539,6 +1560,126 @@ fn plan_patches_overlap(
         f.origin + f.x * u + f.y * v
     };
     Ok(Some((at, lift(fa), lift(fb))))
+}
+
+#[cfg(test)]
+pub(crate) mod fixtures {
+    //! Boxes built by hand, shared by the tests of the distance search.
+
+    use axiolid_brep::{ExactBRep, ExactBRepBuilder};
+    use axiolid_core::{Frame3, Interval, Point2, Point3, Vec2, Vec3};
+    use axiolid_curve::{Curve2, Curve3, Line2, Line3};
+    use axiolid_surface::{Plane, Surface};
+    use axiolid_topology::{Edge, EdgeUse, Face, FaceBound, Loop, Orientation, Vertex};
+
+    /// A box from corner `o` along the edge vectors `x`, `y`, `z`
+    /// (orthogonal), with twelve shared line edges and six planar faces.
+    pub(crate) fn cuboid(o: Point3, x: Vec3, y: Vec3, z: Vec3) -> ExactBRep {
+        let mut builder = ExactBRepBuilder::default();
+        let axes = [x, y, z];
+        let corner = |i: usize| {
+            o + x * (i & 1) as f64 + y * ((i >> 1) & 1) as f64 + z * ((i >> 2) & 1) as f64
+        };
+        let vertices: Vec<_> = (0..8)
+            .map(|i| {
+                builder.topology_mut().add_vertex(Vertex {
+                    position: corner(i),
+                })
+            })
+            .collect();
+        // Edge from corner `i` along axis `k` (bit `k` of `i` clear).
+        let mut edges = std::collections::HashMap::new();
+        for i in 0..8usize {
+            for (k, axis) in axes.iter().enumerate() {
+                if i & (1 << k) != 0 {
+                    continue;
+                }
+                let length = axis.length();
+                let curve = builder.add_curve3(Curve3::Line(Line3 {
+                    origin: corner(i),
+                    direction: *axis / length,
+                }));
+                let edge = builder.topology_mut().add_edge(Edge {
+                    start: vertices[i],
+                    end: vertices[i | (1 << k)],
+                    curve: Some(curve),
+                });
+                builder.set_edge_interval(edge, Interval::new(0.0, length));
+                edges.insert((i, i | (1 << k)), edge);
+            }
+        }
+        // Each face: base corner and its two axes; the third axis fixed.
+        for (fixed, side) in [(2, 0), (2, 1), (1, 0), (1, 1), (0, 0), (0, 1)] {
+            let (ka, kb) = match fixed {
+                0 => (1, 2),
+                1 => (0, 2),
+                _ => (0, 1),
+            };
+            let base = side << fixed;
+            let (la, lb) = (axes[ka].length(), axes[kb].length());
+            let (ux, uy) = (axes[ka] / la, axes[kb] / lb);
+            let surface = builder.add_surface(Surface::Plane(Plane {
+                frame: Frame3 {
+                    origin: corner(base),
+                    x: ux,
+                    y: uy,
+                    z: ux.cross(uy),
+                },
+            }));
+            // Counter-clockwise in (u, v): base, +a, +a+b, +b.
+            let ring = [
+                base,
+                base | (1 << ka),
+                base | (1 << ka) | (1 << kb),
+                base | (1 << kb),
+            ];
+            let params = [
+                Point2::new(0.0, 0.0),
+                Point2::new(la, 0.0),
+                Point2::new(la, lb),
+                Point2::new(0.0, lb),
+            ];
+            let mut uses = Vec::new();
+            let mut intervals = Vec::new();
+            for m in 0..4 {
+                let (from, to) = (ring[m], ring[(m + 1) % 4]);
+                let (edge, orientation) = match edges.get(&(from, to)) {
+                    Some(edge) => (*edge, Orientation::Forward),
+                    None => (edges[&(to, from)], Orientation::Reversed),
+                };
+                let (p, q) = (params[m], params[(m + 1) % 4]);
+                let length = (q - p).length();
+                let pcurve = builder.add_curve2(Curve2::Line(Line2 {
+                    origin: p,
+                    direction: Vec2::new((q.x - p.x) / length, (q.y - p.y) / length),
+                }));
+                uses.push(EdgeUse {
+                    edge,
+                    orientation,
+                    pcurve: Some(pcurve),
+                });
+                intervals.push(Interval::new(0.0, length));
+            }
+            let loop_id = builder.topology_mut().add_loop(Loop { edges: uses });
+            for (index, interval) in intervals.into_iter().enumerate() {
+                builder.set_pcurve_interval(loop_id, index, interval);
+            }
+            builder.topology_mut().add_face(Face {
+                surface: Some(surface),
+                bounds: vec![FaceBound {
+                    loop_id,
+                    orientation: Orientation::Forward,
+                    outer: true,
+                }],
+                orientation: Orientation::Forward,
+            });
+        }
+        builder.finish().expect("a valid box")
+    }
+
+    pub(crate) fn unit_box(o: Point3) -> ExactBRep {
+        cuboid(o, Vec3::X, Vec3::Y, Vec3::Z)
+    }
 }
 
 #[cfg(test)]

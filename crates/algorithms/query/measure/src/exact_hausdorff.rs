@@ -97,6 +97,8 @@ use axiolid_surface::Surface;
 use axiolid_topology::Face;
 
 use crate::exact::ExactMeasureError;
+use crate::exact_distance::witness;
+use crate::exact_distance::Key as DistanceKey;
 use crate::exact_distance::{
     critical_toward, point_lower_bound, surface_of, Element, Metric, Shape, Side,
 };
@@ -337,25 +339,33 @@ impl<'a> Nearest<'a> {
         accuracy: Scalar,
     ) -> Result<Option<PointDistance>, ExactMeasureError> {
         let accuracy = accuracy.max(1e-12 * (1.0 + p.length()));
+        // Ties pop first come, first served: the third entry counts up.
         let mut heap = BinaryHeap::new();
         let mut order = 0;
+        let mut best: Option<(Scalar, Point3, Shape)> = None;
         for &root in &self.roots {
             let node = &self.nodes[root];
             if critical_toward(node, p) {
                 let bound = point_lower_bound(p, &self.side, node)?;
-                heap.push(Reverse((Key(bound, Reverse(order)), root)));
+                heap.push(Reverse((DistanceKey(bound), order, root)));
                 order += 1;
+                offer(&mut best, p, node);
             }
         }
-        let mut best: Option<(Scalar, Point3, Shape)> = None;
         let mut lower = 0.0;
         let mut steps = 0;
-        while let Some(Reverse((Key(bound, _), node))) = heap.pop() {
+        while let Some(Reverse((DistanceKey(bound), popped, node))) = heap.pop() {
             lower = bound;
-            if let Some(w) = self.nodes[node].witness {
-                let d = (w - p).length();
-                if best.is_none_or(|(current, ..)| d < current) {
-                    best = Some((d, w, self.nodes[node].shape));
+            let upper = best.map_or(Scalar::INFINITY, |(d, ..)| d);
+            // The boundary point of the node nearest `p` may close the gap
+            // where the bound cannot rise (#318).
+            if bound < upper {
+                let element = self.nodes[node];
+                if let Some((q, on)) = witness::toward(p, &self.side, &element)? {
+                    let d = (q - p).length();
+                    if best.is_none_or(|(current, ..)| d < current) {
+                        best = Some((d, q, on));
+                    }
                 }
             }
             let upper = best.map_or(Scalar::INFINITY, |(d, ..)| d);
@@ -365,19 +375,20 @@ impl<'a> Nearest<'a> {
             steps += 1;
             let children = self.children(node)?;
             if steps > POINT_STEPS || children.is_empty() {
-                heap.push(Reverse((Key(bound, Reverse(order)), node)));
+                heap.push(Reverse((DistanceKey(bound), popped, node)));
                 break;
             }
             for child in children {
                 let element = &self.nodes[child];
                 if critical_toward(element, p) {
                     let bound = point_lower_bound(p, &self.side, element)?;
+                    heap.push(Reverse((DistanceKey(bound), order, child)));
                     order += 1;
-                    heap.push(Reverse((Key(bound, Reverse(order)), child)));
+                    offer(&mut best, p, element);
                 }
             }
         }
-        if let Some(Reverse((Key(bound, _), _))) = heap.peek() {
+        if let Some(Reverse((DistanceKey(bound), ..))) = heap.peek() {
             lower = Scalar::min(lower, *bound);
         }
         Ok(best.map(|(upper, nearest, on)| PointDistance {
@@ -386,6 +397,19 @@ impl<'a> Nearest<'a> {
             nearest,
             on,
         }))
+    }
+}
+
+/// Count `element`'s witness, a point certainly on the boundary, towards
+/// `best`: as soon as its node is queued, so that refining patches whose
+/// bound cannot rise (a planar patch along its own normal) never runs
+/// ahead of the witnesses already in hand (#318). Ties keep the first.
+fn offer(best: &mut Option<(Scalar, Point3, Shape)>, p: Point3, element: &Element) {
+    if let Some(w) = element.witness {
+        let d = (w - p).length();
+        if best.is_none_or(|(current, ..)| d < current) {
+            *best = Some((d, w, element.shape));
+        }
     }
 }
 
@@ -1205,5 +1229,55 @@ mod tests {
         assert_eq!(found[0].len(), 1);
         assert_eq!(found[0][0].face, 0);
         assert!(found[0][0].shifted.is_none());
+    }
+
+    /// A point 0.02 under a box's bottom, under its edge or its face: the
+    /// patches of that face tie along its own normal, and the edge spans'
+    /// witnesses have to be in hand before they are refined (#318).
+    #[test]
+    fn a_point_under_an_edge_finds_the_edge_witness() {
+        use super::Nearest;
+        use crate::exact_distance::fixtures::unit_box;
+        use crate::exact_distance::{Metric, Side};
+        let b = unit_box(Point3::new(0.0, 0.0, 0.02));
+        let mut nearest = Nearest::new(Side::new(&b, 1e-12, Metric::Space).expect("a side"));
+        for k in 1..64 {
+            let t = f64::from(k) / 64.0;
+            for p in [Point3::new(t, 0.0, 0.0), Point3::new(t, t, 0.0)] {
+                let found = nearest
+                    .query(p, 1e-10)
+                    .expect("evaluates")
+                    .expect("a boundary point");
+                assert!(
+                    found.lower <= 0.02 && 0.02 <= found.upper + 1e-15,
+                    "{p:?}: [{}, {}]",
+                    found.lower,
+                    found.upper
+                );
+                assert!(
+                    found.upper - found.lower <= 1e-10,
+                    "{p:?}: [{}, {}]",
+                    found.lower,
+                    found.upper
+                );
+            }
+        }
+    }
+
+    /// A point over a face, off every patch centre: the foot of the point on
+    /// the face closes the interval, not the patches' own witnesses (#318).
+    #[test]
+    fn a_point_over_a_face_closes_on_its_foot() {
+        use super::Nearest;
+        use crate::exact_distance::fixtures::unit_box;
+        use crate::exact_distance::{Metric, Side};
+        let b = unit_box(Point3::ZERO);
+        let mut nearest = Nearest::new(Side::new(&b, 1e-12, Metric::Space).expect("a side"));
+        let found = nearest
+            .query(Point3::new(0.37, 0.61, 1.5), 1e-10)
+            .expect("evaluates")
+            .expect("a boundary point");
+        assert!(found.lower <= 0.5 && 0.5 <= found.upper, "{found:?}");
+        assert!(found.upper - found.lower <= 1e-10, "{found:?}");
     }
 }

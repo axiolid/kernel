@@ -30,6 +30,7 @@ use axiolid_curve::Curve3;
 use axiolid_evaluate::evaluate3;
 use axiolid_surface::Surface;
 
+use super::witness::plane_parameters;
 use super::{point_on, surface_of, Element, Shape, Side};
 use crate::exact::ExactMeasureError;
 
@@ -59,7 +60,7 @@ pub(super) fn within_rounding(p: Point3, q: Point3) -> bool {
 }
 
 /// The line carrying edge `edge`, when it is one, and its span in order.
-fn line_span<'s>(
+pub(super) fn line_span<'s>(
     side: &'s Side<'_>,
     element: &Element,
 ) -> Result<Option<(&'s Curve3, Scalar, Scalar)>, ExactMeasureError> {
@@ -73,7 +74,7 @@ fn line_span<'s>(
     Ok(matches!(curve, Curve3::Line(_)).then_some((curve, t0.min(t1), t0.max(t1))))
 }
 
-fn on_curve(curve: &Curve3, t: Scalar) -> Result<Point3, ExactMeasureError> {
+pub(super) fn on_curve(curve: &Curve3, t: Scalar) -> Result<Point3, ExactMeasureError> {
     evaluate3(curve, t).map_err(|_| crate::exact::EVALUATION)
 }
 
@@ -102,7 +103,12 @@ fn edge_edge(
 /// Parameters in `[0, 1]` of the closest points of segments `p0 p1` and
 /// `q0 q1` (Ericson, *Real-Time Collision Detection*, 5.1.9); for parallel
 /// segments, one closest pair of the several.
-fn segment_parameters(p0: Point3, p1: Point3, q0: Point3, q1: Point3) -> (Scalar, Scalar) {
+pub(super) fn segment_parameters(
+    p0: Point3,
+    p1: Point3,
+    q0: Point3,
+    q1: Point3,
+) -> (Scalar, Scalar) {
     let (d1, d2, r) = (p1 - p0, q1 - q0, p0 - q0);
     let (a, e, f) = (d1.dot(d1), d2.dot(d2), d2.dot(r));
     if a <= 0.0 && e <= 0.0 {
@@ -162,15 +168,6 @@ fn edge_face(
         return Ok(None);
     };
     let frame = plane.frame;
-    let (gxx, gxy, gyy) = (
-        frame.x.dot(frame.x),
-        frame.x.dot(frame.y),
-        frame.y.dot(frame.y),
-    );
-    let gram = gxx * gyy - gxy * gxy;
-    if gram.is_nan() || gram <= 0.0 {
-        return Ok(None);
-    }
     // Where the line crosses the plane, first, then the span's ends and
     // middle, for a line lying in the plane or standing on it.
     let normal = frame.x.cross(frame.y);
@@ -184,10 +181,11 @@ fn edge_face(
     let candidates = [crossing, Some(t0), Some(0.5 * (t0 + t1)), Some(t1)];
     for t in candidates.into_iter().flatten() {
         let p = on_curve(curve, t)?;
-        let r = p - frame.origin;
-        let (rx, ry) = (frame.x.dot(r), frame.y.dot(r));
-        let u = ((gyy * rx - gxy * ry) / gram).clamp(u0, u1);
-        let v = ((gxx * ry - gxy * rx) / gram).clamp(v0, v1);
+        let Some(foot) = plane_parameters(&frame, p) else {
+            continue;
+        };
+        let u = foot.x.clamp(u0, u1);
+        let v = foot.y.clamp(v0, v1);
         if !(u.is_finite() && v.is_finite()) {
             continue;
         }
@@ -224,112 +222,8 @@ mod tests {
 
     use super::super::{search_with, Found, Metric, MAX_STEPS};
     use super::{segment_parameters, touch, within_rounding};
+    use crate::exact_distance::fixtures::{cuboid, unit_box};
     use crate::exact_distance::Side;
-
-    /// A box from corner `o` along the edge vectors `x`, `y`, `z`
-    /// (orthogonal), with twelve shared line edges and six planar faces.
-    fn cuboid(o: Point3, x: Vec3, y: Vec3, z: Vec3) -> ExactBRep {
-        let mut builder = ExactBRepBuilder::default();
-        let axes = [x, y, z];
-        let corner = |i: usize| {
-            o + x * (i & 1) as f64 + y * ((i >> 1) & 1) as f64 + z * ((i >> 2) & 1) as f64
-        };
-        let vertices: Vec<_> = (0..8)
-            .map(|i| {
-                builder.topology_mut().add_vertex(Vertex {
-                    position: corner(i),
-                })
-            })
-            .collect();
-        // Edge from corner `i` along axis `k` (bit `k` of `i` clear).
-        let mut edges = std::collections::HashMap::new();
-        for i in 0..8usize {
-            for (k, axis) in axes.iter().enumerate() {
-                if i & (1 << k) != 0 {
-                    continue;
-                }
-                let length = axis.length();
-                let curve = builder.add_curve3(Curve3::Line(Line3 {
-                    origin: corner(i),
-                    direction: *axis / length,
-                }));
-                let edge = builder.topology_mut().add_edge(Edge {
-                    start: vertices[i],
-                    end: vertices[i | (1 << k)],
-                    curve: Some(curve),
-                });
-                builder.set_edge_interval(edge, Interval::new(0.0, length));
-                edges.insert((i, i | (1 << k)), edge);
-            }
-        }
-        // Each face: base corner and its two axes; the third axis fixed.
-        for (fixed, side) in [(2, 0), (2, 1), (1, 0), (1, 1), (0, 0), (0, 1)] {
-            let (ka, kb) = match fixed {
-                0 => (1, 2),
-                1 => (0, 2),
-                _ => (0, 1),
-            };
-            let base = side << fixed;
-            let (la, lb) = (axes[ka].length(), axes[kb].length());
-            let (ux, uy) = (axes[ka] / la, axes[kb] / lb);
-            let surface = builder.add_surface(Surface::Plane(Plane {
-                frame: Frame3 {
-                    origin: corner(base),
-                    x: ux,
-                    y: uy,
-                    z: ux.cross(uy),
-                },
-            }));
-            // Counter-clockwise in (u, v): base, +a, +a+b, +b.
-            let ring = [
-                base,
-                base | (1 << ka),
-                base | (1 << ka) | (1 << kb),
-                base | (1 << kb),
-            ];
-            let params = [
-                Point2::new(0.0, 0.0),
-                Point2::new(la, 0.0),
-                Point2::new(la, lb),
-                Point2::new(0.0, lb),
-            ];
-            let mut uses = Vec::new();
-            let mut intervals = Vec::new();
-            for m in 0..4 {
-                let (from, to) = (ring[m], ring[(m + 1) % 4]);
-                let (edge, orientation) = match edges.get(&(from, to)) {
-                    Some(edge) => (*edge, Orientation::Forward),
-                    None => (edges[&(to, from)], Orientation::Reversed),
-                };
-                let (p, q) = (params[m], params[(m + 1) % 4]);
-                let length = (q - p).length();
-                let pcurve = builder.add_curve2(Curve2::Line(Line2 {
-                    origin: p,
-                    direction: Vec2::new((q.x - p.x) / length, (q.y - p.y) / length),
-                }));
-                uses.push(EdgeUse {
-                    edge,
-                    orientation,
-                    pcurve: Some(pcurve),
-                });
-                intervals.push(Interval::new(0.0, length));
-            }
-            let loop_id = builder.topology_mut().add_loop(Loop { edges: uses });
-            for (index, interval) in intervals.into_iter().enumerate() {
-                builder.set_pcurve_interval(loop_id, index, interval);
-            }
-            builder.topology_mut().add_face(Face {
-                surface: Some(surface),
-                bounds: vec![FaceBound {
-                    loop_id,
-                    orientation: Orientation::Forward,
-                    outer: true,
-                }],
-                orientation: Orientation::Forward,
-            });
-        }
-        builder.finish().expect("a valid box")
-    }
 
     /// A one-face sheet on the plane `z = 0` bounded by the polygon
     /// `corners`, counter-clockwise.
@@ -394,10 +288,6 @@ mod tests {
             orientation: Orientation::Forward,
         });
         builder.finish().expect("a valid sheet")
-    }
-
-    fn unit_box(o: Point3) -> ExactBRep {
-        cuboid(o, Vec3::X, Vec3::Y, Vec3::Z)
     }
 
     /// `v` turned about `axis` by `angle` (Rodrigues).
@@ -686,5 +576,52 @@ mod tests {
             Point3::new(0.5, 1.0, 1.0),
         );
         assert_eq!((s, t), (0.5, 0.5));
+    }
+
+    /// The interval holds `truth` and is no wider than `accuracy`, in fewer
+    /// than `steps` pairs.
+    fn closes_on(a: &ExactBRep, b: &ExactBRep, truth: f64, accuracy: f64, steps: usize) {
+        let found = distance(a, b, accuracy, true);
+        let bounds = &found.bounds;
+        assert!(bounds.lower <= truth + 1e-12, "{bounds:?}");
+        assert!(bounds.upper >= truth - 1e-12, "{bounds:?}");
+        assert!(bounds.upper - bounds.lower <= accuracy, "{bounds:?}");
+        assert!(found.steps < steps, "{} steps, {bounds:?}", found.steps);
+    }
+
+    #[test]
+    fn parallel_faces_close_on_a_foot_witness() {
+        // Face against face along their common normal: every pair of the
+        // overlap is a minimal one, so the lower bound is right from the
+        // start and only a witness on the other face closes the gap (#318).
+        let a = cuboid(Point3::ZERO, Vec3::X * 2.0, Vec3::Y * 2.0, Vec3::Z);
+        let b = cuboid(
+            Point3::new(0.8, 0.8, 1.5),
+            Vec3::X * 0.4,
+            Vec3::Y * 0.4,
+            Vec3::Z * 0.5,
+        );
+        closes_on(&a, &b, 0.5, 1e-9, 1000);
+    }
+
+    #[test]
+    fn a_turned_slab_over_a_slab_closes_on_a_foot_witness() {
+        let a = cuboid(Point3::ZERO, Vec3::X * 3.0, Vec3::Y * 3.0, Vec3::Z);
+        let b = turned_box(
+            Point3::new(1.37, 1.21, 1.75),
+            Vec3::new(0.6, 0.4, 0.5),
+            Vec3::Z,
+            0.3,
+        );
+        closes_on(&a, &b, 0.5, 1e-9, 1000);
+    }
+
+    #[test]
+    fn a_foot_beyond_the_face_is_not_a_witness() {
+        // The foot of b's witness on a's top face would lie outside it: the
+        // nearest points are on an edge of each box, sqrt(1 + 0.25) apart.
+        let a = unit_box(Point3::ZERO);
+        let b = unit_box(Point3::new(2.0, 0.0, 1.5));
+        closes_on(&a, &b, 1.25_f64.sqrt(), 1e-9, MAX_STEPS);
     }
 }
