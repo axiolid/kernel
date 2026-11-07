@@ -504,6 +504,46 @@ fn finite(t: Scalar) -> GeomResult<()> {
     }
 }
 
+/// Third derivative of a 2D curve with respect to its native parameter,
+/// for the families whose second derivative is closed form and whose
+/// third is: what an offset's acceleration rests on (#406).
+pub(crate) fn third_derivative2(curve: &Curve2, t: Scalar) -> GeomResult<Vec2> {
+    finite(t)?;
+    let value = match curve {
+        Curve2::Line(_) | Curve2::Polyline(_) => Ok(Vec2::ZERO),
+        // `P''' = -P'` in the angle parameter.
+        Curve2::Circle(c) => Ok(-conic_tangent2(&c.frame, c.radius, c.radius, t)),
+        Curve2::Ellipse(e) => Ok(-conic_tangent2(&e.frame, e.semi_axis_x, e.semi_axis_y, t)),
+        Curve2::BSpline(b) => {
+            de_boor_third_derivative(b, t, |p| [p.x, p.y], |c| Vec2::new(c[0], c[1]))
+        }
+        _ => Err(GeomError::Unsupported {
+            backend: axiolid_contracts::BackendId::new("axiolid-reference"),
+            operation: axiolid_contracts::Operation::CurveEvaluation,
+        }),
+    }?;
+    finite2(value, "curve third derivative")
+}
+
+/// Third derivative of a 3D curve with respect to its native parameter;
+/// see [`third_derivative2`].
+pub(crate) fn third_derivative3(curve: &Curve3, t: Scalar) -> GeomResult<Vec3> {
+    finite(t)?;
+    let value = match curve {
+        Curve3::Line(_) | Curve3::Polyline(_) => Ok(Vec3::ZERO),
+        Curve3::Circle(c) => Ok(-conic_tangent3(&c.frame, c.radius, c.radius, t)),
+        Curve3::Ellipse(e) => Ok(-conic_tangent3(&e.frame, e.semi_axis_x, e.semi_axis_y, t)),
+        Curve3::BSpline(b) => {
+            de_boor_third_derivative(b, t, |p| [p.x, p.y, p.z], |c| Vec3::new(c[0], c[1], c[2]))
+        }
+        _ => Err(GeomError::Unsupported {
+            backend: axiolid_contracts::BackendId::new("axiolid-reference"),
+            operation: axiolid_contracts::Operation::CurveEvaluation,
+        }),
+    }?;
+    finite3(value, "curve third derivative")
+}
+
 fn finite2(value: Vec2, what: &str) -> GeomResult<Vec2> {
     if value.is_finite() {
         Ok(value)
@@ -893,6 +933,69 @@ where
     Ok(from(core::array::from_fn(|axis| {
         (second[axis] - 2.0 * first_weight * first_projected[axis] - second_weight * position[axis])
             / weight
+    })))
+}
+
+/// Third derivative via three homogeneous hodograph constructions.
+///
+/// With `A = w C` and `A^(k)`, `w^(k)` the homogeneous derivatives (zero
+/// beyond the degree), `C' = (A' - w' C) / w`, `C'' = (A'' - 2 w' C' - w'' C)
+/// / w` and `C''' = (A''' - 3 w' C'' - 3 w'' C' - w''' C) / w`.
+fn de_boor_third_derivative<P, const N: usize, F, G, Q>(
+    b: &BSplineCurve<P>,
+    t: Scalar,
+    to: F,
+    from: G,
+) -> GeomResult<Q>
+where
+    F: Fn(&P) -> [Scalar; N],
+    G: Fn([Scalar; N]) -> Q,
+{
+    let (knots, _, degree) = spline_span(b, t)?;
+    let control_points = finite_control_points(&b.control_points, &to)?;
+    let count = b.control_points.len();
+    let u = t.clamp(knots[degree], knots[count]);
+
+    let mut points: Vec<[Scalar; N]> = (0..count)
+        .map(|i| {
+            let weight = b.weights.as_ref().map_or(1.0, |weights| weights[i]);
+            core::array::from_fn(|axis| control_points[i][axis] * weight)
+        })
+        .collect();
+    if points.iter().flatten().any(|value| !value.is_finite()) {
+        return Err(GeomError::Degenerate(
+            "B-spline homogeneous control point overflowed".to_owned(),
+        ));
+    }
+    let mut weights: Vec<Scalar> = (0..count)
+        .map(|i| b.weights.as_ref().map_or(1.0, |values| values[i]))
+        .collect();
+
+    // The homogeneous derivatives of order 0 to 3 at `u`.
+    let mut orders = [([0.0; N], 0.0); 4];
+    let mut levels = &knots[..];
+    for (order, slot) in orders.iter_mut().enumerate() {
+        if order > degree {
+            break;
+        }
+        *slot = eval_homogeneous(levels, degree - order, &points, &weights, u);
+        if order < 3 && order < degree {
+            (points, weights) = derivative_controls(&points, &weights, levels, degree - order);
+            levels = &levels[1..levels.len() - 1];
+        }
+    }
+    let [(a0, w0), (a1, w1), (a2, w2), (a3, w3)] = orders;
+    if !w0.is_finite() || w0 == 0.0 {
+        return Err(GeomError::Degenerate(
+            "B-spline weight collapsed to zero".to_owned(),
+        ));
+    }
+    let c0: [Scalar; N] = core::array::from_fn(|axis| a0[axis] / w0);
+    let c1: [Scalar; N] = core::array::from_fn(|axis| (a1[axis] - w1 * c0[axis]) / w0);
+    let c2: [Scalar; N] =
+        core::array::from_fn(|axis| (a2[axis] - 2.0 * w1 * c1[axis] - w2 * c0[axis]) / w0);
+    Ok(from(core::array::from_fn(|axis| {
+        (a3[axis] - 3.0 * w1 * c2[axis] - 3.0 * w2 * c1[axis] - w3 * c0[axis]) / w0
     })))
 }
 
@@ -1829,6 +1932,9 @@ fn verify3(curve: &Curve3, t: Scalar, point: Point3, tolerance: Scalar) -> GeomR
 
 #[cfg(test)]
 mod tests {
+    use axiolid_core::Point2;
+    use axiolid_curve::{BSplineCurve2, Ellipse2, KnotSpec};
+
     use super::*;
 
     /// A span with no chord bound passes on its sagitta alone for a family
@@ -1858,5 +1964,64 @@ mod tests {
         let refused = subdivide(&eval, &loose, 1.0, 1.0, 1e-3, 6, 1 << 10, true, &mut point);
         assert!(matches!(refused, Err(GeomError::Degenerate(_))));
         subdivide(&eval, &some, 1.0, 1.0, 1e-3, 6, 1 << 10, true, &mut point).unwrap();
+    }
+
+    fn spline(degree: u16, rational: bool, multiplicities: Vec<u32>, n: usize) -> Curve2 {
+        Curve2::BSpline(BSplineCurve2 {
+            degree,
+            control_points: (0..n)
+                .map(|i| Point2::new(3.0 * i as Scalar, ((i * i + 2 * i) % 7) as Scalar))
+                .collect(),
+            knots: vec![0.0, 0.4, 1.0],
+            multiplicities,
+            weights: rational.then(|| (0..n).map(|i| 1.0 + 0.3 * i as Scalar).collect()),
+            closed: false,
+            self_intersect: None,
+            knot_spec: KnotSpec::Unspecified,
+        })
+    }
+
+    /// The third derivative against a central difference of the second:
+    /// an ellipse, a cubic, a quartic and a rational quadratic B-spline.
+    #[test]
+    fn the_third_derivative_matches_a_difference_of_the_second() {
+        let curves = [
+            Curve2::Ellipse(Ellipse2 {
+                frame: axiolid_core::Frame2 {
+                    origin: Point2::new(3.0, 1.0),
+                    x: Vec2::new(0.6, 0.8),
+                    y: Vec2::new(-0.8, 0.6),
+                },
+                semi_axis_x: 20.0,
+                semi_axis_y: 10.0,
+            }),
+            spline(3, false, vec![4, 1, 4], 5),
+            spline(4, false, vec![5, 1, 5], 6),
+            spline(2, true, vec![3, 1, 3], 4),
+            spline(3, true, vec![4, 1, 4], 5),
+        ];
+        let h = 1e-5;
+        for curve in &curves {
+            for t in [0.07, 0.3, 0.55, 0.9] {
+                let third = third_derivative2(curve, t).unwrap();
+                let difference = (second_derivative2(curve, t + h).unwrap()
+                    - second_derivative2(curve, t - h).unwrap())
+                    / (2.0 * h);
+                assert!(
+                    (third - difference).length() <= 1e-5 * (1.0 + third.length()),
+                    "{curve:?} at {t}: {third:?} against {difference:?}"
+                );
+            }
+        }
+    }
+
+    /// A quadratic with no rational factor has a zero third derivative; a
+    /// rational one does not.
+    #[test]
+    fn a_polynomial_quadratic_has_no_third_derivative() {
+        let polynomial = spline(2, false, vec![3, 1, 3], 4);
+        assert_eq!(third_derivative2(&polynomial, 0.2).unwrap(), Vec2::ZERO);
+        let rational = spline(2, true, vec![3, 1, 3], 4);
+        assert!(third_derivative2(&rational, 0.2).unwrap().length() > 1e-3);
     }
 }

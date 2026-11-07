@@ -128,7 +128,11 @@
 //! within a certified error (`PieceReader::jet`). The Lipschitz constants
 //! above hold only where `P''` is continuous, so a span (widened by its
 //! measure) whose native range strictly contains a point where it may jump
-//! (a B-spline's knot of multiplicity above `degree - 2`) has no rates.
+//! (a B-spline's knot of multiplicity above `degree - 2`; beside an offset,
+//! `degree - 3`, since its `P''` holds the base's `B'''`) has no rates.
+//! Beside a base the offset's acceleration is `B'' + D''`, `D` the
+//! displacement differentiated twice through the unit vectors it is built
+//! of (`panels::unit_accel`) and the law's reading along the base.
 //!
 //! # Intrinsic curves (#361)
 //!

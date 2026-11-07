@@ -106,6 +106,22 @@ pub(super) fn unit_jet(r: Scalar, w1: Scalar, w2: Scalar, w3: Scalar) -> Jet<4> 
     [1.0, x, y + 3.0 * x * x, z + 9.0 * x * y + 15.0 * x * x * x]
 }
 
+/// A unit vector `u = w / |w|` with its first and second derivatives, from
+/// `w`, `w'` and `w''`: `r = |w|`, `r' = u.w'`, `u' = (w' - u r') / r`,
+/// `r'' = u'.w' + u.w''` and `u'' = (w'' - 2 u' r' - u r'') / r`.
+pub(super) fn unit_accel(w: Vec3, w1: Vec3, w2: Vec3) -> GeomResult<(Vec3, Vec3, Vec3)> {
+    let r = w.length();
+    if r.is_nan() || r <= 0.0 {
+        return Err(uncertified());
+    }
+    let u = w / r;
+    let r1 = u.dot(w1);
+    let u1 = (w1 - u * r1) / r;
+    let r2 = u1.dot(w1) + u.dot(w2);
+    let u2 = (w2 - 2.0 * u1 * r1 - u * r2) / r;
+    Ok((u, u1, u2))
+}
+
 /// A unit vector `w / |w|` and its derivative, from `w` and `w'`.
 pub(super) fn unit_rate(w: Vec3, dw: Vec3) -> GeomResult<(Vec3, Vec3)> {
     let r = w.length();
@@ -616,6 +632,29 @@ mod tests {
             sum.add(0.1);
         }
         assert!((sum.value() - 100_000.0).abs() <= 1e-9);
+    }
+
+    /// The unit vector of `w(t) = (cos 2t + t, sin 3t, t^2 + 1)` and its two
+    /// derivatives against central differences.
+    #[test]
+    fn the_unit_vector_has_its_first_and_second_derivative() {
+        let w = |t: Scalar| Vec3::new((2.0 * t).cos() + t, (3.0 * t).sin(), t * t + 1.0);
+        let w1 = |t: Scalar| Vec3::new(1.0 - 2.0 * (2.0 * t).sin(), 3.0 * (3.0 * t).cos(), 2.0 * t);
+        let w2 = |t: Scalar| Vec3::new(-4.0 * (2.0 * t).cos(), -9.0 * (3.0 * t).sin(), 2.0);
+        let unit = |t: Scalar| w(t) / w(t).length();
+        let h = 1e-5;
+        for t in [0.1, 0.7, 1.3] {
+            let (u, u1, u2) = unit_accel(w(t), w1(t), w2(t)).unwrap();
+            assert!((u - unit(t)).length() < 1e-14);
+            let first = (unit(t + h) - unit(t - h)) / (2.0 * h);
+            assert!((u1 - first).length() < 1e-8, "{u1:?} against {first:?}");
+            let second = (unit(t + h) - 2.0 * unit(t) + unit(t - h)) / (h * h);
+            assert!((u2 - second).length() < 1e-4, "{u2:?} against {second:?}");
+            // The first derivative the pair gives agrees with `unit_rate`.
+            let (_, rate) = unit_rate(w(t), w1(t)).unwrap();
+            assert!((u1 - rate).length() < 1e-14);
+        }
+        assert!(unit_accel(Vec3::ZERO, Vec3::X, Vec3::Y).is_err());
     }
 
     /// The widest panel is halved first, and the refinement stops once the

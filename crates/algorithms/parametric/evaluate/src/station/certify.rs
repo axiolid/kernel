@@ -108,7 +108,7 @@ use crate::bound::{
 };
 use crate::curve::{
     derivative2, derivative3, domain2, domain3, evaluate2, evaluate3, second_derivative2,
-    second_derivative3,
+    second_derivative3, third_derivative2, third_derivative3,
 };
 use beside::chord_offset_length;
 use panels::{adapt, finish, product, Compensated, Jet, Measured, PANEL_SHARE, VELOCITY_ROUNDING};
@@ -376,6 +376,18 @@ impl<'c> Native<'c> {
                 Ok(Vec3::new(d.x, d.y, 0.0))
             }
             Self::Three(curve) => second_derivative3(curve, t),
+        }
+    }
+
+    /// `B'''` at the native parameter `t`: what an offset's acceleration
+    /// rests on (#406).
+    fn third_derivative(&self, t: Scalar) -> GeomResult<Vec3> {
+        match self {
+            Self::Two(curve) => {
+                let d = third_derivative2(curve, t)?;
+                Ok(Vec3::new(d.x, d.y, 0.0))
+            }
+            Self::Three(curve) => third_derivative3(curve, t),
         }
     }
 

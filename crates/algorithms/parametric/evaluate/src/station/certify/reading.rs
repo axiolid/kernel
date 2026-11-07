@@ -271,8 +271,7 @@ impl<'c> PieceReader<'c> {
     ///
     /// # Errors
     ///
-    /// The evaluators' refusals, and the offset's until its acceleration
-    /// is certified.
+    /// The evaluators' refusals.
     pub(crate) fn jet(
         &self,
         piece: &StationPiece<'c>,

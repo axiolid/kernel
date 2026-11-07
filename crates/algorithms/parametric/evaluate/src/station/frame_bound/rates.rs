@@ -200,7 +200,10 @@ impl FrameLaw<'_, '_> {
             velocity_error: ev,
             acceleration_error: ew,
         } = jet;
-        let mut frame = at.piece.section_on(mid, SeamSide::Outgoing).ok()?;
+        let mut frame = at
+            .piece
+            .section_with(mid, SeamSide::Outgoing, at.table)
+            .ok()?;
         let plan = reading == FrameReading::Plan;
         if plan {
             frame = frame.plan().ok()?;

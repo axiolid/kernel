@@ -37,7 +37,8 @@ use axiolid_core::{Scalar, Vec3};
 use axiolid_curve::{OffsetFrame, OffsetLaw};
 
 use super::panels::{
-    product, unit_jet, unit_rate, Compensated, Jet, Measured, Panel, PANEL_SHARE, VELOCITY_ROUNDING,
+    product, unit_accel, unit_jet, unit_rate, Compensated, Jet, Measured, Panel, PANEL_SHARE,
+    VELOCITY_ROUNDING,
 };
 use super::{uncertified, DistanceInterval, Native};
 use crate::station::offset::StationOffset;
@@ -490,8 +491,87 @@ fn offset_chords<R>(
             _ => 0.0,
         };
     let shift = placement.map_or(0.0, |rigid| rigid.translation.abs().max_element());
-    // The offset's acceleration needs the base's third derivative (#406).
-    let acceleration = |_: Scalar| -> GeomResult<(Vec3, Scalar)> { Err(uncertified()) };
+    // `P'' = B'' + D''` (#406): the displacement differentiated twice
+    // through the unit vectors it is built of and the law's reading along
+    // the base, with the base's third derivative in the unit vectors' second
+    // rates.
+    let acceleration = |t: Scalar| -> GeomResult<(Vec3, Scalar)> {
+        let d1 = move_vector(native.derivative(t)?);
+        let d2 = move_vector(native.second_derivative(t)?);
+        let d3 = move_vector(native.third_derivative(t)?);
+        let (w, w1, w2) = (travel * d1, travel * d2, travel * d3);
+        let (t0, t1, t2) = unit_accel(w, w1, w2)?;
+        let (l0, l1, l2) = unit_accel(Vec3::Z.cross(w), Vec3::Z.cross(w1), Vec3::Z.cross(w2))?;
+        let up = (
+            t0.cross(l0),
+            t1.cross(l0) + t0.cross(l1),
+            t2.cross(l0) + 2.0 * t1.cross(l1) + t0.cross(l2),
+        );
+        let mut slip = 0.0;
+        // The magnitudes the sum of `P''` is made of, which its rounding is
+        // relative to.
+        let mut magnitude = d2.length();
+        let displacement = match law {
+            OffsetLaw::Planar { distance } => distance * l2,
+            OffsetLaw::Directed {
+                distance,
+                reference_direction,
+            } => {
+                let v = reference_direction.normalize();
+                distance * unit_accel(v.cross(w), v.cross(w1), v.cross(w2))?.2
+            }
+            OffsetLaw::Linear { start, end, frame } => {
+                let axes = match frame {
+                    OffsetFrame::Section => [(l0, l1, l2), up, (t0, t1, t2)],
+                    OffsetFrame::Plan => {
+                        let flat = |v: Vec3| Vec3::new(v.x, v.y, 0.0);
+                        let (a0, a1, a2) = unit_accel(flat(w), flat(w1), flat(w2))?;
+                        [
+                            (Vec3::Z.cross(a0), Vec3::Z.cross(a1), Vec3::Z.cross(a2)),
+                            (Vec3::Z, Vec3::ZERO, Vec3::ZERO),
+                            (a0, a1, a2),
+                        ]
+                    }
+                    _ => return Err(uncertified()),
+                };
+                let (v, error) = read(t)?;
+                let (rate, rate_error) = pace(d1);
+                // `v''`: the law's reading is constant on a fixed or a
+                // rated base, and follows the base's speed through its
+                // table.
+                let (rate2, rate2_error) = match progress {
+                    Progress::Table(_, (lo, hi)) => {
+                        let along = d1.dot(d2) / d1.length();
+                        (
+                            travel * span * along * 2.0 / (lo + hi),
+                            0.5 * span * along.abs() * (1.0 / lo - 1.0 / hi),
+                        )
+                    }
+                    _ => (0.0, 0.0),
+                };
+                let u = (v / length).clamp(0.0, 1.0);
+                let pairs = [
+                    (start.lateral, end.lateral),
+                    (start.vertical, end.vertical),
+                    (start.longitudinal, end.longitudinal),
+                ];
+                let mut sum = Vec3::ZERO;
+                for (k, (&(a, b), (a0, a1, a2))) in pairs.iter().zip(axes).enumerate() {
+                    let q = (b - a) / length;
+                    let terms = [q * rate2 * a0, 2.0 * q * rate * a1, (a + (b - a) * u) * a2];
+                    magnitude += terms.iter().map(|term| term.length()).sum::<Scalar>();
+                    sum += terms[0] + terms[1] + terms[2];
+                    slip += rates[k].abs()
+                        * (rate2_error + 2.0 * rate_error * a1.length() + error * a2.length());
+                }
+                sum
+            }
+            _ => return Err(uncertified()),
+        };
+        let out = d2 + displacement;
+        magnitude += displacement.length();
+        Ok((out, slip + VELOCITY_ROUNDING * (out.length() + magnitude)))
+    };
     run(&Measured {
         point: &point,
         velocity: &velocity,

@@ -50,13 +50,14 @@
 //! - `sigma`: `sup |O''| + sup |O'| sup |N'|`;
 //! - `beta_L`: `sup |L'| sup |N'| + sup |N''|`, and `beta_U` likewise.
 //!
-//! A frame read by quadrature (an ellipse, a B-spline) has the bend of its
-//! exact law, whose jet is the curve's unit tangent and its curvature
-//! vector from a certified second derivative (#406, `PieceReader::jet`);
-//! the bend is not bounded over a span across a point where the curvature
-//! may jump (a B-spline's knot of too low a multiplicity), and an offset
-//! beside such a curve has none yet. Every frame without certified bounds
-//! has no bend.
+//! A frame read by quadrature (an ellipse, a B-spline, an offset beside a
+//! line, a circle, an ellipse or a B-spline) has the bend of its exact law,
+//! whose jet is the curve's unit tangent and its curvature vector from a
+//! certified second derivative (#406, `PieceReader::jet`; an offset's
+//! acceleration holds the base's third derivative). The bend is not bounded
+//! over a span across a point where the curvature may jump (a B-spline's
+//! knot of too low a multiplicity, a cubic's beside an offset). Every frame
+//! without certified bounds has no bend.
 
 use axiolid_core::{Scalar, Vec3};
 use axiolid_curve::{Curve2, Curve3, SeamSide};

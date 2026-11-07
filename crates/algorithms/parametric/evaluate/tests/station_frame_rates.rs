@@ -12,11 +12,11 @@ use axiolid_core::{Frame2, Frame3, Point2, Point3, Scalar, Transform3, Vec2, Vec
 use axiolid_curve::{
     BSplineCurve, BSplineCurve2, BankConvention, Banked3, CantLaw, CantPiece, Chain2, ChainPiece2,
     Circle2, Circle3, CurvatureLaw, Curve2, Curve3, Elevated3, ElevationLaw, Ellipse2, Intrinsic2,
-    KnotSpec, Line2, SeamSide,
+    KnotSpec, Line2, OffsetFrame, OffsetLaw, PathOffsets, SeamSide,
 };
 use axiolid_evaluate::station::{
-    station_section2, station_section3, CompositeBasis, FrameLaw, FrameRates, FrameReading,
-    RateBounds, SectionFrame, StationCurve, StationPiece,
+    offset_pieces, station_section2, station_section3, CompositeBasis, FrameLaw, FrameRates,
+    FrameReading, RateBounds, SectionFrame, StationCurve, StationPiece,
 };
 
 const TOLERANCE: Scalar = 1e-7;
@@ -35,39 +35,36 @@ fn twist_at(frame: &dyn Fn(Scalar) -> SectionFrame, s: Scalar, h: Scalar) -> Sca
     frame(s).up.dot(rate)
 }
 
-/// `O' . U` by a central difference of the frame's point.
-fn rise_at(frame: &dyn Fn(Scalar) -> SectionFrame, s: Scalar, h: Scalar) -> Scalar {
-    let rate = (frame(s + h).point - frame(s - h).point) / (2.0 * h);
-    rate.dot(frame(s).up)
-}
-
-/// `L . T'` and `U . T'` by a central difference of the frame's tangent.
-fn bends_at(frame: &dyn Fn(Scalar) -> SectionFrame, s: Scalar, h: Scalar) -> (Scalar, Scalar) {
-    let rate = (frame(s + h).tangent - frame(s - h).tangent) / (2.0 * h);
-    let at = frame(s);
-    (at.lateral.dot(rate), at.up.dot(rate))
-}
-
-/// The bends, the twist and the rise sampled over `[lo, hi]` lie within the
-/// rates' ranges, and their middle values within their errors (and
-/// `slack`) of the references.
-fn check_with(
+/// The bends, the twist and the rise sampled at `samples + 1` points over
+/// `[lo, hi]` lie within the rates' ranges, and their middle values within
+/// their errors (and `slack`) of the references.
+fn check_sampled(
     rates: &FrameRates,
     frame: &dyn Fn(Scalar) -> SectionFrame,
     (lo, hi): (Scalar, Scalar),
     (h, slack): (Scalar, Scalar),
+    samples: usize,
 ) {
     let at = |s: Scalar| {
-        let (lateral, up) = bends_at(frame, s, h);
+        let (before, here, after) = (frame(s - h), frame(s), frame(s + h));
+        let bend = (after.tangent - before.tangent) / (2.0 * h);
         [
-            (&rates.lateral, lateral, "lateral"),
-            (&rates.up, up, "up"),
-            (&rates.twist, twist_at(frame, s, h), "twist"),
-            (&rates.rise, rise_at(frame, s, h), "rise"),
+            (&rates.lateral, here.lateral.dot(bend), "lateral"),
+            (&rates.up, here.up.dot(bend), "up"),
+            (
+                &rates.twist,
+                here.up.dot((after.lateral - before.lateral) / (2.0 * h)),
+                "twist",
+            ),
+            (
+                &rates.rise,
+                ((after.point - before.point) / (2.0 * h)).dot(here.up),
+                "rise",
+            ),
         ]
     };
-    for i in 0..=40 {
-        let s = lo + (hi - lo) * Scalar::from(i) / 40.0;
+    for i in 0..=samples {
+        let s = lo + (hi - lo) * i as Scalar / samples as Scalar;
         for (rate, reference, name) in at(s) {
             assert!(
                 rate.range[0] - slack <= reference && reference <= rate.range[1] + slack,
@@ -84,6 +81,15 @@ fn check_with(
             rate.error
         );
     }
+}
+
+fn check_with(
+    rates: &FrameRates,
+    frame: &dyn Fn(Scalar) -> SectionFrame,
+    span: (Scalar, Scalar),
+    steps: (Scalar, Scalar),
+) {
+    check_sampled(rates, frame, span, steps, 40);
 }
 
 /// [`check_with`] for the frames read in closed form.
@@ -635,4 +641,177 @@ fn chains_have_no_rates() {
     for reading in [FrameReading::Section, FrameReading::Plan] {
         assert!(law.rates(5.0, 8.0, reading).is_none());
     }
+}
+
+// --- offsets beside curves read by quadrature -----------------------------------
+
+/// The ellipse's parameter at arc length `s` of its offset by `distance`
+/// (positive to the left), by RK4 on `dt/ds = 1 / |P'(t)|` with
+/// `|P'| = |B'| - distance a b / |B'|^2`.
+fn offset_parameter(distance: Scalar, s: Scalar) -> Scalar {
+    let speed = |t: Scalar| {
+        let base = (400.0 * t.sin().powi(2) + 100.0 * t.cos().powi(2)).sqrt();
+        base - distance * 200.0 / (base * base)
+    };
+    let steps = (s / 1e-3).ceil().max(1.0) as usize;
+    let h = s / steps as Scalar;
+    let mut t = 0.0;
+    for _ in 0..steps {
+        let k1 = 1.0 / speed(t);
+        let k2 = 1.0 / speed(t + 0.5 * h * k1);
+        let k3 = 1.0 / speed(t + 0.5 * h * k2);
+        let k4 = 1.0 / speed(t + h * k3);
+        t += h * (k1 + 2.0 * k2 + 2.0 * k3 + k4) / 6.0;
+    }
+    t
+}
+
+#[test]
+fn an_offset_beside_an_ellipse_bends_at_its_own_radius() {
+    let plan = ellipse();
+    let distance = -2.0;
+    let base = StationPiece::between(StationCurve::Two(&plan), 0.0, 40.0).unwrap();
+    let basis =
+        CompositeBasis::new(offset_pieces(&[base], OffsetLaw::Planar { distance }).unwrap())
+            .unwrap();
+    let law = basis.frame_law(TOLERANCE).unwrap();
+    for reading in [FrameReading::Section, FrameReading::Plan] {
+        // The curvature of the offset is `kappa / (1 - d kappa)`.
+        let offset_curvature = |s: Scalar| {
+            let kappa = ellipse_curvature(offset_parameter(distance, s));
+            kappa / (1.0 - distance * kappa)
+        };
+        // Near the sharpest end the radius is `5 + 2 = 7`.
+        let sharp = law.rates(0.0, 0.05, reading).unwrap();
+        assert!(sharp.lateral.range[0] > 0.0, "{:?}", sharp.lateral);
+        assert!((offset_curvature(0.0) - 1.0 / 7.0).abs() < 1e-12);
+        for span in [(0.0, 1.0), (10.0, 13.0), (30.0, 33.0)] {
+            let rates = law.rates(span.0, span.1, reading).unwrap();
+            for i in 0..=20 {
+                let s = span.0 + (span.1 - span.0) * Scalar::from(i) / 20.0;
+                assert!(contains(&rates.lateral, offset_curvature(s)), "at {s}");
+            }
+            let mid = 0.5 * (span.0 + span.1);
+            assert!(
+                (rates.lateral.middle - offset_curvature(mid)).abs() <= rates.lateral.error + 1e-9,
+                "{} against {}, error {}",
+                rates.lateral.middle,
+                offset_curvature(mid),
+                rates.lateral.error
+            );
+            assert!(rates.lateral.error < 1e-6, "{}", rates.lateral.error);
+            for rate in [&rates.twist, &rates.rise, &rates.up] {
+                assert!(contains(rate, 0.0));
+            }
+        }
+    }
+}
+
+fn widening() -> OffsetLaw {
+    OffsetLaw::Linear {
+        start: PathOffsets::new(0.5, 0.0, 0.0),
+        end: PathOffsets::new(0.75, 0.2, 0.0),
+        frame: OffsetFrame::Section,
+    }
+}
+
+#[test]
+fn offsets_by_distances_beside_an_ellipse_and_a_b_spline_bend() {
+    let (plan, solid) = (ellipse(), spline3());
+    let cases: [(StationCurve<'_>, OffsetLaw, Scalar, Scalar); 4] = [
+        (StationCurve::Two(&plan), widening(), 2.0, 20.0),
+        (
+            StationCurve::Two(&plan),
+            OffsetLaw::Linear {
+                start: PathOffsets::new(0.5, 0.0, 0.0),
+                end: PathOffsets::new(0.75, 0.2, 0.0),
+                frame: OffsetFrame::Plan,
+            },
+            2.0,
+            20.0,
+        ),
+        (StationCurve::Three(&solid), widening(), 1.0, 28.0),
+        (
+            StationCurve::Three(&solid),
+            OffsetLaw::Directed {
+                distance: 1.0,
+                reference_direction: Vec3::Z,
+            },
+            0.0,
+            28.0,
+        ),
+    ];
+    for (k, (curve, offset_law, start, end)) in cases.into_iter().enumerate() {
+        let base = StationPiece::between(curve, start, end).unwrap();
+        // The first offset by distances runs along its base backwards.
+        let base = if k == 0 { base.reversed() } else { base };
+        let basis = CompositeBasis::new(offset_pieces(&[base], offset_law).unwrap()).unwrap();
+        let law = basis.frame_law(TOLERANCE).unwrap();
+        let section = |s: Scalar| basis.section_on(s, SeamSide::Outgoing).unwrap();
+        // The plan reading differs from the section's where the curve
+        // climbs or the law is read in the plan frame.
+        let readings: &[FrameReading] = if k == 1 || k == 2 {
+            &[FrameReading::Section, FrameReading::Plan]
+        } else {
+            &[FrameReading::Section]
+        };
+        for &reading in readings {
+            let span = (3.0, 4.5);
+            let rates = law
+                .rates(span.0, span.1, reading)
+                .unwrap_or_else(|| panic!("no rates for case {k} {reading:?}"));
+            if reading == FrameReading::Plan {
+                check_sampled(&rates, &|s| plan_of(section(s)), span, (H_READ, 1e-6), 4);
+            } else {
+                check_sampled(&rates, &section, span, (H_READ, 1e-6), 4);
+            }
+        }
+    }
+}
+
+#[test]
+fn a_constant_offset_beside_a_cubic_has_rates_only_between_its_knots() {
+    let solid = spline3();
+    let base = StationPiece::between(StationCurve::Three(&solid), 0.0, 28.0).unwrap();
+    let basis = CompositeBasis::new(
+        offset_pieces(
+            &[base],
+            OffsetLaw::Directed {
+                distance: 1.0,
+                reference_direction: Vec3::Z,
+            },
+        )
+        .unwrap(),
+    )
+    .unwrap();
+    let law = basis.frame_law(TOLERANCE).unwrap();
+    // The offset's `P''` holds the base's `B'''`, which jumps at the
+    // cubic's interior knot: a span across it has bounds but no rates,
+    // however narrow.
+    let none = |lo: Scalar, hi: Scalar| law.rates(lo, hi, FrameReading::Section).is_none();
+    // A span too wide for the bounds has none either; halving tells it from
+    // the knot, which stays without as narrow as the halving goes.
+    let mut knots = Vec::new();
+    for start in (3..13).map(|k| 2.0 * Scalar::from(k)) {
+        let (mut lo, mut hi) = (start, start + 2.0);
+        while none(lo, hi) && hi - lo > 0.01 {
+            let mid = 0.5 * (lo + hi);
+            if none(lo, mid) {
+                hi = mid;
+            } else if none(mid, hi) {
+                lo = mid;
+            } else {
+                break;
+            }
+        }
+        if hi - lo <= 0.01 && none(lo, hi) {
+            knots.push((lo, hi));
+        }
+    }
+    assert_eq!(knots.len(), 1, "{knots:?}");
+    let (lo, hi) = knots[0];
+    // The bounds stay, and the sides have rates again.
+    assert!(law.bounds(lo, hi, FrameReading::Section).is_some());
+    assert!(law.rates(lo - 0.2, lo, FrameReading::Section).is_some());
+    assert!(law.rates(hi, hi + 0.2, FrameReading::Section).is_some());
 }
