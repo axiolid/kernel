@@ -24,19 +24,23 @@ caret rule for `0.x` versions.
   - A NaN or infinite coordinate: it returned a certain sign; it now
     returns `Uncertain`, as `orient3d` does.
 
-  The filters decline when their permanent is outside [1e-250, 1e300]. The
+  The filters decline unless every nonzero coordinate difference has a
+  magnitude in [2^-128, 2^128), so that no product or sub-product overflows or
+  underflows (a gate on the permanent alone does not exclude a degree-2
+  sub-product that underflows and is then multiplied by a large lift). The
   expansion stage of the exact path runs only where every difference lies in
   [1e-60, 1e60] (`incircle`) or [1e-45, 1e45] (`insphere`) and every nonzero
   rounding tail is at least as large as the lower bound; anything else goes
   to a fixed-size dyadic evaluation over the original coordinates (133 and
   166 words, the accumulator `orient2d` and `orient3d` share), which forms
   no difference and no rounded product. Cost, measured with the committed
-  `predicates` bench (three runs each, ns per call; before the change, the
-  "huge" scene is the wrong Zero of the overflowing path): random points
-  15.6 to 16.1 before, 16.1 to 16.9 after; exactly cocircular lattice points
-  (2^-10 grid, every call escalates) 911 to 951 before, 923 to 1027 after;
-  the same points scaled to about 1e80 1196 to 1209 before, 5330 to 5440
-  after, now exact.
+  `predicates` bench on a loaded machine (ns per call, old and new binaries
+  alternated five times, minimum to typical): random points 20.6 to 23 before,
+  about 25 to 28 after (the difference gate costs about 20% on the filtered
+  path); exactly cocircular
+  lattice points (2^-10 grid, every call escalates) 1380 to 1460 before, 1420
+  to 1600 after; the same points scaled to about 1e80 1800 to 1870 before (the
+  wrong Zero of the overflowing path), 6300 to 7000 after, now exact.
 - `StaticFilter::orient3d` certified a wrong sign when the declared range was
   below about 1e-103, in every published release: the precomputed error bound
   underflowed to zero, so every nonzero rounded determinant was accepted

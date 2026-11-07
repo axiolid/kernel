@@ -461,3 +461,186 @@ fn insphere_matches_the_dyadic_reference_across_scales() {
     );
     assert!(zeros > 300 && nonzero_out_of_filter > 300);
 }
+
+/// Differences of very different magnitudes: a degree-2 sub-product underflows
+/// and is then multiplied by a large lift, which a gate on the permanent alone
+/// did not exclude (#430).
+#[test]
+fn mixed_scale_inputs_are_not_certified_wrong() {
+    let a = p2(1e100, 0.0);
+    let b = p2(0.0, -5e-324);
+    let c = p2(0.3, 0.0);
+    let origin = p2(0.0, 0.0);
+    assert_eq!(
+        certain(incircle(a, b, c, origin)),
+        incircle_reference(a, b, c, origin)
+    );
+    assert_eq!(incircle_reference(a, b, c, origin), Sign::Positive);
+
+    let (a, b, c) = (p2(0.0, 0.0), p2(0.0, 3.0000000000000002e100), p2(0.0, 0.3));
+    let p = p2(-5e-324, 0.0);
+    assert_eq!(
+        certain(incircle(a, b, c, p)),
+        incircle_reference(a, b, c, p)
+    );
+    assert_eq!(incircle_reference(a, b, c, p), Sign::Negative);
+
+    let a = p3(-0.0625, 1e100, -7.888609052210118e-31);
+    let b = p3(-1.5e-323, -0.0, 1.5e-323);
+    let c = p3(-5e-324, 5e-324, -0.6);
+    let e = p3(0.0, 1.88079096131566e-37, 7.427640235712282e27);
+    let p = p3(-0.0, 1e-323, -0.0);
+    assert_eq!(
+        certain(insphere(a, b, c, e, p)),
+        insphere_reference(a, b, c, e, p)
+    );
+    assert_eq!(insphere_reference(a, b, c, e, p), Sign::Positive);
+}
+
+/// A coordinate of random sign with a random binary exponent from the
+/// subnormals to about 2^340, or zero.
+fn mixed(rng: &mut Rng) -> f64 {
+    if rng.below(8) == 0 {
+        return 0.0;
+    }
+    let k = rng.below(1500) as i32 - 1070;
+    rng.unit() * 2f64.powi(k.min(340))
+}
+
+/// Seeded fuzz with an independent scale per coordinate, so that differences
+/// of every magnitude meet in one determinant.
+#[test]
+fn mixed_scale_fuzz_matches_the_dyadic_reference() {
+    let mut rng = Rng(0xA5A5_1234_DEAD_BEEF);
+    for _ in 0..40_000 {
+        let pts = [(); 4].map(|()| p2(mixed(&mut rng), mixed(&mut rng)));
+        assert_eq!(
+            certain(incircle(pts[0], pts[1], pts[2], pts[3])),
+            incircle_reference(pts[0], pts[1], pts[2], pts[3]),
+            "{pts:?}"
+        );
+    }
+    for _ in 0..4_000 {
+        let pts = [(); 5].map(|()| p3(mixed(&mut rng), mixed(&mut rng), mixed(&mut rng)));
+        assert_eq!(
+            certain(insphere(pts[0], pts[1], pts[2], pts[3], pts[4])),
+            insphere_reference(pts[0], pts[1], pts[2], pts[3], pts[4]),
+            "{pts:?}"
+        );
+    }
+}
+
+/// The mixed-scale inputs under every permutation of their points and
+/// coordinate axes, so that each of the filters' differences is the one that
+/// carries the tiny value.
+#[test]
+fn mixed_scale_inputs_hold_under_every_permutation() {
+    fn permutations(n: usize) -> Vec<Vec<usize>> {
+        if n == 1 {
+            return vec![vec![0]];
+        }
+        let mut out = Vec::new();
+        for rest in permutations(n - 1) {
+            for at in 0..n {
+                let mut p = rest.clone();
+                p.insert(at, n - 1);
+                out.push(p);
+            }
+        }
+        out
+    }
+    let flat2: [[[f64; 2]; 4]; 2] = [
+        [[1e100, 0.0], [0.0, -5e-324], [0.3, 0.0], [0.0, 0.0]],
+        [
+            [0.0, 0.0],
+            [0.0, 3.0000000000000002e100],
+            [0.0, 0.3],
+            [-5e-324, 0.0],
+        ],
+    ];
+    for case in flat2 {
+        for order in permutations(4) {
+            // Each point swaps its own axes or not, so the large and the tiny
+            // value meet in every combination of difference slots.
+            for swaps in 0..16_u32 {
+                let q = |i: usize| {
+                    let v = case[order[i]];
+                    if swaps & (1 << i) != 0 {
+                        p2(v[1], v[0])
+                    } else {
+                        p2(v[0], v[1])
+                    }
+                };
+                assert_eq!(
+                    certain(incircle(q(0), q(1), q(2), q(3))),
+                    incircle_reference(q(0), q(1), q(2), q(3)),
+                    "{order:?} {swaps:b} {case:?}"
+                );
+            }
+        }
+    }
+    let case: [[f64; 3]; 5] = [
+        [-0.0625, 1e100, -7.888609052210118e-31],
+        [-1.5e-323, -0.0, 1.5e-323],
+        [-5e-324, 5e-324, -0.6],
+        [0.0, 1.88079096131566e-37, 7.427640235712282e27],
+        [-0.0, 1e-323, -0.0],
+    ];
+    let axes = permutations(3);
+    let mut rng = Rng(0x0DDB_1A5E_5BAD_5EED);
+    for order in permutations(5) {
+        for _ in 0..60 {
+            let pick: Vec<&Vec<usize>> = (0..5).map(|_| &axes[rng.below(axes.len())]).collect();
+            let q = |i: usize| {
+                let (v, a) = (case[order[i]], pick[i]);
+                p3(v[a[0]], v[a[1]], v[a[2]])
+            };
+            assert_eq!(
+                certain(insphere(q(0), q(1), q(2), q(3), q(4))),
+                insphere_reference(q(0), q(1), q(2), q(3), q(4)),
+                "{order:?} {pick:?}"
+            );
+        }
+    }
+}
+
+/// Seeded fuzz over a small palette of awkward values (zeros, subnormals,
+/// large and mid-range ones) so that sub-products underflow beside large
+/// lifts in every slot of the determinant.
+#[test]
+fn palette_fuzz_matches_the_dyadic_reference() {
+    const PALETTE: [f64; 14] = [
+        0.0,
+        -0.0,
+        5e-324,
+        -5e-324,
+        1.5e-323,
+        1e-323,
+        0.3,
+        -0.6,
+        1e100,
+        -3.0000000000000002e100,
+        1.88079096131566e-37,
+        -7.888609052210118e-31,
+        7.427640235712282e27,
+        1.0,
+    ];
+    let mut rng = Rng(0xFEED_FACE_CAFE_F00D);
+    let pick = |rng: &mut Rng| PALETTE[rng.below(PALETTE.len())];
+    for _ in 0..150_000 {
+        let pts = [(); 4].map(|()| p2(pick(&mut rng), pick(&mut rng)));
+        assert_eq!(
+            certain(incircle(pts[0], pts[1], pts[2], pts[3])),
+            incircle_reference(pts[0], pts[1], pts[2], pts[3]),
+            "{pts:?}"
+        );
+    }
+    for _ in 0..120_000 {
+        let pts = [(); 5].map(|()| p3(pick(&mut rng), pick(&mut rng), pick(&mut rng)));
+        assert_eq!(
+            certain(insphere(pts[0], pts[1], pts[2], pts[3], pts[4])),
+            insphere_reference(pts[0], pts[1], pts[2], pts[3], pts[4]),
+            "{pts:?}"
+        );
+    }
+}

@@ -14,12 +14,13 @@
 //!
 //! The determinants have degree 4 (`incircle`) and 5 (`insphere`) in the
 //! coordinate differences, so their products leave binary64's range much
-//! sooner than `orient*`'s (#430). The filter therefore declines when its
-//! permanent is outside [1e-250, 1e300]. The expansion stage of the exact path
-//! runs only where every nonzero difference lies in a range that keeps all of
-//! its products normal: [1e-60, 1e60] for `incircle` and [1e-45, 1e45] for
-//! `insphere`, with every nonzero rounding tail of a difference at least as
-//! large as the range's lower bound. Any
+//! sooner than `orient*`'s (#430). The filter and the expansion stage of the
+//! exact path therefore run only where every nonzero difference lies in a
+//! range that keeps all products normal: [2^-128, 2^128) for the filters, about
+//! [1e-60, 1e60] for the `incircle` expansion stage and [1e-45, 1e45] for the
+//! `insphere` one; the expansion stage also needs every nonzero
+//! rounding tail of a difference at least as large as the range's lower
+//! bound. Any
 //! other finite input goes to a fixed-size dyadic evaluation over the original
 //! coordinates (`sphere_dyadic`), which forms no difference and no rounded
 //! product and is exact for every finite input. A non-finite coordinate returns
@@ -43,8 +44,10 @@ const INCIRCLE_ERROR_FACTOR: f64 = (10.0 + 96.0 * EPSILON) * EPSILON;
 const INSPHERE_ERROR_FACTOR: f64 = (16.0 + 224.0 * EPSILON) * EPSILON;
 
 /// Differences of `incircle` must be zero or within `[INCIRCLE_MIN, INCIRCLE_MAX]`
-/// in magnitude for the expansion stage: a product of four of them then lies in
-/// `[1e-240, 1e240]`.
+/// in magnitude for the filter and the expansion stage: a product of four of
+/// them, and every partial product, then lies in `[1e-240, 1e240]`. Gating the
+/// permanent instead is not enough: a degree-2 sub-product can underflow and
+/// then be multiplied by a large lift, dropping a whole term.
 const INCIRCLE_MIN: f64 = 1.0e-60;
 const INCIRCLE_MAX: f64 = 1.0e60;
 
@@ -52,25 +55,14 @@ const INCIRCLE_MAX: f64 = 1.0e60;
 const INSPHERE_MIN: f64 = 1.0e-45;
 const INSPHERE_MAX: f64 = 1.0e45;
 
-/// The filter's error bound is relative to the permanent, which assumes no
-/// product overflowed and none lost bits to underflow. A finite permanent of at
-/// most `PERMANENT_MAX` excludes overflow (it sums the absolute value of every
-/// product). One of at least `PERMANENT_MIN` makes the bound at least 1e-266,
-/// far above the few units of 2^-1074 that underflowing products can add to the
-/// error, so the bound still holds. A NaN is outside the range.
-const PERMANENT_MIN: f64 = 1.0e-250;
-const PERMANENT_MAX: f64 = 1.0e300;
-
-fn permanent_in_range(permanent: f64) -> bool {
-    (PERMANENT_MIN..=PERMANENT_MAX).contains(&permanent)
-}
-
 /// Whether every value is zero or has a magnitude in `[min, max]`; a NaN or
 /// an infinity is not.
 fn all_in_range(values: &[f64], min: f64, max: f64) -> bool {
-    values
-        .iter()
-        .all(|v| *v == 0.0 || (min..=max).contains(&v.abs()))
+    // Bitwise `&` and `|` keep this free of branches, which the filter pays on every call.
+    values.iter().fold(true, |ok, v| {
+        let magnitude = v.abs();
+        ok & ((magnitude == 0.0) | ((magnitude >= min) & (magnitude <= max)))
+    })
 }
 
 /// Whether every `p - q` is in range for the expansion stage: its head is
@@ -81,6 +73,25 @@ fn differences_expandable(pairs: &[(f64, f64)], min: f64, max: f64) -> bool {
         let (head, tail) = two_diff(p, q);
         all_in_range(&[head], min, max) && (tail == 0.0 || tail.abs() >= min)
     })
+}
+
+/// The filter's differences must be zero or have a biased exponent in
+/// `[FILTER_EXPONENT_LOW, FILTER_EXPONENT_LOW + 255]`, that is a magnitude in
+/// `[2^-128, 2^128)`: every product of four (`incircle`) or five (`insphere`)
+/// of them is then in `[2^-640, 2^640)`, far from both ends of binary64.
+const FILTER_EXPONENT_LOW: u64 = 1023 - 128;
+
+/// Whether every value is zero or in the filter's exponent window; a
+/// subnormal, an infinity and a NaN are not. Branch-free: the filter pays it
+/// on every call, so it reads the exponent bits and checks the OR of all
+/// window offsets once (the window is a power of two wide).
+fn exponents_in_range(values: &[f64]) -> bool {
+    let offsets = values.iter().fold(0_u64, |or, v| {
+        let bits = v.to_bits();
+        let nonzero = u64::from(bits << 1 != 0).wrapping_neg();
+        or | ((((bits >> 52) & 0x7ff).wrapping_sub(FILTER_EXPONENT_LOW)) & nonzero)
+    });
+    offsets >> 8 == 0
 }
 
 /// Is `d` inside the circle through `a`, `b`, `c`?
@@ -106,13 +117,18 @@ pub fn incircle(a: Point2, b: Point2, c: Point2, d: Point2) -> Certified {
 
 /// The fast filter alone, exposed so escalation can be measured.
 ///
-/// Returns [`Certified::Uncertain`] when the permanent is outside
-/// [1e-250, 1e300], where products may overflow or underflow.
+/// Returns [`Certified::Uncertain`] when a nonzero coordinate difference is
+/// outside [2^-128, 2^128), where a product may overflow or underflow.
 #[must_use]
 pub fn incircle_filter(a: Point2, b: Point2, c: Point2, d: Point2) -> Certified {
     let (adx, ady) = (a.x - d.x, a.y - d.y);
     let (bdx, bdy) = (b.x - d.x, b.y - d.y);
     let (cdx, cdy) = (c.x - d.x, c.y - d.y);
+    if !exponents_in_range(&[adx, ady, bdx, bdy, cdx, cdy]) {
+        return Certified::Uncertain {
+            attempted: Precision::F64,
+        };
+    }
     let bdxcdy = bdx * cdy;
     let cdxbdy = cdx * bdy;
     let alift = adx * adx + ady * ady;
@@ -132,11 +148,6 @@ pub fn incircle_filter(a: Point2, b: Point2, c: Point2, d: Point2) -> Certified 
         + (cdxady.abs() + adxcdy.abs()) * blift
         + (adxbdy.abs() + bdxady.abs()) * clift;
 
-    if !permanent_in_range(permanent) {
-        return Certified::Uncertain {
-            attempted: Precision::F64,
-        };
-    }
     Certified::from_filter(
         determinant,
         INCIRCLE_ERROR_FACTOR * permanent,
@@ -246,8 +257,8 @@ pub fn insphere(a: Point3, b: Point3, c: Point3, d: Point3, e: Point3) -> Certif
 
 /// The fast filter alone, exposed so escalation can be measured.
 ///
-/// Returns [`Certified::Uncertain`] when the permanent is outside
-/// [1e-250, 1e300], where products may overflow or underflow.
+/// Returns [`Certified::Uncertain`] when a nonzero coordinate difference is
+/// outside [2^-128, 2^128), where a product may overflow or underflow.
 #[must_use]
 pub fn insphere_filter(a: Point3, b: Point3, c: Point3, d: Point3, e: Point3) -> Certified {
     let v = |p: Point3| (p.x - e.x, p.y - e.y, p.z - e.z);
@@ -255,6 +266,11 @@ pub fn insphere_filter(a: Point3, b: Point3, c: Point3, d: Point3, e: Point3) ->
     let (bx, by, bz) = v(b);
     let (cx, cy, cz) = v(c);
     let (dx, dy, dz) = v(d);
+    if !exponents_in_range(&[ax, ay, az, bx, by, bz, cx, cy, cz, dx, dy, dz]) {
+        return Certified::Uncertain {
+            attempted: Precision::F64,
+        };
+    }
     let (axby, bxay) = (ax * by, bx * ay);
     let (bxcy, cxby) = (bx * cy, cx * by);
     let (cxdy, dxcy) = (cx * dy, dx * cy);
@@ -297,11 +313,6 @@ pub fn insphere_filter(a: Point3, b: Point3, c: Point3, d: Point3, e: Point3) ->
         + (ab_plus * dz + bd_plus * az + da_plus * bz) * clift
         + (bc_plus * az + ac_plus * bz + ab_plus * cz) * dlift;
 
-    if !permanent_in_range(permanent) {
-        return Certified::Uncertain {
-            attempted: Precision::F64,
-        };
-    }
     Certified::from_filter(
         determinant,
         INSPHERE_ERROR_FACTOR * permanent,

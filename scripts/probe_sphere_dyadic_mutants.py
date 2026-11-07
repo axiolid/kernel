@@ -1,8 +1,7 @@
 """Mutation probe for the range gates and exact fallback of `incircle` and `insphere` (#430).
 
 Both predicates are lifted determinants of degree 4 and 5, so their products
-leave binary64's range near 1e60 and 1e-60. The filter declines on its
-permanent outside [1e-250, 1e300]; the expansion stage runs only where every
+leave binary64's range near 1e60 and 1e-60. The filters decline on a nonzero difference outside [2^-128, 2^128); the expansion stage runs only where every
 difference and rounding tail is in range; every other finite input goes to the
 fixed-size dyadic evaluation in
 `crates/algorithms/predicates/src/sphere_dyadic.rs`. Each mutant breaks one
@@ -12,10 +11,10 @@ gate, one term, one sign, the accumulator or a routing decision and must turn
 comparison with an exact dyadic reference over scales 2^-1060 to 2^1010, the
 non-finite inputs) or, for the ordinary range, `tests/incircle_exact.rs`.
 
-Equivalent mutants, deliberately not listed: raising the filter's upper
-permanent bound to infinity (a permanent beyond 1e300 below infinity cannot
-overflow, and an infinite one makes the error bound infinite, which certifies
-nothing); reading a NaN as in range in `all_in_range` (the tail check rejects
+Equivalent mutants, deliberately not listed: raising or widening the filter window's
+upper end (an overflowing product makes the determinant non-finite, which
+`Certified::from_filter` declines); dropping the `nonzero` mask in
+`exponents_in_range` (a zero then declines, which only costs speed); reading a NaN as in range in `all_in_range` (the tail check rejects
 the NaN tail of the same difference); a non-finite pre-check in `insphere`
 (`insphere_small_integer`, the expansion guard and the dyadic evaluation each
 refuse it); a uniform extra shift of every product's offset (it scales both
@@ -37,14 +36,16 @@ TIMEOUT = 300
 
 MUTANTS = [
     # the filter's range
-    ('the filter accepts a permanent below the underflow range', SPHERE,
-     'const PERMANENT_MIN: f64 = 1.0e-250;', 'const PERMANENT_MIN: f64 = 0.0;', EXTREME),
+    ('the filter window moved to accept small differences', SPHERE,
+     'const FILTER_EXPONENT_LOW: u64 = 1023 - 128;', 'const FILTER_EXPONENT_LOW: u64 = 1023 - 400;', EXTREME),
+    ('a difference left out of the incircle window check', SPHERE,
+     'exponents_in_range(&[adx, ady, bdx, bdy, cdx, cdy])', 'exponents_in_range(&[adx, bdx, cdx, cdy])', EXTREME),
+    ('a difference left out of the insphere window check', SPHERE,
+     'exponents_in_range(&[ax, ay, az, bx, by, bz, cx, cy, cz, dx, dy, dz])', 'exponents_in_range(&[ax, ay, bx, by, bz, cx, cy, cz, dx, dy, dz])', EXTREME),
     ('the incircle filter ignores the range', SPHERE,
-     '    if !permanent_in_range(permanent) {\n        return Certified::Uncertain {\n            attempted: Precision::F64,\n        };\n    }\n    Certified::from_filter(\n        determinant,\n        INCIRCLE_ERROR_FACTOR',
-     '    Certified::from_filter(\n        determinant,\n        INCIRCLE_ERROR_FACTOR', EXTREME),
+     'if !exponents_in_range(&[adx, ady, bdx, bdy, cdx, cdy]) {', 'if false {', EXTREME),
     ('the insphere filter ignores the range', SPHERE,
-     '    if !permanent_in_range(permanent) {\n        return Certified::Uncertain {\n            attempted: Precision::F64,\n        };\n    }\n    Certified::from_filter(\n        determinant,\n        INSPHERE_ERROR_FACTOR',
-     '    Certified::from_filter(\n        determinant,\n        INSPHERE_ERROR_FACTOR', EXTREME),
+     'if !exponents_in_range(&[ax, ay, az, bx, by, bz, cx, cy, cz, dx, dy, dz]) {', 'if false {', EXTREME),
     # the expansion stage's range
     ('the incircle expansion range lower bound dropped', SPHERE,
      'const INCIRCLE_MIN: f64 = 1.0e-60;', 'const INCIRCLE_MIN: f64 = 0.0;', EXTREME),
