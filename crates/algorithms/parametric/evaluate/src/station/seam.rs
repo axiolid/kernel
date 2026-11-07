@@ -551,15 +551,7 @@ pub(super) fn seam_section3(
         Curve3::Banked(banked) => {
             let truncated;
             let read = if incoming {
-                truncated = Banked3 {
-                    base: Elevated3 {
-                        plan: banked.base.plan.clone(),
-                        elevation: elevation_ending_at(&banked.base.elevation, at),
-                    },
-                    cant: law_ending_at(&banked.cant, at),
-                    pivot: law_ending_at(&banked.pivot, at),
-                    ..banked.clone()
-                };
+                truncated = banked_ending_at(banked, at);
                 &truncated
             } else {
                 banked
@@ -569,6 +561,20 @@ pub(super) fn seam_section3(
         _ => return Ok(None),
     };
     Ok(Some(frame))
+}
+
+/// A banked curve cut at `at`: its profile, cant and pivot read the pieces
+/// ENDING there ([`elevation_ending_at`], [`law_ending_at`]).
+pub(crate) fn banked_ending_at(banked: &Banked3, at: Scalar) -> Banked3 {
+    Banked3 {
+        base: Elevated3 {
+            plan: banked.base.plan.clone(),
+            elevation: elevation_ending_at(&banked.base.elevation, at),
+        },
+        cant: law_ending_at(&banked.cant, at),
+        pivot: law_ending_at(&banked.pivot, at),
+        ..banked.clone()
+    }
 }
 
 /// A profile cut at `distance`: the pieces starting before it (outside

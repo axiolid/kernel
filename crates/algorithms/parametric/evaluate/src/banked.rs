@@ -527,6 +527,41 @@ pub fn banked_section(curve: &Banked3, d: Scalar) -> GeomResult<BankedSection> {
     let point = banked_point(curve, d)?;
     let derivative = banked_derivative(curve, d)?;
     let (pivot, _) = curve.pivot_at(d).map_err(refused)?;
+    let axes = rolled_axes(curve, d, derivative)?;
+    Ok(BankedSection {
+        point,
+        tangent: axes.tangent,
+        lateral: axes.lateral,
+        up: axes.up,
+        cant: axes.cant,
+        bank_angle: axes.bank_angle,
+        roll: axes.roll,
+        pivot,
+        grade: derivative.z,
+        rail_head_distance: curve.rail_head_distance,
+    })
+}
+
+/// The rolled section axes of a banked curve at plan distance `d`, from its
+/// derivative `(p, G)` there.
+pub(crate) struct RolledAxes {
+    pub(crate) tangent: Vec3,
+    pub(crate) lateral: Vec3,
+    pub(crate) up: Vec3,
+    pub(crate) roll: Scalar,
+    pub(crate) cant: Scalar,
+    pub(crate) bank_angle: Scalar,
+}
+
+/// The tangent, rolled lateral and up axes, roll, cant and bank angle at
+/// `d` for the point path's `derivative` `(p, G)`: what [`banked_section`]
+/// frames, factored out so a reader that knows the derivative in closed
+/// form (#396) frames it the same way.
+///
+/// # Errors
+///
+/// The cant law's and the convention's refusals by name.
+pub(crate) fn rolled_axes(curve: &Banked3, d: Scalar, derivative: Vec3) -> GeomResult<RolledAxes> {
     let b = curve.rail_head_distance;
     let tangent = derivative.normalize();
     // `cos(theta)` from the derivative `(p, G)`: `1 / sqrt(1 + G^2)`.
@@ -545,16 +580,12 @@ pub fn banked_section(curve: &Banked3, d: Scalar) -> GeomResult<BankedSection> {
     let (sin, cos) = roll.sin_cos();
     let lateral = cos * normal + sin * square_up;
     let up = -sin * normal + cos * square_up;
-    Ok(BankedSection {
-        point,
+    Ok(RolledAxes {
         tangent,
         lateral,
         up,
+        roll,
         cant,
         bank_angle,
-        roll,
-        pivot,
-        grade,
-        rail_head_distance: b,
     })
 }
