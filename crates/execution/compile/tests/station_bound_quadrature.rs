@@ -5,9 +5,11 @@
 //! report a certified deviation within the request, and a dense sampling
 //! of the EXACT solid -- its frames computed here from the curves in
 //! closed form at their true arc length, by a fine quadrature independent
-//! of the kernel's -- never strays past it. The bases that stay
-//! uncertified are still unbounded by name, and so is the deck's cell
-//! beside the mitre where its law starts to widen.
+//! of the kernel's -- never strays past it. So do the deck's cell beside
+//! the mitre where its law starts to widen and a B-spline's across its
+//! corner knot (#335), against the exact mitred solid of two curves in
+//! closed form. The bases that stay uncertified are still unbounded by
+//! name.
 
 use axiolid_construct::profile::profile_rings;
 use axiolid_contracts::ExecutionOptions;
@@ -26,6 +28,10 @@ use axiolid_reference::{derivative2, evaluate2};
 
 fn options() -> ExecutionOptions {
     ExecutionOptions::new(Tolerance::MILLIMETRE)
+}
+
+fn options_at(chord: Scalar) -> ExecutionOptions {
+    options().with_chord_error(chord).unwrap()
 }
 
 fn compiler() -> ReferenceMeshCompiler<BoolmeshBoolean> {
@@ -281,8 +287,16 @@ fn measured(mesh: &TriMesh, points: &[Point3]) -> Scalar {
 
 /// The run's own deviation in `graph`'s compilation of `root`.
 fn run_bound(graph: &GeometryGraph, root: NodeId) -> (TriMesh, DeviationBound, bool) {
+    run_bound_with(graph, root, &options())
+}
+
+fn run_bound_with(
+    graph: &GeometryGraph,
+    root: NodeId,
+    options: &ExecutionOptions,
+) -> (TriMesh, DeviationBound, bool) {
     let (outcome, report) = compiler()
-        .compile_mesh_with_deviation(graph, root, &options())
+        .compile_mesh_with_deviation(graph, root, options)
         .unwrap();
     let bound = report
         .contributions
@@ -316,6 +330,204 @@ fn unbounded(graph: &GeometryGraph, root: NodeId) -> &'static str {
     }
 }
 
+// --- the exact solid across a mitre ---------------------------------------------
+
+/// One side of a mitre in closed form: its curve, its arc lengths from
+/// the curve's parameter `0`, and where the run's knot stands on it.
+struct Side {
+    curve: Plane,
+    lengths: Lengths,
+    /// The parameter of the knot on this curve.
+    knot: Scalar,
+}
+
+impl Side {
+    fn new(curve: Plane, end: Scalar, knot: Scalar) -> Self {
+        let speed = |t: Scalar| (curve.velocity)(t).length();
+        let lengths = Lengths::new(&speed, 0.0, end, 100_000);
+        Self {
+            curve,
+            lengths,
+            knot,
+        }
+    }
+
+    /// The run's distance of the knot along this curve.
+    fn knot_length(&self) -> Scalar {
+        let speed = |t: Scalar| (self.curve.velocity)(t).length();
+        self.lengths.at(&speed, self.knot)
+    }
+
+    /// The point and the unit tangent and lateral at `s`, the run's
+    /// distance, whose knot stands at `knot_at`.
+    fn frame(&self, s: Scalar, knot_at: Scalar) -> (Point3, Vec3, Vec3) {
+        let speed = |t: Scalar| (self.curve.velocity)(t).length();
+        let t = self
+            .lengths
+            .inverse(&speed, self.knot_length() + (s - knot_at));
+        let (p, v) = ((self.curve.point)(t), (self.curve.velocity)(t));
+        let tangent = Vec3::new(v.x, v.y, 0.0) / v.length();
+        (
+            Point3::new(p.x, p.y, 0.0),
+            tangent,
+            Vec3::new(-tangent.y, tangent.x, 0.0),
+        )
+    }
+}
+
+/// The exact mitred solid of a constant rectangle (`2 hw` by `2 hh`) along
+/// two curves meeting in a corner at the run's distance `knot_at`: each
+/// side's walls kept behind the mitre plane, extruded to it along its end
+/// tangent, and the faces between the two cuts.
+struct Mitred {
+    incoming: Side,
+    outgoing: Side,
+    knot_at: Scalar,
+    at: [Scalar; 2],
+    half: (Scalar, Scalar),
+}
+
+const RECTANGLE: [(Scalar, Scalar); 4] = [(-1.0, -1.0), (1.0, -1.0), (1.0, 1.0), (-1.0, 1.0)];
+
+fn nearest(triangles: &[[Point3; 3]], p: Point3) -> Scalar {
+    triangles
+        .iter()
+        .filter_map(|&t| axiolid_measure::proximity::closest_point_on_triangle(p, t).ok())
+        .map(|q| p.distance(q))
+        .fold(Scalar::INFINITY, Scalar::min)
+}
+
+impl Mitred {
+    fn point(&self, side: &Side, s: Scalar, (x, y): (Scalar, Scalar)) -> Point3 {
+        let (origin, _, lateral) = side.frame(s, self.knot_at);
+        origin + lateral * (x * self.half.0) + Vec3::Z * (y * self.half.1)
+    }
+
+    /// The largest distance of the exact solid from `mesh`: walls with
+    /// `steps` distances per side and `per_edge` points per edge, then the
+    /// faces.
+    fn measure(&self, mesh: &TriMesh, steps: usize, per_edge: usize) -> Scalar {
+        let triangles: Vec<[Point3; 3]> = mesh
+            .indices
+            .as_chunks::<3>()
+            .0
+            .iter()
+            .map(|t| [0, 1, 2].map(|k| mesh.positions[t[k] as usize]))
+            .collect();
+        let (origin, t_in, _) = self.incoming.frame(self.knot_at, self.knot_at);
+        let (_, t_out, _) = self.outgoing.frame(self.knot_at, self.knot_at);
+        let normal = (t_in + t_out).normalize();
+        let height = |p: Point3| (p - origin).dot(normal);
+        let along = |a: (Scalar, Scalar), b: (Scalar, Scalar), v: Scalar| {
+            (a.0 + (b.0 - a.0) * v, a.1 + (b.1 - a.1) * v)
+        };
+        let mut worst: Scalar = 0.0;
+        for e in 0..4 {
+            let (a, b) = (RECTANGLE[e], RECTANGLE[(e + 1) % 4]);
+            for iv in 0..=per_edge {
+                let xy = along(a, b, iv as Scalar / per_edge as Scalar);
+                for j in 0..=steps {
+                    let u = j as Scalar / steps as Scalar;
+                    let s = self.at[0] + (self.knot_at - self.at[0]) * u;
+                    let p = self.point(&self.incoming, s, xy);
+                    if height(p) <= 0.0 {
+                        worst = worst.max(nearest(&triangles, p));
+                    }
+                    let s = self.knot_at + (self.at[1] - self.knot_at) * u;
+                    let p = self.point(&self.outgoing, s, xy);
+                    if height(p) >= 0.0 {
+                        worst = worst.max(nearest(&triangles, p));
+                    }
+                }
+                let end = self.point(&self.incoming, self.knot_at, xy);
+                if height(end) < 0.0 {
+                    let reach = -height(end) / t_in.dot(normal);
+                    for j in 0..=40 {
+                        let p = end + t_in * (reach * j as Scalar / 40.0);
+                        worst = worst.max(nearest(&triangles, p));
+                    }
+                }
+                let start = self.point(&self.outgoing, self.knot_at, xy);
+                if height(start) > 0.0 {
+                    let reach = height(start) / t_out.dot(normal);
+                    for j in 0..=40 {
+                        let p = start - t_out * (reach * j as Scalar / 40.0);
+                        worst = worst.max(nearest(&triangles, p));
+                    }
+                }
+            }
+        }
+        // The faces: the plane's points inside one side's cut ring only.
+        let across = Vec3::new(-normal.y, normal.x, 0.0);
+        let to_plane = |p: Point3| ((p - origin).dot(across), (p - origin).dot(Vec3::Z));
+        let cut = |ending: bool, xy: (Scalar, Scalar)| -> Point3 {
+            let (side, tangent, sign, range) = if ending {
+                (&self.incoming, t_in, 1.0, (self.at[0], self.knot_at))
+            } else {
+                (&self.outgoing, t_out, -1.0, (self.at[1], self.knot_at))
+            };
+            let at_knot = self.point(side, self.knot_at, xy);
+            let h = height(at_knot);
+            if h * sign <= 0.0 {
+                return at_knot - tangent * (h / tangent.dot(normal));
+            }
+            // The wall crosses the plane before the knot.
+            let (mut near, mut far) = range;
+            for _ in 0..100 {
+                let mid = 0.5 * (near + far);
+                if height(self.point(side, mid, xy)) * sign > 0.0 {
+                    far = mid;
+                } else {
+                    near = mid;
+                }
+            }
+            self.point(side, 0.5 * (near + far), xy)
+        };
+        let ring = |ending: bool| -> Vec<(Scalar, Scalar)> {
+            let mut out = Vec::new();
+            for e in 0..4 {
+                let (a, b) = (RECTANGLE[e], RECTANGLE[(e + 1) % 4]);
+                for q in 0..64 {
+                    out.push(to_plane(cut(ending, along(a, b, q as Scalar / 64.0))));
+                }
+            }
+            out
+        };
+        let (ring_in, ring_out) = (ring(true), ring(false));
+        let inside = |ring: &[(Scalar, Scalar)], q: (Scalar, Scalar)| {
+            let mut in_ring = false;
+            for (i, a) in ring.iter().enumerate() {
+                let b = ring[(i + 1) % ring.len()];
+                if (a.1 > q.1) != (b.1 > q.1) && q.0 < (b.0 - a.0) * (q.1 - a.1) / (b.1 - a.1) + a.0
+                {
+                    in_ring = !in_ring;
+                }
+            }
+            in_ring
+        };
+        let (mut x0, mut x1, mut y0, mut y1) = (Scalar::MAX, Scalar::MIN, Scalar::MAX, Scalar::MIN);
+        for p in ring_in.iter().chain(&ring_out) {
+            x0 = x0.min(p.0);
+            x1 = x1.max(p.0);
+            y0 = y0.min(p.1);
+            y1 = y1.max(p.1);
+        }
+        for i in 0..=400 {
+            for j in 0..=40 {
+                let q = (
+                    x0 + (x1 - x0) * i as Scalar / 400.0,
+                    y0 + (y1 - y0) * j as Scalar / 40.0,
+                );
+                if inside(&ring_in, q) != inside(&ring_out, q) {
+                    let p = origin + across * q.0 + Vec3::Z * q.1;
+                    worst = worst.max(nearest(&triangles, p));
+                }
+            }
+        }
+        worst
+    }
+}
+
 // --- the deck -------------------------------------------------------------------
 
 /// The deck's directrix: the ellipse offset by `0.5` to station 2,
@@ -338,29 +550,46 @@ fn deck_directrix(b: &mut GeometryGraphBuilder) -> NodeId {
     .unwrap()
 }
 
+/// The deck's ellipse: its velocity and speed at the parameter `t`.
+fn deck_ellipse_velocity(t: Scalar) -> Vec2 {
+    Vec2::new(-10.0 * t.sin(), 6.0 * t.cos())
+}
+
+fn deck_ellipse_speed(t: Scalar) -> Scalar {
+    deck_ellipse_velocity(t).length()
+}
+
+/// The ellipse's arc length from the parameter `0`.
+fn deck_base() -> std::rc::Rc<Lengths> {
+    std::rc::Rc::new(Lengths::new(&deck_ellipse_speed, 0.0, 6.3, 100_000))
+}
+
+/// The offset law along the ellipse's arc length `w`: the distance beside
+/// it and its rate, constant to station 2, widening to 20, held after.
+fn deck_law(w: Scalar) -> (Scalar, Scalar) {
+    if w <= 2.0 {
+        (0.5, 0.0)
+    } else if w <= 20.0 {
+        (0.5 + 0.25 * (w - 2.0) / 18.0, 0.25 / 18.0)
+    } else {
+        (0.75, 0.0)
+    }
+}
+
 /// The deck's directrix exactly: the law runs linearly in the ellipse's
 /// arc length, its point beside the ellipse's along the left normal.
 fn deck_curve() -> Plane {
-    fn e(t: Scalar) -> Vec2 {
-        Vec2::new(-10.0 * t.sin(), 6.0 * t.cos())
-    }
-    fn base_speed(t: Scalar) -> Scalar {
-        e(t).length()
-    }
-    let base = std::rc::Rc::new(Lengths::new(&base_speed, 0.0, 6.3, 100_000));
-    let law = |w: Scalar| {
-        if w <= 2.0 {
-            (0.5, 0.0)
-        } else if w <= 20.0 {
-            (0.5 + 0.25 * (w - 2.0) / 18.0, 0.25 / 18.0)
-        } else {
-            (0.75, 0.0)
-        }
-    };
+    deck_plane(deck_law)
+}
+
+/// The ellipse offset by `law` of its arc length.
+fn deck_plane(law: fn(Scalar) -> (Scalar, Scalar)) -> Plane {
+    let e = deck_ellipse_velocity;
+    let base = deck_base();
     let lengths = base.clone();
     Plane {
         point: Box::new(move |t| {
-            let (d, _) = law(lengths.at(&base_speed, t));
+            let (d, _) = law(lengths.at(&deck_ellipse_speed, t));
             let v = e(t);
             Point2::new(30.0 + 10.0 * t.cos(), 6.0 * t.sin())
                 + d * Vec2::new(-v.y, v.x) / v.length()
@@ -368,7 +597,7 @@ fn deck_curve() -> Plane {
         velocity: Box::new(move |t| {
             let (v, dv) = (e(t), Vec2::new(-10.0 * t.cos(), -6.0 * t.sin()));
             let g = v.length();
-            let (d, rate) = law(base.at(&base_speed, t));
+            let (d, rate) = law(base.at(&deck_ellipse_speed, t));
             let n = Vec2::new(-v.y, v.x);
             let dn = Vec2::new(-dv.y, dv.x);
             let turn = dn / g - n * (v.dot(dv) / (g * g * g));
@@ -388,19 +617,45 @@ fn deck(b: &mut GeometryGraphBuilder, at: [Scalar; 2]) -> (NodeId, Vec<SectionAt
 }
 
 #[test]
-fn the_ifc_443_deck_is_framed_and_certified_across_its_mitre() {
+fn the_ifc_443_deck_is_certified_across_its_mitre() {
     let mut b = GeometryGraphBuilder::new();
     let (root, _) = deck(&mut b, [0.0, 5.0]);
     let graph = b.finish(vec![root]).unwrap();
+    let (mesh, bound, meets) = run_bound(&graph, root);
+    let DeviationBound::Certified(bound) = bound else {
+        panic!("not certified: {bound:?}")
+    };
     // Its frames are certified, and so is the cell beside the mitre where
     // the law starts to widen, at station 2 (#335).
-    let (mesh, bound, meets) = run_bound(&graph, root);
-    assert!(matches!(bound, DeviationBound::Certified(_)), "{bound:?}");
-    assert!(meets, "{bound:?}");
+    assert!((bound - 4.88e-4).abs() <= 1e-6, "{bound}");
+    assert!(meets, "{bound} is past the request");
     let volume = volume_properties(&mesh, Tolerance::MILLIMETRE)
         .unwrap()
         .signed_volume;
     assert!((volume - 10.0).abs() <= 1e-3, "{volume}");
+    // The mitre's exact solid: the offset before the corner holds its
+    // distance, the one after widens; the corner is at the offset's own
+    // length where the ellipse's arc length reaches 2.
+    let knot = deck_base().inverse(&deck_ellipse_speed, 2.0);
+    let incoming = Side::new(deck_plane(|_| (0.5, 0.0)), 6.3, knot);
+    let outgoing = Side::new(
+        deck_plane(|w| (0.5 + 0.25 * (w - 2.0) / 18.0, 0.25 / 18.0)),
+        6.3,
+        knot,
+    );
+    let knot_at = incoming.knot_length();
+    let far = Mitred {
+        incoming,
+        outgoing,
+        knot_at,
+        at: [0.0, 5.0],
+        half: (1.0, 0.5),
+    }
+    .measure(&mesh, 200, 8);
+    assert!(
+        far <= bound,
+        "the exact solid strays {far}, past the bound {bound}"
+    );
 }
 
 #[test]
@@ -474,6 +729,91 @@ fn a_run_along_an_ellipse_and_along_its_offset_is_certified() {
     };
     let exact = Exact::new(curve, (0.0, 3.0), &graph, &sections);
     assert_certified(&graph, offset, &exact);
+}
+
+/// A quadratic Bezier arc as a plane curve in closed form.
+fn bezier(p: [Point2; 3]) -> Plane {
+    Plane {
+        point: Box::new(move |t| {
+            let (a, b, c) = ((1.0 - t) * (1.0 - t), 2.0 * t * (1.0 - t), t * t);
+            Point2::new(
+                a * p[0].x + b * p[1].x + c * p[2].x,
+                a * p[0].y + b * p[1].y + c * p[2].y,
+            )
+        }),
+        velocity: Box::new(move |t| 2.0 * (1.0 - t) * (p[1] - p[0]) + 2.0 * t * (p[2] - p[1])),
+    }
+}
+
+#[test]
+fn a_b_spline_with_a_corner_knot_is_certified_across_its_mitre() {
+    // Two quadratic Beziers joined at (10, 0) with a corner: the spline
+    // of degree two with an interior knot of multiplicity two.
+    let spline = Curve2::BSpline(BSplineCurve2 {
+        degree: 2,
+        control_points: vec![
+            Point2::new(0.0, 0.0),
+            Point2::new(5.0, 1.0),
+            Point2::new(10.0, 0.0),
+            Point2::new(15.0, 0.5),
+            Point2::new(20.0, 2.0),
+        ],
+        knots: vec![0.0, 0.5, 1.0],
+        multiplicities: vec![3, 2, 3],
+        weights: None,
+        closed: false,
+        self_intersect: None,
+        knot_spec: KnotSpec::Unspecified,
+    });
+    let mut b = GeometryGraphBuilder::new();
+    let basis = b.push_value(spline).unwrap();
+    let profile = rectangle(&mut b, 2.0, 1.0);
+    let at = [1.0, 19.0];
+    let sections: Vec<_> = at
+        .iter()
+        .map(|&d| SectionAtStation::new(profile, Station::at(d)))
+        .collect();
+    let root = spine(&mut b, basis, sections);
+    let graph = b.finish(vec![root]).unwrap();
+    let incoming = Side::new(
+        bezier([
+            Point2::new(0.0, 0.0),
+            Point2::new(5.0, 1.0),
+            Point2::new(10.0, 0.0),
+        ]),
+        1.0,
+        1.0,
+    );
+    let outgoing = Side::new(
+        bezier([
+            Point2::new(10.0, 0.0),
+            Point2::new(15.0, 0.5),
+            Point2::new(20.0, 2.0),
+        ]),
+        1.0,
+        0.0,
+    );
+    let knot_at = incoming.knot_length();
+    let exact = Mitred {
+        incoming,
+        outgoing,
+        knot_at,
+        at,
+        half: (1.0, 0.5),
+    };
+    for (chord, expected, meets) in [(0.01, 3.38e-3, true), (1e-3, 1.72e-3, false)] {
+        let (mesh, bound, met) = run_bound_with(&graph, root, &options_at(chord));
+        let DeviationBound::Certified(bound) = bound else {
+            panic!("not certified at {chord}: {bound:?}")
+        };
+        assert!((bound - expected).abs() <= 1e-5, "{bound} at {chord}");
+        assert_eq!(met, meets, "{bound} against {chord}");
+        let far = exact.measure(&mesh, 200, 8);
+        assert!(
+            far <= bound,
+            "the exact solid strays {far}, past the bound {bound}"
+        );
+    }
 }
 
 #[test]
