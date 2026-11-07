@@ -84,3 +84,4 @@ Package names and paths in older accepted records describe the tree at the time 
 | [0097](./0097-ruled-surfaces-are-a-graph-relation-between-two-curve-sides.md) | Ruled surfaces are a graph relation between two curve sides |
 | [0098](./0098-a-union-the-mesh-cut-cannot-settle-is-decided-by-the-exact-compiler.md) | A union the mesh cut cannot settle is decided by the exact compiler |
 | [0099](./0099-mesh-volume-over-oriented-edge-cycles.md) | Mesh volume over oriented edge cycles |
+| [0100](./0100-exact-arrangements-are-snap-rounded-to-the-binary64-grid.md) | Exact arrangements are snap-rounded to the binary64 grid |

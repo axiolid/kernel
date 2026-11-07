@@ -22,9 +22,11 @@ lines, the crop and the exact intersection curves of the triangles go into
 the exact planar arrangement of `axiolid-exact-arrangement`; each side of
 each piece is labelled by the exact frontmost source at a symbolic side
 point, and the regions are traced from those labels. Region vertices are the
-exact points rounded once. Sources tied in depth each receive the area.
-Known limit: a generic rotated scene can be refused as `Degenerate` when two
-exact ring vertices round to the same binary64 value (`TODO(#410)`).
+exact points rounded once where no edge passes through the rounding cell of
+another vertex, and snap-rounded to the binary64 grid otherwise (ADR 0100).
+Sources tied in depth each receive the area.
+A region whose area collapses under rounding is dropped and counted in the
+evidence, never refused.
 
 ```bash
 cargo add axiolid-hidden-lines

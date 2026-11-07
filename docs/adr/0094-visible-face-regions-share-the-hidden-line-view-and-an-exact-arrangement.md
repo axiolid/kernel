@@ -4,6 +4,7 @@
 - **Date:** 2026-10-30
 - **Deciders:** Friedrich Schrödter
 - **Supersedes:** —
+- **Amended by:** [0100](./0100-exact-arrangements-are-snap-rounded-to-the-binary64-grid.md): the regions are snap-rounded, and a region that collapses under rounding is counted, not refused.
 - **Amends:** [0090](./0090-mesh-hidden-line-drawings.md), [0093](./0093-mesh-sections-merge-in-plane-faces-on-an-exact-arrangement.md)
 
 ## Context
@@ -30,7 +31,9 @@ request, limits, outcome, evidence and conformance suite.
 - **The result is a list of `VisibleRegion`s**: per mesh and `FaceSource`
   (`Group` or `Cap`), a closed region with an outer ring, holes and the
   frontmost triangles. Vertices are exact points rounded once to nearest, so
-  they are bit-identical between regions and with hidden-line endpoints.
+  they are bit-identical between regions and with hidden-line endpoints
+  (amended by 0100: where an edge passes through the rounding cell of another
+  vertex the regions are snap-rounded).
 - **Equal depth over an area gives the area to every tied source**, as ADR
   0090 says equal depth never occludes. The evidence counts the tied sides.
   Regions of one source never overlap.
@@ -41,8 +44,8 @@ request, limits, outcome, evidence and conformance suite.
   pattern. Sheets are never capped and the far plane has no cap.
 - **Refusals** are the hidden-line refusals, a group slice whose length is
   not the triangle count, the request budgets (meshes, vertices, triangles,
-  candidate pairs, regions, region vertices, memory), a region that collapses
-  under rounding, and cancellation. No tolerance enters a decision.
+  candidate pairs, regions, region vertices, memory) and cancellation (amended
+  by 0100: a region that collapses under rounding is no longer a refusal). No tolerance enters a decision.
 
 A second registry, `MeshVisibleFacesRegistry`, in `axiolid-dispatch` checks
 the outcome like the hidden-line registry does.
@@ -126,10 +129,6 @@ unchanged bit for bit, which every existing section test pins.
   takes seconds at a few thousand triangles, because exact intersection
   curves and labelling dominate; the 50x50 isometric grid takes over ten
   seconds and is not in the bench.
-- A known limit. A generic rotated scene can be refused as `Degenerate` when
-  two exact ring vertices round to the same binary64 value, because the
-  region would collapse under rounding. The refusal is typed and names the
-  mesh; the remedy belongs to the snapping decision of #377 (`TODO(#410)`).
 
 **Follow-ups / risks to watch**
 

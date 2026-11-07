@@ -3343,8 +3343,7 @@ Every publishable crate versions and publishes independently ([ADR 0067](/adr/00
   beats a full scan on a cut plan by 1.4-2.1x at 400 boxes and 4.1-6.6x at
   2,500 boxes, and the depth prune of hidden edges saves 2.7-3.2x in an
   isometric view at 400 boxes; the BVH is not consistently faster than the
-  scan in an isometric view or on interpenetrating boxes. A generic rotated scene can be refused as `Degenerate` when two exact ring
-  vertices round to the same binary64 value (`TODO(#410)`).
+  scan in an isometric view or on interpenetrating boxes.
 
 ### Changed
 

@@ -9,6 +9,19 @@ caret rule for `0.x` versions.
 
 ## [Unreleased]
 
+### Fixed
+
+- `ScalarVisibleFaces` no longer refuses a scene as `Degenerate` when exact
+  ring vertices round to the same binary64 value (#410, ADR 0100). The
+  regions are the exact regions snap-rounded to the binary64 grid: an edge
+  that passes through the rounding cell of another vertex is routed through
+  it, and a region or hole whose area vanishes is dropped and counted. The
+  evidence reports `snap_displacement`, `rerouted_edges`, `collapsed_regions`
+  and `collapsed_holes`; where nothing is rerouted the vertices are still the
+  exact points rounded once. The two seeded oracle scenes that were refused
+  (seed 1 oblique, seed 9 isometric, each with a near plane) are answered and
+  pinned, with frozen copies in the conformance suite.
+
 ### Changed
 
 - Hidden-line drawing does less exact work for the same output (#369): an
@@ -52,8 +65,7 @@ caret rule for `0.x` versions.
   beats a full scan on a cut plan by 1.4-2.1x at 400 boxes and 4.1-6.6x at
   2,500 boxes, and the depth prune of hidden edges saves 2.7-3.2x in an
   isometric view at 400 boxes; the BVH is not consistently faster than the
-  scan in an isometric view or on interpenetrating boxes. A generic rotated scene can be refused as `Degenerate` when two exact ring
-  vertices round to the same binary64 value (`TODO(#410)`).
+  scan in an isometric view or on interpenetrating boxes.
 
 ### Changed
 
