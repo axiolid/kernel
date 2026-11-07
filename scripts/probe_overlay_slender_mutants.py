@@ -22,10 +22,10 @@ OVERLAY = "exact_overlay.rs"
 MUTANTS = [
     # Carriers: the edge itself and the edges sharing a stretch with it.
     ("an edge not a candidate carrier of its own pieces", ARR,
-     "        candidates.push(index);\n",
+     "            piece_candidates.push(index);\n",
      ""),
     ("edges sharing a stretch not candidate carriers", ARR,
-     "                shared[index].push(near);\n                shared[near].push(index);\n",
+     "                shared[index].push((near, xs.clone()));\n                shared[near].push((index, xs.clone()));\n",
      ""),
     # Rings carried across any other stop.
     ("a ring met at the stop keeps its membership", ARR,

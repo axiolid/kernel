@@ -3,8 +3,8 @@
 
 Each mutant weakens one step -- the check `Region::new` and `Region::translate` run, the regions
 it skips, the rings it turns or leaves out, the crossings it refuses
-before the arrangement and the names it gives them, and how each side of a
-piece is read -- and must turn a test red.
+before the arrangement and the names it gives them, how each side of a
+piece is read, and the sweep of an edge's shared stretches -- and must turn a test red.
 
 Equivalent mutants, deliberately not listed:
 - leaving out the early return for fewer than two arranged rings: the
@@ -17,6 +17,11 @@ import probe_lib
 
 N = "crates/algorithms/planar/overlay/src/nesting.rs"
 G = "crates/algorithms/planar/overlay/src/region.rs"
+ARR = "crates/algorithms/planar/overlay/src/exact_arc/arrangement.rs"
+SWEEP = [
+    ["-p", "axiolid-overlay", "--lib", "exact_arc::arrangement::tests"],
+    ["-p", "axiolid-overlay", "--test", "region_nesting"],
+]
 TESTS = [
     ["-p", "axiolid-overlay", "--test", "region_nesting"],
     ["-p", "axiolid-overlay", "--lib", "nesting::"],
@@ -68,6 +73,15 @@ MUTANTS = [
     ("two polygons holding one side accepted", N,
      "overlap |= polygons_holding(&held, roles) > 1;",
      "overlap |= polygons_holding(&held, roles) > 2;", TESTS),
+]
+
+MUTANTS += [
+    ("a shared stretch never leaves the sweep", ARR,
+     "while next_end < by_end.len() && spans[by_end[next_end]].2 <= at {",
+     "while false && next_end < by_end.len() && spans[by_end[next_end]].2 <= at {", SWEEP),
+    ("a shared stretch enters the sweep a piece late", ARR,
+     "while next_start < by_start.len() && spans[by_start[next_start]].1 <= at {",
+     "while next_start < by_start.len() && spans[by_start[next_start]].1 + 1 <= at {", SWEEP),
 ]
 
 probe_lib.main(MUTANTS, timeout=900)
