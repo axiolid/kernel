@@ -31,6 +31,9 @@ MUTANTS = [
     ('an open lower end does not win a tie', SNAP,
      '                        Ordering::Equal if candidate.open => lower = candidate,',
      '                        Ordering::Equal if false => lower = candidate,', TESTS),
+    ('an open upper end does not win a tie', SNAP,
+     '                        Ordering::Equal if candidate.open => upper = candidate,',
+     '                        Ordering::Equal if false => upper = candidate,', TESTS),
     # How far a boundary moved.
     ('a flat end contributes its half-width', SNAP,
      '\n            if points.flat(id).is_none() {\n                displacement',

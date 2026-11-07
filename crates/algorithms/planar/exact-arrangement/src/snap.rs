@@ -179,11 +179,12 @@ fn meets(from: &[Dyadic; 3], to: &[Dyadic; 3], cell: &Cell) -> GeomResult<Option
                         den: h0.sub(&h1),
                         open,
                     };
-                    // Two upper ends of equal value cannot meet a lower end
-                    // there (the lower ends lie on other lines of the cell),
-                    // so which of them is open never decides.
-                    if compare_values(&candidate, &upper)?.is_lt() {
-                        upper = candidate;
+                    // An open end excludes its value: it wins a tie, also
+                    // against the initial closed end at the edge's far end.
+                    match compare_values(&candidate, &upper)? {
+                        Ordering::Less => upper = candidate,
+                        Ordering::Equal if candidate.open => upper = candidate,
+                        _ => {}
                     }
                 }
                 (false, true) => {
@@ -625,7 +626,26 @@ mod tests {
                 };
                 [offset(rng, center.x), offset(rng, center.y), weight.clone()]
             };
-            let (from, to) = (end(&mut rng), end(&mut rng));
+            // A third of the ends sit exactly on a corner of the cell, where
+            // ties of both axes meet, whichever way they go.
+            let corner = |rng: &mut Lcg| {
+                let pick = |rng: &mut Lcg, axis: usize| {
+                    if rng.below(2) == 0 {
+                        cell.lo[axis].clone()
+                    } else {
+                        cell.hi[axis].clone()
+                    }
+                };
+                [pick(rng, 0), pick(rng, 1), exact(1.0).unwrap()]
+            };
+            let either = |rng: &mut Lcg| {
+                if rng.below(3) == 0 {
+                    corner(rng)
+                } else {
+                    end(rng)
+                }
+            };
+            let (from, to) = (either(&mut rng), either(&mut rng));
             let found = meets(&from, &to, &cell).unwrap();
             let inside =
                 |num: &Dyadic, den: &Dyadic| rounded_at(&from, &to, num, den) == cell.center;
