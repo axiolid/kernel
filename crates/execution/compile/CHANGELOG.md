@@ -9,13 +9,6 @@ caret rule for `0.x` versions.
 
 ## [Unreleased]
 
-### Fixed
-
-- A closed B-spline edge whose span crosses the seam past a C0 knot such as
-  0.1, 0.2 or 1/3 keeps its chord bound: the copy of the knot one period on
-  is mapped back to the knot exactly, not by `(t + period) - period`, which
-  left the piece ending an ulp past the knot (#426).
-
 ## [0.3.44] - 2026-11-03
 
 ### Added
@@ -155,6 +148,11 @@ caret rule for `0.x` versions.
   than its coincident supports no longer yields a bound below the move.
   The bound of a boolean measured against an exact result grows by those
   two terms.
+
+- A closed B-spline edge whose span crosses the seam past a C0 knot such as
+  0.1, 0.2 or 1/3 keeps its chord bound: the copy of the knot one period on
+  is mapped back to the knot exactly, not by `(t + period) - period`, which
+  left the piece ending an ulp past the knot (#426).
 
 ## [0.3.43] - 2026-11-03
 
