@@ -780,7 +780,7 @@ fn unbounded_reason(graph: &GeometryGraph, root: NodeId) -> &'static str {
 fn a_chain_frame_and_a_curved_taper_are_unbounded_by_name() {
     let mut b = GeometryGraphBuilder::new();
     // A banked curve over a chain plan: a clothoid plan with cant is
-    // certified since #396, a chain's frame is not (TODO(#438)).
+    // certified since #396, a chain's frame is not (TODO(#394)).
     let clothoid = b
         .push_value(Curve3::Banked(Banked3::new(
             Elevated3::new(

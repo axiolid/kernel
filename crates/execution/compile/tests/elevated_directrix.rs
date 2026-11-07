@@ -153,6 +153,15 @@ fn exact_centre(curve: &Curve3, t: Scalar) -> Point3 {
         Curve3::Banked(b) => (&b.base, b.pivot_at(t).unwrap().0),
         _ => return axiolid_reference::curve::evaluate3(curve, t).unwrap(),
     };
+    if matches!(base.plan.as_ref(), Curve2::Chain(_)) {
+        let local = chain_local(t);
+        let w = world();
+        return Point3::new(
+            w.origin.x + w.x.x * local.x + w.y.x * local.y,
+            w.origin.y + w.x.y * local.x + w.y.y * local.y,
+            base.elevation.height_at(t).unwrap() + pivot,
+        );
+    }
     if !matches!(base.plan.as_ref(), Curve2::Intrinsic(_)) {
         return axiolid_reference::curve::evaluate3(curve, t).unwrap();
     }
@@ -692,15 +701,21 @@ fn a_grade_break_is_unbounded_by_name() {
     );
 }
 
-/// A tube along an elevated curve over a chain plan, or under an intrinsic
-/// profile, reads points with no certified error (#393): unbounded by
-/// name, where the exact tube lay 2.8 mm from a mesh certified at 1 mm.
-/// The chain is a line, a cubic Bezier `y = x^3 / (6 R L)` and an arc.
-#[test]
-fn a_disk_along_a_chain_plan_or_an_intrinsic_profile_is_unbounded_by_name() {
-    let (radius, length): (Scalar, Scalar) = (300.0, 40.0);
-    let rise = length.powi(3) / (6.0 * radius * length);
-    let chain = Curve2::Chain(Chain2::new(
+/// The cubic transition `y = x^3 / (6 R L)` of the chain below: radius,
+/// length and its coefficient.
+const CUBIC_RADIUS: Scalar = 300.0;
+const CUBIC_LENGTH: Scalar = 40.0;
+
+fn cubic_rate() -> Scalar {
+    1.0 / (6.0 * CUBIC_RADIUS * CUBIC_LENGTH)
+}
+
+/// A line of 20 m, a cubic Bezier `y = x^3 / (6 R L)` over 40 m of arc and
+/// an arc of radius `R` over 40 m.
+fn cubic_chain() -> Curve2 {
+    let (radius, length) = (CUBIC_RADIUS, CUBIC_LENGTH);
+    let rise = cubic_rate() * length.powi(3);
+    Curve2::Chain(Chain2::new(
         world(),
         vec![
             ChainPiece2::Intrinsic {
@@ -739,33 +754,94 @@ fn a_disk_along_a_chain_plan_or_an_intrinsic_profile_is_unbounded_by_name() {
                 length: 40.0,
             },
         ],
-    ));
-    let cases = [
-        (
-            "chain plan",
-            elevated(&chain, &ElevationLaw::constant_grade(50.0, 0.04)),
-            (5.0, 95.0),
-        ),
-        (
-            "intrinsic profile",
-            elevated(
-                &straight(),
-                &ElevationLaw::intrinsic(0.0, 0.01, CurvatureLaw::clothoid(0.0, 1.0 / 300.0, 60.0)),
-            ),
-            (5.0, 55.0),
-        ),
-    ];
-    for (name, curve, range) in cases {
-        let (mesh, report) =
-            compile(|g| disk(g, curve.clone(), 0.3, Some(range)), &options(1e-3)).unwrap();
-        volume(&mesh, name);
-        assert_eq!(report.contributions[0].path, DeviationPath::SweptDisk);
-        assert!(report.bound.is_none(), "{name}: {report:?}");
-        let DeviationBound::Unbounded(reason) = &report.contributions[0].bound else {
-            panic!("{name}: {:?}", report.contributions[0].bound);
-        };
-        assert!(reason.contains("no certified error"), "{name}: {reason}");
+    ))
+}
+
+/// Arc length of `y = a x^3` from 0 to `x` by its binomial series.
+fn cubic_series(a: Scalar, x: Scalar) -> Scalar {
+    let z = 9.0 * a * a * x.powi(4);
+    let (mut binomial, mut power, mut sum) = (1.0, 1.0, 0.0);
+    for n in 0..200 {
+        let term = binomial * power / (4.0 * n as Scalar + 1.0);
+        sum += term;
+        if term.abs() < 1e-30 {
+            break;
+        }
+        binomial *= (0.5 - n as Scalar) / (n as Scalar + 1.0);
+        power *= z;
     }
+    x * sum
+}
+
+/// The exact point of [`cubic_chain`] at plan distance `d` in its start
+/// frame: the line, the cubic at the abscissa whose series arc length is
+/// `d - 20`, and the arc in closed form from the cubic's end.
+fn chain_local(d: Scalar) -> Vec2 {
+    let a = cubic_rate();
+    let abscissa = |length: Scalar| {
+        let mut x = length;
+        for _ in 0..50 {
+            x -= (cubic_series(a, x) - length) / (1.0 + 9.0 * a * a * x.powi(4)).sqrt();
+        }
+        x
+    };
+    if d < 20.0 {
+        return Vec2::new(d, 0.0);
+    }
+    if d < 20.0 + CUBIC_LENGTH {
+        let x = abscissa(d - 20.0);
+        return Vec2::new(20.0 + x, a * x.powi(3));
+    }
+    let x = abscissa(CUBIC_LENGTH);
+    let heading = (3.0 * a * x * x).atan();
+    let join = Vec2::new(20.0 + x, a * x.powi(3));
+    let phi = (d - 20.0 - CUBIC_LENGTH) / CUBIC_RADIUS;
+    let arc = Vec2::new(CUBIC_RADIUS * phi.sin(), CUBIC_RADIUS * (1.0 - phi.cos()));
+    let (sin, cos) = heading.sin_cos();
+    join + Vec2::new(cos * arc.x - sin * arc.y, sin * arc.x + cos * arc.y)
+}
+
+/// A tube along an elevated curve under an intrinsic profile reads points
+/// with no certified error (#481): unbounded by name, where the exact tube
+/// lay 2.8 mm from a mesh certified at 1 mm.
+#[test]
+fn a_disk_under_an_intrinsic_profile_is_unbounded_by_name() {
+    let curve = elevated(
+        &straight(),
+        &ElevationLaw::intrinsic(0.0, 0.01, CurvatureLaw::clothoid(0.0, 1.0 / 300.0, 60.0)),
+    );
+    let (mesh, report) = compile(
+        |g| disk(g, curve.clone(), 0.3, Some((5.0, 55.0))),
+        &options(1e-3),
+    )
+    .unwrap();
+    volume(&mesh, "intrinsic profile");
+    assert_eq!(report.contributions[0].path, DeviationPath::SweptDisk);
+    assert!(report.bound.is_none(), "{report:?}");
+    let DeviationBound::Unbounded(reason) = &report.contributions[0].bound else {
+        panic!("{:?}", report.contributions[0].bound);
+    };
+    assert!(reason.contains("no certified error"), "{reason}");
+}
+
+/// A tube along an elevated curve over a chain plan of a line, a cubic and
+/// an arc (#438): the points, the tangent and the second derivative of the
+/// directrix are read from a certified chain table, and the bound charges
+/// their errors. Before, the evaluator's points (off by the arc-length
+/// inverse's tolerance and the placements' accumulation) made it
+/// unbounded by name (#393).
+#[test]
+fn a_disk_along_a_cubic_chain_plan_is_certified() {
+    let curve = elevated(&cubic_chain(), &ElevationLaw::constant_grade(50.0, 0.04));
+    let report = assert_tube(
+        "chain plan",
+        &curve,
+        0.3,
+        1e-3,
+        (5.0, 95.0),
+        "elevated curve",
+    );
+    assert!(report.bound.is_some_and(|b| b <= 1e-3), "{report:?}");
 }
 
 #[test]
