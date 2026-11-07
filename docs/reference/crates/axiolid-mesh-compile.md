@@ -164,17 +164,11 @@ Latest release, 0.3.45 (2026-11-13):
 
 ### Changed
 
-- A swept disk along an elevated or banked curve over a chain plan, or under
-  an intrinsic (vertical clothoid) profile, is reported unbounded by name
+- A swept disk along an elevated or banked curve under an intrinsic
+  (vertical clothoid) profile is reported unbounded by name
   (`UNCERTIFIED_DIRECTRIX_POINTS`, "the directrix's points have no certified
   error") where it was reported certified (#393). The certificate read the
-  evaluator's points, which have no certified error. `TODO(#438)` lifts it
-  for chain plans, `TODO(#481)` for intrinsic profiles.
-- An elevated curve over a chain plan is no longer claimed certified for
-  flattening (`axiolid_reference::bound::certifies_flattening3`, #393,
-  `TODO(#438)`): its chord bound under-reported the evaluated ends, so its
-  polylines and curve-bounded boundaries are reported unbounded by name
-  where they were reported proven.
+  evaluator's points, which have no certified error. `TODO(#481)` lifts it.
 
 - A flush slab whose openings were round-tripped through world coordinates
   (their sides moved by `9.3e-10`) is refused by name, `SKIN_WITHIN_ROUNDING`
@@ -224,6 +218,16 @@ Latest release, 0.3.45 (2026-11-13):
 
 ### Fixed
 
+- A swept disk along an elevated curve over a chain plan (a line, a cubic
+  transition and an arc) is certified against the exact tube (#438): the
+  centre line, its tangent and its second derivative are read from the
+  `ElevatedPositionTable` over the chain, and the bound charges their
+  errors (`wall_jet_charge`, held against adversarially perturbed jets in
+  a unit test). The evaluator's points were taken as exact there: the
+  arc-length inverse's tolerance and every placement before a piece carry
+  into them. A 0.3 m disk along such a plan over `[5, 95]` at 1 mm is
+  certified at 1 mm and the exact tube lies within the reported bound; the
+  swept disk of a chain with a sinusoid or polyline piece stays unbounded.
 - A swept disk along an elevated or banked curve over an intrinsic plan
   (a clothoid) is certified against the exact tube (#393): the centre line
   is read from an `ElevatedPositionTable` built at a thousandth of the

@@ -27,8 +27,9 @@
 //! `g` everywhere, so the law's bound plus the larger of the two ends'
 //! distances from the exact points holds. Each distance is the evaluator's
 //! point against a certified [`IntrinsicPositionTable`] point, plus that
-//! point's own certified error. The chain bound (`crate::chain`) does not
-//! carry it for the evaluated ends of its pieces yet (#438).
+//! point's own certified error. The chain bound (`crate::chain`) charges
+//! the evaluated ends of its pieces the same way against a
+//! [`ChainPositionTable`](super::ChainPositionTable) (#438).
 
 use axiolid_core::Scalar;
 use axiolid_curve::{CurvatureLaw, Intrinsic2, Intrinsic3};

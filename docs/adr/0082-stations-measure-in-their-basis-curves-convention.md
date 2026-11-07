@@ -2037,3 +2037,92 @@ sheet), `crates/execution/compile/tests/station_bound_quadrature.rs` (the
 deck, certified at 4.88e-4 within its 1e-3 request, and a B-spline's corner
 knot) and `scripts/probe_station_mitre_mutants.py`. Every test asserts the
 sampled exact solid stays within the reported bound.
+
+## Amendment 2026-11-07: certified positions of arc-length chains, and tubes over chain plans (#438)
+
+Context: the amendment on elevated and banked curves over intrinsic plans
+(#393) refused a chain plan by name, because the chord bound of an elevated
+curve over one under-reported the evaluated ends. The cause is in the chain:
+the evaluator places each piece at the end of the one before it, reads an
+intrinsic piece by quadrature and a parametric piece at the parameter of an
+arc-length inverse whose `1e-12` tolerance is an estimate. On a chain of a
+straight 20 m and `k = 0.01 sin 50 s` over 100 m, `chain_chord_bound` over
+`[116.4375, 116.5625]` was 1.95e-5 while the exact curve lies 2.835e-3 from
+the chord of the evaluated ends (the ends are 1.72e-3 and 2.84e-3 off), and
+the bound of the point span at 116.5 was 0 for a point 1.4e-2 off.
+
+- **`ChainPositionTable` reads the exact chain.** The exact chain is the
+  representation's, nothing re-fitted: each piece placed at the exact end of
+  the one before. An intrinsic piece's points come from an
+  `IntrinsicPositionTable`, built in the piece's identity frame at its share
+  of the budget. A line, circle, ellipse or B-spline piece is read at the
+  parameter whose certified arc length (the station certificate's chord
+  panels, `CurveLengths`) encloses the distance; the evaluator's inverse is
+  only a guess, kept when its enclosure holds the distance and bisected
+  otherwise, and a piece longer than its curve is refused. A read whose
+  enclosure is wider than the piece's share is refused, so `max_error`,
+  `max_tangent_error` and `max_curvature_error` are suprema by construction.
+  The placements carry a position error `E` and a turn error `Phi` from
+  piece to piece (`|R(X) p - R(X*) p*| <= |p - p*| + |X - X*| |p*|`, the
+  angles add), mapped by the start frame's stretch.
+- **A parametric piece may start off the end of the one before it**, by up
+  to `PIECE_FRAME_TOLERANCE`; the exact chain then jumps at the join. A read
+  carries a `SeamSide`: `Outgoing` is the piece that starts there (what the
+  evaluator reads), `Incoming` the piece that ends there.
+- **The chord bound charges the evaluated ends (#414's rule).**
+  `chain_chord_bound` is the exact-chord bound plus the larger of the lower
+  end's gap (read `Outgoing`) and the upper end's (read `Incoming`), each the
+  evaluator's point against the table's point plus that point's error. The
+  table is built at an eighth of the exact bound, or a few ulps of the
+  placement if more. The harmonic chain now reports a bound within
+  [2.8348e-3, 2.9e-3] over the span and [1.39e-2, 1.5e-2] at the point; a
+  span that ends where the next piece starts 5e-10 off is charged 5e-10; the
+  line/cubic/arc layout's bounds are unchanged to 1%. `chord_bound3` over a
+  chain plan takes the same ends from `ElevatedPositionTable`, which now
+  accepts a chain plan (`point3_on`, `jet3_on`, `jet_errors`), and
+  `certifies_elevated` claims a chain plan again exactly where
+  `chain_certifies` does.
+- **`chain_certifies` narrows.** A chain with a sinusoid or a polyline
+  parametric piece is no longer claimed for flattening: no certified arc
+  length exists to charge its ends against, so it stays unbounded by name.
+- **The tube reads the table's jets.** Over a chain plan the wall takes its
+  centre, tangent and second derivative from `jet3_on` (the plan's from the
+  chain table, the profile's and the pivot's closed form), and the bound
+  charges `e = e0 + max(W, C)`. With `e1`, `e2` the table's tangent and
+  curvature errors, `sigma` the speed floor less `e1`, `k1 = d2 / sigma`: the
+  unit tangent is off by `2 e1 / sigma`, its derivative by `(2 e2 + 2 d2 et
+  + k1 e1) / sigma`, the reference's projection stays `cos tau` long, and the
+  wall's point and `theta`-partial are off by `r (en + eb)`, its `s`-partial
+  by `e1 + r (en1 + eb1)` (`wall_jet_errors`); `W` is twice the sum over a
+  cell (`h_s <= half`, `h_theta <= pi`), covering the products of two errors
+  below `1e-3`, and `C = 2 r e1 / |c'|` the end disks' tilt. Over an
+  intrinsic plan `e1 = e2 = 0` and `e = e0`: the amendment on intrinsic
+  plans is bitwise unchanged. A tangent known to worse than a thousandth, a
+  speed floor that vanishes or a piece that turns the tangent by more than
+  1.5 rad leaves the tube unbounded. A corner at a join is read as the
+  piece that ends (or starts) there. Intrinsic profiles stay unbounded by
+  name (`TODO(#481)`).
+- **Not given here.** A frame law for chain plans (stations, placements and
+  folds along a chain, banked curves over one) is #394's; the station
+  paths still report them unbounded by name.
+
+| Option | Why not |
+| --- | --- |
+| Certify the evaluator's eight-point Gauss read and its Newton inverse | The #361 amendment rejected certifying the quadrature itself; a uniform supremum cannot be certified for the evaluator's parameter either, and the tube needs one. |
+| Fold all-intrinsic chains into one piecewise `Intrinsic2` | It does not cover a cubic or an ellipse piece; kept as a test oracle (the table against `IntrinsicPositionTable` of the equivalent piecewise curve). |
+| Take the evaluator's parameter unchecked | Its tolerance is an estimate; the table checks that the enclosure holds the distance and bisects otherwise. |
+| A per-cell error method on the `Patch` trait | A uniform charge per wall suffices, as in the #393 amendment. |
+| A rigid-motion argument for the jets | It fails on a parametric piece under a profile: the plan is read at a shifted distance while the profile is read at `s`. |
+
+Evidence: `crates/algorithms/parametric/evaluate/src/bound/chain_positions.rs`
+(the derivations in its `//!` docs, the solver's unit tests),
+`crates/algorithms/parametric/evaluate/tests/chain_position_table.rs`
+(points, tangents and curvature against compensated Simpson, the cubic's
+binomial series and the piecewise `Intrinsic2`; the offset join; refusals),
+`tests/arc_length_chain.rs` (the harmonic chain's bound against the exact
+arc), `tests/elevated_positions.rs` (the same over elevated and banked
+curves, the jet against the closed forms),
+`crates/execution/compile/src/deviation/paths.rs` (`wall_jet_errors` against
+adversarially perturbed jets), `crates/execution/compile/tests/elevated_directrix.rs`
+(`a_disk_along_a_cubic_chain_plan_is_certified`) and
+`scripts/probe_chain_positions_mutants.py`.

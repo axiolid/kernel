@@ -56,10 +56,15 @@
 //!   points are read with a certified error by [`IntrinsicPositions`], and
 //!   [`chord_bound2`] adds the distance of the evaluated ends from the
 //!   exact points (#414).
-//! - Elevated and banked curves over an intrinsic plan (#393): the plan's
-//!   and the profile's exact-chord bounds in quadrature, plus the distance
-//!   of the evaluated ends from the points of an
+//! - Elevated and banked curves over an intrinsic plan (#393) or a chain plan
+//!   (#438): the plan's and the profile's exact-chord bounds in quadrature,
+//!   plus the distance of the evaluated ends from the points of an
 //!   [`ElevatedPositionTable`] (`elevated_positions`).
+//! - Arc-length chains (#438): the pieces' exact-chord bounds, plus the
+//!   distance of the evaluated ends from the points of a
+//!   [`ChainPositionTable`] (`chain_positions`), which reads each piece's
+//!   exact point, tangent and curvature vector with a certified error
+//!   carried through the placements.
 //! - Constant offsets `B + d u` (#317): `|P''|` from the basis's suprema
 //!   through the unit-vector rule of the certified station lengths
 //!   ([`offset_chord_bound2`]).
@@ -655,7 +660,8 @@ fn conic_bounds(
 /// [`crate::curve::evaluate2`] returns at `a` and at `b`, not the exact
 /// ones, which differ by the evaluator's own error: the bound carries it
 /// for the families whose evaluation is an estimate, a lifted pcurve's
-/// solve and an intrinsic curve's quadrature). `None` when the family
+/// solve, an intrinsic curve's quadrature and an arc-length chain's pieces,
+/// #438). `None` when the family
 /// has no derivative bound here, or when the curve may not be `C^1`
 /// strictly inside the interval (a polyline vertex, a B-spline knot of full
 /// multiplicity): split there first ([`continuity_breaks2`]).
