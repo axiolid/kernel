@@ -401,7 +401,8 @@ fn bspline_breaks<P>(curve: &BSplineCurve<P>, k: usize) -> Vec<Scalar> {
 /// to be `C^k` (`k >= 1`): a polyline's vertices, a B-spline's knots of
 /// multiplicity above `degree - k`, an arc-length chain's joins (where its
 /// curvature may jump; the chain is `C^1` there, but each piece is bounded
-/// on its own). Empty for the smooth families.
+/// on its own), an implicit curve's cell joins and a lifted pcurve's space
+/// curve's breaks (#414). Empty for the smooth families.
 #[must_use]
 pub fn continuity_breaks2(curve: &Curve2, k: usize) -> Vec<Scalar> {
     match curve {
@@ -413,11 +414,14 @@ pub fn continuity_breaks2(curve: &Curve2, k: usize) -> Vec<Scalar> {
         Curve2::Chain(c) if k >= 1 => c.joins().unwrap_or_default(),
         // An implicit curve's cells are bounded one at a time (#249).
         Curve2::Implicit(c) if k >= 1 => implicit::joins(c),
+        // A lifted pcurve breaks where its space curve does (#414).
+        Curve2::Lifted(l) => continuity_breaks3(&l.curve, k),
         _ => Vec::new(),
     }
 }
 
-/// [`continuity_breaks2`] for a 3D curve.
+/// [`continuity_breaks2`] for a 3D curve; an implicit section also breaks
+/// at its cell joins and a pair section at its interior nodes.
 #[must_use]
 pub fn continuity_breaks3(curve: &Curve3, k: usize) -> Vec<Scalar> {
     match curve {
@@ -427,6 +431,12 @@ pub fn continuity_breaks3(curve: &Curve3, k: usize) -> Vec<Scalar> {
         // the plan for `k >= 2` (#252).
         Curve3::Elevated(e) => crate::elevated::elevated_breaks(e, k),
         Curve3::Banked(b) => crate::elevated::banked_breaks(b, k),
+        // The rate of an implicit section changes where one cell joins the
+        // next, and a pair section's chord plane at each node (#414).
+        Curve3::ImplicitSection(s) if k >= 1 => implicit::joins(&s.curve),
+        Curve3::PairSection(p) if k >= 1 => (1..p.nodes.len().saturating_sub(1))
+            .map(|k| k as Scalar)
+            .collect(),
         _ => Vec::new(),
     }
 }

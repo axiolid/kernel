@@ -601,3 +601,46 @@ fn fourth_derivative_bounds_cover_sampled_fourth_derivatives() {
         assert!(d4.length() <= fourth * (1.0 + 1e-3) + 1e-6);
     }
 }
+
+/// An implicit section names its cell joins, a pair section its interior
+/// nodes, and a lifted pcurve its space curve's breaks (#414): the rate
+/// of the first changes at a join, and the chord plane of the second at a
+/// node.
+#[test]
+fn implicit_and_pair_sections_break_at_their_joins_and_a_lifted_pcurve_follows() {
+    use axiolid_curve::{Carrier, ImplicitSection3, LiftedCurve2, PairNode, PairSection3};
+    let Curve2::Implicit(circle) = implicit_circle() else {
+        unreachable!()
+    };
+    let plane = Carrier::Plane(frame3());
+    let implicit = Curve3::ImplicitSection(ImplicitSection3 {
+        carrier: plane.clone(),
+        curve: circle,
+    });
+    let node = PairNode {
+        point: Point3::ZERO,
+        first: Point2::ZERO,
+        second: Point2::ZERO,
+    };
+    let pair = Curve3::PairSection(PairSection3 {
+        first: plane.clone(),
+        second: plane.clone(),
+        nodes: vec![node; 4],
+    });
+    assert_eq!(continuity_breaks3(&implicit, 1), vec![1.0]);
+    assert_eq!(continuity_breaks3(&pair, 1), vec![1.0, 2.0]);
+    assert_eq!(continuity_breaks3(&pair, 2), vec![1.0, 2.0]);
+    assert!(continuity_breaks3(&implicit, 0).is_empty());
+    assert!(continuity_breaks3(&pair, 0).is_empty());
+    for (curve, joins) in [(implicit, vec![1.0]), (pair, vec![1.0, 2.0])] {
+        let lifted = Curve2::Lifted(LiftedCurve2 {
+            curve: Box::new(curve),
+            carrier: plane.clone(),
+            start: 0.0,
+            end: 1.0,
+            guide: vec![Point2::ZERO],
+        });
+        assert_eq!(continuity_breaks2(&lifted, 1), joins);
+        assert!(continuity_breaks2(&lifted, 0).is_empty());
+    }
+}
