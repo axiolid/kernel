@@ -2911,6 +2911,14 @@ Every publishable crate versions and publishes independently ([ADR 0067](/adr/00
   one before it (up to `PIECE_FRAME_TOLERANCE`) is charged its jump.
   `certifies_flattening3` claims a chain plan exactly where `chain_certifies`
   does.
+- `curve::flatten2` and `flatten3` no longer accept a span of a claimed
+  family (`certifies_flattening2/3`) whose chord bound is `None` on its
+  sagitta alone (#438): the span is refined and, at the depth limit,
+  refused with `BudgetExceeded`. A chain under a stretched start frame
+  (stretch 2 or 4) had its table refuse reads near its own bound, because a
+  rounding allowance grew with the square of the stretch; the resulting
+  `None` bounds passed as proven and the polyline lay 3.9e-3 from the curve
+  at a 3e-3 tolerance.
 
 ### 0.3.20 - 2026-11-03
 
@@ -5027,6 +5035,14 @@ Every publishable crate versions and publishes independently ([ADR 0067](/adr/00
   (`UNCERTIFIED_DIRECTRIX_POINTS`, "the directrix's points have no certified
   error") where it was reported certified (#393). The certificate read the
   evaluator's points, which have no certified error. `TODO(#481)` lifts it.
+- Flattening a 2D chain is narrowed (`axiolid_reference::bound`,
+  #438): a chain with a sinusoid or two-point polyline parametric piece is
+  no longer claimed, so polylines, curve-bounded boundaries and elevated
+  curves over such chains go from proven to unbounded. A claimed family
+  whose chord bound is missing on a span is refined and, at the depth
+  limit, refused, never accepted on the midpoint's sagitta; a chain with a
+  fast intrinsic piece, whose evaluated ends are centimetres off, can
+  reach `BudgetExceeded` below a tolerance its ends' gap exceeds.
 
 - A flush slab whose openings were round-tripped through world coordinates
   (their sides moved by `9.3e-10`) is refused by name, `SKIN_WITHIN_ROUNDING`
@@ -5084,8 +5100,11 @@ Every publishable crate versions and publishes independently ([ADR 0067](/adr/00
   a unit test). The evaluator's points were taken as exact there: the
   arc-length inverse's tolerance and every placement before a piece carry
   into them. A 0.3 m disk along such a plan over `[5, 95]` at 1 mm is
-  certified at 1 mm and the exact tube lies within the reported bound; the
-  swept disk of a chain with a sinusoid or polyline piece stays unbounded.
+  certified at 1 mm and the exact tube lies within the reported bound. A
+  swept disk along a chain with a sinusoid or two-point polyline piece was
+  certified in 0.3.44 from the evaluator's points; it is now unbounded, by
+  the generic reason ("the directrix could not be bounded"), since no
+  certified arc length exists for such a piece.
 - A swept disk along an elevated or banked curve over an intrinsic plan
   (a clothoid) is certified against the exact tube (#393): the centre line
   is read from an `ElevatedPositionTable` built at a thousandth of the
