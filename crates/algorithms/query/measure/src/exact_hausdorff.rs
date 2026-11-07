@@ -14,7 +14,7 @@
 //!
 //! - `lower` is `d(p, dB)` bounded below for a point `p` certainly on `dA`
 //!   (an edge point, or a surface point at parameters its face's domain is
-//!   certified to contain), by the same branch and bound as
+//!   certified to contain), less `p`'s evaluation rounding (#439), by the same branch and bound as
 //!   [`crate::boundary_distance`] with one side shrunk to the point.
 //! - `upper` bounds `d(p, dB)` for every point of `dA`. The faces of `A` are
 //!   covered by patches of their parameter domains (a patch is dropped only
@@ -44,7 +44,8 @@
 //!     the gate are in the private `exact_hausdorff/translate.rs`);
 //!   - a *Lipschitz* bound: `d(., dB)` is 1-Lipschitz, so over a patch inside
 //!     a sphere of radius `r` about `c` it is at most `d(c, dB) + r`, with
-//!     `d(c, dB)` bounded above by a point found on `dB`.
+//!     `d(c, dB)` bounded above by a point found on `dB` plus that point's
+//!     evaluation rounding (#439).
 //!
 //! The witnesses are `point_from`, the point realising `lower`, and
 //! `point_to`, the nearest point found to it on the other boundary.
@@ -370,7 +371,9 @@ impl<'a> Nearest<'a> {
                     }
                 }
             }
-            let upper = best.map_or(Scalar::INFINITY, |(d, ..)| super::exact_distance::witnessed_upper(d, error));
+            let upper = best.map_or(Scalar::INFINITY, |(d, ..)| {
+                super::exact_distance::witnessed_upper(d, error)
+            });
             if upper.is_finite()
                 && (bound >= upper || closed(bound, upper, accuracy, floor(scale, upper) + excess))
             {
@@ -398,11 +401,12 @@ impl<'a> Nearest<'a> {
         Ok(best.map(|(d, nearest, on)| {
             let upper = super::exact_distance::witnessed_upper(d, error);
             PointDistance {
-            lower: lower.min(upper),
-            upper,
-            nearest,
-            on,
-        }}))
+                lower: lower.min(upper),
+                upper,
+                nearest,
+                on,
+            }
+        }))
     }
 }
 
@@ -1331,7 +1335,11 @@ mod tests {
         let at = |p: Point2| frame.origin + frame.x * p.x + frame.y * p.y;
         let vertices: Vec<_> = corners
             .iter()
-            .map(|p| builder.topology_mut().add_vertex(Vertex { position: at(*p) }))
+            .map(|p| {
+                builder
+                    .topology_mut()
+                    .add_vertex(Vertex { position: at(*p) })
+            })
             .collect();
         let n = corners.len();
         let mut uses = Vec::new();

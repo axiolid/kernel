@@ -9,7 +9,24 @@ caret rule for `0.x` versions.
 
 ## [Unreleased]
 
+### Changed
+
+- `DistanceBounds::upper` (all distance and clearance queries, plan and body
+  variants) is at least the distance between the boundary points the
+  witnesses stand for, not their computed distance: it adds their evaluation
+  rounding, 16 ulps of each side's witness scale. A plan overlap still
+  reports `[0, 0]` (#439).
+
 ### Fixed
+
+- At georeferenced coordinates `Clearance::Below` could be claimed within
+  about `1e-8` of a limit the distance does not go below (#439).
+- The exact Hausdorff lower bound takes off its witness's rounding (a face
+  charted from far away but lying near the origin raised it up to about
+  `1e-9` past the distance), and a point query's upper adds its nearest
+  point's (#439).
+- B-spline witnesses are padded by the de Boor evaluation's rounding, a
+  bound that counts the degrees and the weights' spread (#439).
 
 - The exact boundary distance and Hausdorff distance carry rounding margins
   derived from the magnitudes their numbers are computed from, in ulps of the

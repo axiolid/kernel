@@ -51,7 +51,8 @@ use crate::exact_distance::{closed, overlap_search, Clearance, Metric, PlanOverl
 /// body may overlap in plan, or in space. When two planar faces show an
 /// overlap of positive area, the interval is `[0, 0]` and the witnesses
 /// project into it. `point_a` and `point_b` lie on the items `item_a` and
-/// `item_b` name, their projections `upper` apart. A negative or NaN
+/// `item_b` name, their projections at most `upper` apart, within
+/// rounding. A negative or NaN
 /// accuracy is read as zero.
 ///
 /// # Errors

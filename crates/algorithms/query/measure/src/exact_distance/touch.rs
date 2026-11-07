@@ -19,7 +19,8 @@
 //! are found to be. They count only when no more than 128 ulps of their
 //! magnitudes apart ([`within_rounding`], the floor of `FLOOR_EPSILONS`):
 //! no lower bound can then rise above zero, so the interval `[0, d]` they
-//! give is what the search would converge to, reached at once. A gap wider
+//! give, widened by the witnesses' rounding (#439), is what the search
+//! would converge to, reached at once. A gap wider
 //! than that margin (about `6e-14` at unit scale) is never taken for a
 //! touch; it is measured by the search as before.
 //!
@@ -353,7 +354,10 @@ mod tests {
         };
         assert_eq!(
             bounds.upper,
-            witnessed_upper((bounds.point_a - bounds.point_b).length(), error(a) + error(b))
+            witnessed_upper(
+                (bounds.point_a - bounds.point_b).length(),
+                error(a) + error(b)
+            )
         );
         assert!(
             early.steps <= steps,
@@ -684,10 +688,7 @@ mod tests {
         );
         let found = distance(&a, &b, 1e-6, true);
         let bounds = &found.bounds;
-        assert!(
-            bounds.lower <= 0.5 && 0.5 <= bounds.upper,
-            "{bounds:?}"
-        );
+        assert!(bounds.lower <= 0.5 && 0.5 <= bounds.upper, "{bounds:?}");
         assert!(bounds.upper - bounds.lower <= 1e-6, "{bounds:?}");
         assert!(found.steps < 1000, "{} steps", found.steps);
     }

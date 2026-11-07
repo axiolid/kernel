@@ -96,8 +96,8 @@ parameters) and edge spans.
 - `scripts/probe_boundary_distance_mutants.py`: 11 faults, all caught.
 - `crates/algorithms/query/measure/src/exact_distance/witness.rs`: the certified
   foot witnesses (#318).
-- `scripts/probe_distance_rounding_mutants.py`: 9 faults in the derived margins,
-  all caught (#318).
+- `scripts/probe_distance_rounding_mutants.py`: 13 faults in the derived margins
+  and witness bounds, all caught (#318, #439).
 
 ## Amendment 2026-11-07: rounding margins in ulps of the coordinates, a floor, and foot witnesses (#318)
 
@@ -157,8 +157,55 @@ interval about `1e-5` wide, and the Hausdorff search shared the margins.
 stay. They are sound over-enclosures, and for a translate the coefficient
 differences are zero, so they do not widen the bound.
 
-**Follow-ups.** The upper bound excludes its witnesses' evaluation rounding,
-about `32 eps S`, so far out `Clearance::Below` can be claimed within about
-`1e-8` of a limit (#439). The `1e-9`-relative gates of `plan_patches_overlap`,
+**Follow-ups.** The upper bound's witness rounding is covered by the
+amendment on #439 below. The `1e-9`-relative gates of `plan_patches_overlap`,
 `exact_bodies::separate` and `exact_domain::slack` reach millimetres far out
 and lead to refusals or no verdict, never to an unsound result (#440).
+
+## Amendment 2026-11-07: the upper bound covers its witnesses (#439)
+
+**Problem.** The upper bound was the computed distance of two witnesses, each
+off its boundary by its evaluation rounding, up to `16 eps S`. At (450000,
+5600000) two cuboids turned to axes (0.6, 0.8, 0) gave `upper` below the
+distance by `4.66e-11` in 7 of 40 placements, so `boundary_clearance` claimed
+`Below` for a limit just under the distance. The Hausdorff lower bound had the
+same gap on the other side: a source witness of a face charted from far away
+but lying near the origin raised it by up to `7.45e-10` past the distance.
+B-spline witnesses were not covered by the table at all: a witness runs
+`p_u + p_v` levels of de Boor in homogeneous coordinates and divides by the
+weight.
+
+**Decision.**
+
+- `upper = |pa - pb| (1 + RATIO eps) + POINT eps (W_a + W_b)`, `W` a side's
+  witness scale: the largest witness `M` over its root elements, `S` unless
+  the side has a B-spline face, which gets `(p_u + p_v + 1) (w_max / w_min)
+  max|P|`. `best` stays the computed distance, so the search order and the
+  witnesses are those of before; only the stop test and the reported value
+  widen. A plan overlap shown by planar faces still reports `[0, 0]`: the
+  distance is exactly zero there.
+- The floor keeps `S`, so without B-spline faces it is unchanged (it already
+  budgets `32 eps S` for witnesses); with them it adds `POINT eps (W - S)` per
+  side.
+- A point query's upper adds its target's `W`; the one-sided Hausdorff lower
+  bound subtracts the source witness's `POINT eps W`.
+- The bound is derived from the current `bspline_point` and lives beside the
+  analytic table, as the #318 amendment decided. Its long-term owner is
+  axiolid-evaluate (#460).
+- Margins that no test can observe (#447): the `RATIO` guards of the pair and
+  point bounds and a point query's own pad `PROJECTION eps |p|` are covered by
+  other margins, since `S` is at least every point magnitude of its side. They
+  stay, listed in the probe's "Not probed" note.
+
+**Alternatives rejected.**
+
+- Widening only in `DistanceBounds::against`: the interval itself stays
+  unsound for distance consumers.
+- A per-witness error by element family: the shape would have to travel with
+  every comparison, and it breaks the uniform pads of #318. The cost of the
+  per-side `W` is that a B-spline face widens all its side's witnesses, about
+  `2.8e-7` per far bicubic side.
+- `W` in place of `S` in the floor: it coarsens the floor up to about 7x on
+  far B-spline bodies.
+- `[0, rounding]` for a plan overlap: it breaks the documented `[0, 0]` for no
+  gain in soundness.

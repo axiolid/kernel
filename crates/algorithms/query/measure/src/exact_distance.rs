@@ -3,13 +3,16 @@
 //! # What is certified
 //!
 //! [`boundary_distance`] returns an interval `[lower, upper]` that contains
-//! the true minimum distance between the two boundaries, and two points, one
-//! on each boundary, exactly `upper` apart. Both ends are guarantees, not
+//! the true minimum distance between the two boundaries, and two computed
+//! points, one on each boundary within its evaluation rounding, whose
+//! boundary points `upper` covers (#439). Both ends are guarantees, not
 //! estimates:
 //!
-//! - `upper` is the distance between two points that lie on the boundaries:
-//!   points on edges, or surface points at parameters the face's domain is
-//!   certified to contain (the crate-private `Domain` classifier).
+//! - `upper` is at least the distance between two points that lie on the
+//!   boundaries, which the two computed witnesses stand for: points on
+//!   edges, or surface points at parameters the face's domain is certified
+//!   to contain (the crate-private `Domain` classifier). It is their
+//!   computed distance plus their rounding (see "Rounding").
 //! - `lower` comes from bounding spheres that enclose every point of a patch
 //!   of a face's parameter domain, from Lipschitz bounds on the exact
 //!   surface, with a margin for rounding. Patches are dropped only when
@@ -69,7 +72,7 @@
 //! certified by the face's domain. Two such points no farther apart than
 //! the rounding margin (128 ulps of the points' magnitudes: about `6e-14`
 //! at unit scale) end the search with
-//! `[0, d]`, `d` their distance and they the witnesses: no lower bound can
+//! `[0, d']`, `d'` their distance plus their rounding (#439), they being the witnesses: no lower bound can
 //! rise above zero there, so this is the interval the search would only
 //! converge to. Two boxes sharing a face, or crossing, stop within a few
 //! steps. A gap wider than that margin is never taken for a touch, and boundaries that are apart measure exactly as
@@ -97,7 +100,8 @@
 //! | cone patch | `|o| + 2 (|r| + |v| tan(angle)) s + ...` |
 //! | sphere patch | `|o| + 3 |r| s + ...` |
 //! | torus patch | `|o| + (2 R + 3 r) s + ...` |
-//! | B-spline patch | the largest control point |
+//! | B-spline patch (sphere) | the largest control point |
+//! | B-spline patch (witness) | `(p_u + p_v + 1) (w_max / w_min) max|P|` |
 //! | line span | `|o| + |t| |d|` |
 //! | circle span | `|o| + (2 + |t|) |r| s` |
 //! | ellipse span | `|o| + (|a| + |b| + |t| max(|a|, |b|)) s` |
@@ -126,6 +130,36 @@
 //!   (S_a + S_b) = 48 eps (S_a + S_b)` below the exact one, and the
 //!   witnesses' own evaluation adds up to `32 eps (S_a + S_b)`: 80, with
 //!   room to spare.
+//!
+//! A witness is a point evaluated at a parameter, so it is off its boundary
+//! by `POINT eps W`, `W` the side's witness scale: the largest witness `M`
+//! over its root elements, equal to `S` unless the side has a B-spline face.
+//! The reported upper bound is
+//! `|pa - pb| (1 + RATIO eps) + POINT eps (W_a + W_b)`, so it is at least
+//! the distance between the boundary points the witnesses stand for, and
+//! `Clearance::Below` is never claimed within rounding of a limit the
+//! distance does not go below (#439). The search order and the witnesses
+//! are those of the computed distance; only the stop test and the reported
+//! value widen. A plan overlap shown by two planar faces still reports
+//! `[0, 0]`. The floor adds `POINT eps ((W_a - S_a) + (W_b - S_b))`, nothing
+//! without B-spline faces.
+//!
+//! A B-spline sphere's `M` is its control points, since its patch is
+//! enclosed by them, but a witness runs `p_u + p_v` levels of de Boor in
+//! homogeneous coordinates and divides by the weight. Each level adds at
+//! most `4 eps` of the largest homogeneous coordinate `w_max |P|max`; the
+//! division by a weight of at least `w_min` gives
+//! `((8L + 0.5) rho + 0.5) eps |P|max` per coordinate (`L = p_u + p_v`,
+//! `rho = w_max / w_min`). Times `sqrt 3` that is below
+//! `16 (L + 1) rho eps |P|max`, which is `POINT eps M` for the witness `M`
+//! of the table. A non-positive weight is refused.
+//!
+//! The `RATIO` guards of the pair and point bounds and a point query's own
+//! pad `PROJECTION eps |p|` cover rounding that another margin covers too
+//! (#447): `S` is at least the magnitude of every point of its side, so a
+//! computed gap or projection is off by a few `eps (S_a + S_b)` at most,
+//! inside the side pads. They stay, so each bound is sound by its own
+//! arithmetic, but no test can observe their loss.
 //!
 //! The libm functions the evaluators call are assumed within one ulp.
 //! The floor is about `3.2e-7` at (450000, 5600000) and about `6e-14` at
@@ -193,23 +227,31 @@ pub(crate) const RATIO_EPSILONS: Scalar = 8.0;
 /// The width an interval settles at, in units of `eps * (S_a + S_b)`.
 pub(crate) const FLOOR_EPSILONS: Scalar = 128.0;
 
-/// An interval certain to contain the distance between two boundaries.
+/// An interval certain to contain the distance between two boundaries,
+/// and two witnesses. `point_a` and `point_b` are computed points, each
+/// within its evaluation rounding of a point of its boundary
+/// (`POINT eps W`, see "Rounding" in the module docs), and `upper` is at
+/// least the distance between those two boundary points (#439): the
+/// computed `|point_a - point_b|` plus that rounding, never less. In plan,
+/// an overlap shown by two planar faces reports `[0, 0]`.
 #[derive(Debug, Clone, PartialEq)]
 pub struct DistanceBounds {
     /// No two boundary points are closer than this.
     pub lower: Scalar,
-    /// `point_a` and `point_b` are this far apart.
+    /// The boundary points `point_a` and `point_b` stand for are at most
+    /// this far apart (in plan, for the plan queries).
     pub upper: Scalar,
-    /// A point on the first boundary.
+    /// A computed point within rounding of the first boundary.
     pub point_a: Point3,
-    /// A point on the second boundary, `upper` from `point_a`.
+    /// A computed point within rounding of the second boundary.
     pub point_b: Point3,
 }
 
 /// How a certified distance compares with a limit.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Clearance {
-    /// Certainly closer than the limit: `upper < limit`.
+    /// Certainly closer than the limit: `upper < limit`, `upper` covering
+    /// the witnesses' rounding.
     Below,
     /// Certainly farther than the limit: `lower > limit`.
     Above,
@@ -268,8 +310,8 @@ pub fn boundary_distance(
 /// [`boundary_distance`] with horizontal gaps, directions and enclosing
 /// discs. It is zero when the shadows overlap, and unlike the distance in
 /// space it is zero for a body standing inside another's footprint.
-/// `point_a` and `point_b` lie on the boundaries, their projections
-/// `upper` apart. When two planar faces show the shadows overlap over a
+/// `point_a` and `point_b` lie within rounding of the boundaries, their
+/// projections at most `upper` apart. When two planar faces show the shadows overlap over a
 /// patch of positive area, the interval is `[0, 0]` and the points project
 /// into that patch (see [`plan_overlap`]).
 ///
@@ -1091,14 +1133,21 @@ fn witness_scale(surface: &Surface, lo: Point2, hi: Point2) -> Result<Scalar, Ex
     let Surface::BSpline(spline) = surface else {
         return patch_scale(surface, lo, hi);
     };
-    let largest = spline.control_points.iter().flatten().map(|p| p.length()).fold(0.0, Scalar::max);
+    let largest = spline
+        .control_points
+        .iter()
+        .flatten()
+        .map(|p| p.length())
+        .fold(0.0, Scalar::max);
     let ratio = match &spline.weights {
         None => 1.0,
         Some(weights) => {
             let (mut lo, mut hi) = (Scalar::INFINITY, 0.0_f64);
             for w in weights.iter().flatten() {
                 if w.is_nan() || *w <= 0.0 {
-                    return Err(ExactMeasureError::NonPlanarFace("non-positive-weight B-spline"));
+                    return Err(ExactMeasureError::NonPlanarFace(
+                        "non-positive-weight B-spline",
+                    ));
                 }
                 lo = lo.min(*w);
                 hi = hi.max(*w);
@@ -1108,7 +1157,11 @@ fn witness_scale(surface: &Surface, lo: Point2, hi: Point2) -> Result<Scalar, Ex
     };
     let levels = Scalar::from(spline.u_degree) + Scalar::from(spline.v_degree) + 1.0;
     let scale = levels * ratio * largest;
-    if scale.is_finite() { Ok(scale) } else { Err(crate::exact::EVALUATION) }
+    if scale.is_finite() {
+        Ok(scale)
+    } else {
+        Err(crate::exact::EVALUATION)
+    }
 }
 
 /// The upper bound reported for witnesses computed `distance` apart.
@@ -1656,7 +1709,8 @@ fn search_with(
             }
         }
         let upper = best.map_or(Scalar::INFINITY, |(d, ..)| witnessed_upper(d, error));
-        if upper.is_finite() && (bound >= upper || done(bound, upper, floor(scale, upper) + excess)) {
+        if upper.is_finite() && (bound >= upper || done(bound, upper, floor(scale, upper) + excess))
+        {
             break;
         }
         steps += 1;
@@ -2083,7 +2137,11 @@ mod tests {
                     .expect("bounded")
                     .1
             };
-            assert_eq!(verdict(truth - 1e-15), Clearance::Indeterminate, "{k}: {truth}");
+            assert_eq!(
+                verdict(truth - 1e-15),
+                Clearance::Indeterminate,
+                "{k}: {truth}"
+            );
             assert_eq!(verdict(truth + 1e-6), Clearance::Below, "{k}");
             assert_eq!(verdict(truth - 1e-6), Clearance::Above, "{k}");
         }
@@ -2146,7 +2204,11 @@ mod tests {
                 })
                 .collect();
             let weights = (0..4)
-                .map(|i| (0..4).map(|j| 1.0 + 0.25 * f64::from((i * 3 + j) % 5)).collect())
+                .map(|i| {
+                    (0..4)
+                        .map(|j| 1.0 + 0.25 * f64::from((i * 3 + j) % 5))
+                        .collect()
+                })
                 .collect();
             Surface::BSpline(BSplineSurface {
                 u_degree: 3,
@@ -2181,7 +2243,10 @@ mod tests {
     fn rounding_margins_are_the_derived_constants() {
         assert_eq!(pad(0.0, 1.0), 16.0 * f64::EPSILON + f64::MIN_POSITIVE);
         assert_eq!(floor(3.0, 0.0), 128.0 * f64::EPSILON * 3.0);
-        assert_eq!(witnessed_upper(0.5, 1e-9), 0.5 * (1.0 + 8.0 * f64::EPSILON) + 1e-9);
+        assert_eq!(
+            witnessed_upper(0.5, 1e-9),
+            0.5 * (1.0 + 8.0 * f64::EPSILON) + 1e-9
+        );
         let origin = Point3::new(450_000.0, 5_600_000.0, 0.0);
         let plane = Surface::Plane(Plane {
             frame: Frame3 {
