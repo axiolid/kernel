@@ -8,7 +8,7 @@ Portable orthographic hidden-line drawing request, result, and conformance contr
 
 | | |
 | --- | --- |
-| Latest release | 0.1.3 (2026-11-03) |
+| Latest release | 0.1.4 (2026-11-07) |
 | crates.io | [`axiolid-mesh-hidden-lines-contract`](https://crates.io/crates/axiolid-mesh-hidden-lines-contract) |
 | Facade | [`axiolid`](./axiolid) feature `mesh-hidden-lines` |
 | Layer | contracts (`contract.operation`) |
@@ -35,23 +35,23 @@ frontmost. See ADR 0094.
 
 ## Changes
 
-Latest release, 0.1.3 (2026-11-03):
+Latest release, 0.1.4 (2026-11-07):
 
 ### Added
 
-- The `MeshVisibleFaces` operation contract (ADR 0094, #383): visible face
-  regions of meshes in the same orthographic view, with `FaceGroup`s per
-  triangle, `FaceSource` (group or near-plane cap), `VisibleFaceRequest`,
-  `VisibleFaceLimits`, `VisibleRegion`, evidence and
-  `FACES_CAPABILITY_ID`.
-- `conformance::faces::FaceConformanceSuite` for `MeshVisibleFaces`
-  providers: twelve exact cases (overlapping boxes, a hole under a box, an
-  elevation, a cut column on a slab, a sheet that is never capped,
-  interpenetrating sheets, a coplanar tie, an edge-on wall, two groups on
-  one face, a crop, a far clip and a floating cluster), an area case for
-  non-binary64 coordinates, the refusal cases, and determinism and
-  orientation checks (#383).
-- `HiddenLineMesh::groups` and `HiddenLineMesh::with_groups`; the field is
-  read by `MeshVisibleFaces` only.
+- `VisibleFaceEvidence::snap_displacement`, `rerouted_edges`,
+  `collapsed_regions` and `collapsed_holes` (#410, ADR 0100): how far snap
+  rounding moved region boundaries, as a `DisplacementBound`, and how many
+  edges it rerouted and regions and holes it collapsed. `input_mesh` starts
+  them at zero. The conformance suite requires zero in every exact case.
+
+### Changed
+
+- `MeshVisibleFaces` regions are the exact regions snap-rounded to the
+  binary64 grid (ADR 0100): a region whose area collapses under rounding is
+  dropped and counted, never refused; rings are weakly simple; and
+  `VisibleRegion::triangles` lists the triangles frontmost somewhere in an
+  exact region it was snapped from. Where no edge is rerouted the vertices
+  are still the exact points rounded once.
 
 Full history: [`crates/contracts/operations/mesh-hidden-lines/CHANGELOG.md`](https://github.com/axiolid/kernel/blob/main/crates/contracts/operations/mesh-hidden-lines/CHANGELOG.md)

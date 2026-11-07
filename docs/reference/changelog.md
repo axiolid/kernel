@@ -1738,6 +1738,13 @@ Every publishable crate versions and publishes independently ([ADR 0067](/adr/00
 
 ## axiolid-contracts
 
+### 0.3.7 - 2026-11-07
+
+### Added
+
+- `DisplacementBound`, a finite non-negative distance bound that is `Eq`, for
+  the snap-rounding evidence of visible face regions (#410).
+
 ### 0.3.6 - 2026-11-03
 
 ### Added
@@ -3128,6 +3135,22 @@ Every publishable crate versions and publishes independently ([ADR 0067](/adr/00
 
 ## axiolid-exact-arrangement
 
+### 0.1.1 - 2026-11-07
+
+### Added
+
+- `snap_round`, `Snapped`, `ClassBoundary`, `HOT_POINT_SCRATCH_BYTES` and
+  `FRAGMENT_SCRATCH_BYTES` (ADR 0100, #410): snap rounding of straight,
+  pairwise interior-disjoint edges to the binary64 tensor grid. Each edge is
+  routed through the centre of every hot cell it meets, in order, decided
+  exactly (half-open cells, ties to even); the fragments are arranged and a
+  crossing left among them is refused. `Snapped` carries the displacement
+  bound in the maximum norm and the number of rerouted edges, and
+  `Snapped::class_boundary` nets a class's chain per fragment so that parts
+  of zero width cancel.
+- `check_winding`, which refuses a traced class that winds more than once
+  at some point, and `ExactPoints::frame_sign`.
+
 ### 0.1.0 - 2026-11-03
 
 ### Added
@@ -3326,6 +3349,48 @@ Every publishable crate versions and publishes independently ([ADR 0067](/adr/00
 
 
 ## axiolid-hidden-lines
+
+### 0.1.4 - 2026-11-07
+
+### Fixed
+
+- `ScalarVisibleFaces` no longer refuses a scene as `Degenerate` when exact
+  ring vertices round to the same binary64 value (#410, ADR 0100). The
+  regions are the exact regions snap-rounded to the binary64 grid: an edge
+  that passes through the rounding cell of another vertex is routed through
+  it, and a region or hole whose area vanishes is dropped and counted. The
+  evidence reports `snap_displacement`, `rerouted_edges`, `collapsed_regions`
+  and `collapsed_holes`; where nothing is rerouted the vertices are still the
+  exact points rounded once. The two seeded oracle scenes that were refused
+  (seed 1 oblique, seed 9 isometric, each with a near plane) are answered and
+  pinned, with frozen copies in the conformance suite.
+
+### Changed
+
+- Hidden-line drawing does less exact work for the same output (#369): an
+  edge stops looking at further candidates, and skips the near-plane caps,
+  once one hidden span covers all of its kept part; a sign that a repeated
+  vertex id makes exactly zero (`orient2d` with a shared vertex, a point on
+  its own triangle's plane, a zero coordinate difference) is not evaluated;
+  and a triangle whose plane is certainly not in front of the edge at either
+  end, by the interval filter alone, is skipped before its three image
+  clips. Visible face regions share this resolver, so their
+  `candidate_pairs` and `exact_escalations` evidence and their candidate-pair
+  budget fall the same way; the earlier visible-face timing figures predate
+  this change. The drawing's segment hash is unchanged on every
+  `scenario/hidden-lines` case. Examined candidate pairs and exact
+  escalations fall, as the early exit stops counting pairs: isometric 20x20
+  125,577 to 79,064 pairs and 187,483 to 43,402 escalations; cut plan 20x20
+  23,680 to 14,240 pairs and 113,440 to 51,200 escalations; isometric 50x50
+  829,935 to 511,016 pairs and 1,215,313 to 287,386 escalations; cut plan
+  50x50 148,000 to 89,000 pairs and 709,000 to 320,000 escalations. A loaded
+  machine, three runs each (the BVH provider, ranges of the three
+  estimates): isometric 20x20 0.73-0.85 s to 0.35-0.47 s, cut plan 20x20
+  0.17-0.48 s to 0.08-0.11 s, isometric 50x50 3.9-6.2 s to 1.9-2.6 s, cut
+  plan 50x50 1.0-2.3 s to 0.51-0.79 s. Single runs vary by more than the
+  gain on some cases, so read the work counts as the firm result. Because
+  fewer pairs are examined, a `max_candidate_pairs` limit that the old
+  count reached may no longer be reached.
 
 ### 0.1.3 - 2026-11-03
 
@@ -6167,6 +6232,25 @@ Every publishable crate versions and publishes independently ([ADR 0067](/adr/00
 
 
 ## axiolid-mesh-hidden-lines-contract
+
+### 0.1.4 - 2026-11-07
+
+### Added
+
+- `VisibleFaceEvidence::snap_displacement`, `rerouted_edges`,
+  `collapsed_regions` and `collapsed_holes` (#410, ADR 0100): how far snap
+  rounding moved region boundaries, as a `DisplacementBound`, and how many
+  edges it rerouted and regions and holes it collapsed. `input_mesh` starts
+  them at zero. The conformance suite requires zero in every exact case.
+
+### Changed
+
+- `MeshVisibleFaces` regions are the exact regions snap-rounded to the
+  binary64 grid (ADR 0100): a region whose area collapses under rounding is
+  dropped and counted, never refused; rings are weakly simple; and
+  `VisibleRegion::triangles` lists the triangles frontmost somewhere in an
+  exact region it was snapped from. Where no edge is rerouted the vertices
+  are still the exact points rounded once.
 
 ### 0.1.3 - 2026-11-03
 

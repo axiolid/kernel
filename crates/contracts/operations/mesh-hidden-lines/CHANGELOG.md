@@ -9,6 +9,8 @@ caret rule for `0.x` versions.
 
 ## [Unreleased]
 
+## [0.1.4] - 2026-11-07
+
 ### Added
 
 - `VisibleFaceEvidence::snap_displacement`, `rerouted_edges`,

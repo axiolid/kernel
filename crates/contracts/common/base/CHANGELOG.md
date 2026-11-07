@@ -9,6 +9,8 @@ caret rule for `0.x` versions.
 
 ## [Unreleased]
 
+## [0.3.7] - 2026-11-07
+
 ### Added
 
 - `DisplacementBound`, a finite non-negative distance bound that is `Eq`, for

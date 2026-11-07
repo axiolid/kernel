@@ -35,14 +35,14 @@ Every page here is generated from the crate itself: its manifest, its crate docu
 
 | Crate | Role | Latest release | Description |
 | --- | --- | --- | --- |
-| [`axiolid-contracts`](./crates/axiolid-contracts) | `contract.common` | 0.3.6 | Common backend-neutral execution and diagnostic contracts |
+| [`axiolid-contracts`](./crates/axiolid-contracts) | `contract.common` | 0.3.7 | Common backend-neutral execution and diagnostic contracts |
 | [`axiolid-curve-evaluate-contract`](./crates/axiolid-curve-evaluate-contract) | `contract.operation` | 0.3.8 | Portable curve evaluation capability contract: point, tangent and oriented frame at a distance |
 | [`axiolid-exact-compile-contract`](./crates/axiolid-exact-compile-contract) | `contract.operation` | 0.3.2 | Portable graph-to-exact-B-rep compilation contract |
 | [`axiolid-guarantees`](./crates/axiolid-guarantees) | `contract.guarantees` | 0.3.2 | Certified-value and escalation vocabulary for geometry contracts |
 | [`axiolid-mesh-boolean-contract`](./crates/axiolid-mesh-boolean-contract) | `contract.operation` | 0.3.4 | Portable mesh boolean request, result, evidence, and conformance contract |
 | [`axiolid-mesh-compile-contract`](./crates/axiolid-mesh-compile-contract) | `contract.operation` | 0.3.5 | Portable graph-to-mesh compilation contract |
 | [`axiolid-mesh-contracts`](./crates/axiolid-mesh-contracts) | `contract.common.mesh` | 0.3.2 | Shared mesh admissibility contracts |
-| [`axiolid-mesh-hidden-lines-contract`](./crates/axiolid-mesh-hidden-lines-contract) | `contract.operation` | 0.1.3 | Portable orthographic hidden-line drawing request, result, and conformance contract for triangle meshes |
+| [`axiolid-mesh-hidden-lines-contract`](./crates/axiolid-mesh-hidden-lines-contract) | `contract.operation` | 0.1.4 | Portable orthographic hidden-line drawing request, result, and conformance contract for triangle meshes |
 | [`axiolid-mesh-section-contract`](./crates/axiolid-mesh-section-contract) | `contract.operation` | 0.3.7 | Portable mesh plane-section request, result, and evidence contract |
 | [`axiolid-pointcloud-reconstruction-contract`](./crates/axiolid-pointcloud-reconstruction-contract) | `contract.operation` | 0.3.3 | Portable pointcloud-to-surface reconstruction contract, evidence, and conformance suite. |
 | [`axiolid-tessellation-contract`](./crates/axiolid-tessellation-contract) | `contract.operation` | 0.3.3 | Curves, surfaces and B-reps to triangles under an explicit tolerance. |
@@ -61,10 +61,10 @@ Every page here is generated from the crate itself: its manifest, its crate docu
 | [`axiolid-decompose`](./crates/axiolid-decompose) | `algorithm.discrete` | 0.3.2 | Convex decomposition of a solid, exact or approximate and always labelled |
 | [`axiolid-evaluate`](./crates/axiolid-evaluate) | `algorithm.parametric` | 0.3.20 | Analytic and spline curve/surface evaluation, jets, and inversion |
 | [`axiolid-exact`](./crates/axiolid-exact) | `algorithm.reference` | 0.1.3 | Filtered exact arithmetic: interval filter, dyadic big integers, a + b*sqrt(c) |
-| [`axiolid-exact-arrangement`](./crates/axiolid-exact-arrangement) | `algorithm.planar` | 0.1.0 | Exact arrangement of straight segments on rational points, with face tracing |
+| [`axiolid-exact-arrangement`](./crates/axiolid-exact-arrangement) | `algorithm.planar` | 0.1.1 | Exact arrangement of straight segments on rational points, with face tracing |
 | [`axiolid-field-ops`](./crates/axiolid-field-ops) | `algorithm.sampled` | 0.3.3 | Sampling, morphology, clearance, and navigation over Axiolid layered fields. |
 | [`axiolid-heal`](./crates/axiolid-heal) | `algorithm.repair` | 0.3.4 | Explicit diagnosis and opt-in repair contracts for dirty geometry |
-| [`axiolid-hidden-lines`](./crates/axiolid-hidden-lines) | `algorithm.discrete` | 0.1.3 | Exact scalar hidden-line drawings of triangle meshes in orthographic views |
+| [`axiolid-hidden-lines`](./crates/axiolid-hidden-lines) | `algorithm.discrete` | 0.1.4 | Exact scalar hidden-line drawings of triangle meshes in orthographic views |
 | [`axiolid-inspect`](./crates/axiolid-inspect) | `algorithm.query` | 0.3.9 | Mesh queries: clearance, containment, ray casting, and genus |
 | [`axiolid-levelset`](./crates/axiolid-levelset) | `algorithm.sampled` | 0.3.2 | Level-set extraction: a closed manifold mesh from a sampled scalar field |
 | [`axiolid-linear-intersection`](./crates/axiolid-linear-intersection) | `algorithm.query` | 0.3.2 | Portable, deterministic intersections for linear geometry |

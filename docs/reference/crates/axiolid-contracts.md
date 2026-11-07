@@ -8,7 +8,7 @@ Common backend-neutral execution and diagnostic contracts.
 
 | | |
 | --- | --- |
-| Latest release | 0.3.6 (2026-11-03) |
+| Latest release | 0.3.7 (2026-11-07) |
 | crates.io | [`axiolid-contracts`](https://crates.io/crates/axiolid-contracts) |
 | Facade | [`axiolid`](./axiolid) feature `contracts` |
 | Layer | contracts (`contract.common`) |
@@ -31,15 +31,11 @@ provider selection or fallback, which belong to `axiolid-dispatch`.
 
 ## Changes
 
-Latest release, 0.3.6 (2026-11-03):
+Latest release, 0.3.7 (2026-11-07):
 
 ### Added
 
-- The package now ships `LICENSE` and `LICENSE-COMMERCIAL` (symlinks to the
-  repository root), so the licence texts travel with the archive (#358).
-- The `MESH_VISIBLE_FACES` capability identifier
-  (`org.axiolid.geometry.mesh-visible-faces.v1`) and the
-  `Operation::MeshVisibleFaces` diagnostic variant, for the visible face
-  region contract (ADR 0094, #383).
+- `DisplacementBound`, a finite non-negative distance bound that is `Eq`, for
+  the snap-rounding evidence of visible face regions (#410).
 
 Full history: [`crates/contracts/common/base/CHANGELOG.md`](https://github.com/axiolid/kernel/blob/main/crates/contracts/common/base/CHANGELOG.md)

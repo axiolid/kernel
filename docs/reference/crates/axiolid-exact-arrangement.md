@@ -8,7 +8,7 @@ Exact arrangement of straight segments on rational points, with face tracing.
 
 | | |
 | --- | --- |
-| Latest release | 0.1.0 (2026-11-03) |
+| Latest release | 0.1.1 (2026-11-07) |
 | crates.io | [`axiolid-exact-arrangement`](https://crates.io/crates/axiolid-exact-arrangement) |
 | Layer | algorithms (`algorithm.planar`) |
 | API documentation | [rustdoc](/api/rustdoc/axiolid_exact_arrangement/index.html) · [docs.rs](https://docs.rs/axiolid-exact-arrangement) |
@@ -29,13 +29,20 @@ It is the shared source of truth for those signs: the plane section of `axiolid-
 
 ## Changes
 
-Latest release, 0.1.0 (2026-11-03):
+Latest release, 0.1.1 (2026-11-07):
 
 ### Added
 
-- The exact point store, segment arrangement and ring tracing that the plane
-  section of `axiolid-reference` used (ADR 0093, #366), as a crate of their
-  own, so that the visible faces of `axiolid-hidden-lines` decide on the same
-  exact signs (ADR 0094, #383).
+- `snap_round`, `Snapped`, `ClassBoundary`, `HOT_POINT_SCRATCH_BYTES` and
+  `FRAGMENT_SCRATCH_BYTES` (ADR 0100, #410): snap rounding of straight,
+  pairwise interior-disjoint edges to the binary64 tensor grid. Each edge is
+  routed through the centre of every hot cell it meets, in order, decided
+  exactly (half-open cells, ties to even); the fragments are arranged and a
+  crossing left among them is refused. `Snapped` carries the displacement
+  bound in the maximum norm and the number of rerouted edges, and
+  `Snapped::class_boundary` nets a class's chain per fragment so that parts
+  of zero width cancel.
+- `check_winding`, which refuses a traced class that winds more than once
+  at some point, and `ExactPoints::frame_sign`.
 
 Full history: [`crates/algorithms/planar/exact-arrangement/CHANGELOG.md`](https://github.com/axiolid/kernel/blob/main/crates/algorithms/planar/exact-arrangement/CHANGELOG.md)
