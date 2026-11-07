@@ -230,6 +230,24 @@ fn validate(rings: &[Vec<Point2>], out: &Region, erosion: bool) {
     }
 }
 
+/// An FNV-1a digest of every vertex of the result, as `tests/minkowski.rs`:
+/// equal hashes before and after a change show the result unchanged bit
+/// for bit.
+fn digest(out: &Region) -> u64 {
+    let mut h = 0xcbf2_9ce4_8422_2325_u64;
+    for p in out.boundary_rings().iter().flat_map(|r| r.points.clone()) {
+        for b in
+            p.x.to_bits()
+                .to_le_bytes()
+                .into_iter()
+                .chain(p.y.to_bits().to_le_bytes())
+        {
+            h = (h ^ u64::from(b)).wrapping_mul(0x0100_0000_01b3);
+        }
+    }
+    (h ^ 0xff).wrapping_mul(0x0100_0000_01b3)
+}
+
 /// One case in this process: prints the median time and peak memory.
 fn case(spec: &str) {
     let parts: Vec<&str> = spec.split(':').collect();
@@ -309,14 +327,15 @@ fn case(spec: &str) {
         })
         .map_or_else(|| "n/a".to_string(), |kb| format!("{:.0}", kb / 1024.0));
     println!(
-        "{:<10} {:<8} {:>5} {:>7} {:>7} {:>9.3} {:>8}",
+        "{:<10} {:<8} {:>5} {:>7} {:>7} {:>9.3} {:>8}  {:016x}",
         parts[0],
         parts[1],
         rooms,
         corners,
         out_corners,
         times[RUNS / 2],
-        peak
+        peak,
+        digest(&out)
     );
 }
 
@@ -334,8 +353,8 @@ fn main() {
         })
         .unwrap_or_else(|| ROOMS.to_vec());
     println!(
-        "{:<10} {:<8} {:>5} {:>7} {:>7} {:>9} {:>8}",
-        "finish", "op", "rooms", "corners", "result", "median_s", "peak_mb"
+        "{:<10} {:<8} {:>5} {:>7} {:>7} {:>9} {:>8}  {:<16}",
+        "finish", "op", "rooms", "corners", "result", "median_s", "peak_mb", "hash"
     );
     let exe = std::env::current_exe().expect("this benchmark");
     for finish in ["pilasters", "ribs"] {

@@ -23,6 +23,7 @@ so it stays out of the release.
 | `benches/exact_openings.rs` | Cost per placed opening cut exactly from a placed wall, by openings already cut (#228) |
 | `benches/boundary_distance.rs` | Exact boundary distance between building elements that touch or cross, and a control pair apart (#273); the same pairs at georeferenced coordinates (450012, 5599993), and two regular 8- and 128-gon prisms 1.1 m apart at the origin and there (#318) |
 | `benches/minkowski_plan.rs` | Time and peak memory of the exact Minkowski sum and erosion of a floor's walls by a 0.9 m square, against corner count (#292) |
+| `benches/minkowski_furniture.rs` | Time, peak memory and result hash of the exact Minkowski sum and erosion of furniture outlines by a 1.7 m by 0.9 m rectangle, axis-aligned and turned, against corner count (#344) |
 | `benches/disc_erosion.rs` | Time and peak memory of the inner and outer disc erosions of a room whose walls carry 0.5 mm teeth or exactly collinear corners, at 102, 602 and 1,202 corners, beside the plain rectangle (#323); and of the erosions and dilations of the toothed room and of the same ring as a hole, at 2,402, 5,002 and 10,002 corners (#330) |
 | `benches/triangulate_points.rs` | Planar Delaunay triangulation of 1k to 16k random points, whose growth shows the adjacency is maintained locally (#268) |
 | `benches/triangulate_constraints.rs` | Planar triangulation of a jittered grid of 10k and 50k points with 4,950 and 12,432 zigzag breaklines, whose constraint recovery follows the edges a constraint crosses (#355) |
@@ -42,6 +43,7 @@ cargo bench -p axiolid-benchmark --bench scenario   # end to end
 cargo bench -p axiolid-benchmark --bench exact_openings  # exact placed openings
 cargo bench -p axiolid-benchmark --bench boundary_distance  # touching elements
 cargo bench -p axiolid-benchmark --bench minkowski_plan  # plan morphology, time and peak memory
+cargo bench -p axiolid-benchmark --bench minkowski_furniture  # furniture morphology, time, memory, hash
 cargo bench -p axiolid-benchmark --bench disc_erosion  # disc erosions and dilations of toothed walls, time and peak memory
 cargo bench -p axiolid-benchmark --bench triangulate_points  # planar triangulation against point count
 cargo bench -p axiolid-benchmark --bench triangulate_constraints  # constrained triangulation of breaklines, wall clock

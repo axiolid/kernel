@@ -110,6 +110,10 @@ name = "minkowski_plan"
 harness = false
 
 [[bench]]
+name = "minkowski_furniture"
+harness = false
+
+[[bench]]
 name = "disc_erosion"
 harness = false
 
