@@ -75,6 +75,7 @@ mod intrinsic;
 mod offset;
 mod position_table;
 mod positions;
+mod section;
 mod separation;
 
 pub use intrinsic::{intrinsic_chord_bound2, intrinsic_chord_bound3, intrinsic_derivative_bounds2};

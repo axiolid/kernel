@@ -20,6 +20,8 @@
 //! fold, a box too wide, a crease of a B-spline) has none.
 
 use axiolid_core::{Point3, Scalar, Vec3};
+use axiolid_curve::Carrier;
+use axiolid_surface::Surface;
 
 use super::interval::Iv;
 use super::{ordered, SurfaceBoundOracle};
@@ -59,6 +61,17 @@ impl SurfaceBoundOracle<'_> {
         };
         let finite = point.is_finite() && du.is_finite() && dv.is_finite();
         finite.then_some((point, du, dv))
+    }
+
+    /// The parameter domain of a B-spline surface, `None` for the
+    /// unbounded analytic ones.
+    pub(crate) fn domain(&self) -> Option<((Scalar, Scalar), (Scalar, Scalar))> {
+        use super::Source;
+        match self.source {
+            Source::Carrier(Carrier::Spline(b)) => b.domain(),
+            Source::Surface(Surface::BSpline(b)) => b.domain(),
+            _ => None,
+        }
     }
 
     /// The certified separation over the box `[u.0, u.1] x [v.0, v.1]`, or

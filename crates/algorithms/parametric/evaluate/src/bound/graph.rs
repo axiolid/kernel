@@ -35,7 +35,7 @@
 //! Every enclosure is outward-rounded: each interval operation widens its
 //! result by one ulp each way, and the trigonometric ranges by a few.
 
-use axiolid_core::Scalar;
+use axiolid_core::{Point2, Scalar};
 use axiolid_curve::{AngleGraph2, QuadraticGraph2, Trig2};
 
 use super::interval::{cos_iv, sin_iv, Iv};
@@ -245,6 +245,57 @@ pub(crate) fn angle_chord_bound(graph: &AngleGraph2, lo: Scalar, hi: Scalar) -> 
     certify(graph, lo, hi)
 }
 
+/// A plane curve's box and the suprema of its derivatives over a span, per
+/// axis: the input of a bound of the curve read through a surface (#414).
+#[derive(Debug, Clone, Copy)]
+pub(super) struct PlaneBounds {
+    /// Lower corner of a box holding the curve over the span.
+    pub lo: Point2,
+    /// Upper corner of that box.
+    pub hi: Point2,
+    /// `sup |q'|` per axis.
+    pub first: [Scalar; 2],
+    /// `sup |q''|` per axis.
+    pub second: [Scalar; 2],
+}
+
+/// The bounds of the quadratic graph `(t, w(t))` over one span `[lo, hi]`,
+/// certified from the span's own box, or `None` as for
+/// [`quadratic_chord_bound`].
+pub(super) fn quadratic_bounds(
+    graph: &QuadraticGraph2,
+    lo: Scalar,
+    hi: Scalar,
+) -> Option<PlaneBounds> {
+    let e = piece_checked(graph, lo, hi)?;
+    Some(PlaneBounds {
+        lo: Point2::new(lo, e.heights.lo),
+        hi: Point2::new(hi, e.heights.hi),
+        first: [1.0, e.slope],
+        second: [0.0, e.bend],
+    })
+}
+
+/// The bounds of the angle graph `(w(t), t)` over one span; see
+/// [`quadratic_bounds`].
+pub(super) fn angle_bounds(graph: &AngleGraph2, lo: Scalar, hi: Scalar) -> Option<PlaneBounds> {
+    let e = piece_checked(graph, lo, hi)?;
+    Some(PlaneBounds {
+        lo: Point2::new(e.heights.lo, lo),
+        hi: Point2::new(e.heights.hi, hi),
+        first: [e.slope, 1.0],
+        second: [e.bend, 0.0],
+    })
+}
+
+/// One piece's enclosure of a finite field over a proper span.
+fn piece_checked<F: Field>(field: &F, lo: Scalar, hi: Scalar) -> Option<Enclosure> {
+    if !(lo.is_finite() && hi.is_finite() && lo < hi && field.is_finite()) {
+        return None;
+    }
+    piece_enclosure(field, lo, hi)
+}
+
 /// The finest split of a span into equal pieces that is tried.
 const MAX_PIECES: usize = 64;
 
@@ -291,10 +342,12 @@ fn rounding(a: Scalar, b: Scalar) -> Scalar {
     64.0 * Scalar::EPSILON * a.abs().max(b.abs()).max(1.0)
 }
 
-/// A certified piece: `sup |w''|`, and how far each computed end is from its
-/// root.
+/// A certified piece: the box of heights holding the graph, `sup |w'|` and
+/// `sup |w''|` over it, and how far each computed end is from its root.
 #[derive(Debug, Clone, Copy)]
 struct Enclosure {
+    heights: Iv,
+    slope: Scalar,
     bend: Scalar,
     start: Scalar,
     end: Scalar,
@@ -382,6 +435,8 @@ fn piece_enclosure<F: Field>(field: &F, lo: Scalar, hi: Scalar) -> Option<Enclos
                 .add(Iv::point(p.ww.mag()).mul(l).mul(l));
             let bend = (numerator.hi / floor).next_up();
             return bend.is_finite().then_some(Enclosure {
+                heights,
+                slope: lipschitz,
                 bend,
                 start: d_lo,
                 end: d_hi,
