@@ -12,7 +12,7 @@ use axiolid::contracts::{ExecutionOptions, GeomError};
 use axiolid::core::{Aabb2, Frame3, Point2, Vec3};
 use axiolid::mesh_hidden_lines::{
     EdgeKind, EdgeSelection, FaceGroup, HiddenLineLimits, HiddenLineMesh, HiddenLineRequest,
-    MeshId, MeshRole, OrthographicView, Visibility,
+    MeshId, MeshRole, View, Visibility,
 };
 
 use super::*;
@@ -223,7 +223,7 @@ fn vec3(value: [f64; 3]) -> Vec3 {
     Vec3::new(value[0], value[1], value[2])
 }
 
-fn read_view(view: &AxiolidView) -> Result<OrthographicView, Refusal> {
+fn read_view(view: &AxiolidView) -> Result<View, Refusal> {
     if view.projection != AXIOLID_PROJECTION_ORTHOGRAPHIC {
         return Err(Refusal::invalid("unknown view projection"));
     }
@@ -237,7 +237,7 @@ fn read_view(view: &AxiolidView) -> Result<OrthographicView, Refusal> {
     finite(&[view.near, view.far], "view depth range must be finite")?;
     let has_near = flag(view.has_near, "has_near must be 0 or 1")?;
     let has_far = flag(view.has_far, "has_far must be 0 or 1")?;
-    let mut result = OrthographicView::new(Frame3 {
+    let mut result = View::new(Frame3 {
         origin: vec3(frame.origin),
         x: vec3(frame.x),
         y: vec3(frame.y),
