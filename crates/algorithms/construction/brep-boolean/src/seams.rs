@@ -223,7 +223,7 @@ pub(crate) fn with_seams(
                     u.interval = Interval::new(u.interval.end, u.interval.start);
                 }
             }
-            let winding = unwrap(&mut uses, pu, pv)?;
+            let winding = unwrap(surface, &mut uses, pu, pv)?;
             any |= winding != Vec2::ZERO;
             loops.push((uses, winding, bound.outer));
         }
@@ -240,10 +240,29 @@ struct Plan {
     loops: Vec<(Vec<Use>, Vec2, bool)>,
 }
 
+/// Whether `p` is a pole or apex of `surface`: the parameter u does not
+/// move the point there (the test `split::close_poles` uses).
+fn at_pole(surface: &Surface, p: Point2) -> bool {
+    match partials(surface, p.x, p.y) {
+        Ok((su, sv)) => su.length() <= 1e-9 * (1.0 + sv.length()),
+        Err(_) => false,
+    }
+}
+
 /// Move each use by whole periods so the loop runs on continuously in
 /// parameters (stepping over poles), and return the whole periods it gains
 /// round the loop: zero for a loop that closes.
-fn unwrap(uses: &mut [Use], pu: bool, pv: bool) -> Result<Vec2, BooleanError> {
+///
+/// A step that ends at a pole or apex is not a turn: every u names the same
+/// point there, so the jump in u across it says nothing about winding. It
+/// gets no u shift, and the loop's closing difference gets no winding in u
+/// when the loop ends at one (#379).
+fn unwrap(
+    surface: &Surface,
+    uses: &mut [Use],
+    pu: bool,
+    pv: bool,
+) -> Result<Vec2, BooleanError> {
     let snap = |x: Scalar, periodic: bool| {
         if periodic {
             (x / TAU).round() * TAU
@@ -255,11 +274,13 @@ fn unwrap(uses: &mut [Use], pu: bool, pv: bool) -> Result<Vec2, BooleanError> {
         let end = uses[k - 1].at(false)?;
         let start = uses[k].at(true)?;
         let d = end - start;
-        uses[k].shift += Vec2::new(snap(d.x, pu), snap(d.y, pv));
+        let u = if at_pole(surface, end) { 0.0 } else { snap(d.x, pu) };
+        uses[k].shift += Vec2::new(u, snap(d.y, pv));
     }
     let (first, last) = (uses[0].at(true)?, uses[uses.len() - 1].at(false)?);
     let d = last - first;
-    Ok(Vec2::new(snap(d.x, pu), snap(d.y, pv)))
+    let u = if at_pole(surface, last) { 0.0 } else { snap(d.x, pu) };
+    Ok(Vec2::new(u, snap(d.y, pv)))
 }
 
 /// A rebuilt copy of `brep` with seams where `plans` asks.
@@ -420,7 +441,7 @@ fn rebuild(
             rotated.extend(uses[..start].iter().cloned());
             // Re-unwrap from the new start so the path starts at the seam.
             let (pu2, pv2) = periods(surface);
-            unwrap(&mut rotated, pu2, pv2)?;
+            unwrap(surface, &mut rotated, pu2, pv2)?;
             let first = rotated[0].at(true)?;
             let to_seam = seam - wound(first);
             let base = make((to_seam / TAU).round() * TAU, 0.0);

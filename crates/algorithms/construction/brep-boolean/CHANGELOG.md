@@ -32,7 +32,10 @@ caret rule for `0.x` versions.
   `Tolerance::ZERO` the union's volume was 1.8e-8 off. A window end never
   replaces a feature cut now; the corners are the corbel's own vertices bit
   for bit and every volume is exact.
-
+- A loop reaching a pole or apex along a seam was read as winding and given
+  a second seam, so the boolean was refused with `TangentSplit` or
+  `Assembly`; a partial revolution's apex included (#379). A step over a
+  pole or apex is no longer counted as a turn.
 - Unions far from the origin sew their kept faces and classify points near
   a face boundary (#418, #419): operands whose common vertex box lies four
   or more diagonals from the origin on an axis are recentred on that axis
