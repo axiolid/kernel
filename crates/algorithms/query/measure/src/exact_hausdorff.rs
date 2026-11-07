@@ -14,8 +14,8 @@
 //!
 //! - `lower` is `d(p, dB)` bounded below for a point `p` certainly on `dA`
 //!   (an edge point, or a surface point at parameters its face's domain is
-//!   certified to contain), less `p`'s evaluation rounding (#439), by the same branch and bound as
-//!   [`crate::boundary_distance`] with one side shrunk to the point.
+//!   certified to contain), less `p`'s evaluation rounding (#439), by the
+//!   same branch and bound as [`crate::boundary_distance`] with one side shrunk to the point.
 //! - `upper` bounds `d(p, dB)` for every point of `dA`. The faces of `A` are
 //!   covered by patches of their parameter domains (a patch is dropped only
 //!   when certified outside its face), and each patch's bound is the better

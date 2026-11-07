@@ -71,11 +71,12 @@
 //! place, each evaluated on its own boundary as any witness is, the face's
 //! certified by the face's domain. Two such points no farther apart than
 //! the rounding margin (128 ulps of the points' magnitudes: about `6e-14`
-//! at unit scale) end the search with
-//! `[0, d']`, `d'` their distance plus their rounding (#439), they being the witnesses: no lower bound can
+//! at unit scale) end the search with `[0, d']`, `d'` their distance plus
+//! their rounding (#439), they being the witnesses: no lower bound can
 //! rise above zero there, so this is the interval the search would only
 //! converge to. Two boxes sharing a face, or crossing, stop within a few
-//! steps. A gap wider than that margin is never taken for a touch, and boundaries that are apart measure exactly as
+//! steps. A gap wider than that margin is never taken for a touch, and
+//! boundaries that are apart measure exactly as
 //! before. Curved faces and circle or ellipse edges show no touch this way
 //! and are refined as before.
 //!
@@ -152,7 +153,9 @@
 //! `((8L + 0.5) rho + 0.5) eps |P|max` per coordinate (`L = p_u + p_v`,
 //! `rho = w_max / w_min`). Times `sqrt 3` that is below
 //! `16 (L + 1) rho eps |P|max`, which is `POINT eps M` for the witness `M`
-//! of the table. A non-positive weight is refused.
+//! of the table. This is first order in `L rho eps` (the division is by the
+//! computed weight sum, off by up to `4 L eps w_max`), so a weight ratio
+//! above `1 / (64 L eps)` is refused, as is a non-positive weight.
 //!
 //! The `RATIO` guards of the pair and point bounds and a point query's own
 //! pad `PROJECTION eps |p|` cover rounding that another margin covers too
@@ -311,9 +314,9 @@ pub fn boundary_distance(
 /// discs. It is zero when the shadows overlap, and unlike the distance in
 /// space it is zero for a body standing inside another's footprint.
 /// `point_a` and `point_b` lie within rounding of the boundaries, their
-/// projections at most `upper` apart. When two planar faces show the shadows overlap over a
-/// patch of positive area, the interval is `[0, 0]` and the points project
-/// into that patch (see [`plan_overlap`]).
+/// projections at most `upper` apart. When two planar faces show the
+/// shadows overlap over a patch of positive area, the interval is `[0, 0]`
+/// and the points project into that patch (see [`plan_overlap`]).
 ///
 /// # Errors
 ///
@@ -1155,7 +1158,14 @@ fn witness_scale(surface: &Surface, lo: Point2, hi: Point2) -> Result<Scalar, Ex
             hi / lo
         }
     };
-    let levels = Scalar::from(spline.u_degree) + Scalar::from(spline.v_degree) + 1.0;
+    let degrees = Scalar::from(spline.u_degree) + Scalar::from(spline.v_degree);
+    // The derivation in the module docs is first order in `L rho eps`.
+    if ratio > 1.0 / (64.0 * degrees.max(1.0) * Scalar::EPSILON) {
+        return Err(ExactMeasureError::NonPlanarFace(
+            "extreme weight ratio B-spline",
+        ));
+    }
+    let levels = degrees + 1.0;
     let scale = levels * ratio * largest;
     if scale.is_finite() {
         Ok(scale)
@@ -1709,7 +1719,12 @@ fn search_with(
             }
         }
         let upper = best.map_or(Scalar::INFINITY, |(d, ..)| witnessed_upper(d, error));
-        if upper.is_finite() && (bound >= upper || done(bound, upper, floor(scale, upper) + excess))
+        // A bound at the computed distance ends the search whatever the
+        // witnesses' rounding adds to the reported upper: stopping is sound,
+        // and coincident witnesses must not refine to the step budget.
+        if best.is_some_and(|(d, ..)| bound >= d)
+            || (upper.is_finite()
+                && (bound >= upper || done(bound, upper, floor(scale, upper) + excess)))
         {
             break;
         }
@@ -2106,6 +2121,62 @@ mod tests {
     /// axes so that the witnesses round across the gap (#439): the upper
     /// bound covers the distance, and a limit just below it is never
     /// `Below`.
+    /// Coincident witnesses (distance 0) must not defeat the raw short
+    /// circuit: a plan search that stops on a positive lower bound ends at
+    /// once for side-by-side boxes, instead of refining to the step cap.
+    #[test]
+    fn side_by_side_boxes_in_plan_stop_at_once() {
+        use super::fixtures::cuboid;
+        use axiolid_core::Tolerance;
+        let a = cuboid(Point3::ZERO, Vec3::X, Vec3::Y, Vec3::Z);
+        let b = cuboid(Point3::new(1.0, 0.0, 0.0), Vec3::X, Vec3::Y, Vec3::Z);
+        let found = super::search(
+            &a,
+            &b,
+            Tolerance::METRE,
+            Metric::Plan,
+            &mut |lower, _, _| lower > 0.0,
+        )
+        .expect("bounded");
+        assert!(found.steps <= 10, "{} steps", found.steps);
+    }
+
+    #[test]
+    fn an_extreme_weight_ratio_witness_scale_is_refused() {
+        use crate::exact::ExactMeasureError;
+        use axiolid_curve::{BSplineSurface, KnotSpec};
+        let net = |high: f64| {
+            let mut weights = vec![vec![1.0; 2]; 2];
+            weights[1][1] = high;
+            Surface::BSpline(BSplineSurface {
+                u_degree: 1,
+                v_degree: 1,
+                control_points: vec![
+                    vec![Point3::new(0.0, 0.0, 0.0), Point3::new(0.0, 1.0, 0.0)],
+                    vec![Point3::new(1.0, 0.0, 0.0), Point3::new(1.0, 1.0, 0.0)],
+                ],
+                u_knots: vec![0.0, 1.0],
+                u_multiplicities: vec![2, 2],
+                v_knots: vec![0.0, 1.0],
+                v_multiplicities: vec![2, 2],
+                weights: Some(weights),
+                u_closed: false,
+                v_closed: false,
+                knot_spec: KnotSpec::Unspecified,
+                self_intersect: None,
+            })
+        };
+        let (lo, hi) = (Point2::new(0.0, 0.0), Point2::new(1.0, 1.0));
+        assert!(witness_scale(&net(1e6), lo, hi).is_ok());
+        // 1 / (64 * 2 * eps) is about 3.5e13.
+        assert!(matches!(
+            witness_scale(&net(1e14), lo, hi),
+            Err(ExactMeasureError::NonPlanarFace(
+                "extreme weight ratio B-spline"
+            ))
+        ));
+    }
+
     #[test]
     fn a_far_clearance_is_never_below_a_limit_the_distance_reaches() {
         use super::fixtures::cuboid;
@@ -2236,7 +2307,6 @@ mod tests {
         }
         // `here` carries the rounding of the shift itself, half an ulp a coordinate.
         assert!(worst <= error, "{worst} > {error}");
-        eprintln!("worst {worst:e} error {error:e}");
     }
 
     #[test]

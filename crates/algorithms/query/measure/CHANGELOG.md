@@ -26,12 +26,14 @@ caret rule for `0.x` versions.
   `1e-9` past the distance), and a point query's upper adds its nearest
   point's (#439).
 - B-spline witnesses are padded by the de Boor evaluation's rounding, a
-  bound that counts the degrees and the weights' spread (#439).
+  bound that counts the degrees and the weights' spread (#439). A B-spline
+  face whose weight ratio exceeds `1 / (64 L eps)` (`L` the sum of its
+  degrees, about `3.5e13` for a bilinear patch) is refused with
+  `ExactMeasureError::NonPlanarFace`, since that bound is first order.
 - The exact Hausdorff upper bound about a B-spline patch's witness adds the
   distance from the witness to the centre of the patch's enclosing sphere
   (the control net's box midpoint), which it left out and so could report an
   upper bound below the distance (#459).
-
 - The exact boundary distance and Hausdorff distance carry rounding margins
   derived from the magnitudes their numbers are computed from, in ulps of the
   coordinates, instead of `1e-12` of them. At georeferenced coordinates

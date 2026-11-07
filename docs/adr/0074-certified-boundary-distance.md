@@ -189,6 +189,12 @@ weight.
   side.
 - A point query's upper adds its target's `W`; the one-sided Hausdorff lower
   bound subtracts the source witness's `POINT eps W`.
+- A B-spline patch's Hausdorff contribution is bounded about its witness,
+  not its enclosing sphere's centre (the control net's box midpoint): the
+  patch bound adds `|w - centre| (1 + RATIO eps)`, zero for analytic patches
+  whose centre is their witness (#459).
+- The B-spline witness bound is first order in `L rho eps`, so a weight ratio
+  above `1 / (64 L eps)` is refused as a typed error.
 - The bound is derived from the current `bspline_point` and lives beside the
   analytic table, as the #318 amendment decided. Its long-term owner is
   axiolid-evaluate (#460).

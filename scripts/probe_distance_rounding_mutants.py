@@ -88,7 +88,7 @@ MUTANTS = [
      "    (found.lower - error).max(0.0)",
      "    found.lower.max(0.0)", UNIT),
     ("a B-spline witness's M without its de Boor levels", D,
-     "    let levels = Scalar::from(spline.u_degree) + Scalar::from(spline.v_degree) + 1.0;",
+     "    let levels = degrees + 1.0;",
      "    let levels = 1.0;", UNIT),
     ("a B-spline witness's M without its weights' spread", D,
      "            hi / lo\n",
@@ -96,6 +96,12 @@ MUTANTS = [
     ("a B-spline patch's Hausdorff bound about its centre, not its witness", H,
      "    (w - element.centre).length() * (1.0 + RATIO_EPSILONS * Scalar::EPSILON)",
      "    0.0 * (w - element.centre).length()", UNIT),
+    ("the search loses its stop at the computed distance", D,
+     "        if best.is_some_and(|(d, ..)| bound >= d)\n            || (upper.is_finite()",
+     "        if false\n            || (upper.is_finite()", UNIT),
+    ("a B-spline witness's M accepts an extreme weight ratio", D,
+     "    if ratio > 1.0 / (64.0 * degrees.max(1.0) * Scalar::EPSILON) {",
+     "    if false {", UNIT),
 ]
 
 probe_lib.main(MUTANTS, timeout=1200)
