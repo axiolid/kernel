@@ -52,6 +52,7 @@
 //! motion that keeps the vertical axis keeps that form, and re-expressing
 //! the law is not implemented. An unknown support family is refused too.
 
+use std::cell::Cell;
 use std::f64::consts::TAU;
 use std::fmt;
 
@@ -103,10 +104,14 @@ impl fmt::Display for TransformError {
 impl std::error::Error for TransformError {}
 
 /// A validated rigid motion.
-#[derive(Debug, Clone, Copy)]
+#[derive(Debug, Clone)]
 struct Rigid {
     transform: Transform3,
     mirror: bool,
+    /// Set when this motion is a pure translation whose every mapped point
+    /// is asked to be exact (#418): the first point that rounds clears
+    /// `lossless`.
+    lossless: Option<Cell<bool>>,
 }
 
 impl Rigid {
@@ -127,11 +132,24 @@ impl Rigid {
         Ok(Self {
             transform: *transform,
             mirror: m.determinant() < 0.0,
+            lossless: None,
         })
     }
 
     fn point(&self, p: Vec3) -> Vec3 {
-        self.transform.transform_point3(p)
+        let mapped = self.transform.transform_point3(p);
+        if let Some(lossless) = &self.lossless {
+            let t = self.transform.translation;
+            let sums = [
+                (p.x, t.x, mapped.x),
+                (p.y, t.y, mapped.y),
+                (p.z, t.z, mapped.z),
+            ];
+            if !sums.iter().all(|&(a, b, sum)| exact_sum(a, b, sum)) {
+                lossless.set(false);
+            }
+        }
+        mapped
     }
 
     fn vector(&self, v: Vec3) -> Vec3 {
@@ -169,6 +187,17 @@ impl Rigid {
             Ok(())
         }
     }
+}
+
+/// Whether `sum` is exactly `a + b`: `a + b` rounds to it and the two-sum
+/// error (Knuth) is zero.
+fn exact_sum(a: Scalar, b: Scalar, sum: Scalar) -> bool {
+    if sum != a + b || !sum.is_finite() {
+        return false;
+    }
+    let virtual_b = sum - a;
+    let error = (a - (sum - virtual_b)) + (b - virtual_b);
+    error == 0.0
 }
 
 /// How a transformed curve's parameter relates to the original's.
@@ -242,20 +271,48 @@ impl ExactBRep {
     ///   a line, circle, ellipse, polyline, B-spline or sinusoid;
     /// - a pcurve shared by faces that would need different reflections.
     pub fn transformed(&self, transform: &Transform3) -> Result<ExactBRep, TransformError> {
-        let rigid = Rigid::new(transform)?;
+        self.moved(&Rigid::new(transform)?)
+    }
+
+    /// This B-rep translated by `offset`, or `None` where that is not
+    /// exact (#418).
+    ///
+    /// The translation is [`ExactBRep::transformed`] by a pure translation,
+    /// accepted only if every vertex position, frame origin, curve origin and
+    /// control point it maps is the sum of the coordinate and the offset
+    /// with no rounding at all. The result is then the exact translate of
+    /// this solid, and translating it back by `-offset` returns these
+    /// coordinates.
+    ///
+    /// # Errors
+    ///
+    /// [`TransformError::NonFinite`] for a non-finite offset, and the
+    /// [`TransformError::Unsupported`] cases of [`ExactBRep::transformed`]
+    /// that do not depend on a reflection.
+    pub fn translated_exactly(&self, offset: Vec3) -> Result<Option<ExactBRep>, TransformError> {
+        let mut rigid = Rigid::new(&Transform3::from_translation(offset))?;
+        rigid.lossless = Some(Cell::new(true));
+        let moved = self.moved(&rigid)?;
+        Ok(rigid
+            .lossless
+            .is_some_and(|lossless| lossless.get())
+            .then_some(moved))
+    }
+
+    fn moved(&self, rigid: &Rigid) -> Result<ExactBRep, TransformError> {
         let source = &self.topology;
 
         let mut curves3 = Vec::with_capacity(self.curves3.len());
         let mut curve_reparam = Vec::with_capacity(self.curves3.len());
         for curve in &self.curves3 {
-            let (curve, reparam) = curve3(curve, &rigid)?;
+            let (curve, reparam) = curve3(curve, rigid)?;
             curves3.push(curve);
             curve_reparam.push(reparam);
         }
         let mut surfaces = Vec::with_capacity(self.surfaces.len());
         let mut axial = Vec::with_capacity(self.surfaces.len());
         for surface in &self.surfaces {
-            let (surface, reflected) = surface_of(surface, &rigid)?;
+            let (surface, reflected) = surface_of(surface, rigid)?;
             surfaces.push(surface);
             axial.push(reflected);
         }
@@ -294,7 +351,7 @@ impl ExactBRep {
         let mut curves2 = Vec::with_capacity(self.curves2.len());
         let mut pcurve_reparam = Vec::with_capacity(self.curves2.len());
         for (index, curve) in self.curves2.iter().enumerate() {
-            let (curve, reparam) = curve2(curve, &rigid, pcurve_reflect[index].unwrap_or(false))?;
+            let (curve, reparam) = curve2(curve, rigid, pcurve_reflect[index].unwrap_or(false))?;
             curves2.push(curve);
             pcurve_reparam.push(reparam);
         }

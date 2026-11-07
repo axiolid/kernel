@@ -355,3 +355,34 @@ fn a_banked_alignment_curve_is_refused_by_name() {
     assert!(matches!(error, TransformError::Unsupported(_)));
     assert!(error.to_string().contains("banked"));
 }
+
+#[test]
+fn a_translation_is_kept_only_where_every_coordinate_moves_exactly() {
+    let sheet = plane_sheet(line2());
+    // Dyadic coordinates and a dyadic offset: every sum is exact.
+    let by = Vec3::new(-0.5, 4.0, -1.0);
+    let moved = sheet
+        .translated_exactly(by)
+        .unwrap()
+        .expect("an exact translation");
+    let back = moved.translated_exactly(-by).unwrap().expect("exact back");
+    assert_eq!(back, sheet);
+    assert_eq!(
+        moved,
+        sheet
+            .transformed(&Transform3::from_translation(by))
+            .unwrap()
+    );
+    // 2^60 swallows the unit coordinates: the sum rounds, so no copy.
+    let far = Vec3::new(2f64.powi(60), 0.0, 0.0);
+    assert!(sheet.translated_exactly(far).unwrap().is_none());
+    // One third is not dyadic: 1 + 1/3 rounds.
+    assert!(sheet
+        .translated_exactly(Vec3::new(1.0 / 3.0, 0.0, 0.0))
+        .unwrap()
+        .is_none());
+    assert_eq!(
+        sheet.translated_exactly(Vec3::new(f64::NAN, 0.0, 0.0)),
+        Err(TransformError::NonFinite)
+    );
+}
