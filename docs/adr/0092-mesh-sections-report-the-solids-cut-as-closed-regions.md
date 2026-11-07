@@ -257,12 +257,19 @@ no tolerance:
    corners that touch give two regions; a hole touching its outer ring is a
    hole that touches it; a hole touching its outer ring twice leaves two
    regions. The result does not depend on where a walk starts.
-3. **Still refused by name.** `REFUSED_PINCHED_CUT_REGION` for two edges along
-   one ray and for a chain through the pinch that the rings would part
-   (chains are not split at a pinch, ADR 0091);
-   `REFUSED_CROSSING_CUT_RINGS` for edges that do not alternate (the material
-   overlaps); a zero-length edge is `Degenerate`. A `Both` ring that repeats a
-   vertex stays refused, because it must equal a cut region bit for bit.
+3. **Containment of a ring that touches another at every corner.** With
+   the split, an island inside a hole can touch it at all its corners, so no
+   vertex is strictly inside or outside. The nesting then decides on the
+   exact midpoint of an inner edge that is off the outer boundary (homogeneous
+   `(x1 w2 + x2 w1, y1 w2 + y2 w1, 2 w1 w2)`). Rings that coincide stay
+   refused.
+4. **Still refused by name.** `REFUSED_PINCHED_CUT_REGION` for an edge in and
+   an edge out along one ray and for a chain through the pinch that the rings
+   would part (chains are not split at a pinch, ADR 0091);
+   `REFUSED_CROSSING_CUT_RINGS` for edges that do not alternate and for two
+   edges of one direction along one ray (the material overlaps); a
+   zero-length edge is `Degenerate`. A `Both` ring that repeats a vertex stays
+   refused, because it must equal a cut region bit for bit.
 
 The conformance fixtures are `RegionsOrRefused`: a provider may still refuse
 a pinch by name.
