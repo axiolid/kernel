@@ -40,14 +40,15 @@
 //! lower at `Tolerance::ZERO`, while a contour open by more than its own
 //! rounding is still refused there. The check only decides WHETHER a ring
 //! is built, never what it is: a ring that lowered before is bit-identical,
-//! except at a quarter turn (#379), below.
+//! except at the vertices of an arc that land on a quarter turn (#379), below.
 //!
 //! # Quarter turns evaluate exactly (#379)
 //!
 //! At a quadrant parameter an arc's `cos` or `sin` is the rounding of the
 //! parameter, not zero: for every form a producer writes (`FRAC_PI_2`,
 //! `-PI / 2`, `1.5 * PI`, `PI + FRAC_PI_2`, `TAU - FRAC_PI_2`, ...)
-//! `|cos t|` is about `0.18 * t * EPSILON`. That is the evaluation's own
+//! `|cos t|` is `0.18 * t * EPSILON` at the quadrants of a turn or two and up
+//! to `0.55 * t * EPSILON` (at `20.5 * PI`). That is the evaluation's own
 //! error, but it decides whether an arc's end lies on a revolution axis
 //! through its circle's centre, which the exact revolution tests with an
 //! exact sign. A parameter within `QUADRANT_ROUNDING * max(1, |t|)` of a
@@ -55,7 +56,11 @@
 //! This moves a point by less than the error of the point itself, and
 //! names no tolerance: a parameter further from the quadrant, by 1e-12
 //! say, is its own angle. It is a rounding gate like the joint rule above,
-//! never reported.
+//! never reported. The vertices it moves are the arc's ends and any split
+//! vertex (a sweep of a half turn or more is split) that lands on a quadrant;
+//! the joint rule reads the arc's radius times `max(1, |t|)` in its scale
+//! (`endpoint_scale`), since the snap and an unsnapped `sin_cos` of a large
+//! parameter differ by that much.
 
 use axiolid_contracts::{GeomError, GeomResult, Operation};
 use axiolid_core::{Point2, Scalar, Tolerance};
@@ -249,7 +254,11 @@ pub(crate) fn endpoint_scale(segment: &ProfileSegment, at_end: bool, point: Poin
     };
     match &segment.curve {
         Curve2::Line(line) => line.origin.length() + line.direction.length() * t.abs(),
-        Curve2::Circle(circle) => circle.frame.origin.length() + circle.radius.abs(),
+        // The parameter's own rounding moves `sin` and `cos` by an epsilon of
+        // `t`, which the radius multiplies.
+        Curve2::Circle(circle) => {
+            circle.frame.origin.length() + circle.radius.abs() * t.abs().max(1.0)
+        }
         _ => point.x.abs() + point.y.abs(),
     }
 }
@@ -291,12 +300,15 @@ fn lower_segment(segment: &ProfileSegment, index: usize) -> Result<LoweredSegmen
         }
         Curve2::Circle(circle) => {
             let (vertices, end) = lower_arc(circle, from, to, index)?;
-            let scale = circle.frame.origin.length() + circle.radius.abs();
+            // The parameter's own rounding moves `sin` and `cos` by an epsilon
+            // of `t`, which the radius multiplies (see `endpoint_scale`).
+            let scale =
+                |t: Scalar| circle.frame.origin.length() + circle.radius.abs() * t.abs().max(1.0);
             Ok(LoweredSegment {
                 vertices,
                 end,
-                start_scale: scale,
-                end_scale: scale,
+                start_scale: scale(from),
+                end_scale: scale(to),
             })
         }
         Curve2::Polyline(polyline) => lower_polyline(polyline, from, to, index),
@@ -469,8 +481,8 @@ fn lower_arc(
 }
 
 /// The rounding of an arc parameter's `sin` and `cos` at a quarter turn, in
-/// machine epsilons of `max(1, |t|)`: measured `0.18` for every form a
-/// producer writes, so `2` leaves a margin of ten.
+/// machine epsilons of `max(1, |t|)`: measured `0.18` to `0.55` for every
+/// form tried (`20.5 * PI` is the worst), so `2` leaves a margin of three.
 pub(crate) const QUADRANT_ROUNDING: Scalar = 2.0 * Scalar::EPSILON;
 
 /// `(sin t, cos t)`, with the one that rounds to zero at a quarter turn
@@ -636,6 +648,27 @@ mod tests {
         ];
         for (t, exact) in quarters {
             assert_eq!(quadrant_sin_cos(t), exact, "{t}");
+        }
+    }
+
+    #[test]
+    fn a_large_arc_closed_by_a_line_between_its_raw_ends_lowers_at_zero() {
+        // The snap moves the arc's ends by the rounding of the parameter,
+        // which the joint check at `Tolerance::ZERO` must read.
+        use core::f64::consts::PI;
+        for t in [19.5, 64.5, 200.5] {
+            let (from, to) = (t * PI, (t + 1.0) * PI);
+            let (a, b) = (from.sin_cos(), to.sin_cos());
+            let close = ProfileSegment {
+                curve: Curve2::Line(Line2 {
+                    origin: Point2::new(b.1, b.0),
+                    direction: Point2::new(a.1, a.0) - Point2::new(b.1, b.0),
+                }),
+                domain: Interval::UNIT,
+                same_sense: true,
+            };
+            let contour = Contour::new(vec![arc(from, to), close]);
+            lower_contour(&contour, Tolerance::ZERO).unwrap_or_else(|e| panic!("{t}: {e:?}"));
         }
     }
 

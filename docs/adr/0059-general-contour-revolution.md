@@ -99,7 +99,11 @@ a plane) or any other straight edge (which sweeps a cone up to its apex). A
 vertex with no axis edge (a pinch point, a non-manifold vertex) is refused by
 name; the mesh path refuses it too (#363). A straight edge ending on the axis
 within the linear tolerance of perpendicular to it but not exactly is refused
-by name: a cone of rise 1e-12 builds but fails the geometric audit by 6e-5.
+by name: a cone of rise 1e-12 builds but fails the geometric audit by 6e-5. The
+refusal is the representation's own: a cone is built only when `rise * tan(angle)`
+reproduces the radius change to the tolerance or to eight machine epsilons of
+the largest coordinate (the round trip through `atan` and `tan`), which also
+refuses a near-flat frustum that touches no axis at `Tolerance::ZERO`.
 
 **An apex has no degenerate edge.** The B-rep has no degenerate edges. An
 apex is a vertex, and the wall's loop runs
@@ -118,7 +122,9 @@ such a face by name (#463).
 
 **The apex frame.** A cone with an end on the axis is framed at its apex with
 radius zero, as the partial-turn path does, so the apex is at v = 0 exactly.
-A cone between two circles keeps its frame at its start, bit for bit.
+A cone between two circles keeps its frame at its start with the same
+parameters; the pcurves of every revolved wall's loop are added in another
+order, with the same geometry.
 
 **Nesting.** A piece's range along the axis, which decides which shell is the
 void of which, takes the heights of both stations of each of its faces, not
@@ -136,13 +142,16 @@ is placed exactly on the axis at the height equidistant from both arc ends,
 latitude, `+-pi/2` at the poles. The gate is a rounding gate, not a
 tolerance: no bulge encodes a quarter arc exactly (`tan(pi / 8)` is
 irrational), so the centre computed from a true sphere's arc is about
-`1e-16 R` off the axis; measured at most a sixteenth of the gate in the worst
-case tried (R 0.37, axis at 12.5). The only alternative to the gate is a
+`1e-16` of the magnitude of its coordinates off the axis. The gate reads that
+magnitude: the vertices', the axis's and, about an axis in another direction,
+the given section's before it was mapped, since a radius is a difference of
+numbers of that size (a ball of radius 1e-3 about x = 12.5, 0.3 about 1000 and
+0.1 about 1e6 are spheres). The only alternative to the gate is a
 refusal, never a different solid.
 
 `lower_arc` evaluates a quarter-turn parameter exactly (within
 `QUADRANT_ROUNDING = 2 * EPSILON * max(1, |t|)`, `sin` and `cos` of 0 and
-`+-1`): at a quadrant `|cos t|` is `0.18 * t * EPSILON` for every form a
+`+-1`): at a quadrant `|cos t|` is `0.18 * t * EPSILON` at the quadrants of a turn or two and up to `0.55` at `20.5 pi`, for every form a
 producer writes, and it decides whether the arc's end is on an axis through
 its circle's centre. This moves a point by less than the error of the point
 itself, the same doctrine as the joint rule of #250. Neither gate is
@@ -184,3 +193,10 @@ is not within tolerance, and construct has no reading channel). This agrees
 with the rule that an axis above rounding keeps its exact coordinates;
 re-expressing an axis within rounding, with a reading, waits on a reading
 kind for it.
+
+A semicircle (a bulge of exactly one) between two vertices on the axis is a
+sphere's meridian and is split at its midpoint, as `lower_arc` splits a half
+turn; any other bulge between them is a lemon and stays refused. The joint
+check of the lowering reads an arc's radius times `max(1, |t|)`, since the
+quadrant snap and an unsnapped `sin_cos` of a large parameter differ by that
+much.

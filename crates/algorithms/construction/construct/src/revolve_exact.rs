@@ -738,6 +738,19 @@ fn revolve_via_contour(
             Ok(ring.clone())
         }
     };
+    // The mapped coordinates are differences of the given ones and the
+    // axis's: the rounding gates of the revolution read their magnitude.
+    let magnitude = |rings: &[&ArcRing]| -> Scalar {
+        if !placed {
+            return 0.0;
+        }
+        rings
+            .iter()
+            .flat_map(|ring| ring.vertices.iter())
+            .fold(frame.origin.x.abs().max(frame.origin.y.abs()), |m, v| {
+                m.max(v.point.x.abs()).max(v.point.y.abs())
+            })
+    };
 
     // A composite is unioned exactly first; members that do not touch
     // revolve into separate solids of one `ExactBRep` (#111).
@@ -750,10 +763,14 @@ fn revolve_via_contour(
                 .iter()
                 .map(&section)
                 .collect::<GeomResult<Vec<_>>>()?;
+            let rings: Vec<&ArcRing> = core::iter::once(&region.outer)
+                .chain(region.holes.iter())
+                .collect();
             pieces.push(revolve_region(
                 &section(&region.outer)?,
                 &holes,
                 axis_origin,
+                magnitude(&rings),
                 angle,
                 tolerance,
             )?);
@@ -768,8 +785,17 @@ fn revolve_via_contour(
         .iter()
         .map(|hole| crate::contour_lower::contour_to_arc_ring(hole, tolerance))
         .collect::<GeomResult<Vec<_>>>()?;
+    let rings: Vec<&ArcRing> = core::iter::once(&outer).chain(holes.iter()).collect();
+    let scale = magnitude(&rings);
     let holes = holes.iter().map(&section).collect::<GeomResult<Vec<_>>>()?;
-    let solid = revolve_region(&section(&outer)?, &holes, axis_origin, angle, tolerance)?;
+    let solid = revolve_region(
+        &section(&outer)?,
+        &holes,
+        axis_origin,
+        scale,
+        angle,
+        tolerance,
+    )?;
     place_in_axis_frame(solid, frame)
 }
 
@@ -779,6 +805,7 @@ fn revolve_region(
     outer: &ArcRing,
     holes: &[ArcRing],
     axis_origin: Point3,
+    magnitude: Scalar,
     angle: Option<Scalar>,
     tolerance: Tolerance,
 ) -> GeomResult<ExactBRep> {
@@ -791,7 +818,8 @@ fn revolve_region(
             tolerance,
         );
     }
-    let solid = crate::revolve_contour::revolve_arc_ring(outer, axis_origin, tolerance)?;
+    let solid =
+        crate::revolve_contour::revolve_ring_scaled(outer, axis_origin, magnitude, tolerance)?;
     if holes.is_empty() {
         return Ok(solid);
     }
@@ -808,7 +836,8 @@ fn revolve_region(
     let outer = builder.append(&solid, false);
     let mut voids = Vec::with_capacity(holes.len());
     for hole in holes {
-        let cavity = crate::revolve_contour::revolve_arc_ring(hole, axis_origin, tolerance)?;
+        let cavity =
+            crate::revolve_contour::revolve_ring_scaled(hole, axis_origin, magnitude, tolerance)?;
         voids.extend(builder.append(&cavity, true));
     }
     let [outer] = outer[..] else {

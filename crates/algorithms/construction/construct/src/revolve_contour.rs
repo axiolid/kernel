@@ -39,7 +39,7 @@ use axiolid_topology::{
 };
 
 use axiolid_guarantees::Sign;
-use axiolid_overlay::ArcRing;
+use axiolid_overlay::{ArcRing, ArcVertex};
 
 use crate::contour_lower::arc_ring_signed_area;
 use crate::revolve::side_of_axis;
@@ -66,6 +66,10 @@ struct Station {
     bulge: Scalar,
     /// Exactly on the axis (#379): the exact `side_of_axis` sign is zero.
     on_axis: bool,
+    /// The largest magnitude the coordinates above were computed from: the
+    /// radius is a difference of the vertex's `x` and the axis's, so it
+    /// carries their rounding, not its own.
+    magnitude: Scalar,
 }
 
 /// What a section edge sweeps when one of its ends may lie on the axis.
@@ -110,6 +114,18 @@ pub fn revolve_arc_ring(
     axis_origin: Point3,
     tolerance: Tolerance,
 ) -> GeomResult<ExactBRep> {
+    revolve_ring_scaled(ring, axis_origin, 0.0, tolerance)
+}
+
+/// [`revolve_arc_ring`] for a ring whose coordinates were computed from
+/// magnitudes up to `magnitude` (a section mapped into an axis frame was a
+/// difference of larger numbers), which the rounding gates read (#450).
+pub(crate) fn revolve_ring_scaled(
+    ring: &ArcRing,
+    axis_origin: Point3,
+    magnitude: Scalar,
+    tolerance: Tolerance,
+) -> GeomResult<ExactBRep> {
     // The axis is the line along +y through `axis_origin`: in the profile
     // plane only when the origin is (#450).
     if axis_origin.z != 0.0 {
@@ -118,6 +134,8 @@ pub fn revolve_arc_ring(
         ));
     }
     let epsilon = tolerance.linear();
+    let halved = split_axis_semicircles(ring, axis_origin);
+    let ring = &halved;
     let count = ring.vertices.len();
     if count < 3 {
         return Err(GeomError::Degenerate(format!(
@@ -164,6 +182,13 @@ pub fn revolve_arc_ring(
                 height: vertex.point.y,
                 bulge,
                 on_axis: side == Sign::Zero,
+                magnitude: vertex
+                    .point
+                    .x
+                    .abs()
+                    .max(vertex.point.y.abs())
+                    .max(axis_origin.x.abs())
+                    .max(magnitude),
             })
         })
         .collect::<GeomResult<Vec<Station>>>()?;
@@ -197,6 +222,7 @@ pub fn revolve_arc_ring(
                     height: stations[source].height,
                     bulge: stations[(source + count - 1) % count].bulge,
                     on_axis: stations[source].on_axis,
+                    magnitude: stations[source].magnitude,
                 }
             })
             .collect()
@@ -205,6 +231,44 @@ pub fn revolve_arc_ring(
     };
 
     build(&stations, axis_origin, epsilon)
+}
+
+/// `ring`, with each semicircle (bulge of magnitude exactly 1) between two
+/// vertices exactly on the axis split at its midpoint, as `lower_arc` splits a
+/// sweep of a half turn: a bulge below 1 is a lemon (refused, both ends on
+/// the axis), but a bulge of 1 is a sphere's meridian, whose two quarter arcs
+/// each have one end on the axis (#379).
+fn split_axis_semicircles(ring: &ArcRing, axis_origin: Point3) -> ArcRing {
+    let axis_point = Point2::new(axis_origin.x, axis_origin.y);
+    let count = ring.vertices.len();
+    let mut vertices = Vec::with_capacity(count + 1);
+    for (index, vertex) in ring.vertices.iter().enumerate() {
+        vertices.push(*vertex);
+        let to = ring.vertices[(index + 1) % count].point;
+        let on_axis = |p: Point2| {
+            p.x.is_finite() && p.y.is_finite() && side_of_axis(axis_point, Vec3::Y, p) == Sign::Zero
+        };
+        if vertex.bulge.abs() == 1.0 && on_axis(vertex.point) && on_axis(to) {
+            let chord = to - vertex.point;
+            let length = chord.length();
+            if length > 0.0 && length.is_finite() {
+                // The semicircle bulges to the right of its chord for a
+                // positive bulge; the quarter arcs carry `tan(pi / 8)`.
+                let side = vertex.bulge.signum();
+                let middle = vertex.point
+                    + chord * 0.5
+                    + Vec2::new(chord.y, -chord.x) / length * (0.5 * length * side);
+                let quarter = side * (core::f64::consts::FRAC_PI_8).tan();
+                let last = vertices.len() - 1;
+                vertices[last].bulge = quarter;
+                vertices.push(ArcVertex {
+                    point: middle,
+                    bulge: quarter,
+                });
+            }
+        }
+    }
+    ArcRing::new(vertices)
 }
 
 /// What the edge leaving station `index` sweeps, judged exactly.
@@ -222,7 +286,7 @@ fn contact(stations: &[Station], index: usize) -> Option<Contact> {
 
 /// Refuse every vertex on the axis that is not the end of an edge along the
 /// axis (a pinch point, a non-manifold vertex), an arc with both ends on the
-/// axis (a spindle torus), and a cone's edge so near perpendicular to the
+/// axis (a lemon or a spindle torus), and a cone's edge so near perpendicular to the
 /// axis that it is neither a disc nor a cone to the tolerance. Whether an arc
 /// with one end on the axis is a sphere is decided when its wall is built.
 fn check_axis_contact(stations: &[Station], epsilon: Scalar) -> GeomResult<()> {
@@ -233,7 +297,7 @@ fn check_axis_contact(stations: &[Station], epsilon: Scalar) -> GeomResult<()> {
         }
         if station.bulge != 0.0 && stations[(index + 1) % count].on_axis {
             return Err(unsupported(
-                "exact revolution of a section with an arc with both ends on the axis (a spindle torus)",
+                "exact revolution of a section with an arc with both ends on the axis",
             ));
         }
         let incoming = contact(stations, (index + count - 1) % count);
@@ -350,6 +414,7 @@ fn build(stations: &[Station], axis_origin: Point3, epsilon: Scalar) -> GeomResu
                     stations,
                     index,
                     true,
+                    epsilon,
                 )?
             }
         } else if here.bulge != 0.0 {
@@ -376,6 +441,7 @@ fn build(stations: &[Station], axis_origin: Point3, epsilon: Scalar) -> GeomResu
                 stations,
                 index,
                 false,
+                epsilon,
             )?
         } else if (here.height - there.height).abs() <= epsilon {
             // Constant height: a planar annulus.
@@ -391,6 +457,7 @@ fn build(stations: &[Station], axis_origin: Point3, epsilon: Scalar) -> GeomResu
                 stations,
                 index,
                 true,
+                epsilon,
             )?
         };
         faces.push((face, index, next));
@@ -423,6 +490,7 @@ fn straight_wall(
     stations: &[Station],
     index: usize,
     cone: bool,
+    epsilon: Scalar,
 ) -> GeomResult<FaceId> {
     let count = stations.len();
     let next = (index + 1) % count;
@@ -448,6 +516,24 @@ fn straight_wall(
         // `semi_angle` is measured so radius grows as `r + v * tan(angle)`,
         // which is exactly the slope of this segment.
         let semi_angle = ((there.radius - here.radius) / rise).atan();
+        // The angle must carry the slope: for a near-flat edge `tan` of it
+        // is off the slope by far more than the coordinates' rounding, and
+        // the cone leaves its edge (a pcurve 7e-5 off the curve for a rise of
+        // 1e-12). It may be off by the tolerance, or by eight machine
+        // epsilons of the largest coordinate, whichever is larger: the round
+        // trip through `atan` and `tan` costs a few ulps of the coordinates.
+        let scale = here
+            .radius
+            .abs()
+            .max(there.radius.abs())
+            .max(here.height.abs())
+            .max(there.height.abs());
+        let carried = rise * semi_angle.tan() - (there.radius - here.radius);
+        if carried.is_nan() || carried.abs() > epsilon.max(8.0 * Scalar::EPSILON * scale) {
+            return Err(unsupported(
+                "exact revolution of an edge so near perpendicular to the axis that a cone cannot carry its slope",
+            ));
+        }
         builder.add_surface(Surface::Cone(Cone {
             frame: frame_at(axis_x, basis.height),
             radius: basis.radius,
@@ -472,15 +558,17 @@ fn straight_wall(
 }
 
 /// How far an arc's centre may lie from the axis, in machine epsilons of the
-/// largest coordinate it is computed from, for the arc to be a sphere's
+/// largest magnitude it is computed from, for the arc to be a sphere's
 /// meridian (#379).
 ///
 /// No bulge encodes a quarter arc exactly (`tan(pi / 8)` is irrational), so
-/// the centre computed from an arc that is a sphere's is a few ulps of its
-/// coordinates off the axis: measured at most a sixteenth of this gate in the
-/// worst case tried (radius 0.37 about an axis at 12.5). It is a rounding
-/// gate, not a tolerance: it only chooses between a sphere and a refusal, and
-/// the sphere is placed exactly on the axis. It is not reported.
+/// the centre computed from an arc that is a sphere's is a few ulps of the
+/// magnitude of its coordinates off the axis. That magnitude is the vertices'
+/// and the axis's (a radius is their difference, so a ball of radius 1e-3
+/// about `x = 12.5` carries the rounding of 12.5), and for a section mapped
+/// into an axis frame the given section's. It is a rounding gate, not a
+/// tolerance: it only chooses between a sphere and a refusal, and the sphere
+/// is placed exactly on the axis. It is not reported.
 const CENTRE_ROUNDING: Scalar = 64.0 * Scalar::EPSILON;
 
 /// A sphere wall: an arc with one end on the axis, centred on it, swept a
@@ -533,6 +621,8 @@ fn sphere_wall(
         .max(here.height.abs())
         .max(there.radius.abs())
         .max(there.height.abs())
+        .max(here.magnitude)
+        .max(there.magnitude)
         + arc.radius;
     let offset = (arc.centre - Point2::new(0.0, centre)).length();
     if offset.is_nan() || offset > CENTRE_ROUNDING * scale {

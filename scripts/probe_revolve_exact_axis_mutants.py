@@ -74,6 +74,12 @@ MUTANTS = [
     ('disc height not copied to the axis end', E, '            points[on].y = points[off].y;', '            let _ = (on, off);', TESTS),
     ('hair off perpendicular read as a disc', E, '        } else if points[on].y == points[off].y {', '        } else if false {', TESTS),
     ('side of a vertex not kept by the rotation', E, '        if !consistent {', '        if false {', TESTS),
+    ('near-flat cone carried by its angle', C, '        if carried.is_nan() || carried.abs() > epsilon.max(8.0 * Scalar::EPSILON * scale) {', '        if false {', TESTS),
+    ('slope check at the tolerance only', C, 'carried.abs() > epsilon.max(8.0 * Scalar::EPSILON * scale)', 'carried.abs() > epsilon.max(1e3 * scale)', TESTS),
+    ('sphere gate blind to the coordinates\' magnitude', C, '        .max(here.magnitude)\n        .max(there.magnitude)\n', '', TESTS),
+    ('magnitude of a mapped section not threaded', E, '        if !placed {\n            return 0.0;', '        if true {\n            return 0.0;', TESTS),
+    ('semicircle between axis points not split', C, '        if vertex.bulge.abs() == 1.0 && on_axis', '        if false && on_axis', TESTS),
+    ('joint scale of an arc blind to its parameter', L, '                |t: Scalar| circle.frame.origin.length() + circle.radius.abs() * t.abs().max(1.0);', '                |_t: Scalar| circle.frame.origin.length() + circle.radius.abs();', TESTS),
     ('rectangle edge on the axis refused', E, '    if left == 0.0 || right == 0.0 {', '    if false {', TESTS),
 ]
 

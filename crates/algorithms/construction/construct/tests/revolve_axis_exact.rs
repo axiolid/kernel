@@ -804,6 +804,13 @@ fn a_half_disc_revolves_to_a_ball_at_any_radius_and_offset() {
         (1000.0, 0.0),
         (0.37, 12.5),
         (2.0, -3.0),
+        // The radii are differences of numbers of the axis's magnitude, so
+        // the rounding the centre gate reads is the axis's, not the ball's.
+        (1e-3, 12.5),
+        (0.3, 1000.0),
+        (1e-3, 1.0),
+        (0.1, 100.0),
+        (0.01, 100.0),
     ] {
         let ball = revolve(&half_disc(radius, axis_x), axis_x);
         let want = 4.0 / 3.0 * PI * radius.powi(3);
@@ -822,6 +829,124 @@ fn a_half_disc_revolves_to_a_ball_at_any_radius_and_offset() {
             .surfaces()
             .iter()
             .all(|s| matches!(s, Surface::Sphere(_))));
+    }
+}
+
+#[test]
+fn a_small_ball_far_from_the_origin_is_read_at_the_axis_magnitude() {
+    // Radii 0.1 about x = 1e6: each is 1e-10 off, the centre computed from
+    // them likewise.
+    let ring = ArcRing::new(vec![
+        ArcVertex {
+            point: Point2::new(1e6, -0.1),
+            bulge: (PI / 8.0).tan(),
+        },
+        ArcVertex {
+            point: Point2::new(1e6 + 0.1, 0.0),
+            bulge: (PI / 8.0).tan(),
+        },
+        ArcVertex {
+            point: Point2::new(1e6, 0.1),
+            bulge: 0.0,
+        },
+    ]);
+    let solid = revolve_arc_ring(&ring, Point3::new(1e6, 0.0, 0.0), Tolerance::METRE)
+        .expect("a ball far from the origin");
+    let want = 4.0 / 3.0 * PI * 1e-3;
+    assert!(
+        (volume(&solid) - want).abs() <= 1e-8 * want,
+        "{}",
+        volume(&solid)
+    );
+}
+
+#[test]
+fn a_ball_about_a_distant_x_axis_is_read_at_its_premapped_magnitude() {
+    // Mapped into the axis's frame the coordinates are small, but they are
+    // differences of numbers near 1000.
+    let ball = contour_of(vec![
+        arc_segment(Point2::new(1000.0, 0.0), 0.3, 0.0, PI),
+        line_segment(Point2::new(999.7, 0.0), Point2::new(1000.3, 0.0)),
+    ]);
+    let solid = revolve_about(&ball, Point3::new(1000.0, 0.0, 0.0), Vec3::X, TAU);
+    let want = 4.0 / 3.0 * PI * 0.027;
+    assert!(
+        (volume(&solid) - want).abs() <= 1e-9 * want,
+        "{}",
+        volume(&solid)
+    );
+}
+
+#[test]
+fn a_semicircle_between_two_points_of_the_axis_is_a_ball() {
+    // A bulge of exactly one is a sphere's meridian, split at its midpoint
+    // as a half turn of an arc is; any other bulge between them is a lemon.
+    for bulge in [1.0, -1.0] {
+        let ring = ArcRing::new(vec![
+            ArcVertex {
+                point: Point2::new(0.0, -1.0),
+                bulge,
+            },
+            ArcVertex {
+                point: Point2::new(0.0, 1.0),
+                bulge: 0.0,
+            },
+            ArcVertex {
+                point: Point2::new(0.0, 0.0),
+                bulge: 0.0,
+            },
+        ]);
+        let solid = revolve_arc_ring(&ring, Point3::ZERO, Tolerance::METRE)
+            .expect("a semicircle is a sphere");
+        let health = geometric_audit(&solid, Tolerance::METRE);
+        assert!(health.is_consistent(), "{:?}", health.defects());
+        close(volume(&solid), 4.0 / 3.0 * PI);
+    }
+}
+
+#[test]
+fn a_near_flat_cone_the_representation_cannot_carry_is_refused_at_zero_tolerance() {
+    // A rise of 1e-12 over a radius of 1: `atan` then `tan` is off the slope
+    // by 2e-4 of the radius, and the cone leaves its edge by 7e-5.
+    for points in [
+        vec![(0.0, 0.0), (1.0, 1e-12), (0.0, 1e-12)],
+        vec![(1.0, 0.0), (2.0, 1e-12), (2.0, 1.0), (1.0, 1.0)],
+    ] {
+        named(
+            revolve_profile_exact(
+                &polygon(&points),
+                Point3::ZERO,
+                Vec3::Y,
+                TAU,
+                Tolerance::ZERO,
+            ),
+            "cannot carry its slope",
+        );
+    }
+}
+
+#[test]
+fn an_ordinary_cone_and_frustum_are_exact_at_zero_tolerance() {
+    for (points, want) in [
+        (vec![(0.0, 0.0), (1.5, 0.0), (0.0, 2.0)], 1.5 * PI),
+        (
+            vec![(1.0, 0.0), (2.0, 1.0), (2.0, 2.0), (1.0, 2.0)],
+            // Annulus of inner radius 1: the frustum 1..2 over [0, 1] and
+            // the cylinder of radius 2 over [1, 2], less the bore.
+            13.0 * PI / 3.0,
+        ),
+    ] {
+        let solid = revolve_profile_exact(
+            &polygon(&points),
+            Point3::ZERO,
+            Vec3::Y,
+            TAU,
+            Tolerance::ZERO,
+        )
+        .expect("exact at zero tolerance");
+        let health = geometric_audit(&solid, Tolerance::METRE);
+        assert!(health.is_consistent(), "{:?}", health.defects());
+        close(volume(&solid), want);
     }
 }
 

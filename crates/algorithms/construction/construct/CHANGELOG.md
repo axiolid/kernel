@@ -15,45 +15,11 @@ caret rule for `0.x` versions.
   `#[non_exhaustive]` with the new `HolesOverlap` and `PolygonsOverlap`, and
   whose `Region::new` refuses rings that cross into each other. `ProfileFinding::DegenerateRing` carries that `OverlayError`, so a `match` on it needs a wildcard arm
   (#448, ADR 0104).
-
-### Added
-
-- `revolve_profile_exact` and `revolve_arc_ring` revolve a full turn of a
-  profile that touches the axis (#379): along edges lying on it, at straight
-  edges ending on it exactly perpendicularly (a disc cap: a solid cylinder, a
-  stepped shaft), at any other straight edge ending on it (a cone up to its
-  apex: a cone, a bolt, a spinning top, a top with a cavity) and at an arc
-  ending on it with its circle centred on it (a sphere up to its pole: a
-  ball, a domed column, a hemisphere cap). An axis edge sweeps no face. A
-  vertex on the axis is admitted when one of its two edges lies on the axis;
-  the contact is classified with the exact `side_of_axis` sign, no
-  tolerance. An apex or pole is a vertex of the B-rep, not a degenerate edge:
-  the cone is framed at its apex with radius zero, the sphere on the axis at
-  the height equidistant from both arc ends, and the wall's loop leaves a gap
-  along the pole line in its parameters, which the boolean and the
-  deviation oracle close. Whether an arc is a sphere's meridian is decided
-  within `64 * EPSILON` of the largest coordinate it is computed from (a
-  bulge cannot encode a quarter arc exactly); the sphere is placed exactly on
-  the axis, and the gate is not reported, as it only chooses between that
-  sphere and a refusal. A section crossing the axis, touching it at a vertex
-  with no edge along it (a pinch point), ending on it at an arc whose circle
-  is not centred on it (a lemon, an apple, an ogive nose: a spindle or horn
-  torus), at an arc with both ends on it or at an arc running across it stays
-  `UnsupportedInput` by name, as does a vertex within the tolerance of the
-  axis but not on it to the bit and an edge ending on the axis within the
-  tolerance of perpendicular to it but not exactly (a cone of rise below the
-  tolerance fails the geometric audit). A section with several contacts (a cavity
-  along the axis) gives one solid per outermost piece with the nested pieces
-  as void shells, nested by the heights of every face's stations, poles
-  included; a solid inside a cavity is refused.
-
-### Changed
-
 - `revolve_arc_ring` refuses an axis origin with `z != 0` as "exact
   revolution about an axis out of the profile plane" (#450); it used to
   accept it unless the section touched the axis.
 - The exact revolution is built about the axis as given (#450). An axis
-  exactly along y (either sense) builds in place, bit for bit as before; any
+  exactly along y (either sense) builds in place with the same geometry as before (the pcurves of a wall's loop are added in another order); any
   other axis lying exactly in the profile plane (`z` zero in its direction and
   origin) maps the section rigidly into the axis's own frame, revolves it
   about +y there and places the solid back with `ExactBRep::transformed`,
@@ -75,15 +41,64 @@ caret rule for `0.x` versions.
   turn (#379): a parameter within `2 * EPSILON * max(1, |t|)` of one (every
   form a producer writes, `FRAC_PI_2`, `-PI / 2`, `1.5 * PI`,
   `PI + FRAC_PI_2`, ...) puts the end of the arc at exactly `0` and `+-1`
-  in that coordinate, where it used to be `0.18 * t * EPSILON` off. A ring
-  that lowered before is unchanged except at those ends, by less than the
-  error of the point itself; a parameter 1e-12 from a quarter turn keeps its
-  angle. This makes an arc end on a revolution axis through its centre
+  in that coordinate, where it used to be up to `0.55 * t * EPSILON` off
+  (`0.18` at the quadrants of a turn or two). A ring that lowered before is
+  unchanged except at the arc's ends and at split vertices that land on a
+  quadrant, by less than the error of the point itself; a parameter 1e-12
+  from a quarter turn keeps its angle. The joint check reads the arc's radius
+  times `max(1, |t|)` in its scale, so an arc of a large parameter closed by
+  a line between its raw ends still lowers at `Tolerance::ZERO`. This makes an arc end on a revolution axis through its centre
   exactly on it, which the exact revolution needs. A rounding gate like the
   joint rule (#250), not reported.
 
+### Added
+
+- `revolve_profile_exact` and `revolve_arc_ring` revolve a full turn of a
+  profile that touches the axis (#379): along edges lying on it, at straight
+  edges ending on it exactly perpendicularly (a disc cap: a solid cylinder, a
+  stepped shaft), at any other straight edge ending on it (a cone up to its
+  apex: a cone, a bolt, a spinning top, a top with a cavity) and at an arc
+  ending on it with its circle centred on it (a sphere up to its pole: a
+  ball, a domed column, a hemisphere cap). An axis edge sweeps no face. A
+  vertex on the axis is admitted when one of its two edges lies on the axis;
+  the contact is classified with the exact `side_of_axis` sign, no
+  tolerance. An apex or pole is a vertex of the B-rep, not a degenerate edge:
+  the cone is framed at its apex with radius zero, the sphere on the axis at
+  the height equidistant from both arc ends, and the wall's loop leaves a gap
+  along the pole line in its parameters, which the boolean and the
+  deviation oracle close. Whether an arc is a sphere's meridian is decided
+  within `64 * EPSILON` of the largest magnitude it is computed from: its
+  coordinates, the axis's and, about an axis in another direction, the given
+  section's (a bulge cannot encode a quarter arc exactly, and a radius is a
+  difference of numbers of the axis's size); the sphere is placed exactly on
+  the axis, and the gate is not reported, as it only chooses between that
+  sphere and a refusal. A section crossing the axis, touching it at a vertex
+  with no edge along it (a pinch point), ending on it at an arc whose circle
+  is not centred on it (a lemon, an apple, an ogive nose: a spindle or horn
+  torus), at an arc with both ends on it or at an arc running across it stays
+  `UnsupportedInput` by name, as does a vertex within the tolerance of the
+  axis but not on it to the bit and an edge ending on the axis within the
+  tolerance of perpendicular to it but not exactly, and a straight edge so
+  near perpendicular that a cone's angle cannot carry its slope (below).
+  A semicircle (a bulge of exactly one) between two vertices on the axis is
+  split at its midpoint, as the lowering splits a half turn, and revolves to
+  a ball; another bulge between them is a lemon and is refused. A section
+  with several contacts (a cavity
+  along the axis) gives one solid per outermost piece with the nested pieces
+  as void shells, nested by the heights of every face's stations, poles
+  included; a solid inside a cavity is refused.
+
 ### Fixed
 
+- A cone whose edge is nearly perpendicular to the axis was built with an
+  angle that does not carry its slope when the tolerance did not cover it
+  (#379): at `Tolerance::ZERO`, a frustum `[(1,0),(2,1e-12),(2,1),(1,1)]`
+  came back `Ok` with its pcurves 7e-5 off their curves, and the same for a
+  cone's apex edge. The exact revolution now refuses an edge whose
+  `rise * tan(angle)` differs from its radius change by more than the
+  tolerance or eight machine epsilons of its largest coordinate, whichever
+  is larger, as an edge so near perpendicular to the axis that a cone cannot
+  carry its slope.
 - `revolve_arc_ring` mirrored a section on the negative side of the axis
   without walking it backwards, so its walls faced inward and its signed
   volume was negative; the mirrored section is now walked the other way
