@@ -25,7 +25,7 @@ MUTANTS = [
      "            piece_candidates.push(index);\n",
      ""),
     ("edges sharing a stretch not candidate carriers", ARR,
-     "                shared[index].push((near, xs.clone()));\n                shared[near].push((index, xs.clone()));\n",
+     "                shared[index].push((near, extremes(edge, &xs)));\n                shared[near].push((index, extremes(theirs, &xs)));\n",
      ""),
     # Rings carried across any other stop.
     ("a ring met at the stop keeps its membership", ARR,
