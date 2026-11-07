@@ -9,8 +9,17 @@ caret rule for `0.x` versions.
 
 ## [Unreleased]
 
+## [0.3.17] - 2026-11-07
+
+### Added
+
+- `bound::ElevatedPositionTable` is re-exported from `axiolid-evaluate`
+  0.3.21 (#393): certified points of an elevated or banked curve over an
+  intrinsic plan, which `axiolid-mesh-compile` reads for its swept disks.
+
 ### Changed
 
+- Requires `axiolid-evaluate` 0.3.21.
 - `section_request` with cut regions no longer refuses a cut whose boundary
   meets itself at a vertex (#373, ADR 0092 amendment): the edges are paired
   there by exact angle and a ring that returns to a vertex is split, so

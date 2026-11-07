@@ -147,6 +147,11 @@ Latest release, 0.3.45 (2026-11-07):
   error") where it was reported certified (#393). The certificate read the
   evaluator's points, which have no certified error. `TODO(#438)` lifts it
   for chain plans, `TODO(#481)` for intrinsic profiles.
+- An elevated curve over a chain plan is no longer claimed certified for
+  flattening (`axiolid_reference::bound::certifies_flattening3`, #393,
+  `TODO(#438)`): its chord bound under-reported the evaluated ends, so its
+  polylines and curve-bounded boundaries are reported unbounded by name
+  where they were reported proven.
 
 - A flush slab whose openings were round-tripped through world coordinates
   (their sides moved by `9.3e-10`) is refused by name, `SKIN_WITHIN_ROUNDING`

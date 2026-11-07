@@ -8,7 +8,7 @@ Portable scalar reference implementation and certified predicates.
 
 | | |
 | --- | --- |
-| Latest release | 0.3.16 (2026-11-03) |
+| Latest release | 0.3.17 (2026-11-07) |
 | crates.io | [`axiolid-reference`](https://crates.io/crates/axiolid-reference) |
 | Facade | [`axiolid`](./axiolid) feature `portable-provider` |
 | Layer | algorithms (`algorithm.reference`) |
@@ -49,36 +49,26 @@ evaluation should depend on those directly.
 
 ## Changes
 
-Latest release, 0.3.16 (2026-11-03):
+Latest release, 0.3.17 (2026-11-07):
 
 ### Added
 
-- The package now ships `LICENSE` and `LICENSE-COMMERCIAL` (symlinks to the
-  repository root), so the licence texts travel with the archive (#358).
+- `bound::ElevatedPositionTable` is re-exported from `axiolid-evaluate`
+  0.3.21 (#393): certified points of an elevated or banked curve over an
+  intrinsic plan, which `axiolid-mesh-compile` reads for its swept disks.
 
 ### Changed
 
-- Requires `axiolid-evaluate` 0.3.20, whose station frame laws bound their
-  signed bend (#361).
-- The exact point store, the segment arrangement and the ring tracing of the
-  section's in-plane faces moved into the new crate
-  `axiolid-exact-arrangement`, which the visible faces of
-  `axiolid-hidden-lines` use as well (ADR 0094, #383). The section's output
-  and refusals are unchanged. A state that cannot occur in that code is now
-  `GeomError::Degenerate`, no longer `BackendContractViolation`. Wall clock of
-  `cargo bench -p axiolid-reference --bench section_in_plane`, best of nine
-  runs on a loaded machine, before and after (ms per section): grid 51.9 and
-  54.1, footprint on a grid 51.4 and 51.0, skew grids 44.9 and 46.7, box on a
-  slab 0.015 and 0.018. Single runs of one build spread from 53 to 192 ms, so
-  this is unchanged within noise.
-
-### Fixed
-
-- `triangulate_simple` and `retriangulate_face` refuse a NaN or infinite
-  coordinate with `GeomError::InvalidInput`. `orient2d` now reports such a
-  coordinate as uncertain instead of a certain zero (#404), and these
-  entry points would otherwise panic on it. `coplanar_overlap` keeps its
-  signature and panics on a non-finite coordinate, documented under
-  `# Panics`.
+- Requires `axiolid-evaluate` 0.3.21.
+- `section_request` with cut regions no longer refuses a cut whose boundary
+  meets itself at a vertex (#373, ADR 0092 amendment): the edges are paired
+  there by exact angle and a ring that returns to a vertex is split, so
+  corners that touch give two regions and a hole touching its outer ring is a
+  hole that touches it. A ring that touches another at every corner is
+  placed by the exact midpoint of one of its edges. Still refused by name: an
+  edge in and an edge out along one ray or a chain the rings would part
+  (`REFUSED_PINCHED_CUT_REGION`), edges that do not alternate or two of one
+  direction along one ray (`REFUSED_CROSSING_CUT_RINGS`); a `Both` ring that repeats a
+  vertex stays refused.
 
 Full history: [`crates/algorithms/reference/CHANGELOG.md`](https://github.com/axiolid/kernel/blob/main/crates/algorithms/reference/CHANGELOG.md)

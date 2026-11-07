@@ -2612,6 +2612,96 @@ Every publishable crate versions and publishes independently ([ADR 0067](/adr/00
 
 ## axiolid-evaluate
 
+### 0.3.21 - 2026-11-07
+
+### Added
+
+- `bound::chord_bound2` bounds `Curve2::Lifted` pcurves (#414): a space
+  curve read in a surface's parameters, `S(p(t)) = c(t)`. The implicit
+  function theorem, with a certified separation of the surface's
+  parameters over a box grown about the evaluated ends, bounds the pcurve's
+  speed and bend per piece of the span (`J p' = c'`, `J p'' = c'' -
+  H[p', p']`, `|J w| >= sigma |D w|`); each evaluated end carries the
+  outward-rounded residual of its image against the space curve over the
+  separation. The space curve's own derivative bounds come from
+  `curve_derivative_bounds3`, or through the carrier for ruled and torus
+  sections and a cell of an implicit section. Analytic carriers (planes,
+  cylinders, cones, spheres, tori) and the sections of two surfaces read on
+  either of them (the same continuation on the four-dimensional system of
+  the section, boxes clamped to a B-spline's knot domain) are covered. A
+  pole, an apex, a fold, a B-spline crease, a guide that could change the
+  turn inside a piece, a space curve without derivative bounds and a
+  B-spline carrier outside a pair section are refused (`None`). Over a
+  curved carrier the bound adds the magnitudes of `c''` and of the
+  carrier's curvature along `p'`, which nearly cancel for a curve that
+  hugs it, so it is sound but not tight there. The mesh compiler samples
+  pcurve edges at uniform spans, ignoring their breaks, and so still
+  reports such trims unbounded until it cuts at them (#436).
+- `bound::chord_bound2` bounds `Curve2::Intrinsic` between the evaluated
+  ends (#414): the law's bound plus the larger distance of an evaluated
+  end from a certified `IntrinsicPositionTable` point, with that point's
+  own error. `chain_chord_bound` does not carry that error for the
+  evaluated ends of the pieces of a chain yet (#438).
+- `bound::SurfaceBoundOracle::for_carrier` (#414): the derivative bounds
+  of the surface a curve lies on (`axiolid_curve::Carrier`, a general ruled
+  carrier included), and `SurfaceBoundOracle::separation` with
+  `ParameterSeparation`: a certified `sigma` with `|S(x) - S(y)| >= sigma
+  |D (x - y)|` over a parameter box, by Weyl's perturbation from the box
+  centre, or `None` at a pole, an apex, a fold, a box too wide or a
+  B-spline crease.
+- `bound::ElevatedPositionTable` (#393): certified points of an elevated or
+  banked curve over an intrinsic plan in plan distance, the plan's from an
+  `IntrinsicPositionTable`, the height and the pivot in closed form, each
+  point with a bound on its distance from the exact one. `None` for a chain
+  plan (`TODO(#438)`), an intrinsic profile, a held-rail cant, or an end
+  past the plan.
+- `bound::IntrinsicPositionTable::max_error` (#393): one certified bound on
+  the error of every point the table returns.
+- `station::FrameLaw` bounds and charges a banked curve over an intrinsic
+  plan (#396): the roll bounded from its cant law, each frame read compared
+  with the exact rolled section (point from the position table plus the
+  height and the pivot, axes from the heading and the roll), so the
+  station, placement and fold paths decide it where they reported it
+  unbounded. A held-rail cant and a banked curve over a chain plan stay
+  unbounded by name (`TODO(#394)`).
+
+### Changed
+
+- `bound::chord_bound2` bounds the distance to the chord of the
+  *evaluated* ends (#414). That differs from the exact chord only for the
+  families whose evaluation is an estimate, which carry the difference:
+  lifted pcurves and intrinsic curves.
+- `bound::chord_bound2` of a point span (`a == b`) of a lifted or an
+  intrinsic pcurve is the evaluated point's own certified error, no longer
+  zero, and `None` where the curve has no bound (#414).
+- `curve::flatten2` accepts a span of a lifted or an intrinsic pcurve only
+  when its certified chord bound is within the tolerance too (#414), where
+  it relied on the midpoint sagitta alone; `certifies_flattening2` still
+  names neither family, whose bounds are not tight on a curved carrier.
+- `bound::continuity_breaks2` and `continuity_breaks3` name the cell joins
+  of an implicit section and the interior nodes of a pair section (#414),
+  where its parameter rate changes; a lifted pcurve breaks where its space
+  curve does. A span across one is refused by `chord_bound2`, as across a
+  B-spline knot.
+
+### Fixed
+
+- `bound::chord_bound3` of an elevated or banked curve over an intrinsic
+  plan bounds the distance to the chord of the *evaluated* ends (#393), as
+  `chord_bound2` does for the plan itself: the exact-chord bound plus the
+  larger distance of an evaluated end from a certified table point. It
+  reported only the exact chord, 1.95e-5 on a plan with a curvature
+  `0.01 sin(50 s)` over `[96.4375, 96.5625]`, where the exact curve lies
+  2.83e-3 from the chord of the evaluated ends (the plan point is 1.4e-2
+  off at 96.5; `TODO(#480)`). The bound of a point span (`a == b`) is that
+  distance. A chain plan is unchanged (`TODO(#438)`), and so is an
+  intrinsic profile, which `certifies_flattening3` does not claim.
+- `bound::certifies_flattening3` no longer claims an elevated curve over a
+  chain plan (#393, `TODO(#438)`): the exact-chord bound of
+  `chord_bound3` under-reports the evaluated ends there (1.95e-5 against
+  2.8e-3 on a chain of a line and `k = 0.01 sin 50 s`), so `flatten3` and
+  the callers that trust the claim no longer take it as a certificate.
+
 ### 0.3.20 - 2026-11-03
 
 ### Added
@@ -4643,6 +4733,11 @@ Every publishable crate versions and publishes independently ([ADR 0067](/adr/00
   error") where it was reported certified (#393). The certificate read the
   evaluator's points, which have no certified error. `TODO(#438)` lifts it
   for chain plans, `TODO(#481)` for intrinsic profiles.
+- An elevated curve over a chain plan is no longer claimed certified for
+  flattening (`axiolid_reference::bound::certifies_flattening3`, #393,
+  `TODO(#438)`): its chord bound under-reported the evaluated ends, so its
+  polylines and curve-bounded boundaries are reported unbounded by name
+  where they were reported proven.
 
 - A flush slab whose openings were round-tripped through world coordinates
   (their sides moved by `9.3e-10`) is refused by name, `SKIN_WITHIN_ROUNDING`
@@ -8673,6 +8768,28 @@ Every publishable crate versions and publishes independently ([ADR 0067](/adr/00
 
 
 ## axiolid-reference
+
+### 0.3.17 - 2026-11-07
+
+### Added
+
+- `bound::ElevatedPositionTable` is re-exported from `axiolid-evaluate`
+  0.3.21 (#393): certified points of an elevated or banked curve over an
+  intrinsic plan, which `axiolid-mesh-compile` reads for its swept disks.
+
+### Changed
+
+- Requires `axiolid-evaluate` 0.3.21.
+- `section_request` with cut regions no longer refuses a cut whose boundary
+  meets itself at a vertex (#373, ADR 0092 amendment): the edges are paired
+  there by exact angle and a ring that returns to a vertex is split, so
+  corners that touch give two regions and a hole touching its outer ring is a
+  hole that touches it. A ring that touches another at every corner is
+  placed by the exact midpoint of one of its edges. Still refused by name: an
+  edge in and an edge out along one ray or a chain the rings would part
+  (`REFUSED_PINCHED_CUT_REGION`), edges that do not alternate or two of one
+  direction along one ray (`REFUSED_CROSSING_CUT_RINGS`); a `Both` ring that repeats a
+  vertex stays refused.
 
 ### 0.3.16 - 2026-11-03
 

@@ -9,6 +9,8 @@ caret rule for `0.x` versions.
 
 ## [Unreleased]
 
+## [0.3.21] - 2026-11-07
+
 ### Added
 
 - `bound::chord_bound2` bounds `Curve2::Lifted` pcurves (#414): a space

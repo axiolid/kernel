@@ -365,7 +365,7 @@ dependencies = [
 
 [[package]]
 name = "axiolid-evaluate"
-version = "0.3.20"
+version = "0.3.21"
 dependencies = [
  "axiolid-contracts",
  "axiolid-core",
@@ -777,7 +777,7 @@ dependencies = [
 
 [[package]]
 name = "axiolid-reference"
-version = "0.3.16"
+version = "0.3.17"
 dependencies = [
  "axiolid-contracts",
  "axiolid-core",
