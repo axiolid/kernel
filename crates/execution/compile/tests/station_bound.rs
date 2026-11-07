@@ -9,8 +9,9 @@ use axiolid_construct::profile::profile_rings;
 use axiolid_contracts::{ExecutionOptions, GeomError};
 use axiolid_core::{Frame2, Interval, Point2, Point3, Scalar, Tolerance, Transform2, Vec2, Vec3};
 use axiolid_curve::{
-    BSplineCurve2, BankConvention, Banked3, CantLaw, CantPiece, Circle2, CurvatureLaw, Curve2,
-    Curve3, Elevated3, ElevationLaw, Ellipse2, Intrinsic2, KnotSpec, Line2, Polyline2,
+    BSplineCurve2, BankConvention, Banked3, CantLaw, CantPiece, Chain2, ChainPiece2, Circle2,
+    CurvatureLaw, Curve2, Curve3, Elevated3, ElevationLaw, Ellipse2, Intrinsic2, KnotSpec, Line2,
+    Polyline2,
 };
 use axiolid_exact_compile_contract::ExactCompiler;
 use axiolid_measure::{exact_properties, volume_properties};
@@ -713,6 +714,49 @@ fn a_jump_in_the_roll_is_bounded_by_the_tear_it_leaves() {
     assert!(bound >= 0.1, "the tear is not bounded: {bound}");
 }
 
+/// Cant over a clothoid plan (#396): the roll is bounded from the cant law,
+/// so the run is certified against the exact rolled frames.
+#[test]
+fn a_canted_clothoid_run_is_certified() {
+    let mut b = GeometryGraphBuilder::new();
+    let curve = Curve3::Banked(Banked3::new(
+        Elevated3::new(
+            Curve2::Intrinsic(Intrinsic2::new(
+                Frame2 {
+                    origin: Point2::ZERO,
+                    x: Vec2::X,
+                    y: Vec2::Y,
+                },
+                CurvatureLaw::clothoid(0.0, 1.0 / 300.0, 60.0),
+                60.0,
+            )),
+            ElevationLaw::level(0.0),
+        ),
+        CantLaw::new(vec![CantPiece::constant(60.0, 0.1)]),
+        CantLaw::zero(60.0),
+        1.5,
+        BankConvention::TangentRotation,
+    ));
+    let basis = b.push_value(curve.clone()).unwrap();
+    let profile = rectangle(&mut b, 1.0, 1.0);
+    let sections = vec![
+        section(profile, 0.0, StationOffsets::ZERO),
+        section(profile, 10.0, StationOffsets::ZERO),
+    ];
+    let root = spine(&mut b, basis, sections.clone(), StationFrame::Section);
+    let graph = b.finish(vec![root]).unwrap();
+    let oracle = spine_oracle(
+        &graph,
+        &sections,
+        Box::new(move |s| station_section3(&curve, s).unwrap()),
+    );
+    assert_certified(&graph, root, DeviationPath::StationedSpine, &oracle);
+    let (_, report) = compiler()
+        .compile_mesh_with_deviation(&graph, root, &options())
+        .unwrap();
+    assert!(report.meets_requested(), "{report:?}");
+}
+
 // --- unbounded by name ------------------------------------------------------
 
 fn unbounded_reason(graph: &GeometryGraph, root: NodeId) -> &'static str {
@@ -733,22 +777,23 @@ fn unbounded_reason(graph: &GeometryGraph, root: NodeId) -> &'static str {
 }
 
 #[test]
-fn a_numerical_frame_and_a_curved_taper_are_unbounded_by_name() {
+fn a_chain_frame_and_a_curved_taper_are_unbounded_by_name() {
     let mut b = GeometryGraphBuilder::new();
-    // A banked curve over a clothoid plan: the clothoid itself is certified
-    // since #361, but cant over it is out of scope (an ellipse's frame is
-    // certified since #316).
+    // A banked curve over a chain plan: a clothoid plan with cant is
+    // certified since #396, a chain's frame is not (TODO(#438)).
     let clothoid = b
         .push_value(Curve3::Banked(Banked3::new(
             Elevated3::new(
-                Curve2::Intrinsic(Intrinsic2::new(
+                Curve2::Chain(Chain2::new(
                     Frame2 {
                         origin: Point2::ZERO,
                         x: Vec2::X,
                         y: Vec2::Y,
                     },
-                    CurvatureLaw::clothoid(0.0, 1.0 / 300.0, 60.0),
-                    60.0,
+                    vec![ChainPiece2::Intrinsic {
+                        curvature: CurvatureLaw::clothoid(0.0, 1.0 / 300.0, 60.0),
+                        length: 60.0,
+                    }],
                 )),
                 ElevationLaw::level(0.0),
             ),
@@ -843,6 +888,7 @@ fn a_numerical_frame_and_a_curved_taper_are_unbounded_by_name() {
         .unwrap();
     let reason = unbounded_reason(&graph, along_clothoid);
     assert!(reason.contains("certified derivative bounds"), "{reason}");
+    assert!(reason.contains("a banked curve over one"), "{reason}");
     let reason = unbounded_reason(&graph, curved_taper);
     assert!(reason.contains("curved profiles"), "{reason}");
     // The exact compiler refuses that taper by name too.
