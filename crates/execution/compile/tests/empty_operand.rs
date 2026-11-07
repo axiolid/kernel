@@ -20,7 +20,10 @@ use axiolid_exact_compile_contract::ExactCompiler;
 use axiolid_measure::exact_properties;
 use axiolid_mesh::TriMesh;
 use axiolid_mesh_boolean_boolmesh::BoolmeshBoolean;
-use axiolid_mesh_compile::{ReferenceExactCompiler, ReferenceMeshCompiler};
+use axiolid_mesh_compile::deviation::EMPTY_RESULT;
+use axiolid_mesh_compile::{
+    DeviationBound, DeviationPath, ReferenceExactCompiler, ReferenceMeshCompiler,
+};
 use axiolid_mesh_compile_contract::{MeshClosure, MeshCompiler};
 use axiolid_model::{
     GeometryGraph, GeometryGraphBuilder, GeometryNode, Instance, NodeId, SolidOperation,
@@ -468,4 +471,39 @@ fn an_authored_empty_mesh_is_still_a_refused_tool() {
         matches!(&error, GeomError::InvalidInput(text) if text.starts_with("boolean tool is a surface model")),
         "{error:?}"
     );
+}
+
+/// The deviation of `case` compiled to a mesh, within the request.
+fn deviation_of(case: Case) -> axiolid_mesh_compile::DeviationReport {
+    let Case { graph, root, .. } = case;
+    let graph = graph.finish(vec![root]);
+    compiler()
+        .compile_mesh_with_deviation(&graph, root, &options())
+        .expect("the mesh compiles")
+        .1
+}
+
+#[test]
+fn an_empty_boolean_with_an_empty_mesh_is_certified_zero() {
+    for (name, case) in [
+        ("an empty root", empty_root()),
+        ("the column clip alone", the_column_clip_alone()),
+        ("an empty subject less a wall", empty_subject_less_a_wall()),
+    ] {
+        let report = deviation_of(case);
+        assert_eq!(report.contributions.len(), 1, "{name}");
+        let only = &report.contributions[0];
+        assert_eq!(only.path, DeviationPath::Boolean, "{name}");
+        assert_eq!(only.detail, EMPTY_RESULT, "{name}");
+        assert_eq!(only.bound, DeviationBound::Certified(0.0), "{name}");
+        assert_eq!(report.bound, Some(0.0), "{name}");
+        assert!(report.meets_requested(), "{name}");
+    }
+}
+
+#[test]
+fn a_difference_by_an_empty_tool_is_certified_within_the_request() {
+    let report = deviation_of(difference_by_empty_clip());
+    assert!(report.bound.is_some(), "{report:?}");
+    assert!(report.meets_requested(), "{report:?}");
 }

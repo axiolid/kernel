@@ -349,6 +349,14 @@ pub const BOOLEAN_ROUNDING_FLOOR: &str = "constructed points read as one within 
 pub const MESH_TO_EXACT: &str =
     "mesh to the exact compiler's result: how far any point of the mesh lies from it";
 
+/// The [`DeviationContribution::detail`] of a boolean whose exact result is
+/// empty and whose mesh is too (#326): nothing is left in either, so the
+/// distance between them is certified `0`. The exact compiler holds the
+/// empty result internally and refuses it only as a root, so the report
+/// cannot be measured against a B-rep; an empty exact result against a
+/// mesh with triangles, or the reverse, is unbounded by name.
+pub const EMPTY_RESULT: &str = "the exact compiler's result is empty, and so is the mesh";
+
 /// The [`DeviationContribution::detail`] of a union the mesh cut could not
 /// settle and the exact compiler decided (#391, ADR 0098): the mesh is
 /// the exact compiler's union tessellated, and the exact union is that of

@@ -193,6 +193,16 @@
 //! now shows, and may fail `meets_requested`, as a void skin does under
 //! [`EXTRA_SHELLS`].
 //!
+//! # An empty result (#326)
+//!
+//! A boolean that leaves nothing (a clip that misses its subject, disjoint
+//! solids' intersection) has no B-rep to measure against: the exact
+//! compiler holds it as empty and refuses it only as a root. When the mesh
+//! has no triangles either, nothing is left in either and the distance is
+//! certified `0` under [`EMPTY_RESULT`]. The two mismatches, an empty exact
+//! result with a mesh that has triangles and a mesh with none against an
+//! exact result that has faces, are unbounded by name.
+//!
 //! # Unbounded, by name
 //!
 //! A boolean the exact compiler refuses (an operand it does not compile
@@ -226,7 +236,7 @@ use axiolid_brep_boolean::{BooleanReport, ToleranceDecisionKind};
 
 use super::{
     Deviation, DeviationBound, DeviationPath, BOOLEAN_ROUNDING_FLOOR, COINCIDENT_OPERANDS,
-    MESH_TO_EXACT, TOLERANCE_READINGS,
+    EMPTY_RESULT, MESH_TO_EXACT, TOLERANCE_READINGS,
 };
 
 use crate::certify::{certify_affine, certify_within, Cell, Coverage, Patch};
@@ -278,13 +288,8 @@ pub(crate) fn of_boolean(
                 )
             }
         };
-    // An empty exact result is not measured yet (#326).
     let Some(exact) = exact else {
-        return Deviation::one(
-            DeviationPath::Boolean,
-            NO_EXACT,
-            DeviationBound::Unbounded(refusal(&GeomError::Degenerate(String::new()))),
-        );
+        return empty_result(mesh);
     };
     // A warped operand was flattened to its triangles (#266): the result
     // is the exact boolean of operands moved by up to `flattened`. No
@@ -298,6 +303,14 @@ pub(crate) fn of_boolean(
     } else {
         MEASURED
     };
+    // The exact result has faces and the mesh none: nothing of it to measure.
+    if mesh.indices.is_empty() {
+        return with_readings(
+            detail,
+            DeviationBound::Unbounded("boolean: the mesh is empty and the exact result is not"),
+            &report,
+        );
+    }
     let budget = crate::compiler::chord_error(options);
     // The flattening takes its share of the budget first (#266): the
     // search settles once within what is left, so a boolean whose
@@ -348,6 +361,25 @@ pub(crate) fn of_boolean(
         );
     }
     deviation
+}
+
+/// The deviation of a boolean whose exact result is empty (#326): `0` when
+/// the mesh has no triangles either, else unbounded, as the exact compiler
+/// has no B-rep to measure the mesh against.
+fn empty_result(mesh: &TriMesh) -> Deviation {
+    if mesh.indices.is_empty() {
+        Deviation::one(
+            DeviationPath::Boolean,
+            EMPTY_RESULT,
+            DeviationBound::Certified(0.0),
+        )
+    } else {
+        Deviation::one(
+            DeviationPath::Boolean,
+            NO_EXACT,
+            DeviationBound::Unbounded("boolean: the exact result is empty and the mesh is not"),
+        )
+    }
 }
 
 /// The deviation of a boolean whose mesh lies `bound` from the exact
@@ -1896,6 +1928,80 @@ mod tests {
         assert_eq!(exact.topology().shells().len(), 2);
         assert_eq!(geometric_components(&mesh), 2);
         assert!(!extra_shells(&exact, &mesh));
+    }
+
+    /// The boolean of a unit block and the half-space `z >= z0`, which
+    /// misses the block for `z0` above it.
+    fn block_and_half_space(z0: Scalar, operator: BooleanOperator) -> (GeometryGraph, NodeId) {
+        let mut g = GeometryGraphBuilder::new();
+        let profile = g
+            .push(GeometryNode::Profile(Profile::Rectangle(
+                RectangleProfile {
+                    x: 1.0,
+                    y: 1.0,
+                    thickness: None,
+                    outer_radius: None,
+                    inner_radius: None,
+                },
+            )))
+            .unwrap();
+        let block = g
+            .push(GeometryNode::SolidOperation(SolidOperation::Extrusion {
+                profile,
+                direction: Vec3::Z,
+                depth: 1.0,
+            }))
+            .unwrap();
+        let above = g
+            .push(GeometryNode::HalfSpace(axiolid_primitive::HalfSpace {
+                boundary: axiolid_core::Plane3 {
+                    origin: Point3::new(0.0, 0.0, z0),
+                    normal: Vec3::Z,
+                },
+                agreement: true,
+            }))
+            .unwrap();
+        let root = g
+            .push(GeometryNode::SolidOperation(SolidOperation::Boolean {
+                left: block,
+                right: above,
+                operator,
+            }))
+            .unwrap();
+        (g.finish(vec![root]).unwrap(), root)
+    }
+
+    #[test]
+    fn an_empty_exact_result_with_an_empty_mesh_is_certified_zero() {
+        let (graph, root) = block_and_half_space(5.0, BooleanOperator::Intersection);
+        let options = ExecutionOptions::new(Tolerance::new(1e-6, 1e-9).unwrap());
+        let deviation = of_boolean(&graph, root, &options, &TriMesh::default());
+        assert_eq!(deviation.0.len(), 1);
+        assert_eq!(deviation.0[0].detail, EMPTY_RESULT);
+        assert_eq!(deviation.0[0].bound, DeviationBound::Certified(0.0));
+    }
+
+    #[test]
+    fn an_empty_exact_result_against_a_mesh_with_triangles_is_unbounded() {
+        let (graph, root) = block_and_half_space(5.0, BooleanOperator::Intersection);
+        let (_, _, _, mesh) = cube(2.0, None);
+        let options = ExecutionOptions::new(Tolerance::new(1e-6, 1e-9).unwrap());
+        let deviation = of_boolean(&graph, root, &options, &mesh);
+        assert_eq!(
+            deviation.0[0].bound,
+            DeviationBound::Unbounded("boolean: the exact result is empty and the mesh is not")
+        );
+    }
+
+    #[test]
+    fn an_empty_mesh_against_an_exact_result_with_faces_is_unbounded() {
+        let (graph, root) = block_and_half_space(5.0, BooleanOperator::Difference);
+        let options = ExecutionOptions::new(Tolerance::new(1e-6, 1e-9).unwrap());
+        let deviation = of_boolean(&graph, root, &options, &TriMesh::default());
+        assert_eq!(
+            deviation.0[0].bound,
+            DeviationBound::Unbounded("boolean: the mesh is empty and the exact result is not")
+        );
     }
 
     /// The wiring: an extra shell makes the boolean's bound unbounded by
