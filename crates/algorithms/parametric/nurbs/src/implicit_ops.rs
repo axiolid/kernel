@@ -719,12 +719,24 @@ mod tests {
 
     #[test]
     fn the_budget_refuses_by_name() {
-        // v = 0 against u (u^2 - 0.04)(u^2 - 0.25): five simple roots.
+        // v = 0 against u times four factors u^2 - r^2: nine simple roots,
+        // more than the cap of the chain, so the leaves must split.
         let f = power(&[(0, 1, 1.0)]);
-        let h = power(&[(5, 0, 1.0), (3, 0, -0.29), (1, 0, 0.01)]);
+        let mut p = vec![0.0, 1.0];
+        for r in [0.2f64, 0.5, 0.8, 0.9] {
+            let mut q = vec![0.0; p.len() + 2];
+            for (i, c) in p.iter().enumerate() {
+                q[i + 2] += c;
+                q[i] -= c * r * r;
+            }
+            p = q;
+        }
+        let terms: Vec<(usize, usize, Scalar)> =
+            p.iter().enumerate().map(|(i, c)| (i, 0, *c)).collect();
+        let h = power(&terms);
         let (lo, hi) = window();
         let curve = traced(&f, lo, hi);
-        assert_eq!(roots_along(&curve, &h, false).expect("decided").len(), 5);
+        assert_eq!(roots_along(&curve, &h, false).expect("decided").len(), 9);
         assert_eq!(
             roots_along_within(&curve, &h, false, 2),
             Err(RootRefusal::Budget)

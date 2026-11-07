@@ -40,7 +40,11 @@ pub struct CurveCurveHit {
     pub second: Scalar,
     /// The point (on the first curve at `first`).
     pub point: Point3,
-    /// 1 where the curves cross, 2 or more where they touch.
+    /// 1 where the curves cross, 2 or more where they touch (the order of
+    /// the contact, up to eight, for a traced curve). At an end of the
+    /// traced curve, where the curve may stop short of a contact, it is the
+    /// order the enclosures see there, not a class: a touch a rounding's
+    /// width from the end can read as a crossing.
     pub multiplicity: usize,
 }
 

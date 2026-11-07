@@ -129,7 +129,11 @@ pub struct ExactCurveHit {
     /// Its parameter on the first curve, exactly.
     pub parameter: ExactCurveParameter,
     /// Its multiplicity: 1 for a transverse crossing, 2 or more where the
-    /// curve touches the other operand.
+    /// curve touches the other operand (the order of the contact, up to
+    /// eight, for a traced section). At an end of the span, where the curve
+    /// may stop short of a contact, it is the order the enclosures see
+    /// there, not a class: a touch a rounding's width from the end can read
+    /// as a crossing.
     pub multiplicity: usize,
     /// The point, rounded from the curve at the parameter (output only).
     /// Planar results have `z = 0`.

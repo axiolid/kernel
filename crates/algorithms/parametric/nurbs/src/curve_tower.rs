@@ -112,21 +112,48 @@ impl<'a> CurveTower<'a> {
         if solved.lo <= 0.0 && solved.hi >= 0.0 {
             return None;
         }
-        let floor = solved.lo.abs().min(solved.hi.abs());
-        let big = {
+        let mut floor = solved.lo.abs().min(solved.hi.abs());
+        let mut big = {
             let r = bound_simple(d_free, &whole);
             r.lo.abs().max(r.hi.abs())
         };
-        let reach = big / floor * (f_hi - f_lo);
-        // The solved value itself is a rounded root: its residual bounds
-        // its distance from the true one.
+        // The solved value itself is a rounded root, and one that snapped
+        // to the end of its bracket may be just outside it: its residual
+        // bounds its distance from the true one, so the hull is the reach
+        // inside the bracket, widened by that distance past it.
         let residual = bound_simple(&self.curve.field, &boxed((f0, f0), (w0, w0)));
-        let slack = residual.lo.abs().max(residual.hi.abs()) / floor;
-        let span = I::around(w0, reach + slack);
-        let hull = boxed(
-            (f_lo, f_hi),
-            (span.lo.max(cell.low), span.hi.min(cell.high)),
-        );
+        let size = residual.lo.abs().max(residual.hi.abs());
+        let mut tries = 0;
+        let hull = loop {
+            let reach = big / floor * (f_hi - f_lo);
+            let slack = size / floor;
+            let span = I::new(
+                (w0 - reach).max(cell.low) - slack,
+                (w0 + reach).min(cell.high) + slack,
+            );
+            let hull = boxed((f_lo, f_hi), (span.lo, span.hi));
+            let along = bound_simple(d_solved, &hull);
+            if along.lo <= 0.0 && along.hi >= 0.0 {
+                return None;
+            }
+            let (floor_hull, big_hull) = {
+                let r = bound_simple(d_free, &hull);
+                (
+                    along.lo.abs().min(along.hi.abs()),
+                    r.lo.abs().max(r.hi.abs()),
+                )
+            };
+            // Past the bracket the partials may be worse than assumed.
+            if floor_hull >= floor && big_hull <= big {
+                break hull;
+            }
+            tries += 1;
+            if tries > 4 {
+                return None;
+            }
+            floor = floor.min(floor_hull);
+            big = big.max(big_hull);
+        };
         let mut p = vec![vec![I::point(0.0); n + 1]; n + 1];
         let mut q = vec![vec![I::point(0.0); n + 1]; n + 1];
         for a in 0..=n {
@@ -277,6 +304,7 @@ mod tests {
     use super::*;
     use crate::implicit_trace::{trace_within, Periodic};
     use axiolid_curve::implicit::{Basis, SeriesField2};
+    use axiolid_curve::ImplicitCell;
 
     fn power(terms: &[(usize, usize, Scalar)]) -> Field2 {
         let mut c = vec![vec![0.0; 5]; 5];
@@ -352,20 +380,50 @@ mod tests {
     #[test]
     fn a_stretch_across_joins_holds_the_values_inside_it() {
         let f = power(&[(2, 0, 1.0), (0, 2, 1.0), (0, 0, -0.25)]);
-        let h = power(&[(1, 0, 1.0), (0, 1, 2.0), (0, 0, 0.1), (3, 0, 0.5)]);
         let curve = traced(&f);
         assert!(curve.cells.len() >= 3);
-        let tower = CurveTower::new(&curve, &h);
-        let (t0, t1) = (0.4, curve.end() - 0.4);
-        assert!(!tower.joins(t0, t1).is_empty());
-        let range = tower.enclose(t0, t1, 3).expect("a range enclosure");
-        for i in 0..=50 {
-            let t = t0 + (t1 - t0) * i as Scalar / 50.0;
-            let point = tower.enclose(t, t, 3).expect("a point enclosure");
-            for j in 0..=3 {
-                let mid = point[j].mid();
-                assert!(contains(range[j], mid), "H_{j} at t = {t}");
+        // The second field climbs along one half of the loop and falls along
+        // the other (`v`), or follows `u + 2 v` with a cubic.
+        for h in [
+            power(&[(0, 1, 1.0)]),
+            power(&[(1, 0, 1.0), (0, 1, 2.0), (0, 0, 0.1), (3, 0, 0.5)]),
+        ] {
+            let tower = CurveTower::new(&curve, &h);
+            let (t0, t1) = (0.4, curve.end() - 0.4);
+            assert!(!tower.joins(t0, t1).is_empty());
+            let range = tower.enclose(t0, t1, 3).expect("a range enclosure");
+            for i in 0..=50 {
+                let t = t0 + (t1 - t0) * i as Scalar / 50.0;
+                let point = tower.enclose(t, t, 3).expect("a point enclosure");
+                for j in 0..=3 {
+                    let mid = point[j].mid();
+                    assert!(contains(range[j], mid), "H_{j} at t = {t}");
+                }
             }
         }
+    }
+
+    #[test]
+    fn a_root_snapped_to_the_end_of_its_bracket_is_still_held() {
+        // The bracket's lower end is 1e-13 above the curve's point at
+        // u = 0.5: the solved value snaps to it, within the rounding scale
+        // of the field, and the true point lies just outside the bracket.
+        let f = power(&[(0, 1, 1.0), (2, 0, -0.3)]);
+        let curve = ImplicitCurve2 {
+            field: f,
+            cells: vec![ImplicitCell {
+                axis: Axis::U,
+                from: 0.5,
+                to: 0.6,
+                low: 0.075 + 1e-13,
+                high: 0.4,
+                bridge: None,
+            }],
+        };
+        let h = power(&[(0, 1, 1.0)]);
+        let tower = CurveTower::new(&curve, &h);
+        let e = tower.enclose(0.0, 0.0, 1).expect("an enclosure");
+        assert!(contains(e[0], 0.075), "{:?}", e[0]);
+        assert!(contains(e[1], -0.3), "{:?}", e[1]);
     }
 }

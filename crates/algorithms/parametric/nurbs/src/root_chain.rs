@@ -33,6 +33,8 @@ pub(crate) const GENERIC_ORDER: usize = 2;
 /// the section, boolean and compile suites needed was 449, and this is the
 /// first power of two (at least `2^14`) above sixteen times that.
 pub(crate) const ROOT_BUDGET: usize = 1 << 14;
+/// Enclosures spent on narrowing a root's extent.
+const REFINE_EVALS: usize = 256;
 const MAX_DEPTH: u32 = 128;
 /// The narrowest leaf, in parameter units.
 const MIN_WIDTH: Scalar = 1.0 / (1u64 << 44) as Scalar;
@@ -98,8 +100,10 @@ impl Zone {
         }
     }
 
-    /// One zone of the run of zones whose enclosures straddle zero.
-    fn cluster(run: &[Zone]) -> Self {
+    /// One zone of the run of zones whose enclosures straddle zero, over
+    /// `[lo, hi]`: the run's extent and the gaps [`gap`] could not clear.
+    /// Its multiplicity is the most Rolle allows.
+    fn cluster(run: &[Zone], lo: Scalar, hi: Scalar) -> Self {
         let mut at = &run[0];
         for q in run {
             if q.m > at.m {
@@ -109,8 +113,8 @@ impl Zone {
         let curve = run.iter().any(|q| q.end == Some(End::Curve));
         let m = run.iter().map(|q| q.m).sum::<usize>() + 1;
         Self {
-            lo: run[0].lo,
-            hi: run[run.len() - 1].hi,
+            lo,
+            hi,
             at: at.at,
             m,
             end: curve.then_some(End::Curve),
@@ -172,6 +176,35 @@ fn isolate_in<T: Tower>(
     out: &mut Vec<Zone>,
 ) -> Result<(), RootRefusal> {
     budget.spend()?;
+    // A stretch some order settles needs no split, wherever its joins lie.
+    let low = tower.enclose(t0, t1, 1).ok_or(RootRefusal::Unresolved);
+    if let Ok(low) = &low {
+        if low[0].excludes_zero() {
+            return Ok(());
+        }
+        let k = if low[1].excludes_zero() {
+            Some(1)
+        } else {
+            tower.enclose(t0, t1, 2).and_then(|mut e| {
+                if !e[2].excludes_zero() {
+                    e = tower.enclose(t0, t1, MAX_CONTACT_ORDER)?;
+                }
+                (2..=MAX_CONTACT_ORDER).find(|&k| e[k].excludes_zero())
+            })
+        };
+        if let Some(k) = k {
+            // A chain that cannot settle the leaf (an inner end that
+            // straddles, an overestimate) splits it like an unsettled one.
+            match chain(tower, t0, t1, k, ends) {
+                Ok(zones) => {
+                    out.extend(zones);
+                    return Ok(());
+                }
+                Err(RootRefusal::Budget) => return Err(RootRefusal::Budget),
+                Err(RootRefusal::Unresolved) => {}
+            }
+        }
+    }
     let middle = 0.5 * (t0 + t1);
     let mut joins = tower.joins(t0, t1);
     joins.sort_by(|a, b| (a - middle).abs().total_cmp(&(b - middle).abs()));
@@ -179,34 +212,20 @@ fn isolate_in<T: Tower>(
         isolate_in(tower, t0, j, [ends[0], End::Inner], depth + 1, budget, out)?;
         return isolate_in(tower, j, t1, [End::Inner, ends[1]], depth + 1, budget, out);
     }
-    let low = tower.enclose(t0, t1, 1).ok_or(RootRefusal::Unresolved)?;
-    if low[0].excludes_zero() {
-        return Ok(());
-    }
-    let k = if low[1].excludes_zero() {
-        Some(1)
-    } else {
-        let mut e = tower.enclose(t0, t1, 2).ok_or(RootRefusal::Unresolved)?;
-        if !e[2].excludes_zero() {
-            e = tower
-                .enclose(t0, t1, MAX_CONTACT_ORDER)
-                .ok_or(RootRefusal::Unresolved)?;
-        }
-        (2..=MAX_CONTACT_ORDER).find(|&k| e[k].excludes_zero())
-    };
-    if let Some(k) = k {
-        out.extend(chain(tower, t0, t1, k, ends)?);
-        return Ok(());
-    }
     if depth >= MAX_DEPTH || t1 - t0 <= MIN_WIDTH {
         return Err(RootRefusal::Unresolved);
     }
-    for c in SPLITS {
-        let m = t0 + (t1 - t0) * c;
-        if generic(tower, m) {
-            isolate_in(tower, t0, m, [ends[0], End::Inner], depth + 1, budget, out)?;
-            return isolate_in(tower, m, t1, [End::Inner, ends[1]], depth + 1, budget, out);
-        }
+    // A cut signed to the second order, else one where only the value is
+    // signed (the chain refuses a leaf whose inner end it cannot sign).
+    let cuts: Vec<Scalar> = SPLITS.iter().map(|c| t0 + (t1 - t0) * c).collect();
+    let cut = cuts
+        .iter()
+        .copied()
+        .find(|&m| generic(tower, m))
+        .or_else(|| cuts.iter().copied().find(|&m| signed(tower, m)));
+    if let Some(m) = cut {
+        isolate_in(tower, t0, m, [ends[0], End::Inner], depth + 1, budget, out)?;
+        return isolate_in(tower, m, t1, [End::Inner, ends[1]], depth + 1, budget, out);
     }
     Err(RootRefusal::Unresolved)
 }
@@ -216,6 +235,11 @@ fn generic<T: Tower>(tower: &T, t: Scalar) -> bool {
     tower
         .enclose(t, t, GENERIC_ORDER)
         .is_some_and(|e| e.iter().all(|x| x.excludes_zero()))
+}
+
+/// Whether the value at `t` is signed.
+fn signed<T: Tower>(tower: &T, t: Scalar) -> bool {
+    tower.enclose(t, t, 0).is_some_and(|e| e[0].excludes_zero())
 }
 
 fn positive(e: I) -> bool {
@@ -260,14 +284,64 @@ fn chain<T: Tower>(
                 if run.iter().any(|q| q.end == Some(End::Inner)) {
                     return Err(RootRefusal::Unresolved);
                 }
-                let cluster = Zone::cluster(run);
+                // The gaps between the run and its signed neighbours hold
+                // no zero of H_{j+1}, so H_j is monotone there: a zero in
+                // one is bracketed by signs or lies in the cluster's extent.
+                let (mut lo, mut hi) = (run[0].lo, run[run.len() - 1].hi);
+                let (mut before, mut after) = (None, None);
+                if start > 0 {
+                    (lo, before) = gap(tower, p[start - 1].hi, positive(e[start - 1]), lo, j)?;
+                }
+                if i < p.len() {
+                    (hi, after) = gap(tower, p[i].lo, positive(e[i]), hi, j)?;
+                }
+                let mut cluster = Zone::cluster(run, lo, hi);
+                // The enclosure of a wide extent overestimates: over its
+                // pieces H_0 may be signed everywhere, or straddle only in
+                // a part, and only that part can hold a root.
+                if j == 0 {
+                    let mut evals = REFINE_EVALS;
+                    match straddling_hull(tower, lo, hi, &mut evals) {
+                        Some((l, h)) => {
+                            // An extent that would not narrow, around a value
+                            // that is signed: a pair of roots closer than the
+                            // enclosures resolve, or none.
+                            if evals == 0 && signed(tower, cluster.at) {
+                                return Err(RootRefusal::Unresolved);
+                            }
+                            cluster.lo = l;
+                            cluster.hi = h;
+                            cluster.at = cluster.at.clamp(l, h);
+                        }
+                        None => {
+                            let sign_change = start > 0
+                                && i < p.len()
+                                && positive(e[start - 1]) != positive(e[i]);
+                            if sign_change {
+                                return Err(RootRefusal::Unresolved);
+                            }
+                            next.extend(before);
+                            next.extend(after);
+                            continue;
+                        }
+                    }
+                }
                 if start > 0 && i < p.len() {
                     let change = positive(e[start - 1]) != positive(e[i]);
                     if change != (cluster.m % 2 == 1) {
                         return Err(RootRefusal::Unresolved);
                     }
                 }
-                next.push(cluster);
+                let found = usize::from(before.is_some()) + usize::from(after.is_some());
+                if found > cluster.m {
+                    return Err(RootRefusal::Unresolved);
+                }
+                cluster.m -= found;
+                next.extend(before);
+                if cluster.m > 0 {
+                    next.push(cluster);
+                }
+                next.extend(after);
             } else {
                 if i + 1 < p.len() && !straddles[i + 1] && positive(e[i]) != positive(e[i + 1]) {
                     next.push(bisect(tower, p[i].hi, p[i + 1].lo, j, positive(e[i]))?);
@@ -281,6 +355,73 @@ fn chain<T: Tower>(
         z = next;
     }
     Ok(z)
+}
+
+/// The part of `[lo, hi]` over which the enclosure of `H_0` straddles zero,
+/// found by halving while it does, within `evals` enclosures: `None` when
+/// it is signed on every piece, the whole range when the work runs out.
+fn straddling_hull<T: Tower>(
+    tower: &T,
+    lo: Scalar,
+    hi: Scalar,
+    evals: &mut usize,
+) -> Option<(Scalar, Scalar)> {
+    if hi - lo <= MIN_WIDTH {
+        return Some((lo, hi));
+    }
+    if *evals == 0 {
+        return Some((lo, hi));
+    }
+    *evals -= 1;
+    let Some(e) = tower.enclose(lo, hi, 0) else {
+        return Some((lo, hi));
+    };
+    if e[0].excludes_zero() {
+        return None;
+    }
+    let m = 0.5 * (lo + hi);
+    if m <= lo || m >= hi {
+        return Some((lo, hi));
+    }
+    match (
+        straddling_hull(tower, lo, m, evals),
+        straddling_hull(tower, m, hi, evals),
+    ) {
+        (Some(a), Some(b)) => Some((a.0.min(b.0), a.1.max(b.1))),
+        (a, b) => a.or(b),
+    }
+}
+
+/// Searches the gap from `ok`, where `H_j` is signed (`positive_ok`), toward
+/// `to`, the edge of a zone whose enclosure straddles zero. `H_j` is
+/// monotone on the gap. Returns where the zone's extent has to start: the
+/// last point found signed like `ok`, or `to` itself when a point of the
+/// opposite sign shows a zero in between, which is returned bracketed.
+fn gap<T: Tower>(
+    tower: &T,
+    mut ok: Scalar,
+    positive_ok: bool,
+    to: Scalar,
+    j: usize,
+) -> Result<(Scalar, Option<Zone>), RootRefusal> {
+    let mut bad = to;
+    for _ in 0..100 {
+        let m = 0.5 * (ok + bad);
+        if m == ok || m == bad {
+            break;
+        }
+        let e = tower.enclose(m, m, j).ok_or(RootRefusal::Unresolved)?[j];
+        if !e.excludes_zero() {
+            bad = m;
+        } else if positive(e) == positive_ok {
+            ok = m;
+        } else {
+            let (lo, hi) = (ok.min(m), ok.max(m));
+            let zone = bisect(tower, lo, hi, j, positive_ok == (lo == ok))?;
+            return Ok((to, Some(zone)));
+        }
+    }
+    Ok((ok, None))
 }
 
 /// The simple zero of `H_j` between `lo` and `hi`, where it changes sign,
@@ -563,5 +704,123 @@ mod tests {
             .unwrap_err(),
             RootRefusal::Unresolved
         );
+    }
+
+    /// A seeded generator, so the fuzz below is the same on every run.
+    struct Lcg(u64);
+
+    impl Lcg {
+        fn next(&mut self, n: u64) -> u64 {
+            self.0 = self
+                .0
+                .wrapping_mul(6364136223846793005)
+                .wrapping_add(1442695040888963407);
+            (self.0 >> 33) % n
+        }
+    }
+
+    /// The sign of `sum coeffs[i] t^i` at `t = n / 256`, exactly: every
+    /// coefficient is an integer over `2^48` (roots are multiples of 1/64,
+    /// the displacement a power of two), so the scaled sum is in `i128`.
+    fn exact_sign(coeffs: &[Scalar], n: i128) -> i32 {
+        let degree = coeffs.len() - 1;
+        let mut sum: i128 = 0;
+        for (i, c) in coeffs.iter().enumerate() {
+            let scaled = c * (1u64 << 48) as Scalar;
+            assert_eq!(scaled.fract(), 0.0, "coefficient {i} is not exact");
+            sum += scaled as i128 * n.pow(i as u32) * 256i128.pow((degree - i) as u32);
+        }
+        sum.signum() as i32
+    }
+
+    #[test]
+    fn random_exact_polynomials_lose_no_crossing_and_invent_no_root() {
+        let mut rng = Lcg(99_537_959);
+        let (mut decided, mut refused) = (0, 0);
+        for case in 0..600 {
+            // Roots at multiples of 1/64 with multiplicities, a positive
+            // factor, and a displacement of the constant term.
+            let mut p = vec![1.0];
+            let mut degree = 0;
+            while degree < 8 && (degree == 0 || rng.next(4) != 0) {
+                let m = (1 + rng.next(3) as usize).min(8 - degree);
+                let r = (rng.next(81) as f64 - 40.0) / 64.0;
+                for _ in 0..m {
+                    p = mul(&p, &[-r, 1.0]);
+                }
+                degree += m;
+            }
+            let k = 12 + rng.next(29) as i32;
+            match rng.next(3) {
+                0 => p[0] += 2f64.powi(-k),
+                1 => p[0] -= 2f64.powi(-k),
+                _ => {}
+            }
+            if rng.next(2) == 0 {
+                p = p.iter().map(|c| -c).collect();
+            }
+            let tower = PolyTower::new(p.clone());
+            let Ok(roots) = run(&tower, -1.0, 1.0) else {
+                refused += 1;
+                continue;
+            };
+            decided += 1;
+            // No invented root: the value is nil there to rounding.
+            for (t, m) in &roots {
+                let at = tower.enclose(*t, *t, 0).unwrap()[0];
+                assert!(
+                    at.lo <= 1e-9 && at.hi >= -1e-9,
+                    "case {case}: root {t} (m = {m}) of {p:?} has value {at:?}"
+                );
+            }
+            // No crossing lost: a sign change of the exact values between
+            // neighbouring grid points holds a reported root.
+            let signs: Vec<i32> = (-256..=256).map(|n| exact_sign(&p, n)).collect();
+            for (w, pair) in signs.windows(2).enumerate() {
+                if pair[0] != 0 && pair[1] != 0 && pair[0] != pair[1] {
+                    let (a, b) = ((w as f64 - 256.0) / 256.0, (w as f64 - 255.0) / 256.0);
+                    assert!(
+                        roots.iter().any(|(t, _)| *t >= a - 1e-9 && *t <= b + 1e-9),
+                        "case {case}: the crossing in [{a}, {b}] of {p:?} is lost: {roots:?}"
+                    );
+                }
+            }
+        }
+        assert!(decided > 400, "{decided} decided, {refused} refused");
+    }
+
+    #[test]
+    fn a_stretch_an_order_settles_needs_no_split_at_its_joins() {
+        // A line over 9000 cells: one node, however many joins it spans.
+        let mut tower = PolyTower::new(vec![-4000.5, 1.0]);
+        tower.joins = (1..9000).map(|k| k as Scalar).collect();
+        let mut budget = Budget::new(4);
+        let zones = isolate(&tower, 0.0, 9000.0, [End::Curve, End::Curve], &mut budget).unwrap();
+        assert_eq!(zones.len(), 1);
+        assert_eq!(zones[0].m, 1);
+        assert!((zones[0].at - 4000.5).abs() < 1e-9);
+    }
+
+    #[test]
+    fn a_leaf_the_chain_cannot_settle_is_split_not_refused() {
+        // -512 (16 t + 15)^4 (2048 t^2 + 2099): no root in the window, but
+        // its inner end sits where the fourth-order chain straddles.
+        let mut p = vec![1.0];
+        for _ in 0..4 {
+            p = mul(&p, &[15.0, 16.0]);
+        }
+        p = mul(&p, &[2099.0, 0.0, 2048.0]);
+        let p = p.iter().map(|c| -512.0 * c).collect();
+        let tower = PolyTower::new(p);
+        let mut budget = Budget::new(ROOT_BUDGET);
+        let zones = isolate(
+            &tower,
+            -0.625,
+            0.1171875,
+            [End::Inner, End::Curve],
+            &mut budget,
+        )
+        .unwrap();
+        assert!(zones.is_empty(), "{zones:?}");
     }
 }
