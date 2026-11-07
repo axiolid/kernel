@@ -257,7 +257,7 @@ dependencies = [
 
 [[package]]
 name = "axiolid-construct"
-version = "0.3.29"
+version = "0.4.0"
 dependencies = [
  "axiolid-brep",
  "axiolid-brep-audit",
@@ -757,7 +757,7 @@ dependencies = [
 
 [[package]]
 name = "axiolid-project"
-version = "0.3.3"
+version = "0.4.0"
 dependencies = [
  "axiolid-core",
  "axiolid-mesh",
@@ -817,7 +817,7 @@ dependencies = [
 
 [[package]]
 name = "axiolid-route"
-version = "0.3.9"
+version = "0.4.0"
 dependencies = [
  "axiolid-contracts",
  "axiolid-core",

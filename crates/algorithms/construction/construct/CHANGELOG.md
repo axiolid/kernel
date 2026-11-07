@@ -9,6 +9,13 @@ caret rule for `0.x` versions.
 
 ## [Unreleased]
 
+### Changed
+
+- **Breaking:** requires `axiolid-overlay` 0.4, whose `OverlayError` is
+  `#[non_exhaustive]` with the new `HolesOverlap` and `PolygonsOverlap`, and
+  whose `Region::new` refuses rings that cross into each other. `ProfileFinding::DegenerateRing` carries that `OverlayError`, so a `match` on it needs a wildcard arm
+  (#448, ADR 0104).
+
 ### Added
 
 - `revolve_profile_exact` and `revolve_arc_ring` revolve a full turn of a
