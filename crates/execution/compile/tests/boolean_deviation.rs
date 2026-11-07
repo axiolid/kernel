@@ -1392,7 +1392,13 @@ fn bolt_tool() -> Profile {
 /// A box of 2 x 2 x 2 and a whole revolved tool placed by `at`, combined
 /// with `operator` (the tool first when `tool_first`), measured against the
 /// exact result and certified within the budget.
-fn pole_case(name: &str, tool: Profile, at: Vec3, operator: BooleanOperator, tool_first: bool) {
+fn pole_case(
+    name: &str,
+    tool: Profile,
+    at: Vec3,
+    operator: BooleanOperator,
+    tool_first: bool,
+) -> Scalar {
     let options = options(1e-3);
     let case = compile(
         |g| {
@@ -1410,6 +1416,7 @@ fn pole_case(name: &str, tool: Profile, at: Vec3, operator: BooleanOperator, too
     );
     let (bound, _) = assert_measured(name, case, &options, 2.0);
     assert!(bound <= 1e-3, "{name}: {bound:e}");
+    bound
 }
 
 /// A whole cone's apex, inside the box and outside it, and the bolt's: the
@@ -1497,13 +1504,16 @@ fn a_box_minus_a_ball_with_a_pole_outside_is_certified() {
 
 #[test]
 fn a_ball_minus_a_box_is_certified() {
-    pole_case(
+    let bound = pole_case(
         "ball minus box",
         ball_tool(),
         Vec3::new(0.0, 0.9, 1.0),
         BooleanOperator::Difference,
         true,
     );
+    // A sphere's box ends at its poles: without that the slack past them
+    // reads 9.99970e-4.
+    assert!(bound < 9.99965e-4, "{bound:e}");
 }
 
 #[test]

@@ -49,6 +49,9 @@ caret rule for `0.x` versions.
 
 ### Changed
 
+- `revolve_arc_ring` refuses an axis origin with `z != 0` as "exact
+  revolution about an axis out of the profile plane" (#450); it used to
+  accept it unless the section touched the axis.
 - The exact revolution is built about the axis as given (#450). An axis
   exactly along y (either sense) builds in place, bit for bit as before; any
   other axis lying exactly in the profile plane (`z` zero in its direction and

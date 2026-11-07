@@ -173,6 +173,9 @@ exactly perpendicular is refused. Any out-of-plane component is refused by
 name: the edges would sweep hyperboloids, so there is no tolerance band to
 offer.
 
+Follow-up: exact booleans of a wall minus a revolution about a slightly
+tilted axis are not sewn or classified yet (#470).
+
 Rejected: refusing everything not exactly +-y (it throws away correct
 in-plane axes, such as the profile's own x axis, which the mesh path
 supports), and snapping the axis within the tolerance and reporting a

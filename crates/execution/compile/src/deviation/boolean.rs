@@ -203,7 +203,8 @@
 //! within the gap admitted above (a periodic face trimmed by two separate
 //! circles) is unbounded by name. A loop that leaves a sphere's pole or a
 //! cone's apex at the height it reached it closes there, whatever the jump
-//! in u: every u names the same point (#379). A cone's box ends at its apex.
+//! in u: every u names the same point (#379). A cone's box ends at its apex
+//! and a sphere's at its poles.
 //!
 //! The exact result is compiled at the node's own options, so under an
 //! instance it is the local solid and the mesh the local mesh; the
@@ -811,6 +812,11 @@ impl Domain {
                     domain.lo.y = domain.lo.y.max(apex);
                 }
             }
+        }
+        // A sphere's latitude ends at its poles likewise.
+        if matches!(surface, Surface::Sphere(_)) {
+            domain.lo.y = domain.lo.y.max(-core::f64::consts::FRAC_PI_2);
+            domain.hi.y = domain.hi.y.min(core::f64::consts::FRAC_PI_2);
         }
         Ok(domain)
     }
