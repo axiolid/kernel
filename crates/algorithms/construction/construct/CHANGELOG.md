@@ -9,8 +9,6 @@ caret rule for `0.x` versions.
 
 ## [Unreleased]
 
-## [0.3.29] - 2026-11-03
-
 ### Added
 
 - `revolve_profile_exact` and `revolve_arc_ring` revolve a full turn of a
@@ -30,6 +28,17 @@ caret rule for `0.x` versions.
   section with several contacts (a cavity along the axis) gives one solid per
   outermost piece with the nested pieces as void shells; a solid inside a
   cavity is refused.
+
+### Fixed
+
+- `revolve_arc_ring` mirrored a section on the negative side of the axis
+  without walking it backwards, so its walls faced inward and its signed
+  volume was negative; the mirrored section is now walked the other way
+  round (#379).
+
+## [0.3.29] - 2026-11-03
+
+### Added
 
 - `ExactProfileValidator::validate_with` and `validate_contours_with` take
   `ArcCheckOptions`; with a clearance, segments of the lowered contour whose
@@ -59,11 +68,6 @@ caret rule for `0.x` versions.
   (#389).
 
 ### Fixed
-
-- `revolve_arc_ring` mirrored a section on the negative side of the axis
-  without walking it backwards, so its walls faced inward and its signed
-  volume was negative; the mirrored section is now walked the other way
-  round (#379).
 
 - `extrude_profile_exact` ran no profile check and built a solid from a
   contour with a self-contact (a chord crossing an arc, a bow tie, a pinch),

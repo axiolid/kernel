@@ -9,8 +9,6 @@ caret rule for `0.x` versions.
 
 ## [Unreleased]
 
-## [0.1.14] - 2026-11-07
-
 ### Fixed
 
 - Unions far from the origin sew their kept faces and classify points near
@@ -26,6 +24,10 @@ caret rule for `0.x` versions.
   operands as given; operands nearer the origin are cut bit for bit as
   before. The next release needs `axiolid-brep` with
   `translated_exactly`.
+
+## [0.1.14] - 2026-11-07
+
+### Fixed
 
 - `BooleanReport::rounding_floor` adds the move of an angular residue at
   the rounding floor (`2^-40` rad, read without a decision) over the
@@ -159,7 +161,6 @@ caret rule for `0.x` versions.
   `Sinusoid2` pcurve in the wall's angle, and a ruling a vertical line.
   Whether a plane is parallel to such a wall's axis or touches it is
   decided by exact predicates only, never read within tolerance.
-
 
 ## [0.1.8] - 2026-10-09
 

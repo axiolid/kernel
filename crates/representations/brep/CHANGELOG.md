@@ -9,14 +9,17 @@ caret rule for `0.x` versions.
 
 ## [Unreleased]
 
-## [0.3.6] - 2026-11-07
-
 ### Added
 
 - `ExactBRep::translated_exactly` (#418): a translation that is `None`
   unless every vertex, frame origin, curve origin and control point moves
   with no rounding, so the copy is the exact translate and translating
   back returns the coordinates.
+
+## [0.3.6] - 2026-11-07
+
+### Added
+
 - The package now ships `LICENSE` and `LICENSE-COMMERCIAL` (symlinks to the
   repository root), so the licence texts travel with the archive (#358).
 
