@@ -1806,3 +1806,39 @@ keeps, shared with the polyline compiler),
 `crates/execution/compile/tests/station_trim_of_trim.rs` (a station on a
 trim of a trim, bitwise against the polyline's ends and the swept
 directrix's volume).
+
+## Amendment 2026-11-07: sheets of open sections cannot fold either (#407)
+
+Context: the amendment on sections that cannot fold (#361) left a sectioned
+surface and an open-section run "not checked here, and #407 tracks both".
+Their section planes fold exactly as a spine's do, and the sheet was reported
+certified (or, where a vertex touched the centre, refused only as a collapsed
+triangle).
+
+- **The same condition, margin 0.** A sheet is decided by the spine's
+  decision (`SectionLaw::fold`) at the vertices of its polylines. An open
+  section is its own exact polyline, so there is no flattening margin; `F`
+  is affine in the section coordinates, so the minimum stands at a polyline
+  vertex. Tags join the vertices before the check, so a section authored
+  reversed is judged on its joined vertices. The exact decision for unturned
+  sections on closed-form bend frames (a touch within rounding included)
+  and the conservative, never-refusing bound for turned sections and
+  frames read by quadrature are unchanged. The refusal reads "station-placed
+  sections fold" for spines and sheets alike.
+- **Stricter than regular.** The rule is that the planes advance past every
+  section point. Refused although the sheet is regular: a sheet wholly past
+  the centre of a plan arc, and a helicoid crossing its axis.
+- **Local only.** A sheet that meets itself far away is not detected (#407
+  stays open for it).
+
+| Option | Why not |
+| --- | --- |
+| Refuse only singular sheets (`F = 0` and the in-plane velocity parallel to the section tangent) | Needs new certified in-plane frame coefficients from axiolid-evaluate, and moving to the strict rule later would be breaking, while relaxing it later is additive. |
+
+Evidence: `crates/execution/compile/src/station.rs` (`sectioned_surface`),
+`crates/execution/compile/src/station/bound/fold.rs`,
+`crates/execution/compile/tests/station_fold_sheet.rs` (both kinds in both
+frames: a plan arc's centre reached, touched and cleared, a receding
+longitudinal offset, a sheet wholly past the centre, a ramp's axis, reversed
+tags, a turned sheet reported unbounded) and
+`scripts/probe_station_fold_mutants.py`.
