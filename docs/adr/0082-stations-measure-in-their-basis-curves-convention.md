@@ -2129,3 +2129,74 @@ curves, the jet against the closed forms),
 adversarially perturbed jets), `crates/execution/compile/tests/elevated_directrix.rs`
 (`a_disk_along_a_cubic_chain_plan_is_certified`) and
 `scripts/probe_chain_positions_mutants.py`.
+
+## Amendment 2026-11-07: folds decided exactly for turned sections and frames read by quadrature (#406)
+
+Context: the amendment on sections that cannot fold (#361) decided a fold
+exactly only for unturned sections on frames with a closed-form bend; a turned
+section, or a frame read by quadrature (an ellipse, a B-spline, an offset),
+got a magnitude bound that never refused and reported the run
+`FOLD_NOT_EXCLUDED`. A section turned past the centre of a bend, a deck along
+an ellipse's offset reaching its sharpest bend, and a section pitched against
+the grade in the plan frame were reported unbounded, never refused; a clear
+run on the outer side of an ellipse was reported unbounded too.
+
+- **The rate along the turned plane.** With the frame's rates in station
+  distance, `T' = beta_L L + beta_U U`, `L' = -beta_L T + tau U`, `O' = sigma T
+  + rise U` (Darboux vector `w = (tau, -beta_U, beta_L)` in the base frame),
+  the turned normal `n`, lateral `y^` and up `e` in the base frame and a vertex
+  at `p = q + x y^ + y e`, the vertex advances along the plane's normal at
+  `F = sigma n_T + rise n_U + q'.n + w.(p x n) + x y^'.n + y e'.n`, the
+  Jacobian determinant of `(s, x, y) -> A`. Unturned, it is #361's `sigma + c'
+  - beta_L a - beta_U b`. The decision, bisection, witness and depth rule are
+  #361's, on this `F`.
+- **Twist and rise** (`FrameLaw::rates`, `FrameRates`). Every section frame
+  is a rolled reference-up frame, so `tau = phi' + T'.(u x Z) / |T_xy|` (`u` the
+  unrolled up, `phi'` the roll's rate from the cant law, zero off a banked
+  curve or under a placement that tilts `+Z`); `rise = O'_z` under the plan
+  reading and zero under the section reading. Ranges are the middle value
+  plus `(span / 2 + measure)` times the Lipschitz constants from
+  `FrameLawBounds` (`|tau'| <= |U'||L'| + |L''|`, `|rise'| <= |O''|`).
+- **The orientation's turn** is closed form: `e'.n = a'.n / |a|`, `y^'.n =
+  -(r'.y^ - (r.e)(a'.y^) / |a|) / |g|` for the interpolated axis `a` and
+  reference `r` (`g = r - (r.e) e`), bounded over a span by the existing
+  interpolation bounds.
+- **Frames read by quadrature.** The exact law is the curve in its true arc
+  length: `O'` its unit tangent and `O''` its curvature vector, from the
+  closed-form `P'` and `P''` at the native parameter the middle read stands at
+  (a new certified second derivative: the curve's own, or beside an offset the
+  base's up to its third derivative through the unit vectors' second rates and
+  the law's reading along the base). Their Lipschitz constants hold only
+  between points where `P''` may jump (a B-spline's knots of multiplicity
+  above `degree - 2`; beside an offset, `degree - 3`): a span across one has
+  no rates and, after 8 halvings, is checked by the conservative bound, never
+  refused.
+- **Refusal width.** A witness refuses where `F` is not certified positive
+  within rounding and, on a frame read by quadrature, the frames' certified
+  error (a thousandth of the budget's share): the "touch within rounding" of
+  #361, widened by a certified error, never by an estimate.
+- **Facing backwards.** A section turned so that its plane's normal runs
+  against the basis (`F <= 0` everywhere, e.g. pitched against the grade
+  beyond its normal) is refused by the same rule: the loft and the exact
+  compiler do not orient by the sign of `F`. Accepting such a run as a
+  reversed solid would be additive.
+- **Still local** (#407 part 2): a run that meets itself far away is not
+  detected. Chains have no frame law (#438, #394); once they do, their jets
+  enter `rates` with no change to the decision.
+
+| Option | Why not |
+| --- | --- |
+| Refuse where the conservative bound is negative | A magnitude bound; it refuses valid solids. |
+| A difference quotient of read tangents for the curvature | Its error, about `sqrt(eps sup|T''|)`, would refuse runs millimetres from a fold. |
+| Bound the twist by its magnitude | The witness would have no precise value to refuse or clear on. |
+| A separate turned path | The unturned rate is the special case. |
+
+Evidence: `crates/algorithms/parametric/evaluate/src/station/frame_bound/rates.rs`,
+`src/station/certify/reading.rs` (`PieceReader::jet`), `src/banked.rs`
+(`roll_rate`), `crates/algorithms/parametric/evaluate/tests/station_frame_rates.rs`
+(twist, rise and bends against differences of the frames, curvature against the
+ellipse's closed form at an RK4 arc length, offsets against `1/(R + d)`),
+`crates/execution/compile/src/station/bound/fold/` (`turned.rs`, `rate.rs`),
+`crates/execution/compile/tests/station_fold_turned.rs` (closed forms and a
+finite-difference oracle of the placed vertices),
+`tests/station_fold_quadrature.rs` and `scripts/probe_exact_fold_mutants.py`.
