@@ -6,6 +6,8 @@
 //! with most edges near collinear neighbours. Cases:
 //!
 //! - `new`: `Region::new` of the floor, which validates its ring.
+//! - `holes`: `Region::new` of the floor with 200 holes, which also checks
+//!   that the holes lie inside the floor and apart (#448).
 //! - `overlay`: `overlay` of the floor's polygon with a 1 m square inside
 //!   it (`Difference`), which validates both operands every call.
 //! - `region`: `Region::difference` of the floor region and the square's,
@@ -130,6 +132,32 @@ fn main() {
         println!(
             "{:<8} {:>8} {:>10.3} {:>10.3} {:>12}",
             "new", count, new, new, "valid"
+        );
+
+        let holed = Polygon {
+            outer: Ring {
+                points: points.clone(),
+            },
+            holes: (0..200)
+                .map(|k| {
+                    let x = 1.0 + 1.9 * (k / 10) as f64;
+                    let y = 1.0 + 2.8 * (k % 10) as f64;
+                    let mut ring = square(x, y, 0.5).outer;
+                    ring.points.reverse();
+                    ring
+                })
+                .collect(),
+        };
+        let with_holes = median(runs, || {
+            black_box(Region::new(vec![holed.clone()], t).expect("a valid floor with holes"));
+        });
+        println!(
+            "{:<8} {:>8} {:>10.3} {:>10.3} {:>12}",
+            "holes",
+            count + 800,
+            with_holes,
+            with_holes,
+            "valid"
         );
 
         let (subject, clip) = (
