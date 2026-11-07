@@ -61,12 +61,13 @@
 //! cannot make them undershoot.
 
 use axiolid_core::{Frame2, Frame3, Scalar, Vec2, Vec3};
-use axiolid_curve::{BSplineCurve, Curve2, Curve3};
+use axiolid_curve::{BSplineCurve, Carrier, Curve2, Curve3};
 use axiolid_surface::{BSplineSurface, Surface};
 
 use crate::curve::span_in;
 use crate::nurbs::SplineAxis;
 
+mod carrier;
 mod graph;
 mod implicit;
 mod interval;
@@ -804,8 +805,15 @@ impl SurfaceBounds {
 /// so each [`Self::bounds`] call only scans the window of the box.
 #[derive(Debug, Clone)]
 pub struct SurfaceBoundOracle<'a> {
-    surface: &'a Surface,
+    source: Source<'a>,
     spline: Option<SplineNets>,
+}
+
+/// What an oracle bounds: a surface, or the carrier a curve lies on.
+#[derive(Debug, Clone, Copy)]
+enum Source<'a> {
+    Surface(&'a Surface),
+    Carrier(&'a Carrier),
 }
 
 /// Homogeneous derivative nets of a B-spline surface, centred.
@@ -838,7 +846,27 @@ impl<'a> SurfaceBoundOracle<'a> {
             Surface::BSpline(b) => Some(SplineNets::new(b)?),
             _ => return None,
         };
-        Some(Self { surface, spline })
+        Some(Self {
+            source: Source::Surface(surface),
+            spline,
+        })
+    }
+
+    /// Prepare the bounds of the surface a curve lies on (ADR 0077), or
+    /// `None` for non-finite data or a malformed spline net.
+    #[must_use]
+    pub fn for_carrier(carrier: &'a Carrier) -> Option<Self> {
+        if !carrier.is_finite() {
+            return None;
+        }
+        let spline = match carrier {
+            Carrier::Spline(b) => Some(SplineNets::new(b)?),
+            _ => None,
+        };
+        Some(Self {
+            source: Source::Carrier(carrier),
+            spline,
+        })
     }
 
     /// Bounds over the box `[u.0, u.1] x [v.0, v.1]`; `None` where the
@@ -851,93 +879,70 @@ impl<'a> SurfaceBoundOracle<'a> {
         if ![u0, u1, v0, v1].iter().all(|x| x.is_finite()) {
             return None;
         }
-        let raw = match self.surface {
-            Surface::Plane(p) => SurfaceBounds {
-                du: p.frame.x.length(),
-                dv: p.frame.y.length(),
-                duu: 0.0,
-                duv: 0.0,
-                dvv: 0.0,
-                smooth: true,
-                interpolation: [0.0; 3],
+        let raw = match self.source {
+            Source::Surface(surface) => match surface {
+                Surface::Plane(p) => carrier::plane(&p.frame),
+                Surface::Cylinder(c) => {
+                    let s = frame_stretch3(&c.frame);
+                    SurfaceBounds {
+                        du: s * c.radius.abs(),
+                        dv: c.frame.z.length(),
+                        duu: s * c.radius.abs(),
+                        duv: 0.0,
+                        dvv: 0.0,
+                        smooth: true,
+                        interpolation: [0.0; 3],
+                    }
+                }
+                Surface::EllipticalCylinder(c) => {
+                    let s = frame_stretch3(&c.frame);
+                    let r = c.semi_axis_x.abs().max(c.semi_axis_y.abs());
+                    SurfaceBounds {
+                        du: s * r,
+                        dv: c.frame.z.length(),
+                        duu: s * r,
+                        duv: 0.0,
+                        dvv: 0.0,
+                        smooth: true,
+                        interpolation: [0.0; 3],
+                    }
+                }
+                Surface::Cone(c) => {
+                    let s = frame_stretch3(&c.frame);
+                    let slope = c.semi_angle.tan();
+                    let (r0, r1) = (c.radius + v0 * slope, c.radius + v1 * slope);
+                    if r0 < 0.0 || r1 < 0.0 {
+                        return None;
+                    }
+                    let rho = r0.max(r1);
+                    SurfaceBounds {
+                        du: s * rho,
+                        dv: s * (1.0 + slope * slope).sqrt(),
+                        duu: s * rho,
+                        duv: s * slope.abs(),
+                        dvv: 0.0,
+                        smooth: true,
+                        interpolation: [0.0; 3],
+                    }
+                }
+                Surface::Sphere(sphere) => carrier::sphere(&sphere.frame, sphere.radius, v0, v1),
+                Surface::Torus(t) => {
+                    carrier::torus(&t.frame, t.major_radius, t.minor_radius, v0, v1)
+                }
+                Surface::BSpline(_) => self.spline.as_ref()?.bounds(u0, u1, v0, v1)?,
+                _ => return None,
             },
-            Surface::Cylinder(c) => {
-                let s = frame_stretch3(&c.frame);
-                SurfaceBounds {
-                    du: s * c.radius.abs(),
-                    dv: c.frame.z.length(),
-                    duu: s * c.radius.abs(),
-                    duv: 0.0,
-                    dvv: 0.0,
-                    smooth: true,
-                    interpolation: [0.0; 3],
+            Source::Carrier(c) => match c {
+                Carrier::Plane(f) => carrier::plane(f),
+                Carrier::Ruled(k) => carrier::ruled(k, v0, v1),
+                Carrier::Sphere { frame, radius } => carrier::sphere(frame, *radius, v0, v1),
+                Carrier::Torus(t) => {
+                    carrier::torus(&t.frame, t.major_radius, t.minor_radius, v0, v1)
                 }
-            }
-            Surface::EllipticalCylinder(c) => {
-                let s = frame_stretch3(&c.frame);
-                let r = c.semi_axis_x.abs().max(c.semi_axis_y.abs());
-                SurfaceBounds {
-                    du: s * r,
-                    dv: c.frame.z.length(),
-                    duu: s * r,
-                    duv: 0.0,
-                    dvv: 0.0,
-                    smooth: true,
-                    interpolation: [0.0; 3],
-                }
-            }
-            Surface::Cone(c) => {
-                let s = frame_stretch3(&c.frame);
-                let slope = c.semi_angle.tan();
-                let (r0, r1) = (c.radius + v0 * slope, c.radius + v1 * slope);
-                if r0 < 0.0 || r1 < 0.0 {
-                    return None;
-                }
-                let rho = r0.max(r1);
-                SurfaceBounds {
-                    du: s * rho,
-                    dv: s * (1.0 + slope * slope).sqrt(),
-                    duu: s * rho,
-                    duv: s * slope.abs(),
-                    dvv: 0.0,
-                    smooth: true,
-                    interpolation: [0.0; 3],
-                }
-            }
-            Surface::Sphere(sphere) => {
-                let s = frame_stretch3(&sphere.frame) * sphere.radius.abs();
-                let cos = max_abs_cos(v0, v1);
-                SurfaceBounds {
-                    du: s * cos,
-                    dv: s,
-                    duu: s * cos,
-                    duv: s * max_abs_sin(v0, v1),
-                    dvv: s,
-                    smooth: true,
-                    interpolation: [0.0; 3],
-                }
-            }
-            Surface::Torus(t) => {
-                let s = frame_stretch3(&t.frame);
-                let (cmin, cmax) = cos_range(v0, v1);
-                let r = t.minor_radius.abs();
-                let ring = (t.major_radius + r * cmin)
-                    .abs()
-                    .max((t.major_radius + r * cmax).abs());
-                SurfaceBounds {
-                    du: s * ring,
-                    dv: s * r,
-                    duu: s * ring,
-                    duv: s * r * max_abs_sin(v0, v1),
-                    dvv: s * r,
-                    smooth: true,
-                    interpolation: [0.0; 3],
-                }
-            }
-            Surface::BSpline(_) => self.spline.as_ref()?.bounds(u0, u1, v0, v1)?,
-            _ => return None,
+                Carrier::Spline(_) => self.spline.as_ref()?.bounds(u0, u1, v0, v1)?,
+            },
         };
-        let raw = if matches!(self.surface, Surface::BSpline(_)) {
+        let raw = if self.spline.is_some() {
             raw
         } else {
             SurfaceBounds {
