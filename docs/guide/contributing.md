@@ -43,7 +43,14 @@ GATE_META=1 scripts/gate.sh   # full gate plus the gate's own mutation probes; t
 - **Threads and priority.** Each gate builds with `CARGO_BUILD_JOBS` and tests with `RUST_TEST_THREADS` set to `max(1, nproc / GATE_SLOTS)`, unless you set them, so three gates do not start three times every core. Its commands run under `nice -n 10` (and `ionice -c3` when available) to keep interactive work responsive; `GATE_NICE=0` turns that off.
 - **Build directory.** Each slot has its own persistent `CARGO_TARGET_DIR`, `<repository>/gate-target/slot-N`, so consecutive gates reuse compiled dependencies and a worktree does not hold a target directory of its own. The gate sets `CARGO_TARGET_DIR` itself; every script under `scripts/` honours it. Slot directories are not cleaned automatically: delete `gate-target/` to reclaim the disk.
 - **Log.** The full output also goes to `gate-target/gate-logs/<worktree>-<time>.log`, or to `GATE_LOG`; its path is the first line printed.
-- `GATE_DRY=1` replaces every step by a sleep (`GATE_DRY_SLEEP` seconds), for testing the tier and slot logic: `scripts/test_gate_tiers.py` and `scripts/probe_gate_tiers.py` do. `GATE_LOCK_DIR` and `GATE_ROOT` relocate the locks and the gate root.
+- **Test hooks**, for testing the tier and slot logic (`scripts/test_gate_tiers.py` and `scripts/probe_gate_tiers.py` use them):
+  - `GATE_DRY=1` replaces every step by a sleep of `GATE_DRY_SLEEP` seconds;
+  - `GATE_DRY_FAIL=<step name>` makes that one step fail;
+  - `GATE_CHANGED_FILES_FROM=<file>` reads the changed files from a list instead of `git diff`;
+  - `GATE_LOCK_DIR` and `GATE_ROOT` relocate the locks and the gate root;
+  - `GATE_SLOT_POLL` sets how often a waiting gate retries the slots, in seconds.
+
+  Slots are shared by every clone on the machine that uses the same lock directory (`${TMPDIR:-/tmp}/axiolid-gate-locks`); each clone keeps its own slot build directories.
 
 The `scripts/probe_*_mutants.py` mutation probes share one runner, `scripts/probe_lib.py`: each takes `--list`, `--only NAME`, `--timeout SECS` and `--check-anchors`. A mutant whose anchor text is missing or not unique stops the probe before any test runs, and `scripts/check-probe-anchors.sh` checks every probe's anchors in the gate, so a refactor that moves probed code must re-anchor the probe (or remove the mutant with a stated reason) in the same change.
 
