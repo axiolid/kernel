@@ -12,7 +12,7 @@ caret rule for `0.x` versions.
 ### Added
 
 - `ViewProjection` (`Orthographic`, the default, and `Perspective`), the
-  `OrthographicView::projection` field, `OrthographicView::perspective(frame,
+  `View::projection` field, `View::perspective(frame,
   near)` (refuses a `near` that is not finite and below zero) and a defaulted
   `supports_projection` on `MeshHiddenLines` and `MeshVisibleFaces` that is
   `true` for `Orthographic` only. Registries route by it, so a provider that
@@ -43,6 +43,12 @@ caret rule for `0.x` versions.
   selected crease. With the selection off the groups stay ignored and the
   output is unchanged (ADR 0106, #385). Conformance gains the planar
   isometric cube and a two-group square sheet.
+
+### Changed
+
+- `OrthographicView` is renamed `View`, because a view can now be
+  perspective. The old name stays as a deprecated type alias, so existing code
+  compiles with a deprecation warning (ADR 0107, #387).
 
 ## [0.1.4] - 2026-11-07
 

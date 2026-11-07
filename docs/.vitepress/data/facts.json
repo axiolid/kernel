@@ -352,7 +352,7 @@
       "version": "0.3.3"
     },
     "axiolid-mesh-hidden-lines-contract": {
-      "description": "Portable orthographic hidden-line drawing request, result, and conformance contract for triangle meshes",
+      "description": "Portable hidden-line drawing request, result, and conformance contract for triangle meshes",
       "layer": "contracts",
       "path": "crates/contracts/operations/mesh-hidden-lines",
       "released": "0.1.5",

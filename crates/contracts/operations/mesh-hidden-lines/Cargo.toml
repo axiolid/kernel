@@ -1,6 +1,6 @@
 [package]
 name = "axiolid-mesh-hidden-lines-contract"
-description = "Portable orthographic hidden-line drawing request, result, and conformance contract for triangle meshes"
+description = "Portable hidden-line drawing request, result, and conformance contract for triangle meshes"
 version = "0.1.5"
 edition.workspace = true
 rust-version.workspace = true

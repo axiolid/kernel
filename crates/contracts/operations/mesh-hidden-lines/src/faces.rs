@@ -148,7 +148,7 @@ impl VisibleFaceLimits {
 pub struct VisibleFaceRequest<'a> {
     /// Input meshes; their order orders the output.
     pub meshes: &'a [HiddenLineMesh<'a>],
-    /// The orthographic view.
+    /// The view.
     pub view: View,
     /// Optional image crop.
     pub region: Option<Aabb2>,

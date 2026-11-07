@@ -4,7 +4,7 @@
 
 # axiolid-mesh-hidden-lines-contract
 
-Portable orthographic hidden-line drawing request, result, and conformance contract for triangle meshes.
+Portable hidden-line drawing request, result, and conformance contract for triangle meshes.
 
 | | |
 | --- | --- |
@@ -27,7 +27,7 @@ It also holds the sibling `MeshVisibleFaces` contract: the regions of the
 same view where each face group, or the near-plane cap of a cut solid, is
 frontmost. See ADR 0094.
 
-A view is orthographic by default. A perspective view (`Projection`, ADR 0107)
+A view is orthographic by default. A perspective view (`ViewProjection`, ADR 0107)
 is part of the contract, and a provider says whether it draws one with
 `supports_projection`; the registries never give it a view it does not
 support, and `PerspectiveConformanceSuite` checks the claim. No provider
@@ -56,5 +56,11 @@ Latest release, 0.1.5 (2026-11-07):
   selected crease. With the selection off the groups stay ignored and the
   output is unchanged (ADR 0106, #385). Conformance gains the planar
   isometric cube and a two-group square sheet.
+
+### Changed
+
+- `OrthographicView` is renamed `View`, because a view can now be
+  perspective. The old name stays as a deprecated type alias, so existing code
+  compiles with a deprecation warning (ADR 0107, #387).
 
 Full history: [`crates/contracts/operations/mesh-hidden-lines/CHANGELOG.md`](https://github.com/axiolid/kernel/blob/main/crates/contracts/operations/mesh-hidden-lines/CHANGELOG.md)

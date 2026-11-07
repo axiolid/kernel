@@ -9,7 +9,7 @@
 ## Context
 
 Issue #387, a follow-up to #383 and #138. `MeshHiddenLines` and
-`MeshVisibleFaces` take an `OrthographicView` only. A perspective drawing
+`MeshVisibleFaces` take an `OrthographicView` only (renamed `View` below). A perspective drawing
 (an interior seen from an eye point) needs projective exact points, which
 divide by depth, and a different near-plane cap. The issue asks for a design:
 which view type, and whether one trait serves both projections.
@@ -59,7 +59,11 @@ implemented in later steps behind the same contract.
   `Unsupported` or `UnsupportedInput`. A provider that claims it fails with
   `ClaimUnverifiable` until the perspective fixtures exist (P3, P4), so a
   claim is never accepted unverified. `register_perspective_conformant` on
-  both registries runs the base suite and this one.
+  both registries runs the base suite and this one. `register_conformant`
+  also runs it whenever the provider claims perspective, so a claim is never
+  routed to unverified: today such a provider is refused, as a
+  `ReturnedError` of the case `perspective claim` (the base reports are
+  exhaustive and take no new variant).
 - **The exact method (P2 to P4).** Inverse depth `1 / (-W)` takes the place of
   `W`; it is affine on every triangle and along every edge. Every predicate
   becomes a homogeneous determinant of view-space vectors from the eye,
@@ -91,8 +95,9 @@ implemented in later steps behind the same contract.
 
 **Positive**
 
-- The change is additive: `OrthographicView` and the traits keep their shape,
-  and an existing provider is routed past a perspective view by the default.
+- The change is additive: the view type (under its old name too) and the
+  traits keep their shape, and an existing provider is routed past a
+  perspective view by the default.
 - A perspective request that nothing can draw is `Unsupported`, never an
   orthographic drawing of a perspective view.
 
@@ -112,7 +117,7 @@ implemented in later steps behind the same contract.
 ## Relation to existing code
 
 - `crates/contracts/operations/mesh-hidden-lines`: `contract.rs`
-  (`ViewProjection`, `OrthographicView::perspective`,
+  (`ViewProjection`, `View`, `View::perspective`,
   `MeshHiddenLines::supports_projection`), `faces.rs`
   (`MeshVisibleFaces::supports_projection`), `conformance/perspective.rs`.
 - `crates/execution/dispatch`: `hidden_lines.rs`, `visible_faces.rs` (routing,

@@ -14,6 +14,8 @@ HR = "crates/execution/dispatch/src/hidden_lines.rs"
 VF = "crates/execution/dispatch/src/visible_faces.rs"
 VC = "crates/execution/dispatch/src/view_checks.rs"
 VW = "crates/algorithms/discrete/hidden-lines/src/view.rs"
+HP = "crates/algorithms/discrete/hidden-lines/src/provider.rs"
+FP = "crates/algorithms/discrete/hidden-lines/src/faces/provider.rs"
 
 CONTRACT = ["-p", "axiolid-mesh-hidden-lines-contract", "--lib"]
 LINES = [
@@ -72,6 +74,22 @@ MUTANTS = [
     # Registration.
     ('hidden lines: registration ignores the perspective report', HR, '                .map(PerspectiveConformanceFailure::HiddenLinesBase),\n        );\n        if !report.is_success() {', '                .map(PerspectiveConformanceFailure::HiddenLinesBase),\n        );\n        if false && !report.is_success() {', LINES),
     ('visible faces: registration ignores the perspective report', VF, '                .map(PerspectiveConformanceFailure::VisibleFacesBase),\n        );\n        if !report.is_success() {', '                .map(PerspectiveConformanceFailure::VisibleFacesBase),\n        );\n        if false && !report.is_success() {', FACES),
+
+    # The providers' own refusal, one mutant per provider.
+    ('ScalarHiddenLines draws a perspective view', HP, '        require_orthographic(&request.view, Self::ID, Operation::MeshHiddenLines)?;\n        draw(BroadPhase::Tree, request, options)', '        draw(BroadPhase::Tree, request, options)', PROVIDERS),
+    ('ScanHiddenLines draws a perspective view', HP, '        require_orthographic(\n            &request.view,\n            self.descriptor().id,\n            Operation::MeshHiddenLines,\n        )?;\n        draw(BroadPhase::Scan, request, options)', '        draw(BroadPhase::Scan, request, options)', PROVIDERS),
+    ('ScalarVisibleFaces draws a perspective view', FP, '        require_orthographic(&request.view, Self::ID, Operation::MeshVisibleFaces)?;\n        run(BroadPhase::Tree, true, request, options)', '        run(BroadPhase::Tree, true, request, options)', PROVIDERS),
+    ('ScanVisibleFaces draws a perspective view', FP, '        require_orthographic(\n            &request.view,\n            self.descriptor().id,\n            Operation::MeshVisibleFaces,\n        )?;\n        run(BroadPhase::Scan, true, request, options)', '        run(BroadPhase::Scan, true, request, options)', PROVIDERS),
+    ('UnprunedVisibleFaces draws a perspective view', FP, '        require_orthographic(\n            &request.view,\n            self.descriptor().id,\n            Operation::MeshVisibleFaces,\n        )?;\n        run(BroadPhase::Tree, false, request, options)', '        run(BroadPhase::Tree, false, request, options)', PROVIDERS),
+    # The default claim of visible faces.
+    ('visible faces: the default claims no projection', F, DEFAULT_CLAIM, '        false\n    }\n', PROVIDERS),
+    # Registration.
+    ('hidden lines: perspective registration skips the base suite', HR, '                .map(PerspectiveConformanceFailure::HiddenLinesBase),', '                .filter(|_| false)\n                .map(PerspectiveConformanceFailure::HiddenLinesBase),', LINES),
+    ('visible faces: perspective registration skips the base suite', VF, '                .map(PerspectiveConformanceFailure::VisibleFacesBase),', '                .filter(|_| false)\n                .map(PerspectiveConformanceFailure::VisibleFacesBase),', FACES),
+    ('hidden lines: register_conformant ignores a perspective claim', HR, '        if provider.supports_projection(ViewProjection::Perspective) {', '        if false && provider.supports_projection(ViewProjection::Perspective) {', PROVIDERS),
+    ('visible faces: register_conformant ignores a perspective claim', VF, '        if provider.supports_projection(ViewProjection::Perspective) {', '        if false && provider.supports_projection(ViewProjection::Perspective) {', PROVIDERS),
+    ('hidden lines: register_conformant accepts a failed perspective suite', HR, '            if !perspective.is_success() {', '            if false && !perspective.is_success() {', PROVIDERS),
+    ('visible faces: register_conformant accepts a failed perspective suite', VF, '            if !perspective.is_success() {', '            if false && !perspective.is_success() {', PROVIDERS),
 ]
 
 probe_lib.main(MUTANTS, timeout=1800, reject_uncompiled=True)
