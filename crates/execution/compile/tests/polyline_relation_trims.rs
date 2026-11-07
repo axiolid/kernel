@@ -566,6 +566,40 @@ fn a_cut_inside_a_quadrature_piece_adds_its_certified_error() {
     );
 }
 
+#[test]
+fn a_cut_inside_a_straight_quadrature_piece_is_bounded_by_its_certified_error() {
+    // The curve is the x axis, so the true length to a vertex is its `x`
+    // and nothing else adds to the bound: it is the cut's alone.
+    let (from, to) = (0.5, 4.2);
+    let (graph, root) = graph_of(|b| {
+        let whole = segment_then_spline(b);
+        trim(b, whole, p(from), p(to), true)
+    });
+    let outcome = polyline(&graph, root).unwrap();
+    let (first, last) = (outcome.points[0].x, outcome.points.last().unwrap().x);
+    let off = (first - from).abs().max((last - to).abs());
+    let whole = match graph.get(root) {
+        Some(GeometryNode::CurveRelation(CurveRelation::Trimmed { basis, .. })) => *basis,
+        other => panic!("{other:?}"),
+    };
+    let path = axiolid_mesh_compile::station::curve_path(&graph, whole).unwrap();
+    let basis = CompositeBasis::from_path(&path).unwrap();
+    let tolerance = 0.125 * CHORD;
+    let end = basis.distance_interval_at(to, tolerance).unwrap();
+    let expected = (to - end.lower).max(0.0);
+    assert!(end.upper - to > 0.0 && end.contains(last), "{end:?} {last}");
+    assert!(
+        outcome.deviation.bound >= off,
+        "{} < {off}",
+        outcome.deviation.bound
+    );
+    assert!(
+        outcome.deviation.bound >= end.upper - to && outcome.deviation.bound >= expected,
+        "{} misses the cut",
+        outcome.deviation.bound
+    );
+}
+
 fn left_offset(b: &mut GeometryGraphBuilder, reversed_first: bool) -> NodeId {
     let first = if reversed_first {
         segment2(b, (3.0, 0.0), (0.0, 0.0))

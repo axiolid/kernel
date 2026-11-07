@@ -39,7 +39,7 @@ MUTANTS = [
     ('piece offset not flipped by its sense', P, '    let law = sensed(offset, !piece.reversed);', '    let law = sensed(offset, true);', TESTS),
     ('piece placement ignored', P, '    match piece.placement {', '    match piece.placement.filter(|_| false) {', TESTS),
     # The evaluator's cut.
-    ('reversed piece measured from its start', C, '                part.start = piece.end - into;', '                part.end = piece.start + into;', TESTS),
+    ('reversed piece measured from its start', C, '                part.start = piece.end - into;', '                part.start = piece.start + into;', TESTS),
     ('native circle parameter is the measure', Z, '            return Ok(m / rate);', '            return Ok(m);', TESTS),
     ('partial piece left out of the distance interval', C, '            let length = piece_length(&part, self.tables[k].as_ref(), shares[k])?;', '            let length = DistanceInterval::point(0.0);', TESTS),
     # Stations.
