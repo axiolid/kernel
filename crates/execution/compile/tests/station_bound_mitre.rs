@@ -818,10 +818,10 @@ fn a_grade_break_over_a_circular_plan_is_certified() {
     assert_eq!(compiled.vertices(), 140);
 }
 
-#[test]
-fn a_short_arc_between_two_mitres_is_refined_until_certified() {
-    // A line, an arc of radius 500 and four metres, a line, each corner 10
-    // degrees: the arc's cells lie between two mitres, and are split.
+/// A line of five metres, an arc of radius 500 and `length` metres, a line
+/// of four, each corner 10 degrees to the left, stations at 1 and the end:
+/// the arc's cells lie between two mitres.
+fn line_arc_line(length: Scalar) -> (Compiled, Strays) {
     let r = 500.0;
     let corner = 10.0_f64.to_radians();
     let centre = (5.0 - corner.sin() * r, corner.cos() * r);
@@ -829,7 +829,7 @@ fn a_short_arc_between_two_mitres_is_refined_until_certified() {
     if start < 0.0 {
         start += 2.0 * PI;
     }
-    let sweep = 4.0 / r;
+    let sweep = length / r;
     let end_angle = start + sweep;
     let end = (
         centre.0 + r * end_angle.cos(),
@@ -847,10 +847,11 @@ fn a_short_arc_between_two_mitres_is_refined_until_certified() {
         &[
             (line_along_x(), 0.0, 5.0),
             (arc.clone(), start, end_angle),
-            (second_line.clone(), 0.0, 5.0),
+            (second_line.clone(), 0.0, 4.0),
         ],
     );
-    let at = [1.0, 13.0];
+    let knots = [5.0, 5.0 + length];
+    let at = [1.0, knots[1] + 4.0];
     let root = spine(&mut b, directrix, at, [2.0, 2.0], 0.0, None);
     let graph = b.finish(vec![root]).unwrap();
     let compiled = compile(&graph, root, 0.01);
@@ -859,16 +860,16 @@ fn a_short_arc_between_two_mitres_is_refined_until_certified() {
             Piece {
                 frame: on2(line_along_x(), SeamSide::Incoming),
                 from: at[0],
-                to: 5.0,
+                to: knots[0],
             },
             Piece {
-                frame: shifted(arc, r * start - 5.0),
-                from: 5.0,
-                to: 9.0,
+                frame: shifted(arc, r * start - knots[0]),
+                from: knots[0],
+                to: knots[1],
             },
             Piece {
-                frame: shifted(second_line, -9.0),
-                from: 9.0,
+                frame: shifted(second_line, -knots[1]),
+                from: knots[1],
                 to: at[1],
             },
         ],
@@ -878,10 +879,157 @@ fn a_short_arc_between_two_mitres_is_refined_until_certified() {
         turn: None,
     }
     .measure(&compiled.mesh, 200, 8);
+    (compiled, strays)
+}
+
+#[test]
+fn a_short_arc_between_two_mitres_is_refined_until_certified() {
+    // The arc's cells lie between two mitres, and are split.
+    let (compiled, strays) = line_arc_line(4.0);
     assert_holds(&compiled, &strays);
     assert_value(&compiled, 2.184e-3, 1e-6);
     assert!(compiled.meets);
     assert_eq!(compiled.vertices(), 20);
+}
+
+#[test]
+fn a_cell_between_two_close_mitres_is_split_though_it_could_be_bounded() {
+    // The 0.4 m arc between the corners is one cell of the sampling: named
+    // and split, whatever a single mitre's bound of it would say.
+    let (compiled, strays) = line_arc_line(0.4);
+    assert_holds(&compiled, &strays);
+    assert_value(&compiled, 3.7663e-5, 1e-9);
+    assert!(compiled.meets);
+    assert_eq!(compiled.vertices(), 20);
+}
+
+#[test]
+fn a_seam_inside_a_cell_beside_a_mitre_is_bounded() {
+    // A line, then a gentle tangent-continuous arc of radius 20 km, then
+    // a 10 degree corner onto a line: the cell next to the mitre holds the
+    // joint of the line and the arc.
+    let r = 20_000.0;
+    let corner = 10.0_f64.to_radians();
+    let sweep = 10.0 / r;
+    let centre = (20.0, r);
+    let end = (
+        centre.0 + r * (1.5 * PI + sweep).cos(),
+        centre.1 + r * (1.5 * PI + sweep).sin(),
+    );
+    let heading = sweep + corner;
+    let second_line = Curve2::Line(Line2 {
+        origin: Point2::new(end.0, end.1),
+        direction: Vec2::new(heading.cos(), heading.sin()),
+    });
+    let arc = circle(centre.0, centre.1, r);
+    let mut b = GeometryGraphBuilder::new();
+    let directrix = composite(
+        &mut b,
+        &[
+            (line_along_x(), 0.0, 20.0),
+            (arc.clone(), 1.5 * PI, 1.5 * PI + sweep),
+            (second_line.clone(), 0.0, 10.0),
+        ],
+    );
+    let at = [2.0, 38.0];
+    let root = spine(&mut b, directrix, at, [2.0, 2.0], 0.0, None);
+    let graph = b.finish(vec![root]).unwrap();
+    let compiled = compile(&graph, root, 0.01);
+    let line = line_along_x();
+    let before: Frame = Box::new(move |s| {
+        if s <= 20.0 {
+            station_section2_on(&line, s, SeamSide::Incoming).unwrap()
+        } else {
+            station_section2(&arc, r * 1.5 * PI + (s - 20.0)).unwrap()
+        }
+    });
+    let strays = Mitred {
+        pieces: vec![
+            Piece {
+                frame: before,
+                from: at[0],
+                to: 30.0,
+            },
+            Piece {
+                frame: shifted(second_line, -30.0),
+                from: 30.0,
+                to: at[1],
+            },
+        ],
+        at,
+        section: Section::rectangle([2.0, 2.0]),
+        long: 0.0,
+        turn: None,
+    }
+    .measure(&compiled.mesh, 400, 12);
+    assert_holds(&compiled, &strays);
+    assert_value(&compiled, 4.5736e-3, 1e-7);
+    assert!(compiled.meets);
+    assert_eq!(compiled.vertices(), 12);
+}
+
+#[test]
+fn a_seam_inside_a_cell_after_a_mitre_is_bounded() {
+    // A line, a 10 degree corner onto a line, and from its end a gentle
+    // tangent-continuous arc of radius 20 km: the cell next to the mitre
+    // holds the joint of the line and the arc.
+    let r = 20_000.0;
+    let heading = 10.0_f64.to_radians();
+    let corner_end = (10.0 + 10.0 * heading.cos(), 10.0 * heading.sin());
+    let second_line = Curve2::Line(Line2 {
+        origin: Point2::new(10.0, 0.0),
+        direction: Vec2::new(heading.cos(), heading.sin()),
+    });
+    let centre = (
+        corner_end.0 - r * heading.sin(),
+        corner_end.1 + r * heading.cos(),
+    );
+    let start = heading - 0.5 * PI + 2.0 * PI;
+    let sweep = 18.0 / r;
+    let arc = circle(centre.0, centre.1, r);
+    let mut b = GeometryGraphBuilder::new();
+    let directrix = composite(
+        &mut b,
+        &[
+            (line_along_x(), 0.0, 10.0),
+            (second_line.clone(), 0.0, 10.0),
+            (arc.clone(), start, start + sweep),
+        ],
+    );
+    let at = [2.0, 38.0];
+    let root = spine(&mut b, directrix, at, [2.0, 2.0], 0.0, None);
+    let graph = b.finish(vec![root]).unwrap();
+    let compiled = compile(&graph, root, 0.01);
+    let after: Frame = Box::new(move |s| {
+        if s <= 20.0 {
+            station_section2(&second_line, s - 10.0).unwrap()
+        } else {
+            station_section2(&arc, r * start + (s - 20.0)).unwrap()
+        }
+    });
+    let strays = Mitred {
+        pieces: vec![
+            Piece {
+                frame: on2(line_along_x(), SeamSide::Incoming),
+                from: at[0],
+                to: 10.0,
+            },
+            Piece {
+                frame: after,
+                from: 10.0,
+                to: at[1],
+            },
+        ],
+        at,
+        section: Section::rectangle([2.0, 2.0]),
+        long: 0.0,
+        turn: None,
+    }
+    .measure(&compiled.mesh, 400, 12);
+    assert_holds(&compiled, &strays);
+    assert_value(&compiled, 1.2253e-3, 1e-7);
+    assert!(compiled.meets);
+    assert_eq!(compiled.vertices(), 16);
 }
 
 #[test]
