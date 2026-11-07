@@ -51,9 +51,49 @@ MUTANTS = [
         '    if false && sheet && request.cut_regions.is_some() {', TESTS,
     ),
     (
-        'pinch not refused', K,
-        '        if out > 1 {',
-        '        if false && out > 1 {', TESTS,
+        'pinch paired counter-clockwise', K,
+        '.map(|(index, spoke)| (spoke.edge, spokes[(index + count - 1) % count].edge))',
+        '.map(|(index, spoke)| (spoke.edge, spokes[(index + 1) % count].edge))', TESTS,
+    ),
+    (
+        'pinch edges that do not alternate accepted', K,
+        '        if spokes[index].incoming == spokes[(index + 1) % count].incoming {',
+        '        if false && spokes[index].incoming == spokes[(index + 1) % count].incoming {',
+        TESTS,
+    ),
+    (
+        'pinch edges along one ray accepted', K,
+        '        _ => Err(refused(REFUSED_PINCHED_CUT_REGION)),',
+        '        _ => Ok(false),', TESTS,
+    ),
+    (
+        'pinch half-planes ignored', K,
+        '    if a.lower != b.lower {', '    if false && a.lower != b.lower {', TESTS,
+    ),
+    (
+        'pinch level spoke always in the upper half', K,
+        '                Ordering::Equal => exact.compare(towards, here, 0)? == Ordering::Greater,',
+        '                Ordering::Equal => true,', TESTS,
+    ),
+    (
+        'zero-length pinch edge not degenerate', K,
+        '            if exact.same(towards, here)? {',
+        '            if false && exact.same(towards, here)? {', TESTS,
+    ),
+    (
+        'walk not split at a repeated vertex', K,
+        '        split_walk(&edges, &walk, &mut traced);',
+        '        traced.push(walk);', TESTS,
+    ),
+    (
+        'chain parted at a pinch accepted', K,
+        '            ([into], [onward]) if after[*into] == *onward => {}',
+        '            ([_], [_]) => {}', TESTS,
+    ),
+    (
+        'two cut segments of one direction at a pinch accepted', K,
+        '            _ => return Err(refused(REFUSED_PINCHED_CUT_REGION)),',
+        '            _ => {}', TESTS,
     ),
     (
         'region run vertex always dropped', K,
@@ -269,8 +309,8 @@ MUTANTS = [
     ),
     (
         'unequal degrees not an internal error', K,
-        '        if out != inn {',
-        '        if false && out != inn {', TESTS,
+        '        if incident.incoming.len() != incident.outgoing.len() {',
+        '        if false && incident.incoming.len() != incident.outgoing.len() {', TESTS,
     ),
     (
         'ring without area not refused as degenerate', K,
