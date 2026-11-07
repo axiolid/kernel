@@ -75,7 +75,8 @@
 //!
 //! A cell on a straight piece with a constant section (every vertex runs on a
 //! line through `H`: `K = 0`, `P` is exact and the quad is the wall) keeps
-//! only `D`, `hm`, `eta_H` and the quad: [`SectionLaw::straight_mitre_cell`].
+//! only `eta`, `D`, `hm`, `eta_H` and the quad: [`SectionLaw::straight_mitre_cell`].
+//! A turning orientation is not that case: its vertices move on curves.
 //! It is exact for `D = 0`, which holds when the two sides' cuts coincide (a
 //! flat turn without an offset), and reports the real gap otherwise.
 //!
@@ -355,8 +356,8 @@ impl SectionLaw<'_, '_> {
                 inputs.at_hi[l],
             );
             let gap = gap[k].max(gap[l]);
-            let slide = inputs.slide[k].max(inputs.slide[l]) + extension;
-            worst = worst.max(slide + (quad + gap).max(gap + off_plane + plane_error));
+            let along = inputs.eta[k].max(inputs.eta[l]) + extension;
+            worst = worst.max(along + (quad + gap).max(gap + off_plane + plane_error));
         }
         let floor = gap.iter().copied().fold(0.0, Scalar::max);
         let worst = worst * (1.0 + 1e-12);

@@ -26,7 +26,7 @@ use axiolid_model::{
 };
 use axiolid_profile::{Profile, RectangleProfile};
 use axiolid_reference::station::{
-    station_section2, station_section2_on, station_section3_on, Mitre, SectionFrame,
+    station_section2, station_section2_on, station_section3_on, SectionFrame,
 };
 
 const PI: Scalar = core::f64::consts::PI;
@@ -96,19 +96,20 @@ fn spine(
     at: [Scalar; 2],
     widths: [Scalar; 2],
     long: Scalar,
-    turn: Option<StationOrientation>,
+    turn: Option<[StationOrientation; 2]>,
 ) -> NodeId {
     let sections = at
         .iter()
         .zip(widths)
-        .map(|(&distance, width)| {
+        .enumerate()
+        .map(|(i, (&distance, width))| {
             let profile = rectangle(b, width);
             let section = SectionAtStation::new(
                 profile,
                 Station::new(distance, StationOffsets::new(0.0, 0.0, long)),
             );
             match turn {
-                Some(orientation) => section.with_orientation(orientation),
+                Some(orientations) => section.with_orientation(orientations[i]),
                 None => section,
             }
         })
@@ -186,7 +187,8 @@ struct Mitred {
     at: [Scalar; 2],
     section: Section,
     long: Scalar,
-    turn: Option<StationOrientation>,
+    /// The orientations at the two stations, interpolated between.
+    turn: Option<[StationOrientation; 2]>,
 }
 
 /// How far the exact solid strays from a mesh: its walls (with their
@@ -259,9 +261,11 @@ impl Mitred {
         let (a, b) = (self.local(s, k), self.local(s, l));
         let (x, y) = (lerp(a.0, b.0, v), lerp(a.1, b.1, v));
         let turned = match self.turn {
-            Some(o) => {
-                let (axis, reference) = o.unit_axes().unwrap();
-                f.oriented(Some(axis), Some(reference)).unwrap()
+            Some([o0, o1]) => {
+                let u = (s - self.at[0]) / (self.at[1] - self.at[0]);
+                let ((a0, r0), (a1, r1)) = (o0.unit_axes().unwrap(), o1.unit_axes().unwrap());
+                f.oriented(Some(a0.lerp(a1, u)), Some(r0.lerp(r1, u)))
+                    .unwrap()
             }
             None => *f,
         };
@@ -273,14 +277,15 @@ impl Mitred {
             .windows(2)
             .map(|pair| {
                 let (a, b) = (&pair[0], &pair[1]);
-                let mitre = Mitre::between(&(a.frame)(a.to), &(b.frame)(b.from))
-                    .unwrap()
-                    .unwrap();
+                // The bisector plane, computed here and not by the code
+                // under test.
+                let (before, after) = ((a.frame)(a.to), (b.frame)(b.from));
+                let normal = (before.tangent + after.tangent).normalize();
                 Cut {
-                    origin: mitre.incoming.point + mitre.normal * self.long,
-                    normal: mitre.normal,
-                    incoming: mitre.incoming.tangent,
-                    outgoing: mitre.outgoing.tangent,
+                    origin: before.point + normal * self.long,
+                    normal,
+                    incoming: before.tangent,
+                    outgoing: after.tangent,
                 }
             })
             .collect()
@@ -652,7 +657,7 @@ fn arc_pieces(arcs: &TwoArcs, at: [Scalar; 2]) -> Vec<Piece> {
 
 /// Two radius-20 arcs of 0.3 rad with a 10 degree corner, stations 1 and
 /// 11, a 2 by 1 section, compiled at a 0.01 chord.
-fn two_arcs_run(long: Scalar, turn: Option<StationOrientation>) -> (Compiled, Strays) {
+fn two_arcs_run(long: Scalar, turn: Option<[StationOrientation; 2]>) -> (Compiled, Strays) {
     let mut b = GeometryGraphBuilder::new();
     let arcs = two_arcs(&mut b, 20.0, 0.3, 10.0, 0.3);
     let at = [1.0, 11.0];
@@ -684,7 +689,7 @@ fn a_turned_section_across_a_mitre_on_arcs_is_certified() {
         Some(Vec3::new(0.0, 0.15, 1.0)),
         Some(Vec3::new(1.0, 0.0, 0.1)),
     );
-    let (compiled, strays) = two_arcs_run(0.0, Some(turn));
+    let (compiled, strays) = two_arcs_run(0.0, Some([turn, turn]));
     assert_holds(&compiled, &strays);
     assert_value(&compiled, 2.7691e-3, 1e-7);
     assert!(compiled.meets);
@@ -769,8 +774,9 @@ fn a_widening_section_across_a_corner_is_certified() {
         long: 0.0,
         turn: None,
     }
-    .measure(&compiled.mesh, 400, 12);
+    .measure(&compiled.mesh, 1600, 48);
     assert_holds(&compiled, &strays);
+    assert!(strays.walls >= 0.051, "{strays:?}");
     assert_value(&compiled, 0.0570247, 1e-6);
     assert!(!compiled.meets);
 }
@@ -1030,6 +1036,80 @@ fn a_seam_inside_a_cell_after_a_mitre_is_bounded() {
     assert_value(&compiled, 1.2253e-3, 1e-7);
     assert!(compiled.meets);
     assert_eq!(compiled.vertices(), 16);
+}
+
+#[test]
+fn a_twisting_section_on_straight_legs_is_certified() {
+    // The reference direction turns between the stations: the vertices
+    // move on curves although the legs are straight, and the cell next to
+    // the mitre is bounded through the general path.
+    let curve = Curve2::Polyline(Polyline2 {
+        points: vec![
+            Point2::ZERO,
+            Point2::new(10.0, 0.0),
+            Point2::new(10.0, 10.0),
+        ],
+        closed: false,
+    });
+    for (twist, bound_at_least) in [(0.2, 1e-3), (0.5, 1e-2), (1.0, 3.8e-2)] {
+        let o0 = StationOrientation::new(Some(Vec3::Z), Some(Vec3::X));
+        let o1 = StationOrientation::new(Some(Vec3::Z), Some(Vec3::new(1.0, twist, 0.0)));
+        let mut b = GeometryGraphBuilder::new();
+        let directrix = b.push_value(curve.clone()).unwrap();
+        let at = [2.0, 18.0];
+        let root = spine(&mut b, directrix, at, [2.0, 2.0], 0.0, Some([o0, o1]));
+        let graph = b.finish(vec![root]).unwrap();
+        let compiled = compile(&graph, root, 0.01);
+        let strays = Mitred {
+            pieces: vec![
+                Piece {
+                    frame: on2(curve.clone(), SeamSide::Incoming),
+                    from: at[0],
+                    to: 10.0,
+                },
+                Piece {
+                    frame: on2(curve.clone(), SeamSide::Outgoing),
+                    from: 10.0,
+                    to: at[1],
+                },
+            ],
+            at,
+            section: Section::rectangle([2.0, 2.0]),
+            long: 0.0,
+            turn: Some([o0, o1]),
+        }
+        .measure(&compiled.mesh, 800, 24);
+        assert_holds(&compiled, &strays);
+        // Far from zero: the straight-cell shortcut reported 7.5e-11 at 0.2.
+        assert!(
+            compiled.certified() >= bound_at_least,
+            "{twist}: {compiled:?}",
+            compiled = compiled.bound
+        );
+    }
+}
+
+#[test]
+fn a_shifted_plane_the_mesh_cuts_elsewhere_is_unbounded_by_name() {
+    // The mesher refuses to place a row past the unshifted mitre plane,
+    // the bound cuts at the plane shifted by the longitudinal offset: a far
+    // row between the two is not decided (#484), and named, not certified.
+    for (long, at) in [(-2.0, [5.9, 11.0]), (2.0, [1.0, 6.1])] {
+        let mut b = GeometryGraphBuilder::new();
+        let arcs = two_arcs(&mut b, 20.0, 0.3, 30.0, 0.3);
+        let root = spine(&mut b, arcs.directrix, at, [2.0, 1.0], long, None);
+        let graph = b.finish(vec![root]).unwrap();
+        let compiled = compile(&graph, root, 0.01);
+        match compiled.bound {
+            DeviationBound::Unbounded(reason) => {
+                assert!(
+                    reason.contains("does not advance across the mitre plane"),
+                    "{reason}"
+                );
+            }
+            other => panic!("not unbounded by name at {long}: {other:?}"),
+        }
+    }
 }
 
 #[test]

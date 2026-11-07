@@ -397,6 +397,7 @@ impl<'r, 'g> SectionLaw<'r, 'g> {
         };
         let changes = offset_rate > 0.0
             || turn.up[0] > 0.0
+            || turn.lateral[0] > 0.0
             || self.locals[i]
                 .iter()
                 .zip(&self.locals[i + 1])
