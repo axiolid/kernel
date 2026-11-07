@@ -12,8 +12,8 @@ use axiolid_hidden_lines::{
 };
 use axiolid_mesh_hidden_lines_contract::conformance::perspective::PerspectiveConformanceSuite;
 use axiolid_mesh_hidden_lines_contract::{
-    EdgeSelection, HiddenLineRequest, MeshHiddenLines, MeshVisibleFaces, OrthographicView,
-    Projection, VisibleFaceRequest,
+    EdgeSelection, HiddenLineRequest, MeshHiddenLines, MeshVisibleFaces, Projection, View,
+    VisibleFaceRequest,
 };
 use common::{box_mesh, plan_frame, solids, FACE_LIMITS, LIMITS};
 
@@ -21,8 +21,8 @@ fn options() -> ExecutionOptions {
     ExecutionOptions::new(Tolerance::new(1e-9, 1e-9).expect("tolerance"))
 }
 
-fn perspective() -> OrthographicView {
-    OrthographicView::perspective(plan_frame(), -1.0).expect("valid")
+fn perspective() -> View {
+    View::perspective(plan_frame(), -1.0).expect("valid")
 }
 
 fn is_named_refusal(error: &GeomError, operation: Operation) -> bool {
@@ -126,7 +126,7 @@ fn registries_report_unsupported_for_a_perspective_view() {
 fn an_orthographic_view_is_unchanged_by_the_projection_field() {
     let boxes = [box_mesh([0.0, 0.0, 0.0], [1.0, 1.0, 1.0])];
     let meshes = solids(&boxes);
-    let view = OrthographicView::new(plan_frame());
+    let view = View::new(plan_frame());
     assert_eq!(view.projection, Projection::Orthographic);
     let request = HiddenLineRequest::new(&meshes, view, EdgeSelection::new(None), LIMITS);
     ScalarHiddenLines

@@ -7,7 +7,7 @@ use axiolid_core::{Aabb2, Point2, Point3, Vec3};
 use axiolid_hidden_lines::ScalarVisibleFaces;
 use axiolid_mesh::TriMesh;
 use axiolid_mesh_hidden_lines_contract::{
-    FaceGroup, FaceSource, HiddenLineMesh, MeshId, MeshRole, OrthographicView,
+    FaceGroup, FaceSource, HiddenLineMesh, MeshId, MeshRole, View,
 };
 use common::{box_mesh, faces, frame, plan_frame, source_area, try_faces};
 
@@ -39,7 +39,7 @@ fn a_near_plane_through_a_box_in_plan_gives_its_cap_alone() {
     let outcome = faces(
         &ScalarVisibleFaces::new(),
         &meshes(&parts),
-        OrthographicView::new(plan_frame()).with_near(1.0),
+        View::new(plan_frame()).with_near(1.0),
     );
     assert_eq!(outcome.regions.len(), 1);
     assert_eq!(outcome.evidence.cap_regions, 1);
@@ -50,7 +50,7 @@ fn a_near_plane_through_a_box_in_plan_gives_its_cap_alone() {
 #[test]
 fn a_near_plane_through_a_box_in_elevation_gives_a_cap_and_the_wall_behind_it() {
     // Looking along +y from -y: image x, up z, depth towards the viewer is -y.
-    let view = OrthographicView::new(frame(Vec3::X, Vec3::Z, -Vec3::Y, Point3::ZERO));
+    let view = View::new(frame(Vec3::X, Vec3::Z, -Vec3::Y, Point3::ZERO));
     // Depth W = -y. The box spans y in [1, 3], so W in [-3, -1]; near = -2
     // keeps y >= 2 and cuts the box in half.
     let parts = [(MeshRole::Solid, box_mesh([0.0, 1.0, 0.0], [4.0, 3.0, 2.0]))];
@@ -70,13 +70,13 @@ fn the_far_plane_removes_what_lies_behind_it() {
     let kept = faces(
         &ScalarVisibleFaces::new(),
         &meshes(&parts),
-        OrthographicView::new(plan_frame()).with_far(0.0),
+        View::new(plan_frame()).with_far(0.0),
     );
     assert_eq!(source_area(&kept, 1, GROUP), 4.0);
     let gone = faces(
         &ScalarVisibleFaces::new(),
         &meshes(&parts),
-        OrthographicView::new(plan_frame()).with_far(0.5),
+        View::new(plan_frame()).with_far(0.5),
     );
     assert!(gone.regions.is_empty());
     assert_eq!(gone.evidence.removed_triangles, 2);
@@ -99,7 +99,7 @@ fn a_sheet_cut_by_the_near_plane_keeps_the_part_below_it() {
     let outcome = faces(
         &ScalarVisibleFaces::new(),
         &meshes(&parts),
-        OrthographicView::new(plan_frame()).with_near(1.0),
+        View::new(plan_frame()).with_near(1.0),
     );
     assert_eq!(source_area(&outcome, 1, GROUP), 8.0);
     assert_eq!(outcome.evidence.cap_regions, 0, "a sheet has no cap");
@@ -114,7 +114,7 @@ fn a_cut_solid_ties_with_a_sheet_in_the_near_plane() {
     let outcome = faces(
         &ScalarVisibleFaces::new(),
         &meshes(&parts),
-        OrthographicView::new(plan_frame()).with_near(1.0),
+        View::new(plan_frame()).with_near(1.0),
     );
     // Equal depth never occludes: the sheet and the cap both own the square.
     assert_eq!(source_area(&outcome, 1, FaceSource::Cap), 16.0);
@@ -132,7 +132,7 @@ fn the_crop_clips_every_region_to_the_box() {
     let outcome = try_faces(
         &ScalarVisibleFaces::new(),
         &meshes(&parts),
-        OrthographicView::new(plan_frame()),
+        View::new(plan_frame()),
         Some(region),
     )
     .expect("faces");

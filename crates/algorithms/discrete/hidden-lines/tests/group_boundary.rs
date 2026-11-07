@@ -8,8 +8,8 @@ use axiolid_core::{Frame3, Point2, Point3, Vec3};
 use axiolid_hidden_lines::{ScalarHiddenLines, ScalarVisibleFaces};
 use axiolid_mesh::TriMesh;
 use axiolid_mesh_hidden_lines_contract::{
-    EdgeKind, EdgeSelection, FaceGroup, HiddenLineMesh, HiddenLineSegment, MeshId, MeshRole,
-    OrthographicView, Visibility,
+    EdgeKind, EdgeSelection, FaceGroup, HiddenLineMesh, HiddenLineSegment, MeshId, MeshRole, View,
+    Visibility,
 };
 use common::{box_mesh, faces, frame, plan_frame};
 
@@ -25,8 +25,8 @@ fn square() -> TriMesh {
     )
 }
 
-fn plan() -> OrthographicView {
-    OrthographicView::new(plan_frame())
+fn plan() -> View {
+    View::new(plan_frame())
 }
 
 /// `(vertices, kind, visibility, start, end)` of each segment.
@@ -172,7 +172,7 @@ fn cube_kinds(selection: EdgeSelection) -> Vec<([u32; 2], EdgeKind, Visibility)>
     let outcome = common::try_draw_with(
         &ScalarHiddenLines,
         &meshes,
-        OrthographicView::new(isometric()),
+        View::new(isometric()),
         selection,
     )
     .expect("drawing");

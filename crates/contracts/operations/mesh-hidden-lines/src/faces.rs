@@ -39,9 +39,7 @@ use axiolid_contracts::{
 };
 use axiolid_core::{Aabb2, Point2};
 
-use crate::{
-    HiddenLineError, HiddenLineMesh, HiddenLineSource, MeshId, OrthographicView, Projection,
-};
+use crate::{HiddenLineError, HiddenLineMesh, HiddenLineSource, MeshId, Projection, View};
 
 /// Caller-chosen id of a set of triangles that share one surface pattern.
 ///
@@ -151,7 +149,7 @@ pub struct VisibleFaceRequest<'a> {
     /// Input meshes; their order orders the output.
     pub meshes: &'a [HiddenLineMesh<'a>],
     /// The orthographic view.
-    pub view: OrthographicView,
+    pub view: View,
     /// Optional image crop.
     pub region: Option<Aabb2>,
     /// Work limits.
@@ -162,7 +160,7 @@ impl<'a> VisibleFaceRequest<'a> {
     /// Find the visible faces of `meshes` in `view` without a crop.
     pub const fn new(
         meshes: &'a [HiddenLineMesh<'a>],
-        view: OrthographicView,
+        view: View,
         limits: VisibleFaceLimits,
     ) -> Self {
         Self {
@@ -316,7 +314,7 @@ impl VisibleFaceEvidence {
 #[derive(Debug, Clone, PartialEq)]
 pub struct VisibleFaceOutcome {
     /// The view the regions are expressed in, unchanged.
-    pub view: OrthographicView,
+    pub view: View,
     /// The regions.
     pub regions: Vec<VisibleRegion>,
     /// Counts.
@@ -325,11 +323,7 @@ pub struct VisibleFaceOutcome {
 
 impl VisibleFaceOutcome {
     /// Construct a provider result. Registries validate it before returning it.
-    pub fn new(
-        view: OrthographicView,
-        regions: Vec<VisibleRegion>,
-        evidence: VisibleFaceEvidence,
-    ) -> Self {
+    pub fn new(view: View, regions: Vec<VisibleRegion>, evidence: VisibleFaceEvidence) -> Self {
         Self {
             view,
             regions,

@@ -10,8 +10,7 @@ use axiolid_mesh::TriMesh;
 use axiolid_mesh_hidden_lines_contract::{
     EdgeSelection, FaceSource, HiddenLineError, HiddenLineLimits, HiddenLineMesh,
     HiddenLineOutcome, HiddenLineRequest, MeshHiddenLines, MeshId, MeshRole, MeshVisibleFaces,
-    OrthographicView, Visibility, VisibleFaceLimits, VisibleFaceOutcome, VisibleFaceRequest,
-    VisibleRegion,
+    View, Visibility, VisibleFaceLimits, VisibleFaceOutcome, VisibleFaceRequest, VisibleRegion,
 };
 
 /// The twelve edges of a box mesh built by [`box_mesh`], as ascending vertex
@@ -104,7 +103,7 @@ pub fn solids(meshes: &[TriMesh]) -> Vec<HiddenLineMesh<'_>> {
 pub fn try_draw(
     provider: &dyn MeshHiddenLines,
     meshes: &[HiddenLineMesh<'_>],
-    view: OrthographicView,
+    view: View,
 ) -> Result<HiddenLineOutcome, HiddenLineError> {
     let request = HiddenLineRequest::new(meshes, view, EdgeSelection::new(Some(0.5)), LIMITS);
     let options = axiolid_contracts::ExecutionOptions::new(
@@ -117,7 +116,7 @@ pub fn try_draw(
 pub fn try_draw_with(
     provider: &dyn MeshHiddenLines,
     meshes: &[HiddenLineMesh<'_>],
-    view: OrthographicView,
+    view: View,
     edges: EdgeSelection,
 ) -> Result<HiddenLineOutcome, HiddenLineError> {
     let request = HiddenLineRequest::new(meshes, view, edges, LIMITS);
@@ -130,7 +129,7 @@ pub fn try_draw_with(
 pub fn draw(
     provider: &dyn MeshHiddenLines,
     meshes: &[HiddenLineMesh<'_>],
-    view: OrthographicView,
+    view: View,
 ) -> HiddenLineOutcome {
     try_draw(provider, meshes, view).unwrap_or_else(|error| panic!("{error}"))
 }
@@ -141,7 +140,7 @@ pub const FACE_LIMITS: VisibleFaceLimits =
 pub fn try_faces(
     provider: &dyn MeshVisibleFaces,
     meshes: &[HiddenLineMesh<'_>],
-    view: OrthographicView,
+    view: View,
     region: Option<axiolid_core::Aabb2>,
 ) -> Result<VisibleFaceOutcome, HiddenLineError> {
     let mut request = VisibleFaceRequest::new(meshes, view, FACE_LIMITS);
@@ -157,7 +156,7 @@ pub fn try_faces(
 pub fn faces(
     provider: &dyn MeshVisibleFaces,
     meshes: &[HiddenLineMesh<'_>],
-    view: OrthographicView,
+    view: View,
 ) -> VisibleFaceOutcome {
     try_faces(provider, meshes, view, None).unwrap_or_else(|error| panic!("{error}"))
 }

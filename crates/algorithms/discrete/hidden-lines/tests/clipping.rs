@@ -5,8 +5,8 @@ mod common;
 use axiolid_core::Point3;
 use axiolid_mesh::TriMesh;
 use axiolid_mesh_hidden_lines_contract::{
-    EdgeSelection, HiddenLineMesh, HiddenLineRequest, MeshId, MeshRole, OrthographicView,
-    SourceEdge, Visibility,
+    EdgeSelection, HiddenLineMesh, HiddenLineRequest, MeshId, MeshRole, SourceEdge, View,
+    Visibility,
 };
 use common::{plan_frame, scalar, LIMITS};
 
@@ -31,7 +31,7 @@ fn pieces(near: Option<f64>) -> Vec<(Visibility, f64, f64)> {
         HiddenLineMesh::new(MeshId(1), MeshRole::Sheet, &slope),
         HiddenLineMesh::new(MeshId(2), MeshRole::Sheet, &floor),
     ];
-    let mut view = OrthographicView::new(plan_frame());
+    let mut view = View::new(plan_frame());
     if let Some(near) = near {
         view = view.with_near(near);
     }
@@ -89,7 +89,7 @@ fn under_wall(wall: [[f64; 3]; 3], near: f64) -> Vec<(Visibility, f64, f64)> {
         HiddenLineMesh::new(MeshId(1), MeshRole::Sheet, &wall),
         HiddenLineMesh::new(MeshId(2), MeshRole::Sheet, &floor),
     ];
-    let view = OrthographicView::new(plan_frame()).with_near(near);
+    let view = View::new(plan_frame()).with_near(near);
     let request = HiddenLineRequest::new(&meshes, view, EdgeSelection::new(None), LIMITS);
     let options = axiolid_contracts::ExecutionOptions::new(
         axiolid_core::Tolerance::new(1e-9, 1e-9).expect("tolerance"),
@@ -144,7 +144,7 @@ fn a_collapsed_piece_joins_its_neighbours_of_one_visibility() {
     ];
     let request = HiddenLineRequest::new(
         &meshes,
-        OrthographicView::new(plan_frame()),
+        View::new(plan_frame()),
         EdgeSelection::new(None),
         LIMITS,
     );

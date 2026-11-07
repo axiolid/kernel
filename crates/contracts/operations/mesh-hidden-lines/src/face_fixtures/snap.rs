@@ -12,13 +12,13 @@ use axiolid_mesh::TriMesh;
 
 use super::FaceFixture;
 use crate::fixtures::box_mesh;
-use crate::{MeshRole, OrthographicView, VisibleFaceLimits};
+use crate::{MeshRole, View, VisibleFaceLimits};
 
 /// A scene with no expected rings: only that it is answered and snapped.
 pub(crate) struct SnapCase {
     pub name: &'static str,
     pub meshes: Vec<FaceFixture>,
-    pub view: OrthographicView,
+    pub view: View,
     pub limits: VisibleFaceLimits,
 }
 
@@ -270,7 +270,7 @@ impl SnapScene {
         SnapCase {
             name,
             meshes,
-            view: OrthographicView::new(frame).with_near(f64::from_bits(self.near)),
+            view: View::new(frame).with_near(f64::from_bits(self.near)),
             limits: VisibleFaceLimits::new(16, 100_000, 100_000, 10_000_000, 100_000, 1_000_000),
         }
     }

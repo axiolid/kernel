@@ -13,7 +13,7 @@ use axiolid_core::{Frame3, Point3, Tolerance};
 use axiolid_hidden_lines::ScalarVisibleFaces;
 use axiolid_mesh::TriMesh;
 use axiolid_mesh_hidden_lines_contract::{
-    HiddenLineMesh, MeshId, MeshRole, MeshVisibleFaces, OrthographicView, VisibleFaceEvidence,
+    HiddenLineMesh, MeshId, MeshRole, MeshVisibleFaces, View, VisibleFaceEvidence,
     VisibleFaceRequest,
 };
 use common::topology::assert_valid_topology;
@@ -29,7 +29,7 @@ fn snapped(seed: u64, view: &str) -> (VisibleFaceEvidence, usize) {
     let depth = |p: &axiolid_core::Point3| (*p - frame.origin).dot(frame.z);
     let depths = boxes.iter().flat_map(|m| m.positions.iter().map(depth));
     let (lo, hi) = depths.fold((f64::MAX, f64::MIN), |(l, h), w| (l.min(w), h.max(w)));
-    let view = OrthographicView::new(frame).with_near((lo + hi) / 2.0);
+    let view = View::new(frame).with_near((lo + hi) / 2.0);
     let meshes = solids(&boxes);
     let outcome = try_faces(&ScalarVisibleFaces::new(), &meshes, view, None)
         .unwrap_or_else(|error| panic!("seed {seed}, {view:?}: {error}"));
@@ -105,7 +105,7 @@ fn a_hole_and_its_occluder_thinner_than_a_cell_collapse() {
         HiddenLineMesh::new(MeshId(1), MeshRole::Sheet, &behind),
         HiddenLineMesh::new(MeshId(2), MeshRole::Sheet, &tiny),
     ];
-    let request = VisibleFaceRequest::new(&meshes, OrthographicView::new(frame), FACE_LIMITS);
+    let request = VisibleFaceRequest::new(&meshes, View::new(frame), FACE_LIMITS);
     let options = ExecutionOptions::new(Tolerance::new(1e-40, 1e-40).expect("tolerance"));
     let outcome = ScalarVisibleFaces::new()
         .visible_faces(&request, &options)

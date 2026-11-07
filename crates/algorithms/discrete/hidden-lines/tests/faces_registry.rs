@@ -6,9 +6,7 @@ use axiolid_contracts::ExecutionOptions;
 use axiolid_core::Tolerance;
 use axiolid_dispatch::MeshVisibleFacesRegistry;
 use axiolid_hidden_lines::ScalarVisibleFaces;
-use axiolid_mesh_hidden_lines_contract::{
-    FaceGroup, FaceSource, OrthographicView, VisibleFaceRequest,
-};
+use axiolid_mesh_hidden_lines_contract::{FaceGroup, FaceSource, View, VisibleFaceRequest};
 use common::{box_mesh, plan_frame, solids, source_area, FACE_LIMITS};
 
 fn registry() -> MeshVisibleFacesRegistry {
@@ -27,8 +25,7 @@ fn a_request_runs_end_to_end_through_the_registry() {
         box_mesh([1.0, 1.0, 0.0], [3.0, 3.0, 1.0]),
     ];
     let meshes = solids(&boxes);
-    let request =
-        VisibleFaceRequest::new(&meshes, OrthographicView::new(plan_frame()), FACE_LIMITS);
+    let request = VisibleFaceRequest::new(&meshes, View::new(plan_frame()), FACE_LIMITS);
     let options = ExecutionOptions::new(Tolerance::new(1e-9, 1e-9).expect("tolerance"));
     let outcome = registry().visible_faces(&request, &options).expect("faces");
     let top = FaceSource::Group(FaceGroup(0));

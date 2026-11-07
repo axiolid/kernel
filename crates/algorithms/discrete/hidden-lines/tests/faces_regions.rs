@@ -8,7 +8,7 @@ use axiolid_core::{Point2, Point3};
 use axiolid_exact_arrangement::sequence_order;
 use axiolid_hidden_lines::ScalarVisibleFaces;
 use axiolid_mesh::TriMesh;
-use axiolid_mesh_hidden_lines_contract::{HiddenLineMesh, MeshId, MeshRole, OrthographicView};
+use axiolid_mesh_hidden_lines_contract::{HiddenLineMesh, MeshId, MeshRole, View};
 use common::{faces, plan_frame};
 use std::cmp::Ordering;
 
@@ -60,11 +60,7 @@ fn holes_are_sorted_whatever_the_request_order() {
             .enumerate()
             .map(|(i, mesh)| HiddenLineMesh::new(MeshId(i as u64 + 1), MeshRole::Sheet, mesh))
             .collect();
-        let outcome = faces(
-            &ScalarVisibleFaces::new(),
-            &meshes,
-            OrthographicView::new(plan_frame()),
-        );
+        let outcome = faces(&ScalarVisibleFaces::new(), &meshes, View::new(plan_frame()));
         let big = outcome
             .regions
             .iter()
@@ -102,11 +98,7 @@ fn a_cluster_inside_a_region_is_listed_with_that_region() {
     }
     let mesh = TriMesh::new(vertices, indices);
     let meshes = [HiddenLineMesh::new(MeshId(1), MeshRole::Sheet, &mesh)];
-    let outcome = faces(
-        &ScalarVisibleFaces::new(),
-        &meshes,
-        OrthographicView::new(plan_frame()),
-    );
+    let outcome = faces(&ScalarVisibleFaces::new(), &meshes, View::new(plan_frame()));
     assert_eq!(outcome.regions.len(), 2);
     for (corner, expected) in [
         (Point2::new(0.0, 0.0), vec![0, 1, 2, 3]),

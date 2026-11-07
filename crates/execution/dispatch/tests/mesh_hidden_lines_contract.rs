@@ -19,7 +19,7 @@ use axiolid_mesh::TriMesh;
 use axiolid_mesh_hidden_lines_contract::{
     EdgeKind, EdgeSelection, FaceGroup, HiddenLineError, HiddenLineEvidence, HiddenLineLimits,
     HiddenLineMesh, HiddenLineOutcome, HiddenLineRequest, HiddenLineSegment, MeshHiddenLines,
-    MeshId, MeshRole, OrthographicView, Projection, SourceEdge, Visibility,
+    MeshId, MeshRole, Projection, SourceEdge, View, Visibility,
 };
 
 fn cube() -> TriMesh {
@@ -73,8 +73,8 @@ fn selection() -> EdgeSelection {
     EdgeSelection::new(Some(0.5))
 }
 
-fn view() -> OrthographicView {
-    OrthographicView::new(frame())
+fn view() -> View {
+    View::new(frame())
 }
 
 fn mesh<'a>(id: u64, role: MeshRole, mesh: &'a TriMesh) -> HiddenLineMesh<'a> {
@@ -1155,8 +1155,8 @@ fn audit_lists_a_short_group_slice_exactly_when_group_boundaries_are_selected() 
     assert_eq!(error.error, refused[0].error);
 }
 
-fn perspective_view() -> OrthographicView {
-    OrthographicView::perspective(frame(), -1.0).expect("valid perspective view")
+fn perspective_view() -> View {
+    View::perspective(frame(), -1.0).expect("valid perspective view")
 }
 
 #[test]

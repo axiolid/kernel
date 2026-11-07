@@ -122,7 +122,7 @@ mod tests {
     use axiolid_mesh::TriMesh;
     use axiolid_mesh_hidden_lines_contract::{
         EdgeSelection, HiddenLineLimits, HiddenLineMesh, HiddenLineRequest, MeshHiddenLines,
-        MeshId, MeshRole, OrthographicView,
+        MeshId, MeshRole, View,
     };
 
     use super::*;
@@ -237,7 +237,7 @@ mod tests {
             .enumerate()
             .map(|(i, m)| HiddenLineMesh::new(MeshId(i as u64 + 1), MeshRole::Solid, m))
             .collect();
-        let mut view = OrthographicView::new(frame);
+        let mut view = View::new(frame);
         if let Some(near) = near {
             view = view.with_near(near);
         }

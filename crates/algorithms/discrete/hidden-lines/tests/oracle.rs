@@ -25,7 +25,7 @@ use std::time::Instant;
 
 use axiolid_core::Frame3;
 use axiolid_mesh::TriMesh;
-use axiolid_mesh_hidden_lines_contract::{OrthographicView, Visibility};
+use axiolid_mesh_hidden_lines_contract::{View, Visibility};
 use common::{box_mesh, draw, plan_frame, scalar, scene, solids, views, Lcg, BOX_EDGES};
 
 type V3 = [f64; 3];
@@ -350,7 +350,7 @@ fn check(seed: u64, name: &str, view_frame: Frame3, with_near: bool, tally: &mut
     let near = with_near.then(|| mid_depth(seed, &meshes, &view_frame));
     let oracle = Oracle::new(&meshes, &view_frame, near);
     let input = solids(&meshes);
-    let mut view = OrthographicView::new(view_frame);
+    let mut view = View::new(view_frame);
     if let Some(near) = near {
         view = view.with_near(near);
     }
@@ -508,11 +508,7 @@ fn a_cut_through_a_slab_at_a_rail_top_does_not_hide_the_rail() {
     let rail = box_mesh([3.0, 1.0, 0.0], [6.0, 1.5, 1.0]);
     let meshes = [slab, rail];
     let input = solids(&meshes);
-    let outcome = draw(
-        &scalar(),
-        &input,
-        OrthographicView::new(plan_frame()).with_near(1.0),
-    );
+    let outcome = draw(&scalar(), &input, View::new(plan_frame()).with_near(1.0));
     let top = |visibility| {
         outcome
             .segments

@@ -20,7 +20,7 @@ use axiolid_dispatch::MeshVisibleFacesRegistry;
 use axiolid_mesh::TriMesh;
 use axiolid_mesh_hidden_lines_contract::{
     FaceGroup, FaceSource, HiddenLineError, HiddenLineMesh, MeshId, MeshRole, MeshVisibleFaces,
-    OrthographicView, Projection, VisibleFaceEvidence, VisibleFaceLimits, VisibleFaceOutcome,
+    Projection, View, VisibleFaceEvidence, VisibleFaceLimits, VisibleFaceOutcome,
     VisibleFaceRequest, VisibleRegion,
 };
 
@@ -71,8 +71,8 @@ fn options() -> ExecutionOptions {
     ExecutionOptions::new(Tolerance::METRE)
 }
 
-fn view() -> OrthographicView {
-    OrthographicView::new(frame())
+fn view() -> View {
+    View::new(frame())
 }
 
 fn mesh<'a>(id: u64, role: MeshRole, mesh: &'a TriMesh) -> HiddenLineMesh<'a> {
@@ -1033,8 +1033,8 @@ fn a_planar_group_is_checked_for_structure_only() {
     }
 }
 
-fn perspective_view() -> OrthographicView {
-    OrthographicView::perspective(frame(), -1.0).expect("valid perspective view")
+fn perspective_view() -> View {
+    View::perspective(frame(), -1.0).expect("valid perspective view")
 }
 
 #[test]

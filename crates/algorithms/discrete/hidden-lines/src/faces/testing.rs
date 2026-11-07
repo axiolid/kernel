@@ -4,7 +4,7 @@ use axiolid_contracts::ExecutionOptions;
 use axiolid_core::{Aabb2, Frame3, Point2, Point3, Tolerance, Vec3};
 use axiolid_exact_arrangement::{PairBudget, Segment};
 use axiolid_mesh::TriMesh;
-use axiolid_mesh_hidden_lines_contract::{HiddenLineMesh, MeshId, MeshRole, OrthographicView};
+use axiolid_mesh_hidden_lines_contract::{HiddenLineMesh, MeshId, MeshRole, View};
 
 use super::points::Points;
 use super::segments::PAIRS;
@@ -17,8 +17,8 @@ pub(crate) fn options() -> ExecutionOptions {
 }
 
 /// Looking down the world z axis: image `(x, y)`, nearer is higher.
-pub(crate) fn plan() -> OrthographicView {
-    OrthographicView::new(Frame3 {
+pub(crate) fn plan() -> View {
+    View::new(Frame3 {
         origin: Point3::ZERO,
         x: Vec3::X,
         y: Vec3::Y,
@@ -64,17 +64,13 @@ pub(crate) struct Setup {
     pub prepared: Prepared,
     pub broad: Broad,
     pub meshes: Vec<(MeshId, MeshRole)>,
-    pub view: OrthographicView,
+    pub view: View,
     pub region: Option<Aabb2>,
     pub inputs: Vec<TriMesh>,
 }
 
 impl Setup {
-    pub(crate) fn new(
-        parts: &[(MeshRole, TriMesh)],
-        view: OrthographicView,
-        region: Option<Aabb2>,
-    ) -> Self {
+    pub(crate) fn new(parts: &[(MeshRole, TriMesh)], view: View, region: Option<Aabb2>) -> Self {
         let inputs: Vec<TriMesh> = parts.iter().map(|(_, m)| m.clone()).collect();
         let meshes: Vec<(MeshId, MeshRole)> = parts
             .iter()

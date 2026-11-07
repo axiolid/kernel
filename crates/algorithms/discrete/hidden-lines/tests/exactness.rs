@@ -6,7 +6,7 @@
 mod common;
 
 use axiolid_core::Point3;
-use axiolid_mesh_hidden_lines_contract::{EdgeKind, OrthographicView, Visibility};
+use axiolid_mesh_hidden_lines_contract::{EdgeKind, View, Visibility};
 use common::{box_mesh, draw, isometric_frame, scalar, solids};
 
 /// Escalations, the counts of (visible silhouettes, visible creases, hidden
@@ -16,7 +16,7 @@ fn analyse(origin: Point3) -> (usize, [usize; 3], usize) {
     let outcome = draw(
         &scalar(),
         &solids(&meshes),
-        OrthographicView::new(isometric_frame(origin)),
+        View::new(isometric_frame(origin)),
     );
     let count = |kind, visibility| {
         outcome

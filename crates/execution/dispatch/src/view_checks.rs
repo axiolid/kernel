@@ -11,7 +11,7 @@ use axiolid_contracts::{ExecutionOptions, GeomError, ScratchRequirement};
 use axiolid_core::Aabb2;
 use axiolid_mesh::{audit_mesh_scratch_bytes, try_audit_mesh};
 use axiolid_mesh_hidden_lines_contract::{
-    FaceGroups, HiddenLineError, HiddenLineMesh, MeshRole, OrthographicView, Projection,
+    FaceGroups, HiddenLineError, HiddenLineMesh, MeshRole, Projection, View,
 };
 
 use crate::frame::validate_frame;
@@ -123,7 +123,7 @@ pub(crate) fn validate_meshes(
 
 /// Frame and depth range.
 pub(crate) fn validate_view(
-    view: &OrthographicView,
+    view: &View,
     angular_tolerance: f64,
     label: &str,
 ) -> Result<(), HiddenLineError> {

@@ -8,7 +8,7 @@ use axiolid::core::{Frame3, Tolerance};
 use axiolid::dispatch::MeshVisibleFacesRegistry;
 use axiolid::mesh::TriMesh;
 use axiolid::mesh_hidden_lines::{
-    HiddenLineMesh, MeshId, MeshRole, OrthographicView, ScalarVisibleFaces, VisibleFaceLimits,
+    HiddenLineMesh, MeshId, MeshRole, ScalarVisibleFaces, View, VisibleFaceLimits,
     VisibleFaceRequest,
 };
 use axiolid::{Point3, Vec3};
@@ -28,7 +28,7 @@ fn the_scalar_visible_faces_provider_answers_through_the_registry() {
         vec![0, 1, 2, 0, 2, 3],
     );
     let meshes = [HiddenLineMesh::new(MeshId(1), MeshRole::Sheet, &sheet)];
-    let view = OrthographicView::new(Frame3 {
+    let view = View::new(Frame3 {
         origin: Point3::ZERO,
         x: Vec3::X,
         y: Vec3::Y,

@@ -1,7 +1,7 @@
 # axiolid-mesh-hidden-lines-contract
 
-The portable contract for drawing the edges of triangle meshes as seen in an
-orthographic view, split into visible and hidden pieces: request, view, edge
+The portable contract for drawing the edges of triangle meshes as seen in a
+view, split into visible and hidden pieces: request, view, edge
 selection, limits, segments, evidence, a refusal type that names the mesh at
 fault, and a conformance suite. It computes nothing itself; providers
 implement `MeshHiddenLines`, and `axiolid-dispatch` selects one. See ADR 0090.

@@ -9,8 +9,8 @@ use axiolid_core::{Aabb2, Frame3, Point2, Point3, Vec3};
 use axiolid_mesh::TriMesh;
 
 use crate::{
-    EdgeKind, EdgeSelection, FaceGroup, HiddenLineLimits, MeshId, MeshRole, OrthographicView,
-    SourceEdge, Visibility,
+    EdgeKind, EdgeSelection, FaceGroup, HiddenLineLimits, MeshId, MeshRole, SourceEdge, View,
+    Visibility,
 };
 
 /// One mesh of a scene. An empty `groups` with `planar` unset leaves the
@@ -70,7 +70,7 @@ pub(crate) struct Expect {
 pub(crate) struct Case {
     pub name: &'static str,
     pub meshes: Vec<Fixture>,
-    pub view: OrthographicView,
+    pub view: View,
     pub edges: EdgeSelection,
     pub region: Option<Aabb2>,
     pub limits: HiddenLineLimits,
@@ -83,7 +83,7 @@ pub(crate) struct Case {
 pub(crate) struct Refusal {
     pub name: &'static str,
     pub meshes: Vec<Fixture>,
-    pub view: OrthographicView,
+    pub view: View,
     pub edges: EdgeSelection,
     pub limits: HiddenLineLimits,
     /// The refusing variant.
@@ -263,8 +263,8 @@ fn unit_cube() -> TriMesh {
     box_mesh([0.0; 3], [1.0; 3])
 }
 
-fn plan(view: Frame3) -> OrthographicView {
-    OrthographicView::new(view)
+fn plan(view: Frame3) -> View {
+    View::new(view)
 }
 
 fn crease_half() -> EdgeSelection {
@@ -274,7 +274,7 @@ fn crease_half() -> EdgeSelection {
 fn case(
     name: &'static str,
     meshes: Vec<Fixture>,
-    view: OrthographicView,
+    view: View,
     edges: EdgeSelection,
     expect: Expect,
 ) -> Case {
@@ -683,7 +683,7 @@ pub(crate) fn cases() -> Vec<Case> {
     cases.push(case(
         "far clipping",
         vec![solid(1, unit_cube())],
-        OrthographicView::new(plan_frame()).with_far(0.5),
+        View::new(plan_frame()).with_far(0.5),
         crease_half(),
         Expect {
             rows: Some(vec![row(Silhouette, Visible, 4, 4.0)]),
@@ -703,7 +703,7 @@ pub(crate) fn cases() -> Vec<Case> {
             sheet(1, sheet_quad(-1.0, -1.0, 2.0, 2.0, 3.0)),
             sheet(2, unit_cube()),
         ],
-        OrthographicView::new(plan_frame()).with_near(1.0),
+        View::new(plan_frame()).with_near(1.0),
         crease_half(),
         Expect {
             rows: Some(vec![

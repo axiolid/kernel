@@ -9,8 +9,6 @@ caret rule for `0.x` versions.
 
 ## [Unreleased]
 
-## [0.1.5] - 2026-11-07
-
 ### Added
 
 - `Projection` (`Orthographic`, the default, and `Perspective`), the
@@ -23,6 +21,17 @@ caret rule for `0.x` versions.
   from `supports_projection`: an unclaiming provider must refuse a perspective
   request by name, and a claim fails closed until perspective fixtures exist
   (ADR 0107, #387). No provider draws perspective yet.
+
+### Changed
+
+- `OrthographicView` is renamed `View`, because a view can now be
+  perspective. The old name stays as a deprecated type alias, so existing code
+  compiles with a deprecation warning (ADR 0107, #387).
+
+## [0.1.5] - 2026-11-07
+
+### Added
+
 - `FaceGroups::Planar` and `HiddenLineMesh::with_planar_groups`: the groups are
   the edge-connected components of triangles joined across an edge of exactly
   two triangles with parallel, same-facing normals, decided exactly, each named

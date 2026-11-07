@@ -1,4 +1,5 @@
-//! Portable orthographic hidden-line provider contract.
+//! Portable hidden-line provider contract: the views, the request and the
+//! drawing a provider returns.
 
 use axiolid_contracts::{
     Backend, CancellationGranularity, ExecutionOptions, GeomError, ScratchRequirement,
@@ -100,7 +101,7 @@ pub enum Projection {
 /// has a `near` below zero.
 #[non_exhaustive]
 #[derive(Debug, Clone, Copy, PartialEq)]
-pub struct OrthographicView {
+pub struct View {
     /// Right-handed orthonormal view frame.
     pub frame: Frame3,
     /// Nearest kept depth.
@@ -111,7 +112,12 @@ pub struct OrthographicView {
     pub projection: Projection,
 }
 
-impl OrthographicView {
+/// The former name of [`View`], from when every view was orthographic (ADR
+/// 0107).
+#[deprecated(note = "use View")]
+pub type OrthographicView = View;
+
+impl View {
     /// An orthographic view without depth clipping.
     pub const fn new(frame: Frame3) -> Self {
         Self {
@@ -265,8 +271,8 @@ impl HiddenLineLimits {
 pub struct HiddenLineRequest<'a> {
     /// Input meshes; their order orders the output.
     pub meshes: &'a [HiddenLineMesh<'a>],
-    /// The orthographic view.
-    pub view: OrthographicView,
+    /// The view.
+    pub view: View,
     /// Edge kinds to draw.
     pub edges: EdgeSelection,
     /// Optional image crop.
@@ -279,7 +285,7 @@ impl<'a> HiddenLineRequest<'a> {
     /// Draw `meshes` in `view` without a crop.
     pub const fn new(
         meshes: &'a [HiddenLineMesh<'a>],
-        view: OrthographicView,
+        view: View,
         edges: EdgeSelection,
         limits: HiddenLineLimits,
     ) -> Self {
@@ -447,7 +453,7 @@ impl HiddenLineEvidence {
 #[derive(Debug, Clone, PartialEq)]
 pub struct HiddenLineOutcome {
     /// The view the segments are expressed in, unchanged.
-    pub view: OrthographicView,
+    pub view: View,
     /// Visible and hidden pieces.
     pub segments: Vec<HiddenLineSegment>,
     /// Counts.
@@ -456,11 +462,7 @@ pub struct HiddenLineOutcome {
 
 impl HiddenLineOutcome {
     /// Construct a provider result. Registries validate it before returning it.
-    pub fn new(
-        view: OrthographicView,
-        segments: Vec<HiddenLineSegment>,
-        evidence: HiddenLineEvidence,
-    ) -> Self {
+    pub fn new(view: View, segments: Vec<HiddenLineSegment>, evidence: HiddenLineEvidence) -> Self {
         Self {
             view,
             segments,
@@ -529,20 +531,28 @@ mod tests {
 
     #[test]
     fn a_view_is_orthographic_unless_built_as_perspective() {
-        let view = OrthographicView::new(plan_frame());
+        let view = View::new(plan_frame());
         assert_eq!(view.projection, Projection::Orthographic);
         assert_eq!(Projection::default(), Projection::Orthographic);
         assert_eq!(view.with_near(-1.0).projection, Projection::Orthographic);
     }
 
     #[test]
+    #[allow(deprecated)]
+    fn the_old_name_is_the_same_type() {
+        let old: crate::OrthographicView = crate::OrthographicView::new(plan_frame());
+        let new: View = old;
+        assert_eq!(new, View::new(plan_frame()));
+    }
+
+    #[test]
     fn a_perspective_view_needs_a_finite_negative_near() {
-        let view = OrthographicView::perspective(plan_frame(), -1.0).expect("valid");
+        let view = View::perspective(plan_frame(), -1.0).expect("valid");
         assert_eq!(view.projection, Projection::Perspective);
         assert_eq!(view.near, Some(-1.0));
         assert_eq!(view.far, None);
         for near in [0.0, -0.0, 1.0, f64::NAN, f64::INFINITY, f64::NEG_INFINITY] {
-            let error = OrthographicView::perspective(plan_frame(), near).expect_err("refused");
+            let error = View::perspective(plan_frame(), near).expect_err("refused");
             assert_eq!(error.mesh, None);
             assert!(matches!(error.error, GeomError::InvalidInput(_)), "{near}");
         }

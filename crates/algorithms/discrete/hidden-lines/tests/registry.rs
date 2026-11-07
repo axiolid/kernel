@@ -8,8 +8,7 @@ use axiolid_dispatch::MeshHiddenLinesRegistry;
 use axiolid_hidden_lines::ScalarHiddenLines;
 use axiolid_mesh::TriMesh;
 use axiolid_mesh_hidden_lines_contract::{
-    EdgeKind, EdgeSelection, HiddenLineMesh, HiddenLineRequest, MeshId, MeshRole, OrthographicView,
-    Visibility,
+    EdgeKind, EdgeSelection, HiddenLineMesh, HiddenLineRequest, MeshId, MeshRole, View, Visibility,
 };
 use common::{box_mesh, isometric_frame, plan_frame, LIMITS};
 
@@ -42,7 +41,7 @@ fn a_request_runs_end_to_end_through_the_registry() {
     ];
     let request = HiddenLineRequest::new(
         &meshes,
-        OrthographicView::new(plan_frame()),
+        View::new(plan_frame()),
         EdgeSelection::new(Some(0.5)),
         LIMITS,
     );
@@ -63,7 +62,7 @@ fn the_isometric_cube_through_the_registry_has_the_analytic_kinds() {
     let meshes = [HiddenLineMesh::new(MeshId(1), MeshRole::Solid, &cube)];
     let request = HiddenLineRequest::new(
         &meshes,
-        OrthographicView::new(isometric_frame(Point3::new(0.1, 0.2, 0.3))),
+        View::new(isometric_frame(Point3::new(0.1, 0.2, 0.3))),
         EdgeSelection::new(Some(0.5)),
         LIMITS,
     );
@@ -157,7 +156,7 @@ fn a_beam_whose_underside_is_at_the_cut_height_is_drawn() {
 fn plan_request<'a>(meshes: &'a [HiddenLineMesh<'a>], near: f64) -> HiddenLineRequest<'a> {
     HiddenLineRequest::new(
         meshes,
-        OrthographicView::new(plan_frame()).with_near(near),
+        View::new(plan_frame()).with_near(near),
         EdgeSelection::new(Some(0.5)),
         LIMITS,
     )

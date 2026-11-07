@@ -28,8 +28,11 @@ implemented in later steps behind the same contract.
 
 - **The view.** `Projection { Orthographic, Perspective }`
   (`#[non_exhaustive]`, default `Orthographic`) is a field of the view, which
-  is already `#[non_exhaustive]`, so adding it is additive. `OrthographicView::new`
-  builds an orthographic view as before; `OrthographicView::perspective(frame,
+  is already `#[non_exhaustive]`, so adding it is additive. The type is
+  renamed `View`, since a type that can be perspective should not be called
+  orthographic; `OrthographicView` stays as a `#[deprecated]` type alias, so
+  the rename is semver-compatible. `View::new`
+  builds an orthographic view as before; `View::perspective(frame,
   near)` builds a perspective one and refuses a `near` that is not finite and
   below zero with `InvalidInput`. The registries validate the same rule for a
   view built field by field.
@@ -95,9 +98,8 @@ implemented in later steps behind the same contract.
 
 **Negative / costs**
 
-- The type keeps the name `OrthographicView` while it describes both
-  projections. Renaming it (with an alias and a semver exception) is a
-  separate maintainer decision.
+- Code that names `OrthographicView` gets a deprecation warning until it
+  moves to `View`.
 - Until P3 a registered provider can only decline perspective.
 
 **Follow-ups / risks to watch**

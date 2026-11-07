@@ -253,8 +253,8 @@ mod drawing {
     use axiolid::core::{Frame3, Point2};
     use axiolid::mesh_hidden_lines::{
         EdgeKind, EdgeSelection, FaceGroup, FaceSource, HiddenLineLimits, HiddenLineMesh,
-        HiddenLineRequest, MeshId, MeshRole, OrthographicView, RefusedMesh, Visibility,
-        VisibleFaceLimits, VisibleFaceRequest,
+        HiddenLineRequest, MeshId, MeshRole, RefusedMesh, View, Visibility, VisibleFaceLimits,
+        VisibleFaceRequest,
     };
 
     use super::*;
@@ -263,8 +263,8 @@ mod drawing {
         ExecutionOptions::new(Tolerance::new(1.0e-9, 1.0e-12).expect("valid tolerance"))
     }
 
-    fn plan() -> OrthographicView {
-        OrthographicView::new(Frame3 {
+    fn plan() -> View {
+        View::new(Frame3 {
             origin: Point3::new(0.0, 0.0, 0.0),
             x: Vec3::X,
             y: Vec3::Y,

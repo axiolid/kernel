@@ -8,8 +8,7 @@ use axiolid_core::{Point3, Tolerance};
 use axiolid_hidden_lines::ScalarVisibleFaces;
 use axiolid_mesh::TriMesh;
 use axiolid_mesh_hidden_lines_contract::{
-    HiddenLineMesh, MeshId, MeshRole, MeshVisibleFaces, OrthographicView, VisibleFaceLimits,
-    VisibleFaceRequest,
+    HiddenLineMesh, MeshId, MeshRole, MeshVisibleFaces, View, VisibleFaceLimits, VisibleFaceRequest,
 };
 use common::{box_mesh, plan_frame, solids};
 
@@ -25,7 +24,7 @@ fn refusal(limits: VisibleFaceLimits) -> Option<GeomError> {
         box_mesh([4.0, 0.0, 0.0], [5.0, 1.0, 1.0]),
     ];
     let meshes = solids(&boxes);
-    let request = VisibleFaceRequest::new(&meshes, OrthographicView::new(plan_frame()), limits);
+    let request = VisibleFaceRequest::new(&meshes, View::new(plan_frame()), limits);
     ScalarVisibleFaces::new()
         .visible_faces(&request, &options())
         .err()
@@ -95,7 +94,7 @@ fn intersection_segments_count_against_the_memory_budget() {
         .map(|(i, m)| HiddenLineMesh::new(MeshId(i as u64 + 1), MeshRole::Sheet, m))
         .collect();
     let limits = VisibleFaceLimits::new(100, 10_000, 10_000, 100_000_000, 100_000, 1_000_000);
-    let request = VisibleFaceRequest::new(&meshes, OrthographicView::new(plan_frame()), limits);
+    let request = VisibleFaceRequest::new(&meshes, View::new(plan_frame()), limits);
     let free = ScalarVisibleFaces::new()
         .visible_faces(&request, &options())
         .expect("answers without a budget");
@@ -150,7 +149,7 @@ fn separate_intersection_segments_count_against_the_memory_budget() {
         .map(|(i, m)| HiddenLineMesh::new(MeshId(i as u64 + 1), MeshRole::Sheet, m))
         .collect();
     let limits = VisibleFaceLimits::new(100, 10_000, 10_000, 100_000_000, 100_000, 1_000_000);
-    let request = VisibleFaceRequest::new(&meshes, OrthographicView::new(plan_frame()), limits);
+    let request = VisibleFaceRequest::new(&meshes, View::new(plan_frame()), limits);
     let free = ScalarVisibleFaces::new()
         .visible_faces(&request, &options())
         .expect("answers without a budget");

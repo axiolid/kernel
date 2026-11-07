@@ -8,7 +8,7 @@
 mod common;
 
 use axiolid_hidden_lines::{ScalarVisibleFaces, ScanVisibleFaces, UnprunedVisibleFaces};
-use axiolid_mesh_hidden_lines_contract::OrthographicView;
+use axiolid_mesh_hidden_lines_contract::View;
 use common::{scene, solids, try_faces, views};
 
 #[test]
@@ -22,7 +22,7 @@ fn the_variants_give_equal_outcomes() {
             .into_iter()
             .filter(|(n, _)| ["plan", "-Y", "oblique"].contains(n))
         {
-            let view = OrthographicView::new(frame);
+            let view = View::new(frame);
             let base = try_faces(&ScalarVisibleFaces::new(), &meshes, view, None);
             for (variant, other) in [
                 ("scan", try_faces(&ScanVisibleFaces, &meshes, view, None)),

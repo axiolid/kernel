@@ -14,7 +14,7 @@ use axiolid_guarantees::Sign;
 use axiolid_hidden_lines::ScalarVisibleFaces;
 use axiolid_mesh::TriMesh;
 use axiolid_mesh_hidden_lines_contract::{
-    FaceGroup, FaceSource, HiddenLineMesh, MeshId, MeshRole, OrthographicView, VisibleFaceOutcome,
+    FaceGroup, FaceSource, HiddenLineMesh, MeshId, MeshRole, View, VisibleFaceOutcome,
 };
 use common::{box_mesh, plan_frame, scene, try_faces, views};
 
@@ -171,7 +171,7 @@ fn planar_equals_the_per_triangle_reference_on_seeded_scenes() {
             .into_iter()
             .filter(|(n, _)| ["plan", "-Y", "isometric", "oblique"].contains(n))
         {
-            let view = OrthographicView::new(frame);
+            let view = View::new(frame);
             let context = format!("seed {seed}, {name}");
             let a = try_faces(&provider, &planar, view, None);
             let b = try_faces(&provider, &explicit, view, None);
@@ -202,7 +202,7 @@ fn reversed_winding_gives_the_same_output() {
             .into_iter()
             .filter(|(n, _)| ["plan", "oblique"].contains(n))
         {
-            let view = OrthographicView::new(frame);
+            let view = View::new(frame);
             let context = format!("seed {seed}, {name}");
             match (
                 try_faces(&provider, &original, view, None),
@@ -222,7 +222,7 @@ fn the_plan_cube_shows_its_top_as_the_group_of_the_smaller_triangle() {
     let outcome = try_faces(
         &ScalarVisibleFaces::new(),
         &meshes,
-        OrthographicView::new(plan_frame()),
+        View::new(plan_frame()),
         None,
     )
     .expect("faces");
@@ -249,7 +249,7 @@ fn two_disjoint_coplanar_squares_are_two_groups() {
     let outcome = try_faces(
         &ScalarVisibleFaces::new(),
         &meshes,
-        OrthographicView::new(plan_frame()),
+        View::new(plan_frame()),
         None,
     )
     .expect("faces");
@@ -284,7 +284,7 @@ fn a_fold_keeps_parallel_opposite_facing_triangles_apart() {
     let outcome = try_faces(
         &ScalarVisibleFaces::new(),
         &meshes,
-        OrthographicView::new(plan_frame()),
+        View::new(plan_frame()),
         None,
     )
     .expect("faces");

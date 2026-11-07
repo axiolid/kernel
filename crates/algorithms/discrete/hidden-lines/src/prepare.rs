@@ -17,9 +17,7 @@ use std::ops::Range;
 use axiolid_contracts::{ExecutionOptions, GeomError, GeomResult};
 use axiolid_core::{Aabb2, Frame3, SpaceFrame, Tolerance};
 use axiolid_mesh::try_audit_mesh;
-use axiolid_mesh_hidden_lines_contract::{
-    HiddenLineError, HiddenLineMesh, MeshRole, OrthographicView,
-};
+use axiolid_mesh_hidden_lines_contract::{HiddenLineError, HiddenLineMesh, MeshRole, View};
 
 use crate::caps::Cap;
 use crate::decide::decide;
@@ -91,7 +89,7 @@ pub(crate) struct Prepared {
 /// Validate the request pieces, audit the meshes and build the scene.
 pub(crate) fn prepare(
     meshes: &[HiddenLineMesh<'_>],
-    view: &OrthographicView,
+    view: &View,
     region: Option<Aabb2>,
     limits: SharedLimits,
     names: &ResourceNames,
@@ -195,7 +193,7 @@ fn cut_by_near(verts: &[Vert], near: f64, escalations: &mut usize) -> GeomResult
 /// Request-level checks. Returns the total positions and triangles.
 fn validate_shape(
     meshes: &[HiddenLineMesh<'_>],
-    view: &OrthographicView,
+    view: &View,
     region: Option<Aabb2>,
     limits: SharedLimits,
     names: &ResourceNames,

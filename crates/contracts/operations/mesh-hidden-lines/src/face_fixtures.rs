@@ -18,9 +18,7 @@ pub(crate) use snap::snap_cases;
 
 use crate::fixtures::{box_mesh, isometric_frame, plan_frame, refusals, sheet_quad};
 use crate::MeshRole::{Sheet, Solid};
-use crate::{
-    FaceGroup, FaceSource, MeshId, MeshRole, OrthographicView, VisibleFaceLimits, VisibleRegion,
-};
+use crate::{FaceGroup, FaceSource, MeshId, MeshRole, View, VisibleFaceLimits, VisibleRegion};
 
 /// One mesh of a scene. An empty `groups` means every triangle is in
 /// `FaceGroup(0)`. A `planar` fixture is requested with
@@ -78,7 +76,7 @@ pub(crate) struct EvidenceExpect {
 pub(crate) struct FaceCase {
     pub name: &'static str,
     pub meshes: Vec<FaceFixture>,
-    pub view: OrthographicView,
+    pub view: View,
     pub region: Option<Aabb2>,
     pub limits: VisibleFaceLimits,
     pub regions: Vec<VisibleRegion>,
@@ -90,7 +88,7 @@ pub(crate) struct FaceCase {
 pub(crate) struct AreaCase {
     pub name: &'static str,
     pub meshes: Vec<FaceFixture>,
-    pub view: OrthographicView,
+    pub view: View,
     pub limits: VisibleFaceLimits,
     /// `(mesh, source, area)`, in output order. Every other source must have
     /// no region.
@@ -101,7 +99,7 @@ pub(crate) struct AreaCase {
 pub(crate) struct FaceRefusal {
     pub name: &'static str,
     pub meshes: Vec<FaceFixture>,
-    pub view: OrthographicView,
+    pub view: View,
     pub limits: VisibleFaceLimits,
     /// Whether the refusal's error is the expected kind.
     pub accepts: fn(&GeomError) -> bool,
@@ -128,8 +126,8 @@ pub(crate) fn elevation_frame() -> Frame3 {
     }
 }
 
-fn plan() -> OrthographicView {
-    OrthographicView::new(plan_frame())
+fn plan() -> View {
+    View::new(plan_frame())
 }
 
 fn solid(id: u64, mesh: TriMesh) -> FaceFixture {
@@ -173,7 +171,7 @@ fn group(mesh: u64, group: u32, outer: &[[f64; 2]], triangles: &[u32]) -> Visibl
 fn case(
     name: &'static str,
     meshes: Vec<FaceFixture>,
-    view: OrthographicView,
+    view: View,
     regions: Vec<VisibleRegion>,
 ) -> FaceCase {
     FaceCase {
@@ -279,7 +277,7 @@ fn two_boxes_elevation() -> FaceCase {
             solid(1, box_mesh([0.0, -3.0, 0.0], [2.0, -2.0, 2.0])),
             solid(2, box_mesh([1.0, -1.0, 1.0], [4.0, 0.0, 3.0])),
         ],
-        OrthographicView::new(elevation_frame()),
+        View::new(elevation_frame()),
         two_boxes_regions(&[4, 5]),
     )
 }
@@ -676,7 +674,7 @@ pub(crate) fn area_cases() -> Vec<AreaCase> {
         AreaCase {
             name: "isometric_cube",
             meshes: vec![cube],
-            view: OrthographicView::new(isometric_frame(Point3::ZERO)),
+            view: View::new(isometric_frame(Point3::ZERO)),
             limits: limits(),
             areas: vec![
                 (MeshId(1), FaceSource::Group(FaceGroup(1)), face),
@@ -687,7 +685,7 @@ pub(crate) fn area_cases() -> Vec<AreaCase> {
         AreaCase {
             name: "isometric_cube_planar",
             meshes: vec![planar],
-            view: OrthographicView::new(isometric_frame(Point3::ZERO)),
+            view: View::new(isometric_frame(Point3::ZERO)),
             limits: limits(),
             areas: vec![
                 (MeshId(1), FaceSource::Group(FaceGroup(2)), face),

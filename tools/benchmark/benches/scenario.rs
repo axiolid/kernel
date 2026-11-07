@@ -22,8 +22,7 @@ use axiolid_hidden_lines::{
 use axiolid_mesh::TriMesh;
 use axiolid_mesh_hidden_lines_contract::{
     EdgeSelection, HiddenLineLimits, HiddenLineMesh, HiddenLineRequest, MeshHiddenLines, MeshId,
-    MeshRole, MeshVisibleFaces, OrthographicView, Visibility, VisibleFaceLimits,
-    VisibleFaceRequest,
+    MeshRole, MeshVisibleFaces, View, Visibility, VisibleFaceLimits, VisibleFaceRequest,
 };
 use criterion::{criterion_group, criterion_main, BenchmarkId, Criterion, Throughput};
 use std::hint::black_box;
@@ -173,13 +172,13 @@ fn hidden_lines(criterion: &mut Criterion) {
         1.0 / 6.0_f64.sqrt(),
         1.0 / 3.0_f64.sqrt(),
     );
-    let isometric = OrthographicView::new(Frame3 {
+    let isometric = View::new(Frame3 {
         origin: Point3::ZERO,
         x: Vec3::new(s2, -s2, 0.0),
         y: Vec3::new(s6, s6, -2.0 * s6),
         z: Vec3::new(s3, s3, s3),
     });
-    let plan = OrthographicView::new(Frame3 {
+    let plan = View::new(Frame3 {
         origin: Point3::ZERO,
         x: Vec3::X,
         y: Vec3::Y,
@@ -276,13 +275,13 @@ fn visible_faces(criterion: &mut Criterion) {
         1.0 / 6.0_f64.sqrt(),
         1.0 / 3.0_f64.sqrt(),
     );
-    let isometric = OrthographicView::new(Frame3 {
+    let isometric = View::new(Frame3 {
         origin: Point3::ZERO,
         x: Vec3::new(s2, -s2, 0.0),
         y: Vec3::new(s6, s6, -2.0 * s6),
         z: Vec3::new(s3, s3, s3),
     });
-    let plan = OrthographicView::new(Frame3 {
+    let plan = View::new(Frame3 {
         origin: Point3::ZERO,
         x: Vec3::X,
         y: Vec3::Y,

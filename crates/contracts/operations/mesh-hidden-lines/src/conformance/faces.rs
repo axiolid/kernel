@@ -21,8 +21,8 @@ use crate::face_fixtures::{
 };
 use crate::fixtures::reversed;
 use crate::{
-    FaceSource, HiddenLineError, HiddenLineMesh, MeshId, MeshRole, MeshVisibleFaces,
-    OrthographicView, VisibleFaceLimits, VisibleFaceOutcome, VisibleFaceRequest, VisibleRegion,
+    FaceSource, HiddenLineError, HiddenLineMesh, MeshId, MeshRole, MeshVisibleFaces, View,
+    VisibleFaceLimits, VisibleFaceOutcome, VisibleFaceRequest, VisibleRegion,
 };
 
 #[derive(Debug, Clone, PartialEq)]
@@ -98,7 +98,7 @@ pub struct FaceConformanceSuite;
 struct Scene<'a> {
     name: &'static str,
     meshes: &'a [FaceFixture],
-    view: OrthographicView,
+    view: View,
 }
 
 impl FaceConformanceSuite {
@@ -313,7 +313,7 @@ impl FaceConformanceSuite {
 fn answer(
     provider: &dyn MeshVisibleFaces,
     fixtures: &[FaceFixture],
-    view: OrthographicView,
+    view: View,
     region: Option<axiolid_core::Aabb2>,
     limits: VisibleFaceLimits,
     options: &ExecutionOptions,
@@ -435,7 +435,7 @@ fn sequence_order(a: &[Point2], b: &[Point2]) -> Ordering {
 
 /// Whether the near plane cuts a solid: some vertex is beyond it (`W >
 /// near`) and some is not.
-fn cut_by_near(fixture: &FaceFixture, view: &OrthographicView) -> bool {
+fn cut_by_near(fixture: &FaceFixture, view: &View) -> bool {
     let Some(near) = view.near else {
         return false;
     };

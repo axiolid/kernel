@@ -5,7 +5,7 @@ mod common;
 
 use axiolid_core::{Point2, Point3, Vec3};
 use axiolid_hidden_lines::ScalarVisibleFaces;
-use axiolid_mesh_hidden_lines_contract::{OrthographicView, Visibility};
+use axiolid_mesh_hidden_lines_contract::{View, Visibility};
 use common::{box_mesh, draw, faces, frame, isometric_frame, scalar, solids};
 
 fn same(a: Point2, b: Point2) -> bool {
@@ -29,7 +29,7 @@ fn region_vertices_equal_visible_hidden_line_endpoints() {
         ("isometric", isometric_frame(o)),
         ("front", frame(Vec3::X, Vec3::Z, -Vec3::Y, o)),
     ] {
-        let view = OrthographicView::new(frame);
+        let view = View::new(frame);
         let lines = draw(&scalar(), &meshes, view);
         let endpoints: Vec<Point2> = lines
             .segments
@@ -61,7 +61,7 @@ fn two_boxes_in_plan_share_the_vertices_of_their_common_boundary() {
     let outcome = faces(
         &ScalarVisibleFaces::new(),
         &solids(&boxes),
-        OrthographicView::new(common::plan_frame()),
+        View::new(common::plan_frame()),
     );
     // The front box's top is whole; the back box's top is the L around it,
     // whose inner corner (2, 1) and (1, 2) are shared with the front box.

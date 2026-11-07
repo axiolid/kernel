@@ -1,7 +1,8 @@
 #![forbid(unsafe_code)]
-//! Portable orthographic hidden-line drawing operation contract and evidence.
+//! Portable hidden-line drawing operation contract and evidence.
 //!
-//! The request names triangle meshes, an orthographic view and the edge kinds
+//! The request names triangle meshes, a view (orthographic, or
+//! perspective, ADR 0107) and the edge kinds
 //! to draw. The outcome lists, per source edge, maximal pieces that are
 //! visible or hidden in the view. Visibility is a geometric decision made
 //! by the provider; the contract fixes what the decision means (ADR 0090):
@@ -29,10 +30,12 @@ mod face_fixtures;
 mod faces;
 mod fixtures;
 
+#[allow(deprecated)]
+pub use contract::OrthographicView;
 pub use contract::{
     EdgeKind, EdgeSelection, HiddenLineEvidence, HiddenLineLimits, HiddenLineMesh,
     HiddenLineOutcome, HiddenLineRequest, HiddenLineSegment, HiddenLineSource, MeshHiddenLines,
-    MeshId, MeshRole, OrthographicView, Projection, SourceEdge, Visibility,
+    MeshId, MeshRole, Projection, SourceEdge, View, Visibility,
 };
 pub use error::{HiddenLineError, RefusedMesh};
 pub use faces::{

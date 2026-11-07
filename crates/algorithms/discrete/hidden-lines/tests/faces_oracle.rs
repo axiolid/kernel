@@ -27,9 +27,7 @@ mod common;
 use axiolid_core::{Frame3, Point2};
 use axiolid_hidden_lines::ScalarVisibleFaces;
 use axiolid_mesh::TriMesh;
-use axiolid_mesh_hidden_lines_contract::{
-    FaceGroup, FaceSource, OrthographicView, VisibleFaceOutcome,
-};
+use axiolid_mesh_hidden_lines_contract::{FaceGroup, FaceSource, View, VisibleFaceOutcome};
 use common::topology::assert_valid_topology;
 use common::{scene, solids, try_faces, views};
 
@@ -153,7 +151,7 @@ fn check(seed: u64, name: &str, frame: Frame3, with_near: bool, tally: &mut Tall
             near.is_some_and(|n| v.iter().any(|p| p[2] > n) && v.iter().any(|p| p[2] <= n))
         })
         .collect();
-    let mut view = OrthographicView::new(frame);
+    let mut view = View::new(frame);
     if let Some(n) = near {
         view = view.with_near(n);
     }

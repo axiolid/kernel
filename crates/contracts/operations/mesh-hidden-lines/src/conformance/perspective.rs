@@ -21,7 +21,7 @@ use super::ConformanceFailure;
 use crate::fixtures::{box_mesh, limits, plan_frame};
 use crate::{
     EdgeSelection, HiddenLineError, HiddenLineMesh, HiddenLineRequest, MeshHiddenLines, MeshId,
-    MeshRole, MeshVisibleFaces, OrthographicView, Projection, VisibleFaceRequest,
+    MeshRole, MeshVisibleFaces, Projection, View, VisibleFaceRequest,
 };
 
 /// One failure of the perspective suite.
@@ -152,8 +152,8 @@ impl PerspectiveConformanceSuite {
     }
 }
 
-fn perspective_view() -> OrthographicView {
-    OrthographicView::perspective(plan_frame(), -1.0).expect("a negative finite near")
+fn perspective_view() -> View {
+    View::perspective(plan_frame(), -1.0).expect("a negative finite near")
 }
 
 fn options() -> ExecutionOptions {
