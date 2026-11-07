@@ -13,10 +13,10 @@
 //! without cut regions (it predates them), does not claim them
 //! (`cut_regions_claimed == false`) and the rest is skipped. Otherwise
 //! the answer must equal the plain one, plus the fixture's cut regions and
-//! the cut evidence; a plain refusal must be repeated; a pinched cut may instead be refused by
-//! name (#373); a sheet is invalid
-//! input; the cut rings must cover the chains bit for bit; and every `Both`
-//! region must be a cut region.
+//! the cut evidence; a plain refusal must be repeated; a pinched cut may
+//! instead be refused by name (#373); a sheet is invalid input; the cut rings
+//! must cover the chains bit for bit; and every `Both` region must be a cut
+//! region.
 
 use core::fmt;
 

@@ -70,10 +70,12 @@
 use axiolid_core::Point2;
 
 /// Refusal detail: the cut boundary meets itself at a vertex in a way the
-/// provider does not pair: two edges along one ray, or a chain through the
-/// vertex that the rings would part; a provider may also refuse every pinch.
+/// provider does not pair: an edge in and an edge out along one ray, or a
+/// chain through the vertex that the rings would part; a provider may also
+/// refuse every pinch.
 pub const REFUSED_PINCHED_CUT_REGION: &str = "cut region boundary pinches at a vertex";
-/// Refusal detail: rings of the cut cross or overlap each other.
+/// Refusal detail: rings of the cut cross or overlap each other, such as two
+/// boundary edges of one direction along one ray at a vertex.
 pub const REFUSED_CROSSING_CUT_RINGS: &str = "cut rings cross or overlap";
 
 /// Hard bounds on the cut-region work of one request.
