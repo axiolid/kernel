@@ -4577,6 +4577,38 @@ Every publishable crate versions and publishes independently ([ADR 0067](/adr/00
   referee, bounded half-space tools included, where it reads nothing above
   the rounding reach, and refused by name otherwise.
 
+- A sectioned surface and an open-section run (`SurfaceRelation::SectionedSurface`,
+  `OpenSectionsAtStations`) whose section planes stop advancing are refused
+  as invalid input, as a stationed spine is since #361 (#407). The same
+  decision applies: exact for unturned sections on closed-form bend frames,
+  a touch within rounding included (such a sheet was refused as a collapsed
+  triangle before, now as a fold); conservative for turned sections and
+  frames read by quadrature, never refusing and reporting the sheet
+  unbounded by name when a fold cannot be excluded. A sheet that meets
+  itself far away is not detected yet. The refusal reads 'station-placed
+  sections fold' for spines too.
+- A curved face's pcurve may walk a shared edge at another pace than the
+  pcurve the edge was sampled through (#413). Each cached sample is located
+  on the use's own pcurve: the parameter whose surface image is nearest the
+  sample, searched with Brent's method between the sample before and a
+  guess scaled by the pcurve's pace, so the parameters stay strictly
+  monotone. A sample with no place on the pcurve, or further from it than
+  the chord budget, is refused (`a shared edge sample is not located on a
+  neighbouring pcurve`), where the pcurves were compared at uniform
+  parameters before and a rim whose wall and cap circle differ in pace (a
+  traced section of an exact union, an IFC pcurve) was refused as
+  disagreeing in 3D. A located parameter within a thousandth of a step of
+  its uniform parameter is put there, so a pcurve at the sampling use's
+  pace triangulates as before. The deviation bound takes the chord bounds
+  over the located spans, across a break piecewise (each piece's bound
+  plus the break's distance from the span's chord, where a span with a
+  break inside had none), and the samples' offsets from the surface once,
+  in the triangles. The edge pass halves its spans until the located spans
+  of every other use meet the budget, up to the segment cap. An exact
+  result closes a pcurve's end onto its vertex within the smaller of its
+  boolean's reading and the tolerance (and never less than the chord
+  budget); the disagreement is part of the bound.
+
 ### 0.3.44 - 2026-11-03
 
 ### Added
