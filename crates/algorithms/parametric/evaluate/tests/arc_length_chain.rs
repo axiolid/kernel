@@ -417,6 +417,30 @@ fn a_piece_with_a_corner_is_not_certified() {
         }],
     );
     assert!(!certifies_flattening2(&Curve2::Chain(chain.clone())));
+    // The same corner as a B-spline's knot: a certified family, but not
+    // `C^1` inside the piece.
+    let spline = Chain2::new(
+        frame(Point2::ZERO, 0.0),
+        vec![ChainPiece2::Parametric {
+            curve: Curve2::BSpline(BSplineCurve2 {
+                degree: 1,
+                control_points: vec![
+                    Point2::new(0.0, 0.0),
+                    Point2::new(3.0, 0.0),
+                    Point2::new(3.0, 3.0),
+                ],
+                knots: vec![0.0, 1.0, 2.0],
+                multiplicities: vec![2, 1, 2],
+                weights: None,
+                closed: false,
+                self_intersect: None,
+                knot_spec: KnotSpec::Unspecified,
+            }),
+            start: 0.0,
+            length: 5.0,
+        }],
+    );
+    assert!(!axiolid_evaluate::chain::chain_certifies(&spline));
     let corner = chain_point(&chain, 3.0).unwrap();
     assert!(close(corner, Point2::new(3.0, 0.0), 1e-12), "{corner:?}");
     let up = chain_point(&chain, 5.0).unwrap();

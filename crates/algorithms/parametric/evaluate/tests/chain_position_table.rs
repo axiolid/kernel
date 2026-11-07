@@ -446,7 +446,9 @@ fn an_offset_join_reads_each_side() {
 
 #[test]
 fn errors_grow_along_the_chain() {
-    // A cubic first, so its enclosure is the largest error before the line.
+    // A cubic first, so its enclosure is the largest error before the lines,
+    // then two lines: the second line must carry the cubic's error through
+    // the first, not only the first line's own.
     let chain = Chain2::new(
         layout_frame(),
         vec![
@@ -460,25 +462,39 @@ fn errors_grow_along_the_chain() {
                 start: 0.0,
                 length: 30.0,
             },
+            ChainPiece2::Parametric {
+                curve: line(),
+                start: 0.0,
+                length: 30.0,
+            },
         ],
     );
-    let table = ChainPositionTable::new(&chain, 1e-6, 90.0).unwrap();
-    let join = TRANSITION;
-    let (_, end) = table.point2_on(join, SeamSide::Incoming).unwrap();
-    let (_, begin) = table.point2_on(join, SeamSide::Outgoing).unwrap();
-    assert!(
-        end > 1e-9,
-        "the cubic's enclosure is the error to carry: {end}"
-    );
-    assert!(begin >= end, "{begin} against {end}");
-    let (_, far) = table.point2(90.0).unwrap();
-    assert!(far >= begin);
-    let (_, te) = table.tangent2_on(join, SeamSide::Incoming).unwrap();
-    let (_, tb) = table.tangent2_on(join, SeamSide::Outgoing).unwrap();
-    assert!(te > 1e-12 && tb >= te, "{tb} against {te}");
-    let (_, ce) = table.curvature2_on(join, SeamSide::Incoming).unwrap();
-    let (_, cb) = table.curvature2_on(join, SeamSide::Outgoing).unwrap();
-    // A line is straight whatever turns it: its curvature carries no error.
+    let table = ChainPositionTable::new(&chain, 1e-6, 120.0).unwrap();
+    let mut previous = None;
+    for join in [TRANSITION, TRANSITION + 30.0] {
+        let (_, end) = table.point2_on(join, SeamSide::Incoming).unwrap();
+        let (_, begin) = table.point2_on(join, SeamSide::Outgoing).unwrap();
+        let (_, te) = table.tangent2_on(join, SeamSide::Incoming).unwrap();
+        let (_, tb) = table.tangent2_on(join, SeamSide::Outgoing).unwrap();
+        assert!(
+            end > 1e-9,
+            "the cubic's enclosure is the error to carry: {end}"
+        );
+        assert!(te > 1e-12, "and its tangent's: {te}");
+        assert!(begin >= end, "{begin} against {end} at {join}");
+        assert!(tb >= te, "{tb} against {te} at {join}");
+        // Each join carries at least what the one before it did.
+        if let Some((pe, pt)) = previous {
+            assert!(end >= pe && te >= pt, "{end} {te} against {pe} {pt}");
+        }
+        previous = Some((end, te));
+    }
+    let (_, far) = table.point2(120.0).unwrap();
+    assert!(far >= previous.unwrap().0);
+    // A line is straight whatever turns it: its curvature carries no error,
+    // the cubic's does.
+    let (_, ce) = table.curvature2_on(TRANSITION, SeamSide::Incoming).unwrap();
+    let (_, cb) = table.curvature2_on(TRANSITION, SeamSide::Outgoing).unwrap();
     assert!(ce > 0.0 && cb == 0.0);
 }
 
