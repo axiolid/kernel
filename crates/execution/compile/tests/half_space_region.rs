@@ -198,6 +198,70 @@ fn near(g: Graph, root: NodeId, expected: f64) -> (ExactBRep, bool) {
     check(g, root, expected, 1e-9)
 }
 
+/// A unit block, `x`, `y` in `[-0.5, 0.5]` and `z` in `[0, 1]`, less a
+/// clip that reaches the margin of the stand-in tool, a hair short of it
+/// (#326): the stand-in is a constructed solid whose margin faces stay a
+/// margin `m` from the subject, so what it shares with another stand-in
+/// within the tolerance there is no cavity. The block is whole.
+fn margin() -> f64 {
+    0.25 * 3.0_f64.sqrt() + 4e-6
+}
+
+fn unit_block(g: &mut Graph) -> NodeId {
+    let profile = g.push(GeometryNode::Profile(Profile::Rectangle(
+        RectangleProfile {
+            x: 1.0,
+            y: 1.0,
+            thickness: None,
+            outer_radius: None,
+            inner_radius: None,
+        },
+    )));
+    g.push(GeometryNode::SolidOperation(SolidOperation::Extrusion {
+        profile,
+        direction: Vec3::Z,
+        depth: 1.0,
+    }))
+}
+
+#[test]
+fn a_stand_in_touching_another_within_the_tolerance_at_the_margin_is_no_cavity() {
+    let reach = 0.5 + margin() - 1e-7;
+    // `{z >= 0.5}` bounded along `z` to a strip that starts at the margin.
+    let mut g = Graph::new();
+    let block = unit_block(&mut g);
+    let half_space = g.local_side(Point3::new(0.0, 0.0, 0.5), Vec3::Z);
+    let boundary = g.push(GeometryNode::Curve2(Curve2::Polyline(Polyline2 {
+        points: vec![
+            Point2::new(reach, -0.1),
+            Point2::new(reach + 1.0, -0.1),
+            Point2::new(reach + 1.0, 0.1),
+            Point2::new(reach, 0.1),
+        ],
+        closed: true,
+    })));
+    let strip = g.push(GeometryNode::SolidOperation(
+        SolidOperation::BoundedHalfSpaceAlongZ {
+            half_space,
+            boundary,
+            placement: Transform3::IDENTITY,
+        },
+    ));
+    let root = g.minus(block, strip);
+    let (_, exact) = near(g, root, 1.0);
+    assert!(exact);
+
+    // The same as a region: `{z >= 0.5} & {x >= reach}`.
+    let mut g = Graph::new();
+    let block = unit_block(&mut g);
+    let high = g.local_side(Point3::new(0.0, 0.0, 0.5), Vec3::Z);
+    let far = g.local_side(Point3::new(reach, 0.0, 0.0), Vec3::X);
+    let region = g.meet(high, far);
+    let root = g.minus(block, region);
+    let (_, exact) = near(g, root, 1.0);
+    assert!(exact);
+}
+
 fn refusal(g: Graph, root: NodeId) -> GeomError {
     let graph = g.finish(vec![root]);
     compile(&graph, root).expect_err("refused")

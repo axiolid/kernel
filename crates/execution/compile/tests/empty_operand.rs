@@ -569,7 +569,6 @@ fn an_emptiness_read_within_the_tolerance_is_refused_not_absorbed() {
             "overlapping blocks",
             wall_less_overlapping_blocks as fn(f64) -> (Graph, NodeId),
         ),
-        ("a slab between planes", wall_less_a_slab),
         ("a sliver clip", wall_less_a_sliver_clip),
     ] {
         let (g, root) = build(1e-7);
@@ -594,4 +593,20 @@ fn an_emptiness_read_within_the_tolerance_is_refused_not_absorbed() {
             WALL - cavity
         );
     }
+}
+
+/// The stand-ins of a region are constructed solids, so a slab `gap` thick
+/// between two planes is no reading within the tolerance to refuse: the
+/// stand-ins meet exactly, at zero tolerance, and the slab is cut (#326).
+#[test]
+fn a_slab_between_planes_thinner_than_the_tolerance_is_cut() {
+    let gap = 1e-7;
+    let (g, root) = wall_less_a_slab(gap);
+    let graph = g.finish(vec![root]);
+    let solid = exact(&graph, root).expect("the slab is cut");
+    assert!(
+        (volume(&solid) - (WALL - L * T * gap)).abs() <= 1e-7,
+        "volume {}",
+        volume(&solid)
+    );
 }

@@ -198,7 +198,34 @@ enum Measure<'m> {
 ///
 /// A transformed instance changes the local chord budget. Keying only by node
 /// would incorrectly reuse a coarse source mesh for a larger instance.
-type Cache = std::collections::HashMap<EvalKey, Built>;
+///
+/// It also remembers which nodes are regions ([`Regions`]), so a batch of
+/// roots decides each node once.
+#[derive(Debug, Default)]
+struct Cache {
+    built: std::collections::HashMap<EvalKey, Built>,
+    regions: crate::regions::RegionMemo,
+}
+
+impl Cache {
+    fn new() -> Self {
+        Self::default()
+    }
+}
+
+impl std::ops::Deref for Cache {
+    type Target = std::collections::HashMap<EvalKey, Built>;
+
+    fn deref(&self) -> &Self::Target {
+        &self.built
+    }
+}
+
+impl std::ops::DerefMut for Cache {
+    fn deref_mut(&mut self) -> &mut Self::Target {
+        &mut self.built
+    }
+}
 
 impl<B: MeshBoolean> ReferenceMeshCompiler<B> {
     /// Resolve a bounded half-space's boundary into rings.
@@ -574,7 +601,7 @@ impl<B: MeshBoolean> ReferenceMeshCompiler<B> {
     fn mesh_dependencies(
         &self,
         graph: &GeometryGraph,
-        regions: &Regions,
+        regions: &Regions<'_>,
         node: &GeometryNode,
         key: EvalKey,
     ) -> GeomResult<Vec<EvalKey>> {
@@ -622,7 +649,6 @@ impl<B: MeshBoolean> ReferenceMeshCompiler<B> {
         measure: Measure<'_>,
     ) -> GeomResult<Built> {
         let root_key = EvalKey::new(root, Budget::of(options));
-        let regions = Regions::of(graph);
         let mut stack = vec![Step::Enter(root_key)];
         // The room an instance's source was re-meshed with for its
         // placement's rounding (#295), once its first mesh rounded by more
@@ -640,7 +666,12 @@ impl<B: MeshBoolean> ReferenceMeshCompiler<B> {
                         continue;
                     }
                     let node = self.node(graph, key.id)?;
-                    let deps = self.mesh_dependencies(graph, &regions, node, key)?;
+                    let deps = self.mesh_dependencies(
+                        graph,
+                        &Regions::new(graph, &cache.regions),
+                        node,
+                        key,
+                    )?;
                     // Exit runs after every dependency, so push it first.
                     stack.push(Step::Exit(key));
                     for dep in deps {
@@ -695,7 +726,7 @@ impl<B: MeshBoolean> ReferenceMeshCompiler<B> {
                         graph,
                         (key, room, accuracy),
                         &local_options,
-                        (cache, &regions),
+                        (cache, &Regions::new(graph, &cache.regions)),
                         (measure, root),
                     )?;
                     cache.insert(key, built);
@@ -763,7 +794,7 @@ impl<B: MeshBoolean> ReferenceMeshCompiler<B> {
         graph: &GeometryGraph,
         (key, room, accuracy): (EvalKey, Scalar, Option<PlacementAccuracy>),
         options: &ExecutionOptions,
-        (cache, regions): (&Cache, &Regions),
+        (cache, regions): (&Cache, &Regions<'_>),
         (measure, root): (Measure<'_>, NodeId),
     ) -> GeomResult<Built> {
         let id = key.id;
@@ -1041,7 +1072,7 @@ impl<B: MeshBoolean> ReferenceMeshCompiler<B> {
         operator: axiolid_core::BooleanOperator,
         options: &ExecutionOptions,
         budget: Budget,
-        (cache, regions, root): (&Cache, &Regions, NodeId),
+        (cache, regions, root): (&Cache, &Regions<'_>, NodeId),
     ) -> GeomResult<(Built, Decided)> {
         // A region is the tool of a clip, or the left operand of an
         // intersection with a solid, whose operands are then read the other
@@ -1291,7 +1322,7 @@ impl<B: MeshBoolean> ReferenceMeshCompiler<B> {
         operator: axiolid_core::BooleanOperator,
         options: &ExecutionOptions,
         budget: Budget,
-        (cache, regions): (&Cache, &Regions),
+        (cache, regions): (&Cache, &Regions<'_>),
     ) -> GeomResult<Option<Built>> {
         if clip_of(graph, regions, (left, right), operator)?.is_some() {
             return Ok(None);
@@ -1388,7 +1419,7 @@ impl<B: MeshBoolean> ReferenceMeshCompiler<B> {
         operator: axiolid_core::BooleanOperator,
         options: &ExecutionOptions,
         budget: Budget,
-        (cache, regions): (&Cache, &Regions),
+        (cache, regions): (&Cache, &Regions<'_>),
     ) -> GeomResult<Option<Built>> {
         let Some(clip) = clip_of(graph, regions, (left, right), operator)? else {
             return Ok(None);
@@ -2018,7 +2049,7 @@ fn refused_by_referee(error: GeomError, reason: Option<String>) -> GeomError {
 /// tool, in a union or an instance, ends its chain.
 fn clip_chain_continues(
     graph: &GeometryGraph,
-    regions: &Regions,
+    regions: &Regions<'_>,
     id: NodeId,
     root: NodeId,
 ) -> bool {
@@ -2266,33 +2297,22 @@ struct Clip {
     leaves: Vec<(ClipTool, Transform3)>,
 }
 
-/// Which nodes are regions (#326), read once per evaluation: a half-space,
-/// an instance of a region, or an intersection of regions. The graph lists
-/// operands before the nodes that read them, so one pass decides every node,
-/// and a long chain of intersections is not walked again at each link.
-struct Regions(std::collections::HashMap<NodeId, bool>);
+/// Which nodes of `graph` are regions (#326): a half-space, an instance of a
+/// region, or an intersection of regions, decided on demand and remembered
+/// in the compilation's cache ([`crate::regions`]).
+struct Regions<'a> {
+    graph: &'a GeometryGraph,
+    memo: &'a crate::regions::RegionMemo,
+}
 
-impl Regions {
-    fn of(graph: &GeometryGraph) -> Self {
-        let mut known = std::collections::HashMap::with_capacity(graph.len());
-        for (id, node) in graph.iter() {
-            let is = |operand: &NodeId| known.get(operand).copied().unwrap_or(false);
-            let region = match node {
-                GeometryNode::Instance(instance) => is(&instance.source),
-                GeometryNode::SolidOperation(SolidOperation::Boolean {
-                    left,
-                    right,
-                    operator: axiolid_core::BooleanOperator::Intersection,
-                }) => is(left) && is(right),
-                _ => clip_tool(graph, id).is_some(),
-            };
-            known.insert(id, region);
-        }
-        Self(known)
+impl<'a> Regions<'a> {
+    fn new(graph: &'a GeometryGraph, memo: &'a crate::regions::RegionMemo) -> Self {
+        Self { graph, memo }
     }
 
     fn has(&self, id: NodeId) -> bool {
-        self.0.get(&id).copied().unwrap_or(false)
+        self.memo
+            .has(self.graph, id, |leaf| clip_tool(self.graph, leaf).is_some())
     }
 }
 
@@ -2303,7 +2323,7 @@ impl Regions {
 /// solid on its right.
 fn clip_of(
     graph: &GeometryGraph,
-    regions: &Regions,
+    regions: &Regions<'_>,
     (left, right): (NodeId, NodeId),
     operator: axiolid_core::BooleanOperator,
 ) -> GeomResult<Option<Clip>> {
@@ -2383,7 +2403,7 @@ enum ClipTool {
 }
 
 /// The half-space `id` is, bounded or not; `None` when it is none. The
-/// instances above one are the region's to read ([`collect_leaves`]).
+/// instances above one are the region's to read ([`region`]).
 fn clip_tool(graph: &GeometryGraph, id: NodeId) -> Option<ClipTool> {
     match graph.get(id)? {
         GeometryNode::HalfSpace(half_space) => Some(ClipTool::Unbounded(*half_space)),

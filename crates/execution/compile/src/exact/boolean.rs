@@ -62,7 +62,7 @@
 //! unchanged; the public compiler still refuses a mesh operand by name.
 
 use axiolid_brep::ExactBRep;
-use axiolid_brep_boolean::{boolean_with_report, BooleanError};
+use axiolid_brep_boolean::{boolean_with_report, BooleanError, BooleanReport};
 use axiolid_construct::boolean_exact::{boolean_prisms_exact, Prism};
 use axiolid_contracts::{GeomError, GeomResult};
 use axiolid_core::{BooleanOperator, Point2, Tolerance, Vec3};
@@ -198,9 +198,23 @@ impl ExactCompilation<'_> {
 /// result is refused as `Degenerate`, as it was before empty bodies.
 pub(super) fn emptiness_is_exact(a: &ExactBRep, b: &ExactBRep, operator: BooleanOperator) -> bool {
     matches!(
-        boolean_with_report(a, b, operator, Tolerance::ZERO),
+        at_zero_tolerance(a, b, operator),
         Err(BooleanError::EmptyResult)
     )
+}
+
+/// The general boolean of `a` and `b` at zero tolerance: it reads nothing
+/// within a tolerance, so its result is the exact boolean of the operands as
+/// given. For the stand-ins of a half-space (`super::clip`), whose margin
+/// faces stay a margin from the subject, an emptiness read within the
+/// caller's tolerance may be a margin touch and not a cavity, and this
+/// result is the one to take.
+pub(super) fn at_zero_tolerance(
+    a: &ExactBRep,
+    b: &ExactBRep,
+    operator: BooleanOperator,
+) -> Result<(ExactBRep, BooleanReport), BooleanError> {
+    boolean_with_report(a, b, operator, Tolerance::ZERO)
 }
 
 /// A union, intersection or difference that leaves nothing: only the

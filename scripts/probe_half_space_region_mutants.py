@@ -26,6 +26,7 @@ EXACT = "crates/execution/compile/src/exact.rs"
 COMPILER = "crates/execution/compile/src/compiler.rs"
 EMPTY = "crates/execution/compile/src/empty.rs"
 DEVIATION = "crates/execution/compile/src/deviation/boolean.rs"
+REGIONS = "crates/execution/compile/src/regions.rs"
 
 TESTS = [
     ["-p", "axiolid-mesh-compile", "--test", "half_space_region"],
@@ -35,38 +36,31 @@ TESTS = [
 TURNED = [["-p", "axiolid-mesh-compile", "--test", "turned_clip"]]
 DEEP = [["-p", "axiolid-mesh-compile", "--test", "compiler", "a_deep_region"]]
 
-# A walk of a nest of intersections written recursively, as a helper the
-# arm calls: a nest 100000 deep aborts the process on the test's stack.
-MESH_WALK = (
-    "                }) => {\n"
-    "                    fn walk(graph: &GeometryGraph, id: NodeId) -> bool {\n"
+REGIONS_LIB = [["-p", "axiolid-mesh-compile", "--lib", "regions"]]
+
+# The memo's walk of a nest of intersections written recursively: a nest
+# 100000 deep aborts the process on the test's stack, and no node is
+# remembered, so a chain is quadratic.
+WALK = (
+    "                })) => {\n"
+    "                    fn walk(\n"
+    "                        graph: &GeometryGraph,\n"
+    "                        id: NodeId,\n"
+    "                        leaf: &dyn Fn(NodeId) -> bool,\n"
+    "                    ) -> bool {\n"
     "                        match graph.get(id) {\n"
     "                            Some(GeometryNode::SolidOperation(SolidOperation::Boolean {\n"
     "                                left,\n"
     "                                right,\n"
-    "                                operator: axiolid_core::BooleanOperator::Intersection,\n"
-    "                            })) => walk(graph, *left) && walk(graph, *right),\n"
-    "                            Some(GeometryNode::Instance(i)) => walk(graph, i.source),\n"
-    "                            _ => clip_tool(graph, id).is_some(),\n"
-    "                        }\n"
-    "                    }\n"
-    "                    walk(graph, id)\n"
-    "                }\n"
-)
-EXACT_WALK = (
-    "                }) => {\n"
-    "                    fn walk(c: &ExactCompilation<'_>, id: NodeId) -> bool {\n"
-    "                        match c.graph.get(id) {\n"
-    "                            Some(GeometryNode::SolidOperation(SolidOperation::Boolean {\n"
-    "                                left,\n"
-    "                                right,\n"
     "                                operator: BooleanOperator::Intersection,\n"
-    "                            })) => walk(c, *left) && walk(c, *right),\n"
-    "                            Some(GeometryNode::Instance(i)) => walk(c, i.source),\n"
-    "                            _ => !matches!(c.clip_tool(id), Ok(None)),\n"
+    "                            })) => walk(graph, *left, leaf) && walk(graph, *right, leaf),\n"
+    "                            Some(GeometryNode::Instance(i)) => walk(graph, i.source, leaf),\n"
+    "                            Some(_) => leaf(id),\n"
+    "                            None => false,\n"
     "                        }\n"
     "                    }\n"
-    "                    walk(self, id)\n"
+    "                    let _ = (left, right);\n"
+    "                    Ok(walk(graph, top, &leaf))\n"
     "                }\n"
 )
 
@@ -93,17 +87,21 @@ MUTANTS = [
      "                Cover::Holds => return Ok(Cover::Misses),"),
     ("E5 stand-ins with nothing in common hold", CLIP,
      "                                Err(BooleanError::EmptyResult) => {\n"
-     "                                    return if emptiness_is_exact(\n"
+     "                                    match at_zero_tolerance(\n"
      "                                        &stand_in,\n"
      "                                        &side,\n"
      "                                        BooleanOperator::Intersection,\n"
      "                                    ) {\n"
-     "                                        Ok(Cover::Misses)\n"
-     "                                    } else {\n"
-     "                                        Err(GeomError::Degenerate(CLIP_EMPTIED.to_owned()))\n"
-     "                                    };\n"
-     "                                }\n",
-     "                                Err(BooleanError::EmptyResult) => (stand_in, BooleanReport::default()),\n"),
+     "                                        Ok(done) => done,\n"
+     "                                        Err(BooleanError::EmptyResult) => return Ok(Cover::Misses),",
+     "                                Err(BooleanError::EmptyResult) => {\n"
+     "                                    match at_zero_tolerance(\n"
+     "                                        &stand_in,\n"
+     "                                        &side,\n"
+     "                                        BooleanOperator::Intersection,\n"
+     "                                    ) {\n"
+     "                                        Ok(done) => done,\n"
+     "                                        Err(BooleanError::EmptyResult) => (stand_in, BooleanReport::default()),"),
     ("E6 the exact swap is not a clip", CLIP,
      "            (true, false) if operator == BooleanOperator::Intersection => (right, left),",
      "            (true, false) if false && operator == BooleanOperator::Intersection => (right, left),"),
@@ -180,22 +178,46 @@ MUTANTS = [
      "                None\n"
      "            };",
      TURNED),
-    ("F1 the mesh reads a nest of intersections recursively", COMPILER,
-     "                }) => is(left) && is(right),\n",
-     MESH_WALK, DEEP),
-    ("F1e the exact compiler reads a nest of intersections recursively", CLIP,
-     "                }) => is(left) && is(right),\n",
-     EXACT_WALK.replace("    ", "", 0), DEEP),
+    ("F1 the memo reads a nest of intersections recursively", REGIONS,
+     "                })) => match (known.get(left), known.get(right)) {\n"
+     "                    (Some(false), _) | (_, Some(false)) => Ok(false),\n"
+     "                    (Some(true), Some(true)) => Ok(true),\n"
+     "                    (None, _) => Err(*left),\n"
+     "                    (_, None) => Err(*right),\n"
+     "                },\n",
+     WALK, DEEP + REGIONS_LIB),
+    ("F5e the exact region is read recursively", CLIP,
+     "                        work.push((*right, placement));\n"
+     "                        work.push((*left, placement));\n"
+     "                        break;",
+     "                        leaves.extend(self.region(*left)?.leaves);\n"
+     "                        leaves.extend(self.region(*right)?.leaves);\n"
+     "                        break;", DEEP),
+    ("F5m the mesh region is read recursively", COMPILER,
+     "                    work.push((*right, outer));\n"
+     "                    work.push((*left, outer));\n"
+     "                    break;",
+     "                    leaves.extend(region(graph, *left)?);\n"
+     "                    leaves.extend(region(graph, *right)?);\n"
+     "                    break;", DEEP),
     ("F2a a boolean emptied within the tolerance is an identity", BOOLEAN,
      "return if emptiness_is_exact(&subject, &tool, operator) {",
      "return if true {"),
-    ("F2b stand-ins meeting within the tolerance share nothing", CLIP,
-     "                                    return if emptiness_is_exact(\n"
-     "                                        &stand_in,\n"
-     "                                        &side,\n"
-     "                                        BooleanOperator::Intersection,\n"
-     "                                    ) {",
-     "                                    return if true {"),
+    ("F2b stand-ins meeting at the margin within the tolerance are refused", CLIP,
+     "                                        Ok(done) => done,\n"
+     "                                        Err(BooleanError::EmptyResult) => return Ok(Cover::Misses),",
+     "                                        Ok(_) => return Err(unsupported(STAND_IN_WITHIN_TOLERANCE)),\n"
+     "                                        Err(BooleanError::EmptyResult) => return Ok(Cover::Misses),"),
+    ("F2d the prism along z meeting the plane's side at the margin is refused", CLIP,
+     "                        Ok(done) => done,\n"
+     "                        Err(BooleanError::EmptyResult) => return Ok(Cover::Misses),",
+     "                        Ok(_) => return Err(unsupported(STAND_IN_WITHIN_TOLERANCE)),\n"
+     "                        Err(BooleanError::EmptyResult) => return Ok(Cover::Misses),"),
+    ("F4 a region is forgotten as soon as it is decided", REGIONS,
+     "        let mut known = self.known.borrow_mut();\n",
+     "        let mut known = self.known.borrow_mut();\n"
+     "        known.clear();\n",
+     REGIONS_LIB),
     ("F2c a clip emptied within the tolerance is an identity", CLIP,
      "return if emptiness_is_exact(&subject, &solid, operator) {",
      "return if true {"),

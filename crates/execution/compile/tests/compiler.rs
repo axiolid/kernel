@@ -369,6 +369,7 @@ fn a_deep_instance_chain_does_not_overflow_the_stack() {
 /// hold it (#326).
 fn block_and_deep_region(
     n: usize,
+    right_nested: bool,
 ) -> (
     GeometryGraphBuilder,
     axiolid_model::NodeId,
@@ -384,7 +385,9 @@ fn block_and_deep_region(
         }))
         .unwrap();
     let mut region = None;
-    for k in 0..n {
+    for step in 0..n {
+        // Nested to the right, the last half-space is made first.
+        let k = if right_nested { n - 1 - step } else { step };
         let side = b
             .push(GeometryNode::HalfSpace(HalfSpace {
                 boundary: Plane3 {
@@ -396,13 +399,19 @@ fn block_and_deep_region(
             .unwrap();
         region = Some(match region {
             None => side,
-            Some(so_far) => b
-                .push(GeometryNode::SolidOperation(SolidOperation::Boolean {
-                    left: so_far,
-                    right: side,
+            Some(so_far) => {
+                let (left, right) = if right_nested {
+                    (side, so_far)
+                } else {
+                    (so_far, side)
+                };
+                b.push(GeometryNode::SolidOperation(SolidOperation::Boolean {
+                    left,
+                    right,
                     operator: BooleanOperator::Intersection,
                 }))
-                .unwrap(),
+                .unwrap()
+            }
         });
     }
     (b, block, region.unwrap())
@@ -415,7 +424,7 @@ fn block_and_deep_region(
 fn a_deep_region_does_not_overflow_the_stack() {
     let n = 100_000;
     // A union with it is refused by name, in both compilers.
-    let (mut b, block, region) = block_and_deep_region(n);
+    let (mut b, block, region) = block_and_deep_region(n, false);
     let union = b
         .push(GeometryNode::SolidOperation(SolidOperation::Boolean {
             left: block,
@@ -441,7 +450,7 @@ fn a_deep_region_does_not_overflow_the_stack() {
 
     // As the left operand of an intersection it clips the block: every
     // half-space holds it, and the result is the block.
-    let (mut b, block, region) = block_and_deep_region(20_000);
+    let (mut b, block, region) = block_and_deep_region(20_000, false);
     let clip = b
         .push(GeometryNode::SolidOperation(SolidOperation::Boolean {
             left: region,
@@ -747,4 +756,29 @@ fn boolean_intersection_materializes_unbounded_half_space_from_subject_bounds() 
     let max_z = mesh.positions.iter().map(|p| p.z).fold(f64::MIN, f64::max);
     assert!(min_z >= 1.0 - 1e-9, "wrong half-space side: min z {min_z}");
     assert!(max_z <= 2.0 + 1e-9, "escaped subject bounds: max z {max_z}");
+}
+
+/// The exact compiler reads a region of 100000 half-spaces nested to either
+/// side without recursion either (#326): every half-space holds the block,
+/// so no leaf costs a boolean, and the clip is the block.
+#[test]
+fn a_deep_region_clips_exactly_without_overflowing_the_stack() {
+    for right_nested in [false, true] {
+        let (mut b, block, region) = block_and_deep_region(100_000, right_nested);
+        let clip = b
+            .push(GeometryNode::SolidOperation(SolidOperation::Boolean {
+                left: region,
+                right: block,
+                operator: BooleanOperator::Intersection,
+            }))
+            .unwrap();
+        let graph = b.finish(vec![clip]).unwrap();
+        let solid = axiolid_mesh_compile::ReferenceExactCompiler::new()
+            .compile_exact(&graph, clip, &options())
+            .unwrap_or_else(|error| panic!("right nested {right_nested}: {error:?}"));
+        let volume = axiolid_measure::exact_properties(&solid, Tolerance::METRE)
+            .expect("measurable")
+            .signed_volume;
+        assert!((volume - 1.0).abs() < 1e-9, "right nested {right_nested}");
+    }
 }

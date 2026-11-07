@@ -127,12 +127,16 @@
 //! subject is an empty body (#326), which the booleans above it absorb
 //! (`crate::empty`); as the root it is `GeomError::Degenerate`. A clip
 //! that leaves nothing only within the tolerance is refused as
-//! `Degenerate` too ([`super::boolean::emptiness_is_exact`]), as are the
-//! stand-ins of two leaves that meet in nothing only within it. The model's
+//! `Degenerate` too ([`super::boolean::emptiness_is_exact`]). The stand-ins
+//! are another matter: constructed solids whose margin faces stay a margin
+//! from the subject, so two of them (or the prism along `z` and the plane's
+//! side) meeting in nothing only within the tolerance may be a touch at the
+//! margin, and no cavity. There the result of the same boolean at zero
+//! tolerance ([`super::boolean::at_zero_tolerance`]), which reads nothing,
+//! is taken, empty or not, and it is refused by name only if that is no
+//! boolean. The model's
 //! half-space carries a plane, so a curved base surface cannot reach this
 //! path.
-
-use std::collections::HashMap;
 
 use axiolid_brep::{ExactBRep, TransformError};
 use axiolid_brep_boolean::{boolean_with_report, BooleanError, BooleanReport};
@@ -147,7 +151,7 @@ use axiolid_model::{GeometryNode, NodeId, SolidOperation};
 use axiolid_primitive::HalfSpace;
 use axiolid_profile::{Contour, ContourProfile, Profile, ProfileSegment, RectangleProfile};
 
-use super::boolean::{emptiness_is_exact, remap_boolean_error};
+use super::boolean::{at_zero_tolerance, emptiness_is_exact, remap_boolean_error};
 use super::{remap_construction_error, unsupported, Body, ExactCompilation};
 use crate::half_space_boundary::PrismAxis;
 
@@ -201,6 +205,11 @@ enum Cover {
     /// boolean.
     Cuts(Box<ExactBRep>, Option<BooleanReport>),
 }
+
+/// Why the stand-in of a half-space is refused where it meets the subject's
+/// only within the tolerance and the exact result is no boolean.
+const STAND_IN_WITHIN_TOLERANCE: &str =
+    "exact half-space whose stand-in meets the subject's or another's only within the tolerance";
 
 /// Why a clip leaves nothing.
 const CLIP_EMPTIED: &str = "exact half-space clip leaves nothing of the subject";
@@ -298,33 +307,14 @@ impl ExactCompilation<'_> {
         ))
     }
 
-    /// Which nodes are regions (#326): a half-space, an instance of a
-    /// region, or an intersection of regions. The graph lists operands
-    /// before the nodes that read them, so one pass decides every node, and
-    /// a long chain of intersections is not walked again at each link. A
-    /// node whose half-space cannot be read counts as one, so that the walk
-    /// of [`Self::region`] reports why.
-    pub(super) fn region_map(&self) -> HashMap<NodeId, bool> {
-        let mut known = HashMap::with_capacity(self.graph.len());
-        for (id, node) in self.graph.iter() {
-            let is = |operand: &NodeId| known.get(operand).copied().unwrap_or(false);
-            let region = match node {
-                GeometryNode::Instance(instance) => is(&instance.source),
-                GeometryNode::SolidOperation(SolidOperation::Boolean {
-                    left,
-                    right,
-                    operator: BooleanOperator::Intersection,
-                }) => is(left) && is(right),
-                _ => !matches!(self.clip_tool(id), Ok(None)),
-            };
-            known.insert(id, region);
-        }
-        known
-    }
-
-    /// Whether `id` is a region.
+    /// Whether `id` is a region (#326): a half-space, an instance of a
+    /// region, or an intersection of regions, decided on demand and
+    /// remembered ([`crate::regions`]). A node whose half-space cannot be
+    /// read counts as one, so that [`Self::region`] reports why.
     pub(super) fn is_region(&self, id: NodeId) -> bool {
-        self.regions.get(&id).copied().unwrap_or(false)
+        self.regions.has(self.graph, id, |leaf| {
+            !matches!(self.clip_tool(leaf), Ok(None))
+        })
     }
 
     /// The leaves of the region `id`, through its instances, each placed by
@@ -472,18 +462,23 @@ impl ExactCompilation<'_> {
                                 tolerance,
                             ) {
                                 Ok(done) => done,
-                                // The two stand-ins share nothing, exactly: a
-                                // reading within the tolerance is no emptiness.
+                                // Nothing in common within the tolerance. The
+                                // stand-ins are constructed, their margin faces
+                                // a margin from the subject, so a touch there
+                                // is no cavity: the result at zero tolerance,
+                                // which reads nothing, is the one to take.
                                 Err(BooleanError::EmptyResult) => {
-                                    return if emptiness_is_exact(
+                                    match at_zero_tolerance(
                                         &stand_in,
                                         &side,
                                         BooleanOperator::Intersection,
                                     ) {
-                                        Ok(Cover::Misses)
-                                    } else {
-                                        Err(GeomError::Degenerate(CLIP_EMPTIED.to_owned()))
-                                    };
+                                        Ok(done) => done,
+                                        Err(BooleanError::EmptyResult) => return Ok(Cover::Misses),
+                                        Err(_) => {
+                                            return Err(unsupported(STAND_IN_WITHIN_TOLERANCE))
+                                        }
+                                    }
                                 }
                                 Err(error) => return Err(remap_boolean_error(error)),
                             };
@@ -801,13 +796,15 @@ impl ExactCompilation<'_> {
             match boolean_with_report(&long, &side, BooleanOperator::Intersection, tolerance) {
                 Ok(tool) => tool,
                 // The prism misses the plane's side over the envelope, or
-                // only within the tolerance, which decides nothing (#326).
+                // only within the tolerance, which for these constructed
+                // stand-ins is a margin touch and no cavity: the result at
+                // zero tolerance is the one to take (#326).
                 Err(BooleanError::EmptyResult) => {
-                    return if emptiness_is_exact(&long, &side, BooleanOperator::Intersection) {
-                        Ok(Cover::Misses)
-                    } else {
-                        Err(GeomError::Degenerate(CLIP_EMPTIED.to_owned()))
-                    };
+                    match at_zero_tolerance(&long, &side, BooleanOperator::Intersection) {
+                        Ok(done) => done,
+                        Err(BooleanError::EmptyResult) => return Ok(Cover::Misses),
+                        Err(_) => return Err(unsupported(STAND_IN_WITHIN_TOLERANCE)),
+                    }
                 }
                 Err(error) => return Err(remap_boolean_error(error)),
             };

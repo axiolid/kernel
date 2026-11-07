@@ -166,9 +166,12 @@ MUTANTS = [
      "                if let Some(clip) = clip_of(graph, regions, (*left, *right), *operator)?\n"
      "                    .filter(|clip| clip.leaves.iter().all(|(leaf, _)| matches!(leaf, ClipTool::Unbounded(_))))\n"
      "                {", [DEPTH]),
-    ("a tool through an instance is not routed", M,
-     "                GeometryNode::Instance(instance) => is(&instance.source),",
-     "                GeometryNode::Instance(_) => false,", [DEPTH]),
+    ("a tool through an instance is not routed",
+     "crates/execution/compile/src/regions.rs",
+     "                Some(GeometryNode::Instance(instance)) => match known.get(&instance.source) {",
+     "                Some(GeometryNode::Instance(_)) => Ok(false),\n"
+     "                Some(GeometryNode::Instance(instance)) => match known.get(&instance.source) {",
+     [DEPTH]),
     ("the slab is left in the tool's own frame", M,
      "            channels::transform(&Built::leaf(local), placement, 0.0).mesh",
      "            local", [DEPTH]),

@@ -245,13 +245,13 @@ struct ExactCompilation<'a> {
     /// Per compiled node with a warped mesh beneath it: the largest slab
     /// width a flattened operand was moved by (#266). Absent means none.
     flattened: HashMap<NodeId, Scalar>,
-    /// Which nodes are regions (#326), read once.
-    regions: HashMap<NodeId, bool>,
+    /// Which nodes are regions (#326), decided on demand.
+    regions: crate::regions::RegionMemo,
 }
 
 impl<'a> ExactCompilation<'a> {
     fn new(graph: &'a GeometryGraph, options: &'a ExecutionOptions) -> Self {
-        let mut compilation = Self {
+        Self {
             graph,
             options,
             cache: HashMap::new(),
@@ -262,10 +262,8 @@ impl<'a> ExactCompilation<'a> {
             boolean_report: None,
             flatten: false,
             flattened: HashMap::new(),
-            regions: HashMap::new(),
-        };
-        compilation.regions = compilation.region_map();
-        compilation
+            regions: crate::regions::RegionMemo::default(),
+        }
     }
 
     /// The largest slab width of the meshes flattened beneath a node.

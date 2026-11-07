@@ -16,6 +16,7 @@ mod pinch;
 mod planar;
 mod polyline;
 mod referee;
+mod regions;
 mod ruled;
 mod skin;
 mod snap;
