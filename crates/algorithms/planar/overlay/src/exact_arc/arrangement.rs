@@ -225,6 +225,42 @@ impl Winder {
     }
 }
 
+#[cfg(test)]
+thread_local! {
+    /// Edges tested as carriers, summed over pieces, for the test below.
+    static CANDIDATES: std::cell::Cell<usize> = const { std::cell::Cell::new(0) };
+}
+
+/// For each edge in `shared`, the stops of `edge` where the stretch it
+/// shares begins and ends: `(edge, first stop, last stop)`, covering the
+/// pieces `first..last`. The ends of a shared stretch are among the points
+/// the two edges have in common, which are stops of both. A pair whose
+/// points cannot be placed on the stops covers every piece.
+fn spans_of(
+    edge: &Edge,
+    stops: &[(XPoint, Option<usize>, std::ops::Range<usize>)],
+    shared: &[(usize, Vec<XPoint>)],
+) -> Vec<(usize, usize, usize)> {
+    let stop_of = |x: &XPoint| {
+        let at = stops.partition_point(|s| edge.order(&s.0, x) == Sign::Negative);
+        (at < stops.len() && same_point(&stops[at].0, x)).then_some(at)
+    };
+    shared
+        .iter()
+        .map(|(near, xs)| {
+            let placed: Option<Vec<usize>> = xs.iter().map(stop_of).collect();
+            match placed {
+                Some(at) if !at.is_empty() => (
+                    *near,
+                    *at.iter().min().unwrap_or(&0),
+                    *at.iter().max().unwrap_or(&0),
+                ),
+                _ => (*near, 0, stops.len() - 1),
+            }
+        })
+        .collect()
+}
+
 /// Subdivide the plane by `rings`, each simple and counter-clockwise.
 ///
 /// # Errors
@@ -303,7 +339,7 @@ pub(crate) fn build_charged(rings: &[ArcRing], charge: &mut Charge) -> Result<Ra
     // For each edge, the edges of other rings it has two or more points in
     // common with (#315): the only ones besides itself that can carry a
     // piece of it (see the carrier search below).
-    let mut shared: Vec<Vec<usize>> = vec![Vec::new(); flat.len()];
+    let mut shared: Vec<Vec<(usize, Vec<XPoint>)>> = vec![Vec::new(); flat.len()];
     // Segments given more than once, in rings of their own (#315): a soup
     // overlaid with itself, or a face and its twin below it, repeats
     // whole rings. Each segment is named by the first edge with its two
@@ -405,8 +441,8 @@ pub(crate) fn build_charged(rings: &[ArcRing], charge: &mut Charge) -> Result<Ra
                     overlapped[index] = true;
                     overlapped[near] = true;
                 }
-                shared[index].push(near);
-                shared[near].push(index);
+                shared[index].push((near, xs.clone()));
+                shared[near].push((index, xs.clone()));
             }
             // A point at an end of either segment is met again: the end
             // is a stop already, or a vertex the next edge of its ring
@@ -497,11 +533,37 @@ pub(crate) fn build_charged(rings: &[ArcRing], charge: &mut Charge) -> Result<Ra
         // holds the sample finds, in the same order.
         candidates.clear();
         candidates.push(index);
-        candidates.extend_from_slice(&shared[index]);
+        candidates.extend(shared[index].iter().map(|(near, _)| *near));
         candidates.sort_unstable();
+        // The stretch of each shared edge, as the stops it spans, so a
+        // piece is tested against the edges covering it only, not against
+        // every edge shared with some other piece of a long one: the
+        // sweep below keeps them in `active` (#448).
+        let spans = spans_of(edge, &stops, &shared[index]);
+        let mut by_start: Vec<usize> = (0..spans.len()).collect();
+        by_start.sort_unstable_by_key(|&k| spans[k].1);
+        let mut by_end: Vec<usize> = (0..spans.len()).collect();
+        by_end.sort_unstable_by_key(|&k| spans[k].2);
+        let (mut next_start, mut next_end) = (0, 0);
+        let mut active: std::collections::BTreeSet<usize> = std::collections::BTreeSet::new();
+        let mut piece_candidates: Vec<usize> = Vec::new();
         // The rings containing the previous piece, and its carriers.
         let mut before: Option<(Vec<usize>, Vec<usize>)> = None;
-        for w in stops.windows(2) {
+        for (at, w) in stops.windows(2).enumerate() {
+            while next_start < by_start.len() && spans[by_start[next_start]].1 <= at {
+                active.insert(spans[by_start[next_start]].0);
+                next_start += 1;
+            }
+            while next_end < by_end.len() && spans[by_end[next_end]].2 <= at {
+                active.remove(&spans[by_end[next_end]].0);
+                next_end += 1;
+            }
+            piece_candidates.clear();
+            piece_candidates.push(index);
+            piece_candidates.extend(active.iter().copied());
+            piece_candidates.sort_unstable();
+            #[cfg(test)]
+            CANDIDATES.with(|c| c.set(c.get() + piece_candidates.len()));
             let piece = Piece {
                 sample: sample(edge, &w[0].0, &w[1].0)?,
                 from: w[0].0.clone(),
@@ -531,7 +593,7 @@ pub(crate) fn build_charged(rings: &[ArcRing], charge: &mut Charge) -> Result<Ra
                     edge_tree.query_into(|b| b.may_hold(sx, sy), &mut hits, &mut stack);
                     &hits
                 } else {
-                    &candidates
+                    &piece_candidates
                 };
                 for &index in search {
                     let (other, their) = flat[index];
@@ -544,6 +606,10 @@ pub(crate) fn build_charged(rings: &[ArcRing], charge: &mut Charge) -> Result<Ra
                         debug_assert!(
                             candidates.binary_search(&index).is_ok(),
                             "a carrier has two points in common with the edge"
+                        );
+                        debug_assert!(
+                            piece_candidates.binary_search(&index).is_ok(),
+                            "a carrier's shared stretch covers the piece"
                         );
                         // Splitting is mutual, so a boundary shared by two
                         // rings yields identical pieces; the first ring
@@ -737,4 +803,35 @@ pub(crate) fn build_charged(rings: &[ArcRing], charge: &mut Charge) -> Result<Ra
         vertices,
         edges: out,
     })
+}
+
+#[cfg(test)]
+mod tests {
+    use axiolid_core::Point2;
+
+    use super::*;
+
+    fn rect(x0: f64, y0: f64, x1: f64, y1: f64) -> ArcRing {
+        ArcRing::from_points(&[
+            Point2::new(x0, y0),
+            Point2::new(x1, y0),
+            Point2::new(x1, y1),
+            Point2::new(x0, y1),
+        ])
+    }
+
+    /// Rooms standing on a corridor's long edge: a piece of the corridor's
+    /// edge is tested against the room above it, not against every room
+    /// (#448). Searching every shared edge per piece tests about `k * k`.
+    #[test]
+    fn a_long_shared_edge_is_searched_by_the_edges_covering_each_piece() {
+        let k = 300;
+        let mut rings = vec![rect(0.0, 0.0, k as f64, 1.0)];
+        rings.extend((0..k).map(|i| rect(i as f64, 1.0, i as f64 + 1.0, 5.0)));
+        CANDIDATES.with(|c| c.set(0));
+        let raw = build(&rings).expect("an arrangement");
+        let tested = CANDIDATES.with(std::cell::Cell::get);
+        assert!(!raw.edges.is_empty());
+        assert!(tested < 20 * k, "{tested} candidate tests for {k} rooms");
+    }
 }

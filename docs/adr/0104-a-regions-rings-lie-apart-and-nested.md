@@ -38,7 +38,7 @@ decided exactly on one arrangement of all its rings (`src/nesting.rs`).**
   outside its outer ring, a crossing included), `HolesOverlap` (crossing,
   nested or repeated holes of one polygon), `PolygonsOverlap` (a point in two
   polygons). Rings may touch at points, and along a stretch two rings run
-  with their insides on opposite sides; both occur in settled outputs and
+  with the polygons' insides on opposite sides; both occur in settled outputs and
   every operation reads them as the point set they bound. A ring whose
   vertices all lie on one line encloses nothing and is left out (#219).
   Contacts that cut a polygon's inside apart are not refused.
@@ -92,9 +92,17 @@ decided exactly on one arrangement of all its rings (`src/nesting.rs`).**
   a floor of 100,000 corners with 200 holes
   takes 0.34 s instead of 0.083 s, one of 10,000 corners 0.032 s instead of
   0.007 s (`benches/ring_validation.rs`, case `holes`, median of 3).
-  A region of one ring costs what it did.
+  Rooms standing on one corridor edge cost 0.05 s for 1,000 and 0.22 s for
+  4,000; a rectangle with holes standing on its bottom edge 0.05 s and
+  0.23 s (cases `corridor` and `bays`). The first build of this check
+  searched every edge sharing a stretch with a piece's edge, the square of
+  the number standing on one edge (4,000 rooms 35 s, 4,000 holes 87 s); the
+  arrangement now sweeps each edge's pieces against the edges covering
+  them. A region of one ring costs what it did.
 - Inputs accepted before are refused: overlapping polygons given as one
-  region (axioval's crowded-sliver test fixtures) must be united first.
+  region (axioval's crowded-sliver test fixtures) must be united first, and
+  so must adjacent polygons computed in floating point (rounded room
+  footprints), which are now refused as `PolygonsOverlap`.
 - An input of polygons with holes that cross each other many times is cut
   in full before it is refused.
 

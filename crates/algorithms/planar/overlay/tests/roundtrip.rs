@@ -244,7 +244,8 @@ fn unions_of_subdivided_cells_are_operands_again() {
         let soup = Region::new(axiolid_overlay::union_soup(&rings, t()).unwrap(), t()).unwrap();
         round_trips("union_soup", &soup);
         let half = cells.len() / 2;
-        // Cells share edges, so a half is an overlay operand, not a region (#448).
+        // The cells' rounded T-junction midpoints make neighbours overlap by an
+        // ulp, so a half is an overlay operand, not a region (#448).
         let operand = |cells: &[Polygon]| axiolid_overlay::OverlayInput {
             frame: axiolid_core::Frame2 {
                 origin: Point2::new(0.0, 0.0),

@@ -14,6 +14,12 @@
 //!   five times in a row on each result, as a disc search subtracts one
 //!   obstacle after another. Validated regions are not validated again.
 //!
+//! - `corridor`, `bays`: `Region::new` of `k` rectangles standing on one long
+//!   edge, as rooms stand on a corridor (`k` polygons share the corridor's
+//!   top edge), and of one rectangle with `k` holes standing on its bottom
+//!   edge (#448). Both share one long edge with `k` others.
+//!   `RING_VALIDATION_SHARED` sets the `k` (default 1000,4000).
+//!
 //! Before #341 a ring's validation compared every pair of its edges: at
 //! 50,000 corners about 4 s per validation, at 100,000 about 16 s.
 //!
@@ -86,6 +92,45 @@ fn input(polygons: Vec<Polygon>) -> OverlayInput {
         },
         polygons,
     }
+}
+
+/// A corridor of `k` by 1 with `k` rooms standing on its top edge.
+fn corridor(k: usize) -> Vec<Polygon> {
+    let rect = |x0: f64, y0: f64, x1: f64, y1: f64| {
+        polygon(vec![
+            Point2::new(x0, y0),
+            Point2::new(x1, y0),
+            Point2::new(x1, y1),
+            Point2::new(x0, y1),
+        ])
+    };
+    let mut polygons = vec![rect(0.0, 0.0, k as f64, 1.0)];
+    polygons.extend((0..k).map(|i| rect(i as f64, 1.0, i as f64 + 1.0, 5.0)));
+    polygons
+}
+
+/// A rectangle of `k` by 2 with `k` holes standing on its bottom edge.
+fn bays(k: usize) -> Vec<Polygon> {
+    let mut outer = polygon(vec![
+        Point2::new(0.0, 0.0),
+        Point2::new(k as f64, 0.0),
+        Point2::new(k as f64, 2.0),
+        Point2::new(0.0, 2.0),
+    ]);
+    outer.holes = (0..k)
+        .map(|i| {
+            let x = i as f64;
+            Ring {
+                points: vec![
+                    Point2::new(x + 0.25, 0.0),
+                    Point2::new(x + 0.25, 0.5),
+                    Point2::new(x + 0.75, 0.5),
+                    Point2::new(x + 0.75, 0.0),
+                ],
+            }
+        })
+        .collect();
+    vec![outer]
 }
 
 fn median(runs: usize, mut run: impl FnMut()) -> f64 {
@@ -204,5 +249,25 @@ fn main() {
             chain / cuts.len() as f64,
             format!("{holes} holes")
         );
+    }
+    let shared: Vec<usize> = std::env::var("RING_VALIDATION_SHARED")
+        .ok()
+        .map(|list| {
+            list.split(',')
+                .filter(|n| !n.trim().is_empty())
+                .map(|n| n.trim().parse().expect("a count"))
+                .collect()
+        })
+        .unwrap_or_else(|| vec![1_000, 4_000]);
+    for k in shared {
+        for (name, polygons) in [("corridor", corridor(k)), ("bays", bays(k))] {
+            let seconds = median(runs, || {
+                black_box(Region::new(polygons.clone(), t).expect("a valid region"));
+            });
+            println!(
+                "{:<8} {:>8} {:>10.3} {:>10.3} {:>12}",
+                name, k, seconds, seconds, "valid"
+            );
+        }
     }
 }

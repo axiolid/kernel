@@ -37,6 +37,16 @@ caret rule for `0.x` versions.
   `scripts/probe_region_nesting_mutants.py` lists the faults its tests must
   catch (#448, ADR 0104).
 
+- The exact arrangement finds the carriers of a piece among the edges that
+  cover it, not among every edge sharing some stretch with its edge. An edge
+  that many others stand on cost the square of their number: 1,000 rooms
+  standing on one corridor edge took 2.2 s, 2,000 took 8.6 s and 4,000 took
+  35 s in `Region::new`, and a rectangle with 1,000 holes standing on its
+  bottom edge took 5.3 s, 2,000 took 19.7 s and 4,000 took 87 s. They now
+  take 0.05 s and 0.22 s (corridor, 1,000 and 4,000) and 0.05 s and 0.23 s
+  (holes). The arrangement is unchanged bit for bit
+  (`benches/ring_validation.rs`, cases `corridor` and `bays`, #448).
+
 - `MorphologyMode::Fast` fills the walls of a floor with sub-budget teeth
   in bounded time and memory. On #345's 3 m floor (teeth 0.5 mm deep, 1 mm
   budget) the chord over the room's corner, too deep for the budget, was

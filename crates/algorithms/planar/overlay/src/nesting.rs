@@ -20,8 +20,8 @@
 //!   another hole of its polygon (crossing, nested or repeated).
 //! - [`OverlayError::PolygonsOverlap`]: a point lies in two polygons.
 //!
-//! Rings may meet: at points, and along a stretch two rings run with their
-//! insides on opposite sides. Settled outputs do both: a hole touching its
+//! Rings may meet: at points, and along a stretch two rings run with the
+//! polygons' insides on opposite sides. Settled outputs do both: a hole touching its
 //! outer ring at a vertex (#191), and a union of cells returning two
 //! polygons that share an edge (`tests/roundtrip.rs`), which every
 //! operation reads as the point set they bound. A ring whose vertices all
@@ -45,8 +45,11 @@
 //! on its outer ring's edge, and a stretch two rings run the same way all
 //! show as a side held wrongly. A region of one ring is not checked.
 //!
-//! The arrangement of a valid region has about one piece per edge, so the
-//! check costs about what a boolean on the region costs to cut it.
+//! The arrangement of a valid region has about one piece per edge, and the
+//! carriers of a piece are found among the edges covering it, so the check
+//! costs about what a boolean on the region costs to cut it: 0.34 s for a
+//! floor of 100,000 corners with 200 holes, 0.05 s for 1,000 rooms standing
+//! on one corridor edge, 0.22 s for 4,000 (`benches/ring_validation.rs`).
 //!
 //! `scripts/probe_region_nesting_mutants.py` lists the faults the tests in
 //! `tests/region_nesting.rs` and here must catch.

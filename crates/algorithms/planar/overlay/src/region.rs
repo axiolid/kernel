@@ -138,7 +138,7 @@ impl Region {
     /// decided exactly and with no tolerance, every hole must lie inside its
     /// own outer ring and in no other of its holes, and no point may lie in
     /// two polygons (#448). Rings may touch at points, and along a stretch
-    /// they run with their insides on opposite sides, as settled outputs
+    /// they run with the polygons' insides on opposite sides, as settled outputs
     /// do. An `overlay` operand is not held to this: its rings may overlap,
     /// read by its fill rule.
     ///
