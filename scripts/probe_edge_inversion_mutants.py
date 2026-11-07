@@ -67,6 +67,9 @@ Not listed for the edge pass, as equivalent at test resolution:
 - the pcurve use the samples are taken through: every pcurve use must
   agree with them within the budget, and no fixture shares an edge between
   two pcurve uses that differ.
+
+The Delaunay flips of a curved trim visiting edges in hash order (#425) must
+turn `a_capped_cylinder_meshes_the_same_on_every_call` red.
 """
 import probe_lib
 
@@ -215,6 +218,10 @@ MUTANTS = [
     ("a planar face takes a reversed use's samples forwards", B,
      "            let (indices, _) = shared.in_direction(use_.orientation);",
      "            let (indices, _) = shared.in_direction(Orientation::Forward);"),
+    # Deterministic Delaunay flips (#425).
+    ("Delaunay flips visit edges in hash order", B,
+     "        let mut owners: BTreeMap<LocalEdgeKey, Vec<(usize, usize)>> = BTreeMap::new();",
+     "        let mut owners: HashMap<LocalEdgeKey, Vec<(usize, usize)>> = HashMap::new();"),
 ]
 
 probe_lib.main(MUTANTS, tests=TARGETS, command=probe_lib.CARGO_TEST + ("--all-features",), timeout=1800)

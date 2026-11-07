@@ -1851,3 +1851,34 @@ fn a_polyline_edge_shared_by_two_faces_is_cut_at_its_break_in_any_face_order() {
         }
     }
 }
+
+/// FNV-1a over an index buffer, so a test can pin the exact triangles.
+fn index_hash(indices: &[u32]) -> u64 {
+    indices.iter().fold(0xcbf2_9ce4_8422_2325, |h, i| {
+        i.to_le_bytes()
+            .iter()
+            .fold(h, |h, b| (h ^ u64::from(*b)).wrapping_mul(0x0100_0000_01b3))
+    })
+}
+
+/// The Delaunay flips of a curved face's trim visit edges in a fixed order
+/// (#425): the triangles of a cap bounded by a circle, whose corners are all
+/// cocircular, do not change from call to call, thread to thread or process
+/// to process.
+#[test]
+fn a_capped_cylinder_meshes_the_same_on_every_call() {
+    let run = || capped_cylinder(0.5, 2.0, frame_at(0.0), circle(0.0, 0.5), None, 1e-3, false).0;
+    let first = run();
+    for _ in 0..16 {
+        let again = run();
+        assert_eq!(again.positions, first.positions);
+        assert_eq!(again.indices, first.indices);
+    }
+    // A fresh thread has fresh `RandomState` keys.
+    assert_eq!(
+        std::thread::spawn(run).join().unwrap().indices,
+        first.indices
+    );
+    // A hard-coded hash pins it across processes.
+    assert_eq!(index_hash(&first.indices), 14_495_436_368_589_850_869);
+}

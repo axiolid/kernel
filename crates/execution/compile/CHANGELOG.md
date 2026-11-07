@@ -9,6 +9,14 @@ caret rule for `0.x` versions.
 
 ## [Unreleased]
 
+### Fixed
+
+- A curved face's Delaunay flips (#425) visit interior edges in key order, not
+  in a `HashMap`'s: compiling the same B-rep twice gave different triangles
+  (a cap bounded by a circle, whose corners are cocircular) or the same
+  triangles in a different order (a unique triangulation), from call to call
+  and process to process. Each flip's decision is unchanged.
+
 ## [0.3.44] - 2026-11-03
 
 ### Added

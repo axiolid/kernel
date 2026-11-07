@@ -120,7 +120,7 @@ use axiolid_mesh::TriMesh;
 use axiolid_mesh_compile_contract::MeshClosure;
 use axiolid_model::NodeId;
 use axiolid_topology::{BRep, Orientation};
-use std::collections::{HashMap, HashSet};
+use std::collections::{BTreeMap, HashMap, HashSet};
 
 use crate::planar::{
     clip_projected, clip_shell_face, edge_touches, newell_normal, plane_axes, Projection,
@@ -2755,7 +2755,9 @@ fn delaunay_flips(
     // A pass flips every edge that fails; Lawson's flips terminate, the
     // cap only guards against rounding cycling on cocircular points.
     for _ in 0..4 * triangles.max(1) {
-        let mut owners: HashMap<LocalEdgeKey, Vec<(usize, usize)>> = HashMap::new();
+        // Ordered by edge key: the visit order decides which of two
+        // competing flips happens, so it must not depend on a hash seed.
+        let mut owners: BTreeMap<LocalEdgeKey, Vec<(usize, usize)>> = BTreeMap::new();
         for t in 0..triangles {
             for e in 0..3 {
                 let (a, b) = (indices[3 * t + e], indices[3 * t + (e + 1) % 3]);
