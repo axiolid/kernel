@@ -16,7 +16,8 @@ caret rule for `0.x` versions.
   `match` on it needs a wildcard arm. `HoleOutsideOuter` now also names a
   hole that crosses its outer ring. `Region::translate` checks its result as
   `Region::new` does, since rounding each vertex can turn a contact into a
-  crossing, and `Region::sweep` with it (#448, ADR 0104).
+  crossing; `Region::sweep` moves its copy unchecked, since the copy only
+  feeds `union`, and returns what it did before (#448, ADR 0104).
 
 ### Fixed
 

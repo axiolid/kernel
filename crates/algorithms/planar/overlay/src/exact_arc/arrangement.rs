@@ -23,6 +23,11 @@
 //! containing each later piece follow from the previous piece's; the first
 //! piece counts windings from a sample.
 //!
+//! A long edge that many others stand on (rooms on a corridor, #448) would
+//! cost the square of their number if each piece were tested against all of
+//! them, so each shared stretch is placed on the edge's stops and the pieces
+//! are swept in order, testing a piece against the stretches covering it.
+//!
 //! Soups of overlapping slender parts (#315) cross one another about `k^2`
 //! times, and their long, turned edges have boxes holding much of the
 //! soup, so every search a piece made through the boxes found `O(k)`
@@ -32,7 +37,8 @@
 //! - A boundary carrying a piece of an edge runs along it for a stretch,
 //!   whose two ends both are points the edge has in common with it. So
 //!   the carriers are searched among the edge itself and the edges it
-//!   shares two or more points with, recorded while splitting.
+//!   shares two or more points with, recorded while splitting, and of
+//!   those only the ones whose stretch covers the piece.
 //! - Across any stop that is not a simple crossing, only the rings met
 //!   there can change their winding number between the two pieces' samples,
 //!   so only they are counted again; the others carry over.
@@ -229,6 +235,24 @@ impl Winder {
 thread_local! {
     /// Edges tested as carriers, summed over pieces, for the test below.
     static CANDIDATES: std::cell::Cell<usize> = const { std::cell::Cell::new(0) };
+}
+
+/// The first and last of `xs` along `edge`, which has all of them: `xs`
+/// itself when it holds two or fewer.
+fn extremes(edge: &Edge, xs: &[XPoint]) -> Vec<XPoint> {
+    if xs.len() <= 2 {
+        return xs.to_vec();
+    }
+    let mut ends = (&xs[0], &xs[0]);
+    for x in &xs[1..] {
+        if edge.order(x, ends.0) == Sign::Negative {
+            ends.0 = x;
+        }
+        if edge.order(x, ends.1) == Sign::Positive {
+            ends.1 = x;
+        }
+    }
+    vec![ends.0.clone(), ends.1.clone()]
 }
 
 /// For each edge in `shared`, the stops of `edge` where the stretch it
@@ -441,8 +465,10 @@ pub(crate) fn build_charged(rings: &[ArcRing], charge: &mut Charge) -> Result<Ra
                     overlapped[index] = true;
                     overlapped[near] = true;
                 }
-                shared[index].push((near, xs.clone()));
-                shared[near].push((index, xs.clone()));
+                // Only the ends of the shared stretch place it on a side's
+                // stops, so no more than two points are kept.
+                shared[index].push((near, extremes(edge, &xs)));
+                shared[near].push((index, extremes(theirs, &xs)));
             }
             // A point at an end of either segment is met again: the end
             // is a stop already, or a vertex the next edge of its ring
@@ -475,6 +501,7 @@ pub(crate) fn build_charged(rings: &[ArcRing], charge: &mut Charge) -> Result<Ra
     // met at one stop, and the edges that may carry a piece.
     let mut rings_met: Vec<usize> = Vec::new();
     let mut met: Vec<usize> = Vec::new();
+    #[cfg(debug_assertions)]
     let mut candidates: Vec<usize> = Vec::new();
     let cut_edges = flat.iter().copied().zip(edges.iter().flatten().zip(cuts));
     for (index, ((ring, own), (edge, mut meetings))) in cut_edges.enumerate() {
@@ -531,10 +558,13 @@ pub(crate) fn build_charged(rings: &[ArcRing], charge: &mut Charge) -> Result<Ra
         // circle). Every other edge fails the carrier test below, so
         // searching these finds what searching every edge whose box
         // holds the sample finds, in the same order.
-        candidates.clear();
-        candidates.push(index);
-        candidates.extend(shared[index].iter().map(|(near, _)| *near));
-        candidates.sort_unstable();
+        #[cfg(debug_assertions)]
+        {
+            candidates.clear();
+            candidates.push(index);
+            candidates.extend(shared[index].iter().map(|(near, _)| *near));
+            candidates.sort_unstable();
+        }
         // The stretch of each shared edge, as the stops it spans, so a
         // piece is tested against the edges covering it only, not against
         // every edge shared with some other piece of a long one: the
@@ -603,6 +633,7 @@ pub(crate) fn build_charged(rings: &[ArcRing], charge: &mut Charge) -> Result<Ra
                     let theirs = &edges[other][their];
                     let twin = edge.same_segment(theirs);
                     if twin.is_some() || theirs.contains(&piece.sample) {
+                        #[cfg(debug_assertions)]
                         debug_assert!(
                             candidates.binary_search(&index).is_ok(),
                             "a carrier has two points in common with the edge"

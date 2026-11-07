@@ -66,8 +66,12 @@ decided exactly on one arrangement of all its rings (`src/nesting.rs`).**
   `(0.0223, 0.1729)`, ends with the hole crossing the outer ring; a hole
   and an outer ring that both lie on one line (left out, so accepted)
   translate to rings that no longer do. Both are tests in
-  `tests/region_nesting.rs`. `Region::sweep` translates, so it can refuse
-  the same way.
+  `tests/region_nesting.rs`. `Region::sweep` moves a copy too, but only to
+  `union` it with the region, which reads overlapping operands by fill rule,
+  so it builds the copy unchecked; checking it refused sound sweeps (57 of
+  5,394 sweeps of valid multi-ring regions, all rotated layouts). The cost
+  of `translate` is that of `Region::new`: it arranges every multi-ring
+  region.
 - **Operands of `overlay` and `union_soup` are unchanged**: their rings may
   overlap, read by the fill rule.
 - **Errors.** `OverlayError` becomes `#[non_exhaustive]` and gains

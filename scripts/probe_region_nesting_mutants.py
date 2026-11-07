@@ -76,6 +76,9 @@ MUTANTS = [
 ]
 
 MUTANTS += [
+    ("sweep uses the checked translate", G,
+     "let moved = Self::from_valid(self.shifted(direction)?, true);",
+     "let moved = self.translate(direction)?;", TESTS),
     ("a shared stretch never leaves the sweep", ARR,
      "while next_end < by_end.len() && spans[by_end[next_end]].2 <= at {",
      "while false && next_end < by_end.len() && spans[by_end[next_end]].2 <= at {", SWEEP),

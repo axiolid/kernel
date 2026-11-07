@@ -469,3 +469,30 @@ fn a_translate_of_a_hole_in_a_line_outer_ring_is_refused() {
     let moved = region.translate(axiolid_core::Vec2::new(0.8123, 0.2929));
     assert_eq!(moved.map(|_| ()), Err(OverlayError::HoleOutsideOuter));
 }
+
+/// `sweep` moves a copy that only feeds `union`, which reads overlapping
+/// operands by fill rule: the rounding that makes `translate` refuse does
+/// not make `sweep` refuse.
+#[test]
+fn a_sweep_whose_moved_copy_crosses_is_still_returned() {
+    let outer = [
+        (-0.9, 3.8000000000000003),
+        (-0.5, 3.5),
+        (0.1, 4.3),
+        (-0.30000000000000004, 4.6000000000000005),
+    ];
+    let hole = [
+        (-0.9, 3.8000000000000003),
+        (-0.6000000000000001, 4.2),
+        (-0.2, 3.9000000000000004),
+        (-0.5, 3.5),
+    ];
+    let region = Region::new(vec![polygon(&outer, &[&hole])], t()).expect("valid");
+    let direction = axiolid_core::Vec2::new(0.0223, 0.1729);
+    assert_eq!(
+        region.translate(direction).map(|_| ()),
+        Err(OverlayError::HoleOutsideOuter)
+    );
+    let swept = region.sweep(direction, t()).expect("the sweep is returned");
+    assert!(swept.area() > region.area());
+}
