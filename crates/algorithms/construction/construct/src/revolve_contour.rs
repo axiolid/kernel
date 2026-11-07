@@ -110,17 +110,13 @@ pub fn revolve_arc_ring(
     axis_origin: Point3,
     tolerance: Tolerance,
 ) -> GeomResult<ExactBRep> {
-    revolve_ring_about(ring, axis_origin, true, tolerance)
-}
-
-/// [`revolve_arc_ring`], told whether the axis direction is exactly the
-/// profile's `y` (`x` and `z` zero), which a vertex on the axis needs.
-pub(crate) fn revolve_ring_about(
-    ring: &ArcRing,
-    axis_origin: Point3,
-    exact_direction: bool,
-    tolerance: Tolerance,
-) -> GeomResult<ExactBRep> {
+    // The axis is the line along +y through `axis_origin`: in the profile
+    // plane only when the origin is (#450).
+    if axis_origin.z != 0.0 {
+        return Err(unsupported(
+            "exact revolution about an axis out of the profile plane",
+        ));
+    }
     let epsilon = tolerance.linear();
     let count = ring.vertices.len();
     if count < 3 {
@@ -186,16 +182,6 @@ pub(crate) fn revolve_ring_about(
         ));
     }
     check_axis_contact(&stations, epsilon)?;
-    // The exact sign above is against the line through the origin along y.
-    // The axis the caller named is that line only when it is exactly so: a
-    // tilt or a z offset within the tolerance moves the real axis off a
-    // vertex the sign called on it (#367 refuses the mesh the same way).
-    if stations.iter().any(|station| station.on_axis) && !(exact_direction && axis_origin.z == 0.0)
-    {
-        return Err(unsupported(
-            "exact revolution of a section touching an axis that is not exactly the profile's y axis (tilted or off the plane)",
-        ));
-    }
     // Mirror a section on the negative side so every radius is positive; a
     // full turn makes the two cases the same solid. `side_of_axis` is
     // positive to the left of the upward axis, which is the negative radius.

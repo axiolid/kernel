@@ -44,6 +44,19 @@
 //! name, as is a straight edge ending on the axis within the tolerance of
 //! perpendicular to it but not exactly.
 //!
+//! # The axis (#450)
+//!
+//! An axis exactly along +y or -y builds in place. Any other axis lying
+//! exactly in the profile plane (`z` zero in its direction and origin) is
+//! built exactly as given: the section is mapped rigidly into the axis's own
+//! frame, revolved about +y there and placed back with
+//! [`ExactBRep::transformed`], so a tilt of a milliradian is a tilt of a
+//! milliradian, never snapped onto +y. A direction with a `z` component, or
+//! an origin off the plane, sweeps hyperboloids and is refused by name: there
+//! is no tolerance band to offer. Rejected: snapping the axis within the
+//! tolerance and reporting it (a tilt of 1.4 mrad over 10 m moves geometry by
+//! 14 mm, and construct has no reading channel).
+//!
 //! The mesh path in `revolve.rs` handles all of these. Refusing here means a
 //! caller asking for exactness gets a typed refusal naming the gap instead of
 //! a silently tessellated substitute.
@@ -52,9 +65,10 @@ use std::f64::consts::TAU;
 
 use axiolid_brep::{ExactBRep, ExactBRepBuilder};
 use axiolid_contracts::{GeomError, GeomResult, Operation};
-use axiolid_core::{Frame2, Interval, Point3, Scalar, Tolerance, Vec2, Vec3};
+use axiolid_core::{Frame2, Interval, Point2, Point3, Scalar, Tolerance, Transform3, Vec2, Vec3};
 use axiolid_curve::{Circle2, Circle3, Curve2, Curve3, Line2, Line3};
-use axiolid_overlay::ArcRing;
+use axiolid_guarantees::Sign;
+use axiolid_overlay::{ArcRing, ArcVertex};
 use axiolid_profile::{Profile, RectangleProfile};
 use axiolid_surface::{Cylinder, Plane, Surface};
 use axiolid_topology::{
@@ -62,6 +76,7 @@ use axiolid_topology::{
 };
 
 use crate::extrude_exact::extrude_profile_exact;
+use crate::revolve::{along_axis, side_of_axis};
 use crate::BACKEND_ID;
 
 fn unsupported(input: &'static str) -> GeomError {
@@ -74,8 +89,10 @@ fn unsupported(input: &'static str) -> GeomError {
 
 /// Revolve a supported profile into an exact, closed analytic B-rep.
 ///
-/// The axis must be the profile's local y (either sense) and lie in the
-/// profile plane. `angle` is in radians, by the right-hand rule about
+/// The axis must lie in the profile plane, exactly: `z` is zero in its
+/// direction and its origin. Along y (either sense) it builds in place; any
+/// other in-plane direction builds in the axis's own frame and is placed back
+/// (#450). `angle` is in radians, by the right-hand rule about
 /// `axis_direction`.
 ///
 /// A full turn (`|angle|` within tolerance of `2 pi`) revolves every profile
@@ -90,7 +107,8 @@ fn unsupported(input: &'static str) -> GeomError {
 /// Refused by name: an ellipse, a turn beyond a full turn, a profile crossing
 /// the axis, one touching it at an isolated vertex (a pinch point), an arc
 /// whose circle reaches the axis without being centred on it (spindle or horn
-/// torus). A zero or non-finite angle is invalid input.
+/// torus), an axis out of the profile plane. A zero or non-finite angle is
+/// invalid input.
 pub fn revolve_profile_exact(
     profile: &Profile,
     axis_origin: Point3,
@@ -98,6 +116,7 @@ pub fn revolve_profile_exact(
     angle: Scalar,
     tolerance: Tolerance,
 ) -> GeomResult<ExactBRep> {
+    let frame = axis_frame(axis_origin, axis_direction)?;
     if !angle.is_finite() || angle == 0.0 {
         return Err(GeomError::InvalidInput(format!(
             "revolution angle must be finite and non-zero, got {angle}"
@@ -110,18 +129,18 @@ pub fn revolve_profile_exact(
     // A partial turn has two extra planar walls and arc-bounded caps: a
     // different topology, not a different parameter (#172).
     if (angle.abs() - TAU).abs() > tolerance.linear() {
-        return revolve_partial(profile, axis_origin, axis_direction, angle, tolerance);
+        return revolve_partial(profile, &frame, angle, tolerance);
     }
 
     match profile {
-        Profile::Rectangle(rectangle) => {
-            revolve_rectangle(rectangle, axis_origin, axis_direction, tolerance)
+        // The dedicated rectangle builder knows only the axis along y.
+        Profile::Rectangle(rectangle) if frame.placement.is_none() => {
+            revolve_rectangle(rectangle, &frame, tolerance)
         }
         // A circle lowers to four quarter arcs, each sweeping a torus
         // quarter; a hollow circle's bore becomes a toroidal void (#111).
-        Profile::Circle(_) => {
-            revolve_via_contour(profile, axis_origin, axis_direction, None, tolerance)
-        }
+        Profile::Circle(_) => revolve_via_contour(profile, &frame, None, tolerance),
+        Profile::Rectangle(_) => revolve_via_contour(profile, &frame, None, tolerance),
         Profile::Ellipse(_) => Err(unsupported("ellipse exact revolution")),
         // Every one of these lowers to a contour, and a contour revolves.
         // The refusals they carried described a missing module, not missing
@@ -131,19 +150,166 @@ pub fn revolve_profile_exact(
         | Profile::Contour(_)
         | Profile::Derived { .. }
         | Profile::Composite(_)
-        | Profile::CenterLine(_) => {
-            revolve_via_contour(profile, axis_origin, axis_direction, None, tolerance)
-        }
+        | Profile::CenterLine(_) => revolve_via_contour(profile, &frame, None, tolerance),
         _ => Err(unsupported("unknown profile exact revolution")),
     }
 }
 
+/// The axis of a revolution, in the profile plane (#450).
+#[derive(Debug, Clone)]
+struct AxisFrame {
+    /// A point of the axis, as given.
+    origin: Point2,
+    /// The axis direction as given, in 3D (`z` zero): the exact sign tests
+    /// run against it.
+    given: Vec3,
+    /// The unit direction in the plane, the frame's y.
+    unit: Vec2,
+    /// Where the frame sits in the profile plane: `None` for an axis exactly
+    /// along y, built in place.
+    placement: Option<Transform3>,
+}
+
+/// The axis `axis_origin` + `axis_direction`, which must lie exactly in the
+/// profile plane.
+///
+/// A direction along +y or -y (`x` exactly zero) is the identity. Any other
+/// in-plane direction `d` has the frame `(n, d, z)` with `n = (d.y, -d.x)`,
+/// right-handed, whose origin is the axis origin: a section mapped into it is
+/// revolved about +y there, and the placement maps the result back.
+fn axis_frame(axis_origin: Point3, axis_direction: Vec3) -> GeomResult<AxisFrame> {
+    if !(axis_origin.is_finite() && axis_direction.is_finite()) || axis_direction == Vec3::ZERO {
+        return Err(GeomError::InvalidInput(
+            "revolution axis must be a finite non-zero direction through a finite origin"
+                .to_owned(),
+        ));
+    }
+    // A component out of the plane sweeps hyperboloids: no exact family, and
+    // no tolerance band to offer.
+    if axis_direction.z != 0.0 || axis_origin.z != 0.0 {
+        return Err(unsupported(
+            "exact revolution about an axis out of the profile plane",
+        ));
+    }
+    let origin = Point2::new(axis_origin.x, axis_origin.y);
+    let length = axis_direction.x.hypot(axis_direction.y);
+    let unit = Vec2::new(axis_direction.x / length, axis_direction.y / length);
+    let placement = (axis_direction.x != 0.0).then(|| {
+        let normal = Vec2::new(unit.y, -unit.x);
+        Transform3::from_cols(
+            Vec3::new(normal.x, normal.y, 0.0),
+            Vec3::new(unit.x, unit.y, 0.0),
+            Vec3::Z,
+            Vec3::new(origin.x, origin.y, 0.0),
+        )
+    });
+    Ok(AxisFrame {
+        origin,
+        given: axis_direction,
+        unit,
+        placement,
+    })
+}
+
+/// `ring` in the axis's frame: `p' = ((p - o) . n, (p - o) . d)`, the bulges
+/// kept (a rigid map keeps an arc's bulge).
+///
+/// The revolution classifies a vertex on the axis with an exact sign against
+/// +y, so the map keeps the classification of the original: a vertex exactly
+/// on the axis (the exact sign against the axis as given) maps to `x' = 0`,
+/// and any other has `x'` of the sign of its side. A vertex whose `x'` rounds
+/// to zero or the wrong sign is closer to the axis than the frame can tell
+/// and is refused. An edge exactly perpendicular to the axis with one end on
+/// it keeps equal heights, which makes a disc; an edge that is not, whose
+/// heights come out equal, is refused.
+fn into_axis_frame(ring: &ArcRing, frame: &AxisFrame) -> GeomResult<ArcRing> {
+    let normal = Vec2::new(frame.unit.y, -frame.unit.x);
+    let count = ring.vertices.len();
+    let mut points = Vec::with_capacity(count);
+    let mut on_axis = Vec::with_capacity(count);
+    for vertex in &ring.vertices {
+        let p = vertex.point;
+        if !(p.x.is_finite() && p.y.is_finite()) {
+            return Err(GeomError::InvalidInput(
+                "revolved section must have finite vertices".to_owned(),
+            ));
+        }
+        let offset = p - frame.origin;
+        let side = side_of_axis(frame.origin, frame.given, p);
+        let across = offset.x * normal.x + offset.y * normal.y;
+        let along = offset.x * frame.unit.x + offset.y * frame.unit.y;
+        // Positive is the left of the axis: negative `x'`.
+        let consistent = match side {
+            Sign::Zero => true,
+            Sign::Positive => across < 0.0,
+            Sign::Negative => across > 0.0,
+            _ => false,
+        };
+        if !consistent {
+            return Err(unsupported(
+                "exact revolution of a section with a vertex closer to the axis than the rounding of the axis frame",
+            ));
+        }
+        on_axis.push(side == Sign::Zero);
+        points.push(Point2::new(
+            if side == Sign::Zero { 0.0 } else { across },
+            along,
+        ));
+    }
+    for index in 0..count {
+        let next = (index + 1) % count;
+        if on_axis[index] == on_axis[next] || ring.vertices[index].bulge != 0.0 {
+            continue;
+        }
+        let (on, off) = if on_axis[index] {
+            (index, next)
+        } else {
+            (next, index)
+        };
+        let from = ring.vertices[index].point;
+        let to = ring.vertices[next].point;
+        if along_axis(frame.given, from, to) == Sign::Zero {
+            points[on].y = points[off].y;
+        } else if points[on].y == points[off].y {
+            return Err(unsupported(
+                "exact revolution of an edge ending on the axis within the tolerance of perpendicular to it but not exactly",
+            ));
+        }
+    }
+    Ok(ArcRing::new(
+        ring.vertices
+            .iter()
+            .zip(points)
+            .map(|(vertex, point)| ArcVertex {
+                point,
+                bulge: vertex.bulge,
+            })
+            .collect(),
+    ))
+}
+
+/// `solid`, built in the axis's frame, placed where the axis is.
+fn place_in_axis_frame(solid: ExactBRep, frame: &AxisFrame) -> GeomResult<ExactBRep> {
+    match &frame.placement {
+        None => Ok(solid),
+        Some(placement) => {
+            solid
+                .transformed(placement)
+                .map_err(|error| GeomError::BackendContractViolation {
+                    backend: BACKEND_ID,
+                    detail: format!("placing a revolution in its axis frame failed: {error}"),
+                })
+        }
+    }
+}
+
+/// The dedicated rectangle builder, for an axis exactly along y.
 fn revolve_rectangle(
     rectangle: &RectangleProfile,
-    axis_origin: Point3,
-    axis_direction: Vec3,
+    frame: &AxisFrame,
     tolerance: Tolerance,
 ) -> GeomResult<ExactBRep> {
+    let axis_origin = Point3::new(frame.origin.x, frame.origin.y, 0.0);
     if rectangle.thickness.is_some()
         || rectangle.outer_radius.is_some()
         || rectangle.inner_radius.is_some()
@@ -151,13 +317,7 @@ fn revolve_rectangle(
         // Rounded corners revolve into tori and a hollow section's opening
         // into a void, both of which the general contour revolver builds;
         // the dedicated path below only knows one straight-edged ring.
-        return revolve_via_contour(
-            &Profile::Rectangle(*rectangle),
-            axis_origin,
-            axis_direction,
-            None,
-            tolerance,
-        );
+        return revolve_via_contour(&Profile::Rectangle(*rectangle), frame, None, tolerance);
     }
     if !rectangle.x.is_finite()
         || !rectangle.y.is_finite()
@@ -168,29 +328,6 @@ fn revolve_rectangle(
             "exact rectangle profile must have positive finite extents, got {} x {}",
             rectangle.x, rectangle.y
         )));
-    }
-
-    let length = axis_direction.length();
-    if !length.is_finite() || length <= 0.0 {
-        return Err(GeomError::InvalidInput(
-            "revolution axis must be a finite non-zero direction".to_owned(),
-        ));
-    }
-    let axis = axis_direction / length;
-
-    // The profile lives in the z = 0 plane. Only an axis parallel to local y
-    // sweeps its edges into cylinders and its horizontal edges into annuli;
-    // any other axis produces cones or general surfaces of revolution, which
-    // is a different construction.
-    if (axis.dot(Vec3::Y).abs() - 1.0).abs() > tolerance.linear() {
-        return Err(unsupported(
-            "exact revolution about an axis that is not the profile's local y",
-        ));
-    }
-    if axis_origin.z.abs() > tolerance.linear() {
-        return Err(unsupported(
-            "exact revolution about an axis off the profile plane",
-        ));
     }
 
     let (half_x, half_y) = (rectangle.x / 2.0, rectangle.y / 2.0);
@@ -207,13 +344,7 @@ fn revolve_rectangle(
     // builds (#379); crossing it, or lying within the tolerance of it without
     // touching it, is refused there and here.
     if left == 0.0 || right == 0.0 {
-        return revolve_via_contour(
-            &Profile::Rectangle(*rectangle),
-            axis_origin,
-            axis_direction,
-            None,
-            tolerance,
-        );
+        return revolve_via_contour(&Profile::Rectangle(*rectangle), frame, None, tolerance);
     }
     if left * right < 0.0 {
         return Err(unsupported(
@@ -557,8 +688,7 @@ pub fn fixed_reference_sweep_exact(
 /// revolves a full turn, routed through [`crate::revolve_partial`].
 fn revolve_partial(
     profile: &Profile,
-    axis_origin: Point3,
-    axis_direction: Vec3,
+    frame: &AxisFrame,
     angle: Scalar,
     tolerance: Tolerance,
 ) -> GeomResult<ExactBRep> {
@@ -573,40 +703,41 @@ fn revolve_partial(
         | Profile::CenterLine(_) => {}
         _ => return Err(unsupported("unknown profile exact revolution")),
     }
-    revolve_via_contour(profile, axis_origin, axis_direction, Some(angle), tolerance)
+    revolve_via_contour(profile, frame, Some(angle), tolerance)
 }
 
 /// Revolve any profile that lowers to a contour, a full turn (`angle` is
 /// `None`) or partially.
 ///
-/// The axis must be the profile's local y and must lie in the profile plane,
-/// the same restriction `revolve_rectangle` carries: any other axis sweeps a
-/// general surface of revolution rather than the named quadrics this builds.
+/// About an axis exactly along y the sections are built in place, a turn
+/// about -y running the other way about +y. About any other in-plane axis
+/// each section is mapped into the axis's frame ([`into_axis_frame`]),
+/// revolved about +y there with the angle as given, and the solid placed back
+/// (#450).
 fn revolve_via_contour(
     profile: &Profile,
-    axis_origin: Point3,
-    axis_direction: Vec3,
+    frame: &AxisFrame,
     angle: Option<Scalar>,
     tolerance: Tolerance,
 ) -> GeomResult<ExactBRep> {
-    let axis = axis_direction.normalize_or_zero();
-    if (axis.dot(Vec3::Y).abs() - 1.0).abs() > tolerance.linear() {
-        return Err(unsupported(
-            "exact revolution about an axis that is not the profile's local y",
-        ));
-    }
-    if axis_origin.z.abs() > tolerance.linear() {
-        return Err(unsupported(
-            "exact revolution about an axis off the profile plane",
-        ));
-    }
-
-    // A vertex on the axis is decided against the line along y exactly.
-    let exact_direction = axis_direction.x == 0.0 && axis_direction.z == 0.0;
-
-    // The sections are built about world +y; an axis pointing down turns
-    // the right-hand sweep the other way.
-    let angle = angle.map(|angle| if axis.y < 0.0 { -angle } else { angle });
+    let placed = frame.placement.is_some();
+    let (axis_origin, angle) = if placed {
+        (Point3::ZERO, angle)
+    } else {
+        // The sections are built about world +y; an axis pointing down turns
+        // the right-hand sweep the other way.
+        (
+            Point3::new(frame.origin.x, frame.origin.y, 0.0),
+            angle.map(|angle| if frame.given.y < 0.0 { -angle } else { angle }),
+        )
+    };
+    let section = |ring: &ArcRing| -> GeomResult<ArcRing> {
+        if placed {
+            into_axis_frame(ring, frame)
+        } else {
+            Ok(ring.clone())
+        }
+    };
 
     // A composite is unioned exactly first; members that do not touch
     // revolve into separate solids of one `ExactBRep` (#111).
@@ -614,16 +745,20 @@ fn revolve_via_contour(
         let regions = crate::profile_lower::composite_regions(members, tolerance)?;
         let mut pieces = Vec::with_capacity(regions.len());
         for region in &regions {
+            let holes = region
+                .holes
+                .iter()
+                .map(&section)
+                .collect::<GeomResult<Vec<_>>>()?;
             pieces.push(revolve_region(
-                &region.outer,
-                &region.holes,
+                &section(&region.outer)?,
+                &holes,
                 axis_origin,
                 angle,
-                exact_direction,
                 tolerance,
             )?);
         }
-        return crate::assemble::merge_solids(pieces);
+        return place_in_axis_frame(crate::assemble::merge_solids(pieces)?, frame);
     }
 
     let contour = crate::extrude_exact::profile_to_contour(profile, tolerance)?;
@@ -633,14 +768,9 @@ fn revolve_via_contour(
         .iter()
         .map(|hole| crate::contour_lower::contour_to_arc_ring(hole, tolerance))
         .collect::<GeomResult<Vec<_>>>()?;
-    revolve_region(
-        &outer,
-        &holes,
-        axis_origin,
-        angle,
-        exact_direction,
-        tolerance,
-    )
+    let holes = holes.iter().map(&section).collect::<GeomResult<Vec<_>>>()?;
+    let solid = revolve_region(&section(&outer)?, &holes, axis_origin, angle, tolerance)?;
+    place_in_axis_frame(solid, frame)
 }
 
 /// Revolve one section a full turn -- its outer ring as the solid, each hole
@@ -650,7 +780,6 @@ fn revolve_region(
     holes: &[ArcRing],
     axis_origin: Point3,
     angle: Option<Scalar>,
-    exact_direction: bool,
     tolerance: Tolerance,
 ) -> GeomResult<ExactBRep> {
     if let Some(angle) = angle {
@@ -662,8 +791,7 @@ fn revolve_region(
             tolerance,
         );
     }
-    let solid =
-        crate::revolve_contour::revolve_ring_about(outer, axis_origin, exact_direction, tolerance)?;
+    let solid = crate::revolve_contour::revolve_arc_ring(outer, axis_origin, tolerance)?;
     if holes.is_empty() {
         return Ok(solid);
     }
@@ -680,12 +808,7 @@ fn revolve_region(
     let outer = builder.append(&solid, false);
     let mut voids = Vec::with_capacity(holes.len());
     for hole in holes {
-        let cavity = crate::revolve_contour::revolve_ring_about(
-            hole,
-            axis_origin,
-            exact_direction,
-            tolerance,
-        )?;
+        let cavity = crate::revolve_contour::revolve_arc_ring(hole, axis_origin, tolerance)?;
         voids.extend(builder.append(&cavity, true));
     }
     let [outer] = outer[..] else {

@@ -20,7 +20,7 @@ MUTANTS = [
     ('sweep range reversed', P, '    let (u0, u1) = (base + angle.min(0.0), base + angle.max(0.0));', '    let (u0, u1) = (base + angle.max(0.0), base + angle.min(0.0));', TESTS),
     ('far side swept from the near side', P, '    let base = if side > 0.0 { 0.0 } else { PI };', '    let base = 0.0;', TESTS),
     ('far-side arcs not mirrored', P, '        let bulge = side * vertex.bulge;', '        let bulge = vertex.bulge;', TESTS),
-    ('downward axis read as upward', X, '    let angle = angle.map(|angle| if axis.y < 0.0 { -angle } else { angle });', '    let angle = angle.map(|angle| angle);', TESTS),
+    ('downward axis read as upward', X, '            angle.map(|angle| if frame.given.y < 0.0 { -angle } else { angle }),', '            angle.map(|angle| angle),', TESTS),
     ('radial turns left-handed', P, '        Vec3::new(cos, 0.0, -sin)', '        Vec3::new(cos, 0.0, sin)', TESTS),
     ('vertex near the axis kept off it', P, '        let radius = if radius <= epsilon { 0.0 } else { radius };', '        let radius = radius.max(0.0);', TESTS),
     ('segment on the axis given a wall', P, '            if here.bulge == 0.0 && here.radius == 0.0 && there.radius == 0.0 {', '            if false {', TESTS),
@@ -33,7 +33,7 @@ MUTANTS = [
     ('crossing section accepted', P, '    if min < -epsilon && max > epsilon {', '    if false {', TESTS),
     ('tube reaching the axis accepted', P, '                if radius >= centre.x.abs() - Scalar::EPSILON {', '                if false {', TESTS),
     ('turn beyond a full turn not named', X, '    if angle.abs() > TAU + tolerance.linear() {', '    if false {', TESTS),
-    ('partial turn built as a full turn', X, '        return revolve_partial(profile, axis_origin, axis_direction, angle, tolerance);', '        let _ = revolve_partial;', TESTS),
+    ('partial turn built as a full turn', X, '        return revolve_partial(profile, &frame, angle, tolerance);', '        let _ = revolve_partial;', TESTS),
 ]
 
 probe_lib.main(MUTANTS, timeout=1200)

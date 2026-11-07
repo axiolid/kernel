@@ -4,8 +4,10 @@ Each mutant misreads the exact on-axis classification, the perpendicularity
 of an edge ending on the axis, the admitted contacts, the disc cap and the
 cone's apex (its vertex, its frame, the nesting of a cavity inside it), the
 sphere's pole (the centre gate, the latitudes, the sweep check) and the
-quadrant snap of the arc lowering, or the mirroring of a section on the other
-side, and must turn a test red. The tests
+quadrant snap of the arc lowering, the axis frame of an axis in the profile
+plane that is not along y (#450: its placement, its orientation, the exact
+on-axis and perpendicular decisions kept through the rotation), or the
+mirroring of a section on the other side, and must turn a test red. The tests
 are `tests/revolve_axis_exact.rs` and `tests/revolve_exact.rs`; the
 compile-level case in `boolean_deviation.rs` covers a solid cylinder
 reaching a boolean as a certified bound.
@@ -44,9 +46,6 @@ MUTANTS = [
     ('disc bounded by the axis station', C, '        slot(circles, rim)?,\n        stations[rim].radius,', '        slot(circles, index)?,\n        stations[rim].radius,', TESTS),
     ('section on the far side not mirrored', C, '    let stations: Vec<Station> = if positive {', '    let stations: Vec<Station> = if false {', TESTS),
     ('mirrored walk not reversed', C, '                let source = count - 1 - index;\n                Station {', '                let source = index;\n                Station {', TESTS),
-    ('tilted axis accepted', C, ' && !(exact_direction && axis_origin.z == 0.0)', ' && !(true && axis_origin.z == 0.0)', TESTS),
-    ('axis off the plane accepted', C, ' && !(exact_direction && axis_origin.z == 0.0)', ' && !(exact_direction && axis_origin.z.abs() <= epsilon)', TESTS),
-    ('axis direction judged within the tolerance', E, '    let exact_direction = axis_direction.x == 0.0 && axis_direction.z == 0.0;', '    let exact_direction = axis_direction.x.abs() <= tolerance.linear() && axis_direction.z.abs() <= tolerance.linear();', TESTS),
     ('pieces not split', C, '        if stations[index].on_axis || stations[next].on_axis {\n            continue;\n        }\n        let (a, b)', '        let (a, b)', TESTS),
     ('cavity not nested in the solid', C, '    let contains = |outer: &Piece, inner: &Piece| outer.low < inner.low && inner.high < outer.high;', '    let contains = |_: &Piece, _: &Piece| false;', TESTS),
     ('solid nested in a cavity accepted', C, '    if depth.iter().any(|&d| d > 1) {', '    if false {', TESTS),
@@ -66,6 +65,15 @@ MUTANTS = [
     ('no quadrant snap', L, [('    if cos.abs() <= slack {', '    if false {'), ('    } else if sin.abs() <= slack {', '    } else if false {')], TESTS),
     ('quadrant snap at a loose band', L, 'pub(crate) const QUADRANT_ROUNDING: Scalar = 2.0 * Scalar::EPSILON;', 'pub(crate) const QUADRANT_ROUNDING: Scalar = 1e-6;', TESTS),
     ('quadrant snap not scaled by the parameter', L, '    let slack = QUADRANT_ROUNDING * t.abs().max(1.0);', '    let slack = QUADRANT_ROUNDING;', TESTS),
+    ('general axis built in place', E, '    let placement = (axis_direction.x != 0.0).then(|| {', '    let placement = (axis_direction.x != 0.0 && false).then(|| {', TESTS),
+    ('axis out of the plane accepted', E, '    if axis_direction.z != 0.0 || axis_origin.z != 0.0 {', '    if false {', TESTS),
+    ('axis origin out of the plane accepted by the ring entry', C, '    if axis_origin.z != 0.0 {', '    if false {', TESTS),
+    ('frame\'s normal flipped', E, '        let normal = Vec2::new(unit.y, -unit.x);', '        let normal = Vec2::new(-unit.y, unit.x);', TESTS),
+    ('partial angle negated in the axis frame', E, '        (Point3::ZERO, angle)', '        (Point3::ZERO, angle.map(|angle| -angle))', TESTS),
+    ('vertex on the axis not put on it', E, '            if side == Sign::Zero { 0.0 } else { across },', '            across,', TESTS),
+    ('disc height not copied to the axis end', E, '            points[on].y = points[off].y;', '            let _ = (on, off);', TESTS),
+    ('hair off perpendicular read as a disc', E, '        } else if points[on].y == points[off].y {', '        } else if false {', TESTS),
+    ('side of a vertex not kept by the rotation', E, '        if !consistent {', '        if false {', TESTS),
     ('rectangle edge on the axis refused', E, '    if left == 0.0 || right == 0.0 {', '    if false {', TESTS),
 ]
 

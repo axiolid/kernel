@@ -42,16 +42,32 @@ caret rule for `0.x` versions.
   `UnsupportedInput` by name, as does a vertex within the tolerance of the
   axis but not on it to the bit and an edge ending on the axis within the
   tolerance of perpendicular to it but not exactly (a cone of rise below the
-  tolerance fails the geometric audit). A touching section needs the axis
-  exactly along the profile's y with its origin exactly in the plane: a tilt
-  or a z offset within the tolerance would move the real axis off a vertex
-  judged on it, so it is refused. A section with several contacts (a cavity
+  tolerance fails the geometric audit). A section with several contacts (a cavity
   along the axis) gives one solid per outermost piece with the nested pieces
   as void shells, nested by the heights of every face's stations, poles
   included; a solid inside a cavity is refused.
 
 ### Changed
 
+- The exact revolution is built about the axis as given (#450). An axis
+  exactly along y (either sense) builds in place, bit for bit as before; any
+  other axis lying exactly in the profile plane (`z` zero in its direction and
+  origin) maps the section rigidly into the axis's own frame, revolves it
+  about +y there and places the solid back with `ExactBRep::transformed`,
+  composites, holes and partial turns included. A tilt of a milliradian was
+  silently snapped onto y within the tolerance, so a groove about an axis
+  tilted 1e-3 rad at radius 2 sat 2 mm from where it was asked for (the
+  mesh/exact comparison read a certified 4.5e-3 against a 1e-3 budget); it
+  is now exact, and a section the tilted axis puts on both sides is refused
+  as crossing it. An axis with a component out of the plane (a direction `z`
+  or an origin `z` other than exactly zero) is `UnsupportedInput` ("exact
+  revolution about an axis out of the profile plane"): its edges sweep
+  hyperboloids, so there is no tolerance band to offer; a zero or non-finite
+  axis is invalid input. `revolve_arc_ring` refuses an origin off the plane
+  the same way. In the axis's frame a vertex exactly on the axis is put on it
+  and a disc edge exactly perpendicular to it keeps equal heights; a vertex
+  the rotation's rounding cannot keep on its side, and an edge not exactly
+  perpendicular whose heights round equal, are refused by name.
 - An arc of a lowered contour evaluates `sin` and `cos` exactly at a quarter
   turn (#379): a parameter within `2 * EPSILON * max(1, |t|)` of one (every
   form a producer writes, `FRAC_PI_2`, `-PI / 2`, `1.5 * PI`,

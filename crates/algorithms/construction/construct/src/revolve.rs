@@ -197,18 +197,31 @@ fn bounded_steps(
 /// Not `orient2d(a, a + d, p)`: `a + d` rounds, which tilts the line it
 /// decides against.
 pub(crate) fn side_of_axis(a: Point2, d: Vec3, p: Point2) -> Sign {
-    let term = |x: Scalar, y: Scalar, negate: bool| {
-        let (product, error) = two_product(x, y);
-        if negate {
-            [-error, -product]
-        } else {
-            [error, product]
-        }
-    };
     let mut sum = expansion_sum(&term(d.x, p.y, false), &term(d.x, a.y, true));
     sum = expansion_sum(&sum, &term(d.y, p.x, true));
     sum = expansion_sum(&sum, &term(d.y, a.x, false));
     expansion_sign(&sum)
+}
+
+/// Exact sign of `d . (to - from)`, how far `to` lies along the axis
+/// direction `d` from `from`: `d.x*to.x - d.x*from.x + d.y*to.y - d.y*from.y`,
+/// summed as expansions. Zero exactly when the segment is perpendicular to
+/// the axis (#450).
+pub(crate) fn along_axis(d: Vec3, from: Point2, to: Point2) -> Sign {
+    let mut sum = expansion_sum(&term(d.x, to.x, false), &term(d.x, from.x, true));
+    sum = expansion_sum(&sum, &term(d.y, to.y, false));
+    sum = expansion_sum(&sum, &term(d.y, from.y, true));
+    expansion_sign(&sum)
+}
+
+/// `x * y` (or its negation) as the two-term expansion of its exact value.
+fn term(x: Scalar, y: Scalar, negate: bool) -> [Scalar; 2] {
+    let (product, error) = two_product(x, y);
+    if negate {
+        [-error, -product]
+    } else {
+        [error, product]
+    }
 }
 
 /// The exact side of every ring vertex of the line through `a` along the

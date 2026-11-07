@@ -155,3 +155,29 @@ f64 pole exact), and a rounding band on the on-axis test itself (it breaks
 the rule that on-axis tests are exact). Spindle and horn tori and pinch
 points stay refused: supporting them needs a new torus patch domain or
 non-manifold vertices.
+
+**The axis frame (#450).** The exact revolution builds about the axis as
+given. An axis exactly along +y or -y builds in place, as before. Any other
+axis lying exactly in the profile plane (`z` exactly zero in its direction and
+origin) gets the right-handed frame `(n, d, z)` with `d` its unit direction
+and `n = (d.y, -d.x)`, origin on the axis: the section is mapped rigidly into
+it (`p' = ((p - o) . n, (p - o) . d)`, the bulges kept), revolved about +y
+there with the angle as given, and the solid placed back with
+`ExactBRep::transformed`. The mapping keeps the exact decisions of the
+revolution: a vertex exactly on the axis (the exact sign against the axis as
+given) maps to `x' = 0`, an off-axis vertex keeps the sign of its side or is
+refused as closer to the axis than the frame's rounding, an edge exactly
+perpendicular to the axis with one end on it copies its off-axis end's height
+(an exact `along_axis` sign), and a perpendicular-looking edge that is not
+exactly perpendicular is refused. Any out-of-plane component is refused by
+name: the edges would sweep hyperboloids, so there is no tolerance band to
+offer.
+
+Rejected: refusing everything not exactly +-y (it throws away correct
+in-plane axes, such as the profile's own x axis, which the mesh path
+supports), and snapping the axis within the tolerance and reporting a
+reading (a tilt of 1.4 mrad over a 10 m extent moves geometry by 14 mm, which
+is not within tolerance, and construct has no reading channel). This agrees
+with the rule that an axis above rounding keeps its exact coordinates;
+re-expressing an axis within rounding, with a reading, waits on a reading
+kind for it.

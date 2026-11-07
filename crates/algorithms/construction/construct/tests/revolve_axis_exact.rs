@@ -12,6 +12,10 @@
 //! name, as does an edge ending on the axis within the tolerance of
 //! perpendicular to it, and an arc whose circle is not centred on the axis (a
 //! spindle or horn torus).
+//!
+//! The axis may lie anywhere in the profile plane (#450): it is built exactly
+//! as given, in the axis's own frame, never snapped onto +y. An axis with a
+//! component out of the plane is refused by name.
 
 use axiolid_brep::ExactBRep;
 use axiolid_brep_audit::geometric_audit;
@@ -19,7 +23,7 @@ use axiolid_construct::revolve_contour::revolve_arc_ring;
 use axiolid_construct::revolve_exact::revolve_profile_exact;
 use axiolid_contracts::{GeomError, GeomResult};
 use axiolid_core::{Frame2, Interval, Point2, Point3, Tolerance, Vec2, Vec3};
-use axiolid_curve::{Circle2, Curve2, Line2};
+use axiolid_curve::{Circle2, Curve2, Curve3, Line2};
 use axiolid_overlay::{ArcRing, ArcVertex};
 use axiolid_profile::{Contour, ContourProfile, Profile, ProfileSegment, RectangleProfile};
 use axiolid_surface::Surface;
@@ -432,9 +436,10 @@ fn cylinder_polygon() -> Profile {
 }
 
 #[test]
-fn a_tilted_axis_within_the_tolerance_is_refused_for_a_touching_section() {
-    // (0, 4) is 4e-3 off the real axis, which the sign against the vertical
-    // line through the origin cannot see.
+fn a_tilted_axis_through_a_vertex_puts_the_section_across_it() {
+    // (0, 4) is left of the axis tilted by `tilt` while (1, 0) is right of it:
+    // the section crosses the axis it is revolved about, as given (it used
+    // to be snapped onto y and accepted).
     for tilt in [1e-12, 1e-3, 1.4e-3] {
         named(
             revolve_profile_exact(
@@ -444,9 +449,13 @@ fn a_tilted_axis_within_the_tolerance_is_refused_for_a_touching_section() {
                 TAU,
                 Tolerance::METRE,
             ),
-            "not exactly the profile's y axis",
+            "crossing the axis",
         );
     }
+}
+
+#[test]
+fn an_axis_out_of_the_profile_plane_is_refused_by_name() {
     named(
         revolve_profile_exact(
             &cylinder_polygon(),
@@ -455,12 +464,8 @@ fn a_tilted_axis_within_the_tolerance_is_refused_for_a_touching_section() {
             TAU,
             Tolerance::METRE,
         ),
-        "not exactly the profile's y axis",
+        "out of the profile plane",
     );
-}
-
-#[test]
-fn an_axis_off_the_plane_by_less_than_the_tolerance_is_refused_for_a_touching_section() {
     named(
         revolve_profile_exact(
             &cylinder_polygon(),
@@ -469,7 +474,196 @@ fn an_axis_off_the_plane_by_less_than_the_tolerance_is_refused_for_a_touching_se
             TAU,
             Tolerance::METRE,
         ),
-        "not exactly the profile's y axis",
+        "out of the profile plane",
+    );
+    // A partial turn and the public ring entry refuse it too.
+    named(
+        revolve_profile_exact(
+            &cylinder_polygon(),
+            Point3::new(0.0, 0.0, 1e-7),
+            Vec3::Y,
+            1.0,
+            Tolerance::METRE,
+        ),
+        "out of the profile plane",
+    );
+    named(
+        revolve_arc_ring(
+            &ArcRing::from_points(&[
+                Point2::new(1.0, 0.0),
+                Point2::new(2.0, 0.0),
+                Point2::new(2.0, 1.0),
+            ]),
+            Point3::new(0.0, 0.0, 1e-7),
+            Tolerance::METRE,
+        ),
+        "out of the profile plane",
+    );
+}
+
+#[test]
+fn a_zero_or_non_finite_axis_is_invalid_input() {
+    for direction in [Vec3::ZERO, Vec3::new(f64::NAN, 1.0, 0.0)] {
+        match revolve_profile_exact(
+            &cylinder_polygon(),
+            Point3::ZERO,
+            direction,
+            TAU,
+            Tolerance::METRE,
+        ) {
+            Err(GeomError::InvalidInput(text)) => assert!(text.contains("finite non-zero")),
+            other => panic!("expected invalid input, got {other:?}"),
+        }
+    }
+}
+
+/// `profile` revolved through `angle` about the in-plane axis through
+/// `origin` along `direction`, audited.
+fn revolve_about(profile: &Profile, origin: Point3, direction: Vec3, angle: f64) -> ExactBRep {
+    let solid = revolve_profile_exact(profile, origin, direction, angle, Tolerance::METRE)
+        .expect("an axis in the profile plane revolves");
+    let health = geometric_audit(&solid, Tolerance::METRE);
+    assert!(health.is_consistent(), "{:?}", health.defects());
+    let topology = axiolid_topology::audit_brep(solid.topology());
+    assert!(topology.is_closed_manifold(), "{topology:?}");
+    solid
+}
+
+#[test]
+fn a_tilted_axis_is_built_as_given_not_snapped_onto_y() {
+    // x in [2, 3], y in [0, 1], about the axis through the origin tilted by
+    // a milliradian: Pappus gives 2 pi (2.5 cos a - 0.5 sin a), where about +y
+    // it would be 5 pi.
+    let tilt: f64 = 1e-3;
+    let axis = Vec3::new(tilt.sin(), tilt.cos(), 0.0);
+    let section = polygon(&[(2.0, 0.0), (3.0, 0.0), (3.0, 1.0), (2.0, 1.0)]);
+    let solid = revolve_about(&section, Point3::ZERO, axis, TAU);
+    close(volume(&solid), 15.704813821837996);
+    assert!((volume(&solid) - 5.0 * PI).abs() > 1e-3);
+    // Every circle lies in a plane perpendicular to the axis, about it.
+    let mut circles = 0;
+    for curve in solid.curves3() {
+        if let Curve3::Circle(circle) = curve {
+            circles += 1;
+            assert!(circle.frame.z.cross(axis).length() <= 1e-12);
+            assert!(circle.frame.origin.cross(axis).length() <= 1e-12);
+        }
+    }
+    assert!(circles >= 4);
+    // The section stays where it was given, not mirrored across the axis:
+    // each vertex is one of its corners to rounding.
+    for vertex in solid.topology().vertices() {
+        let corner = [(2.0, 0.0), (3.0, 0.0), (3.0, 1.0), (2.0, 1.0)]
+            .iter()
+            .any(|&(x, y)| (vertex.position - Vec3::new(x, y, 0.0)).length() <= 1e-12);
+        assert!(corner, "{:?}", vertex.position);
+    }
+    // A quarter turn about the tilted axis.
+    let quarter = revolve_about(&section, Point3::ZERO, axis, PI / 2.0);
+    close(volume(&quarter), 3.926203455459499);
+}
+
+#[test]
+fn an_axis_along_x_is_the_profiles_own_axis() {
+    // y in [2, 3], x in [0, 1], about +x: 2 pi * 2.5 * 1.
+    let section = polygon(&[(0.0, 2.0), (1.0, 2.0), (1.0, 3.0), (0.0, 3.0)]);
+    let solid = revolve_about(&section, Point3::ZERO, Vec3::X, TAU);
+    close(volume(&solid), 15.707963267948966);
+    // The turn is about the x axis itself: every vertex is a corner of the
+    // section or its mirror image across the axis (a full turn is the same
+    // solid either way), in the profile plane.
+    for vertex in solid.topology().vertices() {
+        let p = vertex.position;
+        assert!(
+            (2.0 - 1e-12..=3.0 + 1e-12).contains(&p.y.abs()) && p.z.abs() <= 1e-12,
+            "{p:?}"
+        );
+    }
+    // A quarter turn by the right-hand rule about +x carries +y towards +z.
+    let quarter = revolve_about(&section, Point3::ZERO, Vec3::X, PI / 2.0);
+    close(volume(&quarter), 3.9269908169872414);
+    for vertex in quarter.topology().vertices() {
+        assert!(vertex.position.z >= -1e-12, "{:?}", vertex.position);
+    }
+    // And a downward axis keeps +y's sense: -x turns the other way.
+    let against = revolve_about(&section, Point3::ZERO, Vec3::NEG_X, PI / 2.0);
+    for vertex in against.topology().vertices() {
+        assert!(vertex.position.z <= 1e-12, "{:?}", vertex.position);
+    }
+}
+
+#[test]
+fn a_cone_about_the_x_axis_has_its_apex_on_it() {
+    let cone = polygon(&[(0.0, 0.0), (2.0, 0.0), (0.0, 1.0)]);
+    let solid = revolve_about(&cone, Point3::ZERO, Vec3::X, TAU);
+    close(volume(&solid), 2.0943951023931953);
+}
+
+#[test]
+fn a_cone_about_a_slanted_axis_zeroes_the_axis_and_keeps_the_disc_flat() {
+    // The axis (3, 4) passes through (0, 0) and (3, 4), exactly; the edge
+    // from (5, 2.5) to (3, 4) is exactly perpendicular to it. Mapped into the
+    // axis's frame both facts must survive the rounding of the rotation.
+    let cone = polygon(&[(0.0, 0.0), (5.0, 2.5), (3.0, 4.0)]);
+    let solid = revolve_about(&cone, Point3::ZERO, Vec3::new(3.0, 4.0, 0.0), TAU);
+    close(volume(&solid), 32.72492347489368);
+}
+
+#[test]
+fn a_disc_exactly_perpendicular_to_a_slanted_axis_keeps_its_height() {
+    // (4, -3) is exactly perpendicular to the axis (3, 4) from the origin,
+    // yet rotated its height along the axis is -4.4e-16, not the origin's
+    // zero: the edge is a disc only because the height of its end on the
+    // axis is the other end's.
+    let cone = polygon(&[(0.0, 0.0), (4.0, -3.0), (3.0, 4.0)]);
+    let solid = revolve_about(&cone, Point3::ZERO, Vec3::new(3.0, 4.0, 0.0), TAU);
+    // Radius 5, height 5.
+    close(volume(&solid), 125.0 * PI / 3.0);
+    assert_eq!(count(&solid, |s| matches!(s, Surface::Plane(_))), 1);
+    assert_eq!(count(&solid, |s| matches!(s, Surface::Cone(_))), 1);
+}
+
+#[test]
+fn a_vertex_the_rotation_cannot_tell_from_the_axis_is_refused() {
+    // (2.9999999999999902, 3.999999999999987) is 4e-16 left of the axis
+    // along (3, 4), exactly, yet the rotated coordinate rounds to zero: the
+    // axis frame cannot keep its side, so it is refused, not read as on the
+    // axis or across it.
+    named(
+        revolve_profile_exact(
+            &polygon(&[
+                (0.0, 0.0),
+                (4.0, -3.0),
+                (2.9999999999999902, 3.999999999999987),
+            ]),
+            Point3::ZERO,
+            Vec3::new(3.0, 4.0, 0.0),
+            TAU,
+            Tolerance::METRE,
+        ),
+        "closer to the axis than the rounding of the axis frame",
+    );
+}
+
+#[test]
+fn an_edge_a_hair_off_perpendicular_to_a_slanted_axis_is_refused() {
+    // (4, -3) is exactly perpendicular to the axis (3, 4) from the origin;
+    // the next float pair (3.9999999999999827, -2.999999999999987) is off by
+    // 4e-16, yet its height along the axis rounds to exactly zero: a disc by
+    // the heights, a cone by the edge. Refused, not read as a disc.
+    named(
+        revolve_profile_exact(
+            &polygon(&[
+                (0.0, 0.0),
+                (3.9999999999999827, -2.999999999999987),
+                (3.0, 4.0),
+            ]),
+            Point3::ZERO,
+            Vec3::new(3.0, 4.0, 0.0),
+            TAU,
+            Tolerance::METRE,
+        ),
+        "within the tolerance of perpendicular",
     );
 }
 
