@@ -389,7 +389,7 @@ pub(crate) fn roots_along(
     roots_along_within(own, other, closed, ROOT_BUDGET)
 }
 
-/// [`roots_along`] within a work budget of `budget` nodes.
+/// [`roots_along`] within a work budget of `budget` enclosures.
 pub(crate) fn roots_along_within(
     own: &ImplicitCurve2,
     other: &Field2,
@@ -741,5 +741,21 @@ mod tests {
             roots_along_within(&curve, &h, false, 2),
             Err(RootRefusal::Budget)
         );
+    }
+
+    /// Prints the most enclosures a decided case of this module's tests
+    /// needed, for the calibration of `ROOT_BUDGET` (sixteen times the peak
+    /// of every suite must stay below it). Run with
+    /// `cargo test -p axiolid-nurbs --lib peak_enclosures -- --ignored --nocapture`.
+    #[test]
+    #[ignore = "calibration, not a check of behaviour"]
+    fn peak_enclosures_of_decided_cases() {
+        for k in 2..=8 {
+            let (curve, h) = graph(k);
+            roots_along(&curve, &h, false).expect("decided");
+        }
+        let peak = crate::root_chain::PEAK.load(std::sync::atomic::Ordering::Relaxed);
+        println!("peak enclosures of the section cases: {peak}");
+        assert!(16 * peak <= ROOT_BUDGET, "{peak}");
     }
 }
