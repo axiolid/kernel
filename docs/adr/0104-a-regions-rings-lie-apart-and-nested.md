@@ -19,7 +19,7 @@ fill (`fill`, ADR 0087) assumed rings that are apart and nested. Fuzz seed
 top edge at y = 2.1202; `dilate_outer_with(0.9046, fast(1e-2))` left out
 (2.0172, 3.0256), 0.8993 from the region, with a stated deviation of 4.7e-3.
 `area` summed overlapping polygons twice and `component_count` counted them
-apart. A consumer (rheonda/cad `check_polygon`) already documented
+apart. A downstream consumer already documented
 `Region::new` as checking "the holes inside the outer ring and apart".
 
 Outputs must stay inputs (#188, #191): `tests/roundtrip.rs` feeds every
@@ -112,9 +112,9 @@ decided exactly on one arrangement of all its rings (`src/nesting.rs`).**
   arrangement now sweeps each edge's pieces against the edges covering
   them. A region of one ring costs what it did.
 - Inputs accepted before are refused: overlapping polygons given as one
-  region (axioval's crowded-sliver test fixtures) must be united first, and
-  so must adjacent polygons computed in floating point (rounded room
-  footprints), which are now refused as `PolygonsOverlap`.
+  region (such as test fixtures built from crowded slivers) must be united
+  first, and so must adjacent polygons computed in floating point (rounded
+  room footprints), which are now refused as `PolygonsOverlap`.
 - An input of polygons with holes that cross each other many times is cut
   in full before it is refused.
 
