@@ -155,6 +155,7 @@ pub mod path_bound;
 pub mod seam;
 pub mod window;
 
+pub(crate) use certify::CurveLengths;
 pub use certify::{DistanceInterval, MAX_CERTIFIED_PANELS, POINT_ROUNDING, UNCERTIFIED_LENGTH};
 pub use composite::{CompositeBasis, StationCurve, StationPiece, JOINT_TOLERANCE};
 pub use frame_bound::{

@@ -52,6 +52,7 @@ const TURNING: Scalar = 2.0 + 2.0 * core::f64::consts::PI;
 
 /// The base's certified arc length at every native parameter of the
 /// piece, from its chord panels.
+#[derive(Debug, Clone)]
 pub(super) struct BaseTable {
     panels: Vec<Panel>,
     /// Lower and upper bounds of the length at each panel's start, and at
@@ -91,6 +92,11 @@ impl BaseTable {
             upper,
             slack,
         })
+    }
+
+    /// The parameter span of each panel, in order.
+    pub(super) fn spans(&self) -> Vec<(Scalar, Scalar)> {
+        self.panels.iter().map(|p| (p.a.t, p.b.t)).collect()
     }
 
     /// Bounds of the base's whole length between the piece's ends.

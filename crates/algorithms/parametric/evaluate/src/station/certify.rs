@@ -306,6 +306,7 @@ fn offset_length(
 
 /// A base curve evaluated in closed form at its native parameter, 2D lifted
 /// to `z = 0`; a polyline's segment as a line in its measure.
+#[derive(Debug, Clone)]
 enum Native<'c> {
     Two(Cow<'c, Curve2>),
     Three(Cow<'c, Curve3>),
@@ -551,6 +552,63 @@ impl<'c> Native<'c> {
 /// the certified lengths are measured between.
 pub(crate) fn read_parameter(curve: StationCurve<'_>, m: Scalar) -> GeomResult<Scalar> {
     Native::of(curve, m, m)?.parameter(m)
+}
+
+/// The certified arc length of a closed-form 2D curve (a line, a circle, an
+/// ellipse, a B-spline) from a start parameter, by chord panels (#438): an
+/// interval for `lambda(t)` at every parameter, so a chain can enclose the
+/// parameter its arc-length inverse reads instead of trusting the
+/// evaluator's.
+#[derive(Debug, Clone)]
+pub(crate) struct CurveLengths {
+    native: Native<'static>,
+    table: beside::BaseTable,
+}
+
+impl CurveLengths {
+    /// The lengths of `curve` over the parameters `[t0, t1]`, each panel
+    /// refined until the panels' widths sum to `target`.
+    ///
+    /// # Errors
+    ///
+    /// A curve of another family, and the certificate's own refusals.
+    pub(crate) fn new(curve: &Curve2, t0: Scalar, t1: Scalar, target: Scalar) -> GeomResult<Self> {
+        if !matches!(
+            curve,
+            Curve2::Line(_) | Curve2::Circle(_) | Curve2::Ellipse(_) | Curve2::BSpline(_)
+        ) {
+            return Err(uncertified());
+        }
+        let native = Native::Two(Cow::Owned(curve.clone()));
+        let mut breaks = native.breaks(2);
+        breaks.extend(native.breaks(1));
+        let table = native.measured(|m| beside::BaseTable::build(m, t0, t1, &breaks, target))?;
+        Ok(Self { native, table })
+    }
+
+    /// Bounds of the arc length from the start parameter to `t`.
+    ///
+    /// # Errors
+    ///
+    /// The evaluators' own.
+    pub(crate) fn at(&self, t: Scalar) -> GeomResult<(Scalar, Scalar)> {
+        self.native.measured(|m| self.table.at(m, t))
+    }
+
+    /// Bounds of the whole length over the table's parameters.
+    pub(crate) fn total(&self) -> (Scalar, Scalar) {
+        self.table.total()
+    }
+
+    /// The parameter spans of the panels, in order.
+    pub(crate) fn panels(&self) -> Vec<(Scalar, Scalar)> {
+        self.table.spans()
+    }
+
+    /// The coordinate magnitude a point's rounding is relative to.
+    pub(crate) fn extent(&self) -> Scalar {
+        self.native.extent()
+    }
 }
 
 /// A polyline's segment holding the measure `mid`, as the origin and unit
@@ -1053,5 +1111,78 @@ mod tests {
                 );
             }
         }
+    }
+
+    /// `y = a x^3` over `x in [0, reach]` as an exact cubic Bezier, with its
+    /// arc length from 0 to `x` by the binomial series `sum_n C(1/2, n) (9
+    /// a^2)^n x^(4n+1) / (4n+1)`: both independent of the chord panels.
+    fn cubic(a: Scalar, reach: Scalar) -> Curve2 {
+        Curve2::BSpline(axiolid_curve::BSplineCurve2 {
+            degree: 3,
+            control_points: vec![
+                Point2::new(0.0, 0.0),
+                Point2::new(reach / 3.0, 0.0),
+                Point2::new(2.0 * reach / 3.0, 0.0),
+                Point2::new(reach, a * reach.powi(3)),
+            ],
+            knots: vec![0.0, 1.0],
+            multiplicities: vec![4, 4],
+            weights: None,
+            closed: false,
+            self_intersect: None,
+            knot_spec: axiolid_curve::KnotSpec::PiecewiseBezier,
+        })
+    }
+
+    fn cubic_series(a: Scalar, x: Scalar) -> Scalar {
+        let z = 9.0 * a * a * x.powi(4);
+        let (mut binomial, mut power, mut sum) = (1.0, 1.0, 0.0);
+        for n in 0..200 {
+            let term = binomial * power / (4.0 * Scalar::from(n) + 1.0);
+            sum += term;
+            if term.abs() < 1e-30 {
+                break;
+            }
+            binomial *= (0.5 - Scalar::from(n)) / (Scalar::from(n) + 1.0);
+            power *= z;
+        }
+        x * sum
+    }
+
+    #[test]
+    fn curve_lengths_enclose_the_cubic_series() {
+        let (radius, reach) = (300.0, 60.0);
+        let a = 1.0 / (6.0 * radius * reach);
+        let curve = cubic(a, reach);
+        for target in [1e-9, 1e-11] {
+            let lengths = CurveLengths::new(&curve, 0.0, 1.0, target).unwrap();
+            for i in 0..=1000 {
+                let t = Scalar::from(i) / 1000.0;
+                let (lo, hi) = lengths.at(t).unwrap();
+                let series = cubic_series(a, t * reach);
+                assert!(
+                    lo <= series && series <= hi,
+                    "t={t} target={target}: {lo} {series} {hi}"
+                );
+                assert!(
+                    hi - lo <= 2.0 * target,
+                    "t={t} target={target}: width {}",
+                    hi - lo
+                );
+            }
+            let (lo, hi) = lengths.total();
+            let series = cubic_series(a, reach);
+            assert!(lo <= series && series <= hi);
+            assert!(!lengths.panels().is_empty());
+        }
+    }
+
+    #[test]
+    fn curve_lengths_refuse_a_family_without_a_closed_form() {
+        let curve = Curve2::Polyline(axiolid_curve::Polyline2 {
+            points: vec![Point2::new(0.0, 0.0), Point2::new(1.0, 0.0)],
+            closed: false,
+        });
+        assert!(CurveLengths::new(&curve, 0.0, 1.0, 1e-9).is_err());
     }
 }
