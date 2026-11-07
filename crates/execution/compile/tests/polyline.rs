@@ -18,8 +18,9 @@ use axiolid_mesh_boolean_boolmesh::BoolmeshBoolean;
 use axiolid_mesh_compile::ReferenceMeshCompiler;
 use axiolid_mesh_compile_contract::{MeshCompiler, PolylineCompiler, PolylineOutcome};
 use axiolid_model::{
-    CurveStation, GeometryGraph, GeometryGraphBuilder, GeometryNode, Instance, InstanceAtStation,
-    NodeId, OpenProfile, Station, StationFrame,
+    CurveRelation, CurveSegment, CurveStation, GeometryGraph, GeometryGraphBuilder, GeometryNode,
+    Instance, InstanceAtStation, NodeId, OpenProfile, Station, StationFrame, Transition,
+    TrimSelector, TrimmingPreference,
 };
 
 const CHORD: Scalar = 1e-3;
@@ -578,4 +579,39 @@ fn a_circle_placed_far_out_holds_its_bound_in_f64() {
     assert!(worst <= bound, "{worst:e} over {bound:e}");
     assert!(worst > 0.0);
     refused_below_rounding(compiler().compile_polyline(&graph, root, &options_at(1e-9)));
+}
+
+#[test]
+fn a_trim_of_a_composite_of_a_tilted_circle_is_cut_by_arc_length() {
+    // A unit circle in 3D inside a composite: its parameter is arc length,
+    // so `[0.2, 0.9]` is the angles `[0.2, 0.9]`.
+    let circle = Curve3::Circle(Circle3 {
+        frame: tilted_frame(),
+        radius: 1.0,
+    });
+    let (graph, root) = graph_of(|b| {
+        let basis = b.push_value(circle.clone()).unwrap();
+        let chain = b
+            .push(GeometryNode::CurveRelation(CurveRelation::Composite {
+                segments: vec![CurveSegment {
+                    curve: basis,
+                    same_sense: true,
+                    transition: Transition::Continuous,
+                }],
+            }))
+            .unwrap();
+        b.push(GeometryNode::CurveRelation(CurveRelation::Trimmed {
+            basis: chain,
+            start: vec![TrimSelector::Parameter(0.2)],
+            end: vec![TrimSelector::Parameter(0.9)],
+            sense_agreement: true,
+            preference: TrimmingPreference::Parameter,
+        }))
+        .unwrap()
+    });
+    let outcome = polyline(&graph, root).unwrap();
+    let on = |t: Scalar| axiolid_reference::curve::evaluate3(&circle, t).unwrap();
+    assert!((outcome.points[0] - on(0.2)).length() <= 1e-12);
+    assert!((*outcome.points.last().unwrap() - on(0.9)).length() <= 1e-12);
+    assert!(outcome.deviation.meets_requested());
 }

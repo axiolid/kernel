@@ -131,12 +131,7 @@ fn interval(a: Scalar, b: Scalar) -> Carrier {
 ///
 /// A node with no parameter a trim could be read in, by name; the nesting
 /// is bounded.
-pub(crate) fn carrier(
-    graph: &GeometryGraph,
-    id: NodeId,
-    slack: Scalar,
-    depth: usize,
-) -> GeomResult<Carrier> {
+pub(crate) fn carrier(graph: &GeometryGraph, id: NodeId, depth: usize) -> GeomResult<Carrier> {
     if depth > MAX_DEPTH {
         return Err(GeomError::BudgetExceeded {
             resource: "relations and placements nested in a trim",
@@ -145,11 +140,11 @@ pub(crate) fn carrier(
     match graph.get(id) {
         Some(GeometryNode::Curve2(curve)) => Ok(carrier2(curve)),
         Some(GeometryNode::Curve3(curve)) => Ok(carrier3(curve)),
-        Some(GeometryNode::Instance(instance)) => carrier(graph, instance.source, slack, depth + 1),
-        Some(GeometryNode::InstanceAtStation(at)) => carrier(graph, at.source, slack, depth + 1),
-        Some(GeometryNode::OpenProfile(profile)) => carrier(graph, profile.path, slack, depth + 1),
+        Some(GeometryNode::Instance(instance)) => carrier(graph, instance.source, depth + 1),
+        Some(GeometryNode::InstanceAtStation(at)) => carrier(graph, at.source, depth + 1),
+        Some(GeometryNode::OpenProfile(profile)) => carrier(graph, profile.path, depth + 1),
         Some(GeometryNode::CurveRelation(CurveRelation::Offset { basis, .. })) => {
-            carrier(graph, *basis, slack, depth + 1)
+            carrier(graph, *basis, depth + 1)
         }
         Some(GeometryNode::CurveRelation(CurveRelation::Trimmed {
             basis,
@@ -158,16 +153,16 @@ pub(crate) fn carrier(
             sense_agreement,
             preference,
         })) => {
-            let span = trimmed_span(
+            let inner = carrier(graph, *basis, depth + 1)?;
+            let span = span_in(
                 graph,
+                inner,
                 *basis,
                 (start, end),
                 (*sense_agreement, *preference),
                 None,
-                slack,
-                depth + 1,
             )?;
-            let period = carrier(graph, *basis, slack, depth + 1)?.period();
+            let period = inner.period();
             Ok(Carrier::Interval {
                 lo: span.0,
                 hi: span.1,
@@ -220,8 +215,7 @@ pub(crate) fn composite_basis(graph: &GeometryGraph, id: NodeId) -> GeomResult<C
 ///
 /// The basis's own curve reads its selectors as a station basis does
 /// ([`super::trim_parameters`]: a parameter, an arc length or a point); any
-/// other basis reads a parameter selector in its carrier. `slack` is the
-/// tolerance a parameter may lie beyond an end by.
+/// other basis reads a parameter selector in its carrier.
 ///
 /// # Errors
 ///
@@ -231,13 +225,24 @@ pub(crate) fn composite_basis(graph: &GeometryGraph, id: NodeId) -> GeomResult<C
 pub(crate) fn trimmed_span(
     graph: &GeometryGraph,
     basis: NodeId,
+    selectors: (&[TrimSelector], &[TrimSelector]),
+    sense: (bool, TrimmingPreference),
+    incoming: Option<(Scalar, Scalar)>,
+    depth: usize,
+) -> GeomResult<(Scalar, Scalar)> {
+    let inner = carrier(graph, basis, depth)?;
+    span_in(graph, inner, basis, selectors, sense, incoming)
+}
+
+/// [`trimmed_span`] over the `carrier` of the basis, read once.
+fn span_in(
+    graph: &GeometryGraph,
+    carrier: Carrier,
+    basis: NodeId,
     (start, end): (&[TrimSelector], &[TrimSelector]),
     (sense, preference): (bool, TrimmingPreference),
     incoming: Option<(Scalar, Scalar)>,
-    slack: Scalar,
-    depth: usize,
 ) -> GeomResult<(Scalar, Scalar)> {
-    let carrier = carrier(graph, basis, slack, depth)?;
     let own = match graph.get(basis) {
         Some(GeometryNode::Curve2(curve)) => {
             super::trim_parameters(StationCurve::Two(curve), start, end, sense, preference)?
@@ -248,12 +253,12 @@ pub(crate) fn trimmed_span(
         _ => {
             let a = relation_parameter(start, preference)?;
             let b = relation_parameter(end, preference)?;
-            cut(carrier, (a, b), sense, slack)?
+            cut(carrier, (a, b), sense)?
         }
     };
     match incoming {
         None => Ok(own),
-        Some(window) => narrowed(own, carrier.period(), window, slack),
+        Some(window) => narrowed(own, carrier.period(), window),
     }
 }
 
@@ -285,12 +290,7 @@ fn relation_parameter(
 
 /// The span `[lo, hi]` a trim between parameters `a` and `b` of a relation
 /// keeps, in the sense it runs by.
-fn cut(
-    carrier: Carrier,
-    (a, b): (Scalar, Scalar),
-    sense: bool,
-    slack: Scalar,
-) -> GeomResult<(Scalar, Scalar)> {
+fn cut(carrier: Carrier, (a, b): (Scalar, Scalar), sense: bool) -> GeomResult<(Scalar, Scalar)> {
     if a == b {
         return Err(GeomError::Degenerate(
             "a trimmed curve has an empty parameter interval".into(),
@@ -308,14 +308,15 @@ fn cut(
             if closed && (b > a) != sense {
                 return Err(unsupported(TRIM_ACROSS_CLOSING_JOINT));
             }
-            narrowed((lo, hi), period, (a, b), slack)
+            narrowed((lo, hi), period, (a, b))
         }
     }
 }
 
 /// The part of the span `(lo, hi)` the `window` names: its ends read modulo
-/// `period` into the span where the carrier repeats, within `slack` of the
-/// span's ends otherwise.
+/// `period` into the span where the carrier repeats, within a slack relative
+/// to the parameters ([`crate::directrix::parameter_slack`]) of the span's
+/// ends otherwise.
 ///
 /// # Errors
 ///
@@ -324,8 +325,8 @@ pub(crate) fn narrowed(
     (lo, hi): (Scalar, Scalar),
     period: Option<Scalar>,
     (a, b): (Scalar, Scalar),
-    slack: Scalar,
 ) -> GeomResult<(Scalar, Scalar)> {
+    let slack = crate::directrix::parameter_slack(&[lo, hi, a, b]);
     if let Some(period) = period {
         return crate::directrix::range_on_periodic_arc((lo, hi), period, (a, b), slack).map_err(
             |error| match error {

@@ -21,7 +21,7 @@ use axiolid_model::{
     Instance, InstanceAtStation, NodeId, Station, StationFrame, Transition, TrimSelector,
     TrimmingPreference,
 };
-use axiolid_reference::curve::evaluate2;
+use axiolid_reference::curve::{derivative2, evaluate2};
 use axiolid_reference::station::CompositeBasis;
 
 const CHORD: Scalar = 1e-3;
@@ -468,17 +468,37 @@ fn a_cut_at_a_joint_leaves_no_repeated_vertex() {
     );
 }
 
-/// A segment `(0, 0) -> (1, 0)` and a degree-one B-spline from `(1, 0)`
-/// along the x axis: its arc length is a quadrature.
+/// A cubic Bezier from `(3, 0)`, about 95 long, whose arc length is a
+/// quadrature.
+fn bezier() -> Curve2 {
+    Curve2::BSpline(BSplineCurve2 {
+        degree: 3,
+        control_points: vec![
+            Point2::new(3.0, 0.0),
+            Point2::new(33.0, 0.0),
+            Point2::new(63.0, 20.0),
+            Point2::new(93.0, 20.0),
+        ],
+        knots: vec![0.0, 1.0],
+        multiplicities: vec![4, 4],
+        weights: None,
+        closed: false,
+        self_intersect: None,
+        knot_spec: KnotSpec::Unspecified,
+    })
+}
+
+/// A segment `(0, 0) -> (3, 0)` and a degree-one B-spline from `(3, 0)`
+/// along the x axis, a quadrature too: the exact curve is easy to write.
 fn segment_then_spline(b: &mut GeometryGraphBuilder) -> NodeId {
-    let first = segment2(b, (0.0, 0.0), (1.0, 0.0));
+    let first = segment2(b, (0.0, 0.0), (3.0, 0.0));
     let spline = b
         .push_value(Curve2::BSpline(BSplineCurve2 {
             degree: 1,
             control_points: vec![
-                Point2::new(1.0, 0.0),
-                Point2::new(2.0, 0.0),
+                Point2::new(3.0, 0.0),
                 Point2::new(4.0, 0.0),
+                Point2::new(6.0, 0.0),
             ],
             knots: vec![0.0, 0.5, 1.0],
             multiplicities: vec![2, 1, 2],
@@ -491,31 +511,57 @@ fn segment_then_spline(b: &mut GeometryGraphBuilder) -> NodeId {
     composite(b, &[(first, true), (spline, true)])
 }
 
+/// Simpson's rule, `1e5` panels, of the speed of `curve` over `[a, b]`.
+fn simpson_length(curve: &Curve2, a: Scalar, b: Scalar) -> Scalar {
+    let panels = 100_000;
+    let h = (b - a) / Scalar::from(panels);
+    let speed = |t: Scalar| derivative2(curve, t).unwrap().length();
+    let mut sum = speed(a) + speed(b);
+    for i in 1..panels {
+        let weight = if i % 2 == 1 { 4.0 } else { 2.0 };
+        sum += weight * speed(a + h * Scalar::from(i));
+    }
+    sum * h / 3.0
+}
+
 #[test]
 fn a_cut_inside_a_quadrature_piece_adds_its_certified_error() {
-    let (from, to) = (0.5, 2.2);
+    let curve = bezier();
+    let (from, to) = (1.0, 20.0);
     let (graph, root) = graph_of(|b| {
-        let whole = segment_then_spline(b);
+        let first = segment2(b, (0.0, 0.0), (3.0, 0.0));
+        let spline = b.push_value(curve.clone()).unwrap();
+        let whole = composite(b, &[(first, true), (spline, true)]);
         trim(b, whole, p(from), p(to), true)
     });
     let outcome = polyline(&graph, root).unwrap();
-    // The curve is the x axis, `d` from the origin.
-    within_bound(&outcome, |s| bent_at(from + (to - from) * s), SAMPLES);
-    // The error the cut certifies, read from the same basis.
     let whole = match graph.get(root) {
         Some(GeometryNode::CurveRelation(CurveRelation::Trimmed { basis, .. })) => *basis,
         other => panic!("{other:?}"),
     };
     let path = axiolid_mesh_compile::station::curve_path(&graph, whole).unwrap();
     let basis = CompositeBasis::from_path(&path).unwrap();
+    // Where the polyline ends: the curve at the native parameter the cut
+    // reads, whose true length from the start is a quadrature of our own.
+    let cut = basis.pieces_between(from, to).unwrap();
+    let (t0, t1) = cut.last().unwrap().native_span().unwrap();
+    close(
+        *outcome.points.last().unwrap(),
+        lift(evaluate2(&curve, t1).unwrap()),
+        "last",
+    );
+    let reached = 3.0 + simpson_length(&curve, t0, t1);
+    let off = (reached - to).abs();
+    // The certified error of the cut, from the same basis.
     let tolerance = 0.125 * CHORD;
     let start = basis.distance_interval_at(from, tolerance).unwrap();
     let end = basis.distance_interval_at(to, tolerance).unwrap();
     let expected = (start.upper - from).max(to - end.lower).max(0.0);
     assert!(expected > 0.0, "the cut is exact: {start:?} {end:?}");
+    assert!(end.contains(reached), "{end:?} misses the true {reached}");
     assert!(
-        outcome.deviation.bound >= expected,
-        "{} < {expected}",
+        outcome.deviation.bound >= expected && outcome.deviation.bound >= off,
+        "{} < {expected} / {off}",
         outcome.deviation.bound
     );
 }
@@ -706,7 +752,7 @@ fn the_remaining_trims_of_composites_are_refused_by_name() {
     let (graph, root) = graph_of(|b| {
         let whole = segment_then_spline(b);
         let moved = offset(b, whole, 0.1, None);
-        trim(b, moved, p(0.5), p(2.2), true)
+        trim(b, moved, p(0.5), p(4.2), true)
     });
     refused(
         polyline(&graph, root),
@@ -726,4 +772,62 @@ fn the_remaining_trims_of_composites_are_refused_by_name() {
         trim(b, whole, p(0.0), p(1.0), true)
     });
     refused(polyline(&graph, root), "no arc length is measured along it");
+}
+
+#[test]
+fn a_trim_of_a_full_turn_keeps_the_arc_it_names() {
+    let circle = circle2(Point2::ZERO, 2.0);
+    let on = |t: Scalar| lift(evaluate2(&circle, t).unwrap());
+    for (from, to) in [(PI, 2.0 * PI), (1.5 * PI, 2.0 * PI), (0.0, PI)] {
+        let (graph, root) = graph_of(|b| {
+            let basis = b.push_value(circle.clone()).unwrap();
+            let whole = trim(b, basis, p(0.0), p(2.0 * PI), true);
+            trim(b, whole, p(from), p(to), true)
+        });
+        let outcome = polyline(&graph, root).unwrap();
+        close(outcome.points[0], on(from), "first");
+        close(*outcome.points.last().unwrap(), on(to), "last");
+        within_bound(&outcome, |s| on(from + (to - from) * s), SAMPLES);
+    }
+}
+
+#[test]
+fn a_deep_chain_of_trims_is_compiled_in_linear_time() {
+    let spline = spline2();
+    let (graph, root) = graph_of(|b| {
+        let mut node = b.push_value(spline.clone()).unwrap();
+        for level in 0..60 {
+            let margin = 0.001 * Scalar::from(level);
+            node = trim(b, node, p(margin), p(1.0 - margin), true);
+        }
+        node
+    });
+    let started = std::time::Instant::now();
+    let outcome = polyline(&graph, root).unwrap();
+    assert!(started.elapsed().as_secs() < 20, "{:?}", started.elapsed());
+    let on = |t: Scalar| lift(evaluate2(&spline, t).unwrap());
+    close(outcome.points[0], on(0.059), "first");
+}
+
+#[test]
+fn a_window_past_the_inner_span_is_refused_in_parameter_units() {
+    let spline = spline2();
+    let nested = |from: Scalar| {
+        graph_of(|b| {
+            let basis = b.push_value(spline.clone()).unwrap();
+            let inner = trim(b, basis, p(0.1), p(0.9), true);
+            trim(b, inner, p(from), p(0.6), true)
+        })
+    };
+    // Half a thousandth of a parameter past the inner span is not rounding.
+    let (graph, root) = nested(0.0995);
+    invalid(polyline(&graph, root));
+    // A rounding residue is.
+    let (graph, root) = nested(0.1 - 1e-15);
+    let outcome = polyline(&graph, root).unwrap();
+    close(
+        outcome.points[0],
+        lift(evaluate2(&spline, 0.1).unwrap()),
+        "first",
+    );
 }

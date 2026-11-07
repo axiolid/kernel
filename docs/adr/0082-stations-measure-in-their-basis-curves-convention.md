@@ -1779,9 +1779,9 @@ sweep range on an `IfcTrimmedCurve` circle is angles of the circle).
   against the inner span and narrow it: where the inner basis is a closed
   conic they are read modulo its period into the inner trim's arc, so
   selectors on either side of the seam name the same part of the arc; else
-  they must lie within the inner span, to a slack of `1e-9` (a station
-  basis is read from the graph alone, so the directrix's and the polyline's
-  linear tolerance is not at hand). A trim of a composite stays measured as
+  they must lie within the inner span, to a slack relative to the
+  parameters, `1e-12 * max(1, |x|)`, the evaluator's own rule for a
+  distance, so a nested and an unnested trim admit the same window. A trim of a composite stays measured as
   arc length along the composite, which is the composite's parameter, and a
   trim of a trim of a composite reads the same arc length.
 - **What did not change.** Only a trim of a trim (or of a placed trim)

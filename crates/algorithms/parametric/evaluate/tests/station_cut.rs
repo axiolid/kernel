@@ -303,3 +303,34 @@ fn end_points_are_the_first_start_and_the_last_end() {
     assert_eq!(first, Point3::new(1.0, 1.0, 0.0));
     near(last, Point3::new(3.0, 4.0, 0.0), 1e-12, "last");
 }
+
+#[test]
+fn a_distance_interval_inside_a_reversed_piece_measures_from_its_end() {
+    // A segment ending at the spline's end `(93, 20)`, then the spline run
+    // backwards: the cut lies at 40 from its END, not from its start.
+    let curve = spline(Point2::new(3.0, 0.0));
+    let segment = Curve2::Line(Line2 {
+        origin: Point2::new(90.0, 20.0),
+        direction: Vec2::X,
+    });
+    let basis = CompositeBasis::new(vec![
+        StationPiece::between(StationCurve::Two(&segment), 0.0, 3.0).unwrap(),
+        StationPiece::whole(StationCurve::Two(&curve))
+            .unwrap()
+            .reversed(),
+    ])
+    .unwrap();
+    let tolerance = 1e-6;
+    let distance = 3.0 + 40.0;
+    let interval = basis.distance_interval_at(distance, tolerance).unwrap();
+    assert!(interval.width() <= tolerance && !interval.is_point());
+    let cut = basis.pieces_between(0.0, distance).unwrap();
+    let (t0, t1) = cut[1].native_span().unwrap();
+    let reference = 3.0 + simpson_length(&curve, t0, t1);
+    assert!(
+        interval.contains(reference),
+        "{interval:?} misses {reference}"
+    );
+    // The last 40 are the curve's final 40, so its parameter is past the middle.
+    assert!(t0 > 0.5 && t1 == 1.0, "{t0} {t1}");
+}

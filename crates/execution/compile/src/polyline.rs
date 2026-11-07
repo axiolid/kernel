@@ -68,7 +68,8 @@
 //!   curve, a composite) reads parameter selectors only, in the parameter
 //!   of that curve (`crate::station::trimmed_span`): it keeps a span of the
 //!   inner trim's span, read modulo the period where the curve is a closed
-//!   conic or a trim of one, and to the linear tolerance otherwise. The
+//!   conic or a trim of one (a full turn's far end is its end), and to a slack
+//!   relative to the parameters otherwise. The
 //!   trim runs in its sense; the span it keeps is the inner trim's, so the
 //!   sense of an inner trim shows in the direction of the points.
 //! - **A trim of a composite** takes its composite's parameter, its 3D arc
@@ -372,7 +373,6 @@ fn trimmed(
         selectors,
         (sense, preference),
         window,
-        options.tolerance().linear(),
         depth + 1,
     )?;
     let (mut points, bound) = node(

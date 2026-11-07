@@ -50,12 +50,6 @@ use axiolid_reference::station::{
 /// Most relations and placements a station basis may be nested through.
 const MAX_BASIS_DEPTH: usize = 64;
 
-/// Slack within which a window a trim above keeps may lie beyond the span
-/// of the trim it narrows (#424): a directrix and a polyline take the
-/// options' linear tolerance, which a station basis, read from the graph
-/// alone, does not have.
-const NARROW_SLACK: Scalar = 1e-9;
-
 /// The refusal of a basis no station can be measured along.
 pub(crate) const UNSUPPORTED_BASIS: &str =
     "a station along an instanced curve, or along a curve relation other than a composite, a \
@@ -437,7 +431,6 @@ fn flatten_in<'g>(
                     (start, end),
                     (*sense_agreement, *preference),
                     window,
-                    NARROW_SLACK,
                     depth + 1,
                 )?)
             } else {

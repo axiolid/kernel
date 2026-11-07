@@ -12,6 +12,7 @@ use axiolid_contracts::{ExecutionOptions, GeomError, GeomResult, Operation};
 use axiolid_core::{Frame3, Point3, Scalar, Tolerance, Vec3};
 use axiolid_curve::{Circle3, Curve3};
 use axiolid_measure::volume_properties;
+use axiolid_mesh::TriMesh;
 use axiolid_mesh_boolean_boolmesh::BoolmeshBoolean;
 use axiolid_mesh_compile::station::resolve;
 use axiolid_mesh_compile::ReferenceMeshCompiler;
@@ -159,9 +160,8 @@ fn a_station_on_a_trim_of_a_reversed_trim_runs_the_inner_direction() {
     );
 }
 
-/// The volume of a disk swept along the circle trimmed by each of `trims`
-/// in turn.
-fn volume_along(trims: &[(Scalar, Scalar, bool)]) -> Scalar {
+/// A disk swept along the circle trimmed by each of `trims` in turn.
+fn mesh_along(trims: &[(Scalar, Scalar, bool)]) -> TriMesh {
     let mut b = GeometryGraphBuilder::new();
     let mut directrix = b.push_value(circle()).unwrap();
     for &(start, end, sense) in trims {
@@ -177,12 +177,20 @@ fn volume_along(trims: &[(Scalar, Scalar, bool)]) -> Scalar {
         }))
         .unwrap();
     let graph = b.finish(vec![sweep]).unwrap();
-    let mesh = compiler()
+    compiler()
         .compile_mesh(&graph, sweep, &ExecutionOptions::new(Tolerance::MILLIMETRE))
-        .unwrap();
-    volume_properties(&mesh, Tolerance::MILLIMETRE)
+        .unwrap()
+}
+
+fn volume_along(trims: &[(Scalar, Scalar, bool)]) -> Scalar {
+    volume_properties(&mesh_along(trims), Tolerance::MILLIMETRE)
         .expect("a swept disk is closed")
         .signed_volume
+}
+
+/// The mean `y` of the vertices: which half of the circle a tube lies on.
+fn mean_y(mesh: &TriMesh) -> Scalar {
+    mesh.positions.iter().map(|p| p.y).sum::<Scalar>() / mesh.positions.len() as Scalar
 }
 
 #[test]
@@ -229,4 +237,65 @@ fn a_point_or_arc_length_selector_on_a_trim_of_a_trim_is_refused() {
         ),
         "{result:?}"
     );
+}
+
+#[test]
+fn a_trim_of_a_full_turn_keeps_the_arc_it_names() {
+    // The whole circle trimmed, then its far half `[pi, 2 pi]`: the lower
+    // half, the points at those angles, not the near half `[0, pi]` a
+    // selector at the seam wraps to.
+    agrees((0.0, 2.0 * PI, true), (PI, 2.0 * PI, true), PI, PI);
+    agrees(
+        (0.0, 2.0 * PI, true),
+        (1.5 * PI, 2.0 * PI, true),
+        1.5 * PI,
+        FRAC_PI_2,
+    );
+    // And the near half, still.
+    agrees((0.0, 2.0 * PI, true), (0.0, PI, true), 0.0, PI);
+    // The directrix reads the same arc: the tube lies below the x axis.
+    let far = mesh_along(&[(0.0, 2.0 * PI, true), (PI, 2.0 * PI, true)]);
+    assert!(mean_y(&far) < -0.1, "{}", mean_y(&far));
+    let direct = volume_along(&[(PI, 2.0 * PI, true)]);
+    let nested = volume_along(&[(0.0, 2.0 * PI, true), (PI, 2.0 * PI, true)]);
+    assert!((nested - direct).abs() / direct < 1e-9, "{nested} {direct}");
+}
+
+#[test]
+fn a_window_just_past_a_long_composite_is_read_as_the_stations_read_it() {
+    // A distance within the evaluator's relative slack of the length, 1e-12
+    // of 1e7, is the end for the nested and the unnested trim alike.
+    let length = 1.0e7;
+    let mut b = GeometryGraphBuilder::new();
+    let segment = b
+        .push_value(axiolid_curve::Curve3::Polyline(axiolid_curve::Polyline3 {
+            points: vec![Point3::ZERO, Point3::new(length, 0.0, 0.0)],
+            closed: false,
+        }))
+        .unwrap();
+    let whole = b
+        .push(GeometryNode::CurveRelation(CurveRelation::Composite {
+            segments: vec![axiolid_model::CurveSegment {
+                curve: segment,
+                same_sense: true,
+                transition: axiolid_model::Transition::Continuous,
+            }],
+        }))
+        .unwrap();
+    let inner = trimmed(&mut b, whole, (p(0.0), p(length)), true);
+    let past = length + 0.5e-5;
+    let outer = trimmed(&mut b, inner, (p(5.0e6), p(past)), true);
+    let flat = trimmed(&mut b, whole, (p(5.0e6), p(past)), true);
+    let station = |b: &mut GeometryGraphBuilder, curve| {
+        b.push(GeometryNode::CurveStation(CurveStation::new(
+            curve,
+            Station::at(1.0),
+        )))
+        .unwrap()
+    };
+    let (a, c) = (station(&mut b, outer), station(&mut b, flat));
+    let graph = b.finish(vec![a, c]).unwrap();
+    let nested = resolve(&graph, a).unwrap().point;
+    let direct = resolve(&graph, c).unwrap().point;
+    close(nested, direct, "station");
 }

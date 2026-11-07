@@ -173,7 +173,7 @@ fn resolve(
             let selected = range.unwrap_or((a, b));
             let lo = a.min(b);
             let hi = a.max(b);
-            let slack = options.tolerance().linear();
+            let slack = parameter_slack(&[lo, hi, selected.0, selected.1]);
             if selected.0.min(selected.1) < lo - slack || selected.0.max(selected.1) > hi + slack {
                 return Err(GeomError::InvalidInput(
                     "sweep range exceeds trimmed directrix".into(),
@@ -510,19 +510,27 @@ fn sample_periodic_trim(
 }
 
 /// The unwrapped basis interval `[lo, hi]` of a periodic trim, narrowed to
-/// a sweep `range` when one is given (see [`sample_periodic_trim`]).
+/// a sweep `range` when one is given (see [`sample_periodic_trim`]). The
+/// range is read to a slack relative to the parameters
+/// ([`parameter_slack`]), not to the options' linear tolerance, so the
+/// options go unread.
 pub(crate) fn periodic_trim_interval(
     period: Scalar,
     a: Scalar,
     b: Scalar,
     sense: bool,
     range: Option<(Scalar, Scalar)>,
-    options: &ExecutionOptions,
+    _options: &ExecutionOptions,
 ) -> GeomResult<(Scalar, Scalar)> {
     let arc = periodic_arc(period, a, b, sense);
     match range {
         None => Ok(arc),
-        Some(range) => range_on_periodic_arc(arc, period, range, options.tolerance().linear()),
+        Some(range) => range_on_periodic_arc(
+            arc,
+            period,
+            range,
+            parameter_slack(&[arc.0, arc.1, range.0, range.1]),
+        ),
     }
 }
 
@@ -547,9 +555,20 @@ pub(crate) fn periodic_arc(period: Scalar, a: Scalar, b: Scalar, sense: bool) ->
     }
 }
 
+/// The slack within which a parameter may lie beyond the span `[lo, hi]` it
+/// is read against: relative to the parameters' magnitude, as the station
+/// measures admit a distance (`1e-12 * max(1, |x|)`), not a length: a
+/// parameter is a knot or an angle, so a linear tolerance means nothing
+/// against it.
+pub(crate) fn parameter_slack(values: &[Scalar]) -> Scalar {
+    1e-12 * values.iter().fold(1.0, |m: Scalar, v| m.max(v.abs()))
+}
+
 /// A `range` read in the parameter of a periodic arc `[lo, hi]`: each end
 /// is taken modulo the `period` into the arc, within `slack` of its ends,
-/// and the result is the sorted pair.
+/// and the result is the sorted pair. A full turn ends where it starts, so
+/// there an end that lands on `lo` is read as `hi` when it is the larger end
+/// asked: `[pi, 2 pi]` of a full turn is its far half, not its near one.
 pub(crate) fn range_on_periodic_arc(
     (lo, hi): (Scalar, Scalar),
     period: Scalar,
@@ -566,7 +585,8 @@ pub(crate) fn range_on_periodic_arc(
             "sweep parameter range is empty".into(),
         ));
     }
-    let into_arc = |value: Scalar| -> GeomResult<Scalar> {
+    // The end in the arc, and whether it landed on `lo`.
+    let into_arc = |value: Scalar| -> GeomResult<(Scalar, bool)> {
         let shifted = lo + (value - lo).rem_euclid(period);
         // Just below `lo`, a value wraps to just below `lo + period`:
         // read it as `lo` rather than refuse a rounding residue.
@@ -580,9 +600,16 @@ pub(crate) fn range_on_periodic_arc(
                 "sweep range exceeds trimmed directrix".into(),
             ));
         }
-        Ok(shifted.min(hi))
+        Ok((shifted.min(hi), shifted == lo))
     };
-    let (s, e) = (into_arc(start)?, into_arc(end)?);
+    let ((mut s, s_lo), (mut e, e_lo)) = (into_arc(start)?, into_arc(end)?);
+    if hi - lo >= period * (1.0 - PERIOD_SLACK) && !(s_lo && e_lo) {
+        if s_lo && start > end {
+            s = hi;
+        } else if e_lo && end > start {
+            e = hi;
+        }
+    }
     // An end ON the trim's far end maps back to `lo` when the arc is
     // a full turn; a range is never empty by that accident.
     let (s, e) = if s == e { (lo, hi) } else { (s, e) };
