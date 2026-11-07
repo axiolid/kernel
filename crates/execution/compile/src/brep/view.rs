@@ -4,7 +4,9 @@
 //! handles. Resolving them once, here, gives it a [`ResolvedBRep`] that
 //! needs no graph lookups: an edge's 3D curve, a use's pcurve with the
 //! parameter span the use runs over, and a face's surface are borrowed
-//! values, so one tessellator serves any source of supports (#412, #391).
+//! values, so one tessellator serves any source of supports (#412, #391). A
+//! face's surface is a [`Support`](super::support::Support): an atomic
+//! surface, or a surface relation the tessellator reads (#411).
 //!
 //! [`from_graph`] resolves handles into a [`GeometryGraph`]. The copy adds
 //! every entity in index order, so each id of the source B-rep names the
@@ -24,11 +26,12 @@
 //! pcurve of the smallest handle ([`super::edges`]).
 
 use super::support::Support;
+use crate::surface_relation::RelationSurface;
 use axiolid_brep::{Curve2Id, ExactBRep};
 use axiolid_contracts::{GeomError, GeomResult, Operation};
 use axiolid_core::Interval;
 use axiolid_curve::{Curve2, Curve3};
-use axiolid_model::{GeometryGraph, GeometryNode, NodeId};
+use axiolid_model::{GeometryGraph, GeometryNode, NodeId, SurfaceRelation};
 use axiolid_topology::{BRep, Edge, EdgeUse, Face, Loop};
 use std::collections::{BTreeSet, HashMap};
 
@@ -232,7 +235,8 @@ fn use_pcurve(graph: &GeometryGraph, id: NodeId) -> GeomResult<&Curve2> {
 /// A face may legitimately omit its surface: a planar polygon's boundary
 /// already determines its plane. A declared handle that does not resolve to
 /// a Surface node is a graph error, not an absent surface; one that resolves
-/// to a surface relation is refused by name.
+/// to a surface relation is read through [`RelationSurface`] where the
+/// tessellator supports it (#411) and refused by name otherwise.
 fn face_surface<'g>(
     graph: &'g GeometryGraph,
     face: &Face<NodeId>,
@@ -245,6 +249,21 @@ fn face_surface<'g>(
         // A relation (a ruled or swept surface) is a model node with no
         // `Surface` value to tessellate a face over; a refusal by name, not
         // a malformed graph (#402).
+        Some(GeometryNode::SurfaceRelation(
+            node @ SurfaceRelation::Revolution {
+                swept_curve,
+                axis_origin,
+                axis_direction,
+            },
+        )) => Ok(Some(Support::Relation {
+            node,
+            surface: RelationSurface::revolution(
+                graph,
+                *swept_curve,
+                *axis_origin,
+                *axis_direction,
+            )?,
+        })),
         Some(GeometryNode::SurfaceRelation(_)) => Err(GeomError::UnsupportedInput {
             backend: crate::BACKEND_ID,
             operation: Operation::Tessellation,

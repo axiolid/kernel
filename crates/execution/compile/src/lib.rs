@@ -19,6 +19,7 @@ mod ruled;
 mod skin;
 mod snap;
 pub mod station;
+mod surface_relation;
 mod trimmed;
 mod weld;
 

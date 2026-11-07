@@ -68,7 +68,7 @@
 
 use super::support::Support;
 use super::view::Pcurve;
-use axiolid_contracts::{GeomError, GeomResult};
+use axiolid_contracts::{GeomError, GeomResult, Operation};
 use axiolid_core::{Point2, Scalar, Tolerance, Vec3};
 use axiolid_nurbs::{
     CertifiedSurfaceProjectionOptions, PeriodicBSplineSurface, SurfaceInversionCertificate3,
@@ -90,6 +90,11 @@ use super::{
 /// report as the vertex's distance from the surface there, so this only
 /// trades search work against polishing.
 const BSPLINE_PARAMETER_RESOLUTION: Scalar = 1e-4;
+
+/// Why a face over a surface relation has no inverter: an edge use without
+/// a pcurve there is refused before any meshing (#411).
+const RELATION_WITHOUT_PCURVE: &str =
+    "an edge use without a pcurve on a face over a surface relation";
 
 /// Gauss-Newton steps sharpening certified B-spline parameters.
 const POLISH_STEPS: usize = 8;
@@ -132,7 +137,13 @@ struct SplineSearch {
 
 impl<'s> SurfaceInverter<'s> {
     pub(super) fn new(support: Support<'s>, tolerance: Tolerance) -> GeomResult<Self> {
-        let Support::Surface(surface) = support;
+        let Some(surface) = support.atomic() else {
+            return Err(GeomError::UnsupportedInput {
+                backend: crate::BACKEND_ID,
+                operation: Operation::Tessellation,
+                input: RELATION_WITHOUT_PCURVE,
+            });
+        };
         let Surface::BSpline(spline) = surface else {
             return Ok(Self {
                 surface,
@@ -492,7 +503,7 @@ impl FaceBound<'_> {
     /// across the lens is at most `2 W` long, and the surface strays from
     /// that segment's chord by `q(2 W) / 8` at most.
     fn lens(&self, a: Point2, b: Point2, arc: Scalar, near: Scalar) -> Option<Scalar> {
-        let Support::Surface(surface) = self.surface;
+        let surface = self.surface.atomic()?;
         let oracle = self.oracle.as_ref()?;
         let m = (a + b) * 0.5;
         let (su, sv) = axiolid_reference::surface::partials(surface, m.x, m.y).ok()?;

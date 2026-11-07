@@ -3,12 +3,15 @@
 //! The tessellator never matches a surface itself. It asks a [`Support`]
 //! for a point, its parameter periods, its family name and whether two
 //! faces share it, and a [`SupportOracle`] for the derivative bounds over
-//! a parameter box. Today every support is an atomic
-//! [`axiolid_surface::Surface`]; the view keeps the tessellator closed over
-//! one `Copy` type so a further support lands as one more arm here.
+//! a parameter box. A support is an atomic [`axiolid_surface::Surface`] or
+//! a surface relation read through a [`RelationSurface`] (#411, ADR 0103);
+//! the view keeps the tessellator closed over one `Copy` type, so a further
+//! support lands as one more arm here.
 
+use crate::surface_relation::{RelationOracle, RelationSurface};
 use axiolid_contracts::GeomResult;
 use axiolid_core::{Point3, Scalar};
+use axiolid_model::SurfaceRelation;
 use axiolid_reference::bound::{SurfaceBoundOracle, SurfaceBounds};
 use axiolid_surface::Surface;
 
@@ -17,6 +20,11 @@ use axiolid_surface::Surface;
 pub(crate) enum Support<'a> {
     /// An atomic surface value.
     Surface(&'a Surface),
+    /// A surface relation, with the node it was read from.
+    Relation {
+        node: &'a SurfaceRelation,
+        surface: RelationSurface<'a>,
+    },
 }
 
 impl<'a> Support<'a> {
@@ -24,6 +32,7 @@ impl<'a> Support<'a> {
     pub(crate) fn atomic(self) -> Option<&'a Surface> {
         match self {
             Self::Surface(surface) => Some(surface),
+            Self::Relation { .. } => None,
         }
     }
 
@@ -31,6 +40,7 @@ impl<'a> Support<'a> {
     pub(crate) fn evaluate(self, u: Scalar, v: Scalar) -> GeomResult<Point3> {
         match self {
             Self::Surface(surface) => axiolid_reference::surface::evaluate(surface, u, v),
+            Self::Relation { surface, .. } => surface.evaluate(u, v),
         }
     }
 
@@ -38,6 +48,7 @@ impl<'a> Support<'a> {
     pub(crate) fn periods(self) -> (Option<Scalar>, Option<Scalar>) {
         match self {
             Self::Surface(surface) => super::surface_periods(surface),
+            Self::Relation { surface, .. } => surface.periods(),
         }
     }
 
@@ -45,6 +56,7 @@ impl<'a> Support<'a> {
     pub(crate) fn family(self) -> &'static str {
         match self {
             Self::Surface(surface) => super::surface_family(surface),
+            Self::Relation { surface, .. } => surface.family(),
         }
     }
 
@@ -52,6 +64,8 @@ impl<'a> Support<'a> {
     pub(crate) fn same(self, other: Self) -> bool {
         match (self, other) {
             (Self::Surface(a), Self::Surface(b)) => std::ptr::eq(a, b),
+            (Self::Relation { node: a, .. }, Self::Relation { node: b, .. }) => std::ptr::eq(a, b),
+            _ => false,
         }
     }
 }
@@ -61,6 +75,8 @@ impl<'a> Support<'a> {
 pub(crate) enum SupportOracle<'a> {
     /// An atomic surface's oracle.
     Surface(SurfaceBoundOracle<'a>),
+    /// A surface relation's oracle.
+    Relation(RelationOracle<'a>),
 }
 
 impl<'a> SupportOracle<'a> {
@@ -68,6 +84,7 @@ impl<'a> SupportOracle<'a> {
     pub(crate) fn new(support: Support<'a>) -> Option<Self> {
         match support {
             Support::Surface(surface) => SurfaceBoundOracle::new(surface).map(Self::Surface),
+            Support::Relation { surface, .. } => Some(Self::Relation(RelationOracle::new(surface))),
         }
     }
 
@@ -75,6 +92,7 @@ impl<'a> SupportOracle<'a> {
     pub(crate) fn bounds(&self, u: (Scalar, Scalar), v: (Scalar, Scalar)) -> Option<SurfaceBounds> {
         match self {
             Self::Surface(oracle) => oracle.bounds(u, v),
+            Self::Relation(oracle) => oracle.bounds(u, v),
         }
     }
 }
