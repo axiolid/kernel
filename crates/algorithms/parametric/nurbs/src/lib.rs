@@ -41,6 +41,7 @@ mod implicit_ops;
 mod implicit_section;
 mod implicit_trace;
 mod intersection_curve;
+mod interval;
 mod pair_certify;
 mod pair_trace;
 mod periodic;

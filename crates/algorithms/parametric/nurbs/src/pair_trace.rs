@@ -23,7 +23,8 @@
 use axiolid_core::{Point2, Point3, Scalar, Vec3};
 use axiolid_curve::{BSplineSurface, Carrier, PairNode, PairSection3};
 
-use crate::pair_certify::{certify_chord, in_chord, isolate, Enclosure, I};
+use crate::interval::I;
+use crate::pair_certify::{certify_chord, in_chord, isolate, Enclosure};
 use crate::spline_field::bezier_net;
 
 /// A homogeneous control point.
