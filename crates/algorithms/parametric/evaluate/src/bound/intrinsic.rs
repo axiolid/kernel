@@ -21,11 +21,23 @@
 //! by quadrature (`crate::arc_length`, `crate::frenet`) to a stated
 //! estimate; a caller that needs a bound on the points reads them with
 //! [`super::IntrinsicPositions`] instead.
+//!
+//! [`evaluated_chord_bound2`] bounds the chord of the *evaluated* ends
+//! (#414). A chord whose ends each move by at most `g` moves by at most
+//! `g` everywhere, so the law's bound plus the larger of the two ends'
+//! distances from the exact points holds. Each distance is the evaluator's
+//! point against a certified [`IntrinsicPositionTable`] point, plus that
+//! point's own certified error.
 
 use axiolid_core::Scalar;
 use axiolid_curve::{CurvatureLaw, Intrinsic2, Intrinsic3};
 
-use super::{frame_stretch2, frame_stretch3, inflate, ordered, taylor, CurveDerivativeBounds};
+use super::interval::Iv;
+use super::{
+    frame_stretch2, frame_stretch3, inflate, ordered, taylor, CurveDerivativeBounds,
+    IntrinsicPositionTable,
+};
+use crate::arc_length::intrinsic_point;
 use crate::chain::curvature_bound;
 
 /// The span `[lo, hi]` of an intrinsic curve of `length`, or `None` outside
@@ -103,5 +115,35 @@ pub fn intrinsic_chord_bound3(curve: &Intrinsic3, a: Scalar, b: Scalar) -> Optio
     let (lo, hi) = span(a, b, curve.length)?;
     let k = curvature_bound(&curve.curvature, lo, hi)?;
     let out = inflate(taylor(hi - lo, frame_stretch3(&curve.start) * k));
+    out.is_finite().then_some(out)
+}
+
+/// Certified bound on the distance from the 2D intrinsic curve over `[a,
+/// b]` to the chord joining its *evaluated* ends (the quadrature points of
+/// `crate::arc_length`, not the exact ones): the law's bound
+/// ([`intrinsic_chord_bound2`]) plus the larger distance of an evaluated end
+/// from the exact point, each certified against a position table whose
+/// error is an eighth of the law's bound (or a few ulps of the placement,
+/// if more). `None` outside `[0, length]`, for a law with no closed-form
+/// bound, or where the table cannot be built.
+pub(super) fn evaluated_chord_bound2(curve: &Intrinsic2, a: Scalar, b: Scalar) -> Option<Scalar> {
+    let (lo, hi) = span(a, b, curve.length)?;
+    let law = intrinsic_chord_bound2(curve, lo, hi)?;
+    let stretch = frame_stretch2(&curve.start);
+    let origin = curve.start.origin.abs().max_element();
+    let floor = 64.0 * Scalar::EPSILON * (1.0 + origin + stretch * hi);
+    let table = IntrinsicPositionTable::new2(curve, (law / 8.0).max(floor), hi)?;
+    let gap = |s: Scalar| {
+        let (exact, error) = table.point2(s)?;
+        let read = intrinsic_point(curve, s).ok()?;
+        let d = [read.x - exact.x, read.y - exact.y]
+            .map(|c| Iv::point(c).sq())
+            .into_iter()
+            .fold(Iv::point(0.0), Iv::add)
+            .sqrt();
+        Some(Iv::point(d.hi).add(Iv::point(error)).hi)
+    };
+    let g = gap(lo)?.max(gap(hi)?);
+    let out = inflate(Iv::point(law).add(Iv::point(g)).hi);
     out.is_finite().then_some(out)
 }

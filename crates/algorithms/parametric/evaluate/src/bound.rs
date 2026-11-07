@@ -629,7 +629,11 @@ fn conic_bounds(
 /// Certified chord bound of a 2D curve over `[a, b]`.
 ///
 /// An upper bound on the distance from any point of the curve between `a`
-/// and `b` to the chord joining `c(a)` and `c(b)`. `None` when the family
+/// and `b` to the chord joining the *evaluated* ends (what
+/// [`crate::curve::evaluate2`] returns at `a` and at `b`, not the exact
+/// ones, which differ by the evaluator's own error: the bound carries it
+/// for the families whose evaluation is an estimate, a lifted pcurve's
+/// solve and an intrinsic curve's quadrature). `None` when the family
 /// has no derivative bound here, or when the curve may not be `C^1`
 /// strictly inside the interval (a polyline vertex, a B-spline knot of full
 /// multiplicity): split there first ([`continuity_breaks2`]).
@@ -674,6 +678,10 @@ pub fn chord_bound2(curve: &Curve2, a: Scalar, b: Scalar) -> Option<Scalar> {
         Curve2::Lifted(l) => {
             let (lo, hi) = ordered(a, b);
             lifted::chord_bound(l, lo, hi).map(inflate)
+        }
+        Curve2::Intrinsic(i) => {
+            let (lo, hi) = ordered(a, b);
+            intrinsic::evaluated_chord_bound2(i, lo, hi)
         }
         _ => curve_derivative_bounds2(curve, a, b).map(|d| inflate(taylor(b - a, d.second))),
     }
