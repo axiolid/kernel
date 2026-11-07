@@ -1195,7 +1195,8 @@ fn the_fast_mode_on_a_floor_of_sub_budget_teeth_keeps_its_side() {
     // floor. The fast mode fills each wall's teeth (an excess within the
     // budget, the result a few corners) and lies on the certified side
     // within its deviation of the true morphology, sampled in bands about
-    // the offsets of the walls, and over the whole plane.
+    // the offsets of the walls, about the result's own edges (2 mm either
+    // way), and over the whole plane.
     let (radius, budget, slack) = (1.4, 1e-3, 1e-7);
     let mut bands = Vec::new();
     for centre in [-radius, radius, 3.0 - radius, 3.0 + radius] {
@@ -1235,9 +1236,34 @@ fn the_fast_mode_on_a_floor_of_sub_budget_teeth_keeps_its_side() {
                 .map(|ring| ring.points.len())
                 .sum();
             assert!(corners_out < 100, "{what}: {corners_out} corners");
+            // Bands about the result's own edges, 2 mm either way, so that
+            // a sub-millimetre error of its side shows.
+            let (mut lo, mut hi) = (
+                Point2::new(f64::MAX, f64::MAX),
+                Point2::new(f64::MIN, f64::MIN),
+            );
+            for p in fast.polygons().iter().flat_map(|q| &q.outer.points) {
+                lo = Point2::new(lo.x.min(p.x), lo.y.min(p.y));
+                hi = Point2::new(hi.x.max(p.x), hi.y.max(p.y));
+            }
+            let mut own = Vec::new();
+            for y in [lo.y, hi.y] {
+                own.extend(samples(
+                    Point2::new(lo.x, y - 2e-3),
+                    Point2::new(hi.x, y + 2e-3),
+                    300,
+                ));
+            }
+            for x in [lo.x, hi.x] {
+                own.extend(samples(
+                    Point2::new(x - 2e-3, lo.y),
+                    Point2::new(x + 2e-3, hi.y),
+                    300,
+                ));
+            }
             let d = bound.deviation + slack;
             let mut checked = 0;
-            for &p in bands.iter().chain(&broad) {
+            for &p in own.iter().chain(&bands).chain(&broad) {
                 let held = in_region(&fast, p);
                 let (sure, near) = if erode {
                     let rule = |s: f64| in_exact_erosion(&r, p, s);

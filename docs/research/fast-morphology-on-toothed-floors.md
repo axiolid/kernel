@@ -25,7 +25,8 @@ median of 5 runs. Peak memory is the child's `VmHWM`.
 A copy of `fill`'s loop that counted why each chord was refused (not kept:
 the counts are in the table) and `fill::diagnosis` (an `#[ignore]` test that
 prints the chords, the filled ring and the excess per size and radius, run
-on the fixed code it shows 4 chords and 6 corners everywhere) showed, on the complement of the floor
+on the fixed code the floors' erosions take 3 or 4 chords and leave 6 to 9
+corners, 8 at 50,000 corners and r = 1.4, and the dilations 2 chords and 6) showed, on the complement of the floor
 (an erosion sums it), at `t` half the radius and a 1 mm budget:
 
 | corners | r (m) | chords used | filled ring (corners) | refused: unproved / over budget / ring inside |

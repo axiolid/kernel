@@ -27,7 +27,7 @@
 //! `t / 16` (0.0125 m), the reach of #330's proposals.
 //!
 //! The cases of #345 take a floor (`floor`): a 3 m square whose bottom and
-//! top sides carry teeth 0.5 mm deep, eroded inner by 1.4 m, 1.49 m and
+//! top sides carry teeth 0.5 mm deep, eroded inner and outer by 1.4 m, 1.49 m and
 //! 1.6 m (which empties it) at 50,000, 100,000, 150,000 and 200,000
 //! corners, in `fast` mode only (`DISC_EROSION_FLOOR` sets the corners,
 //! empty runs none). Its numbers are in
@@ -157,6 +157,7 @@ fn validate(
     outer: bool,
     radius: f64,
     hollow: bool,
+    sparse: bool,
 ) {
     assert!(hollow || !out.is_empty(), "an empty result");
     let deviation = out.bound().expect("a disc morphology's bound").deviation;
@@ -165,8 +166,10 @@ fn validate(
     let within = outer == erode;
     for polygon in out.polygons() {
         for r in std::iter::once(&polygon.outer).chain(&polygon.holes) {
-            // At most about 400 vertices per ring: the check is quadratic.
-            for &v in r.points.iter().step_by(r.points.len() / 400 + 1) {
+            // The floor's rings (#345) hold 100k corners: about 400 vertices
+            // per ring, the check being quadratic. Others at every vertex.
+            let stride = if sparse { r.points.len() / 400 + 1 } else { 1 };
+            for &v in r.points.iter().step_by(stride) {
                 let d = rings
                     .iter()
                     .flat_map(|ring| {
@@ -271,7 +274,15 @@ fn case(spec: &str) {
     let out = run();
     // A floor eroded by more than half its side is empty (#345).
     let hollow = parts[0] == "floor" && radius > FLOOR / 2.0;
-    validate(&rings, &out, erode, outer, radius, hollow);
+    validate(
+        &rings,
+        &out,
+        erode,
+        outer,
+        radius,
+        hollow,
+        parts[0] == "floor",
+    );
     let out_corners: usize = out
         .polygons()
         .iter()
@@ -390,7 +401,9 @@ fn main() {
     // finish). `DISC_EROSION_FLOOR` lists the corners, empty runs none.
     for n in sizes("DISC_EROSION_FLOOR", &FLOOR_CORNERS) {
         for r in FLOOR_RADII {
-            cases.push(format!("floor:erode:inner:{n}:{r}:fast"));
+            for side in ["inner", "outer"] {
+                cases.push(format!("floor:erode:{side}:{n}:{r}:fast"));
+            }
         }
     }
     for spec in cases {
