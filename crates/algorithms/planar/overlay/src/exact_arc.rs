@@ -53,6 +53,11 @@
 //!   segment's ring, and across any other stop only the rings met there
 //!   are counted afresh from a sample. Debug builds check them against the
 //!   full search and count.
+//! - The partial mode (`arrangement::build_partial`, #344) is the same
+//!   subdivision over chosen edges of each ring, with extra stops at given
+//!   points and no winding numbers. It shares the ring build's body
+//!   (`subdivide`), so a change there changes both; with every edge kept
+//!   it cuts exactly the pieces of the ring build, in the same order.
 //! - Output vertices are rounded once (`XPoint::rounded`, correctly rounded
 //!   for rational points). Rounded output must never be fed back into a
 //!   decision.
@@ -67,7 +72,9 @@
 //! boxes. The straight path ([`crate::exact_overlay`]) is tested against
 //! `i_overlay` by point membership away from boundaries, and
 //! `tests/exact_straight.rs` pins bit-identical vertices and correctly
-//! rounded crossings.
+//! rounded crossings. The partial mode's tests in `arrangement.rs` compare
+//! it piece for piece with the ring build and check its split points and
+//! the winding helper against the ring build's memberships.
 //! `tests/soup_membership.rs` checks unions of grid-snapped and random
 //! soups by point membership, and `scripts/probe_overlay_soup_mutants.py`
 //! lists the faults in the #218 shortcuts the suite must catch.
@@ -117,6 +124,15 @@ pub(crate) fn orient_doubles(a: Point2, b: Point2, c: Point2) -> Sign {
         )
     })
 }
+
+/// Whether `s` lies strictly inside the convex counter-clockwise ring with
+/// vertices `ccw` (#344): exactly, every `orient(ccw[i], ccw[i + 1], s)` is
+/// positive.
+#[allow(dead_code)] // read by `term_union` (next commit)
+pub(crate) fn inside_convex(s: &XPoint, ccw: &[XPoint]) -> bool {
+    (0..ccw.len()).all(|i| orient(&ccw[i], &ccw[(i + 1) % ccw.len()], s) == Sign::Positive)
+}
+
 /// Maps keyed by integers, coordinate bits or point identities, hashed by
 /// multiplication (#218): the default keyed hasher cost a third of a mesh
 /// soup's union. Only lookups read the hash, so no result depends on it.

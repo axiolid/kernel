@@ -70,6 +70,8 @@
 
 use axiolid_guarantees::Sign;
 
+use axiolid_core::Point2;
+
 use crate::arc::ArcRing;
 use crate::budget::{self, Charge};
 use crate::{OverlayError, OverlayRefusal};
@@ -114,6 +116,13 @@ impl Raw {
     /// The rounded position of one vertex (see [`Raw::vertex_positions`]).
     pub(crate) fn vertex_position(&self, index: usize) -> axiolid_core::Point2 {
         self.vertices[index].rounded()
+    }
+
+    /// The exact point strictly inside piece `index`, the one the piece's
+    /// memberships were read at.
+    #[allow(dead_code)] // read by `term_union` (next commit)
+    pub(crate) fn sample(&self, index: usize) -> &XPoint {
+        &self.pieces[index].sample
     }
 
     /// Whether a boundary arriving along one use and leaving along the next
@@ -195,16 +204,16 @@ struct Winder {
 const SCAN: usize = 32;
 
 impl Winder {
-    fn new(own: &[Edge]) -> Self {
+    fn new<'a>(own: impl Iterator<Item = &'a Edge> + Clone) -> Self {
         let mut parts = Vec::new();
         let mut boxes = Vec::new();
-        for edge in own {
+        for edge in own.clone() {
             for part in monotone(edge) {
                 parts.push(part);
                 boxes.push(edge.bounds);
             }
         }
-        let bounds = Bounds::hull(own.iter().map(|e| e.bounds)).expect("a ring has edges");
+        let bounds = Bounds::hull(own.map(|e| e.bounds)).expect("a ring has edges");
         let tree = (parts.len() > SCAN).then(|| BoxTree::new(boxes));
         Self {
             bounds,
@@ -231,10 +240,63 @@ impl Winder {
     }
 }
 
+/// Winding numbers of closed rings around exact points: the rings'
+/// monotone parts, a box tree over the rings and, per long ring, over its
+/// parts (the ring build's counting, shared).
+#[allow(dead_code)] // read by `term_union` (next commit)
+pub(crate) struct Windings {
+    rings: Vec<Winder>,
+    tree: BoxTree,
+    scratch: (Vec<usize>, Vec<usize>),
+    near: Vec<usize>,
+    stack: Vec<usize>,
+}
+
+#[allow(dead_code)] // read by `term_union` (next commit)
+impl Windings {
+    pub(crate) fn new(rings: &[ArcRing]) -> Self {
+        let rings: Vec<Winder> = rings
+            .iter()
+            .map(|ring| Winder::new(edges_of(ring).iter()))
+            .collect();
+        let tree = BoxTree::new(rings.iter().map(|w| w.bounds).collect());
+        Self {
+            rings,
+            tree,
+            scratch: (Vec::new(), Vec::new()),
+            near: Vec::new(),
+            stack: Vec::new(),
+        }
+    }
+
+    /// The rings, ascending, with a nonzero winding number around `s`
+    /// (which lies on no ring's boundary), leaving out those `skip` names.
+    pub(crate) fn holding(
+        &mut self,
+        s: &XPoint,
+        skip: impl Fn(usize) -> bool,
+        out: &mut Vec<usize>,
+    ) {
+        let (sx, sy) = s.enclosures();
+        self.tree
+            .query_into(|b| b.may_hold(sx, sy), &mut self.near, &mut self.stack);
+        out.clear();
+        out.extend(
+            self.near
+                .iter()
+                .copied()
+                .filter(|&ring| !skip(ring) && self.rings[ring].winding(s, &mut self.scratch) != 0),
+        );
+    }
+}
+
 #[cfg(test)]
 thread_local! {
     /// Edges tested as carriers, summed over pieces, for the test below.
     static CANDIDATES: std::cell::Cell<usize> = const { std::cell::Cell::new(0) };
+    /// Pieces cut by [`build_charged`] and [`build_partial`], summed, for
+    /// the cost tests (#344).
+    pub(crate) static PIECES: std::cell::Cell<usize> = const { std::cell::Cell::new(0) };
 }
 
 /// The first and last of `xs` along `edge`, which has all of them: `xs`
@@ -307,8 +369,67 @@ pub(crate) fn build_charged(rings: &[ArcRing], charge: &mut Charge) -> Result<Ra
         rings.iter().map(|ring| ring.vertices.len()).sum(),
         budget::PER_EDGE,
     )?;
-    let edges: Vec<Vec<Edge>> = rings.iter().map(edges_of).collect();
+    let edges = rings.iter().map(indexed_edges).collect();
+    subdivide(rings, edges, &[], true, charge)
+}
 
+/// [`build`] over the edges of each ring with `keep[ring][edge]` set, for a
+/// soup that has already dropped the edges that cannot matter (#344).
+///
+/// Each ring's kept edges are a group that never splits itself, as a whole
+/// ring does not. Every point of `splits` that lies strictly inside a kept
+/// edge becomes a stop of that edge, so the pieces end at every vertex the
+/// caller names. No winding numbers are counted: every
+/// [`RawEdge::inside`] is empty, and the caller reads a piece's sides from
+/// its `sources` and its own tests at [`Raw::sample`]. Sources name the
+/// edge's index in its ring, so they read like the ring build's. Pieces,
+/// owners and order follow the ring build's rules: the first carrier by
+/// ring keeps a shared piece, and edges come ring by ring in ring order.
+///
+/// The rings are simple, and the kept edges straight.
+///
+/// # Errors
+///
+/// As [`build`].
+#[allow(dead_code)] // read by `term_union` (next commit)
+pub(crate) fn build_partial(
+    rings: &[ArcRing],
+    keep: &[Vec<bool>],
+    splits: &[Point2],
+) -> Result<Raw, OverlayError> {
+    let edges = rings
+        .iter()
+        .zip(keep)
+        .map(|(ring, keep)| {
+            let mut flags = keep.iter();
+            let mut edges = indexed_edges(ring);
+            edges.retain(|_| *flags.next().expect("a flag per edge"));
+            edges
+        })
+        .collect();
+    // Repeated points cut an edge once.
+    let mut splits = splits.to_vec();
+    splits.sort_by_key(|p| (p.x.to_bits(), p.y.to_bits()));
+    splits.dedup_by_key(|p| (p.x.to_bits(), p.y.to_bits()));
+    subdivide(rings, edges, &splits, false, &mut Charge::unlimited()).map_err(budget::unbudgeted)
+}
+
+/// A ring's edges with their index in the ring.
+fn indexed_edges(ring: &ArcRing) -> Vec<(usize, Edge)> {
+    edges_of(ring).into_iter().enumerate().collect()
+}
+
+/// The subdivision of the plane by the given edges of `rings`:
+/// `edges[ring]` holds `(index in the ring, edge)`. With `wind` the pieces
+/// also record the rings containing them; `splits` are extra stops (see
+/// [`build_partial`]).
+fn subdivide(
+    rings: &[ArcRing],
+    edges: Vec<Vec<(usize, Edge)>>,
+    splits: &[Point2],
+    wind: bool,
+    charge: &mut Charge,
+) -> Result<Raw, OverlayRefusal> {
     // Broad phase over every edge and every monotone part of every ring
     // (#173): a subdivision of thousands of rings asks, for each edge,
     // which edges of other rings it may meet, and for each piece, which
@@ -321,13 +442,20 @@ pub(crate) fn build_charged(rings: &[ArcRing], charge: &mut Charge) -> Result<Ra
         .collect();
     let edge_tree = BoxTree::new(
         flat.iter()
-            .map(|&(ring, edge)| edges[ring][edge].bounds)
+            .map(|&(ring, edge)| edges[ring][edge].1.bounds)
             .collect(),
     );
     // Each ring's monotone parts, for winding numbers. Only rings whose
     // box holds a sample can contain it; a ring with many parts also gets
     // a tree, so the parts right of the sample are found without a scan.
-    let windings: Vec<Winder> = edges.iter().map(|own| Winder::new(own)).collect();
+    let windings: Vec<Winder> = if wind {
+        edges
+            .iter()
+            .map(|own| Winder::new(own.iter().map(|e| &e.1)))
+            .collect()
+    } else {
+        Vec::new()
+    };
     let ring_tree = BoxTree::new(windings.iter().map(|w| w.bounds).collect());
 
     // Split every edge at every point another ring's boundary meets it.
@@ -351,7 +479,7 @@ pub(crate) fn build_charged(rings: &[ArcRing], charge: &mut Charge) -> Result<Ra
     let mut cuts: Vec<Vec<Meeting>> = flat
         .iter()
         .map(|&(ring, edge)| {
-            let edge = &edges[ring][edge];
+            let edge = &edges[ring][edge].1;
             let mut stops = Vec::with_capacity(4);
             stops.extend([(edge.p0.clone(), None, None), (edge.p1.clone(), None, None)]);
             stops
@@ -377,13 +505,14 @@ pub(crate) fn build_charged(rings: &[ArcRing], charge: &mut Charge) -> Result<Ra
         .iter()
         .enumerate()
         .map(|(index, &(ring, edge))| {
-            if edges[ring][edge].is_arc() {
+            let (at, edge) = &edges[ring][edge];
+            if edge.is_arc() {
                 return index;
             }
             let vertices = &rings[ring].vertices;
             let (a, b) = (
-                vertices[edge].point,
-                vertices[(edge + 1) % vertices.len()].point,
+                vertices[*at].point,
+                vertices[(at + 1) % vertices.len()].point,
             );
             let key = [a.x, a.y, b.x, b.y].map(f64::to_bits);
             *first_of.entry(key).or_insert(index)
@@ -407,14 +536,15 @@ pub(crate) fn build_charged(rings: &[ArcRing], charge: &mut Charge) -> Result<Ra
         .iter()
         .enumerate()
         .map(|(index, &(ring, edge))| {
-            if edges[ring][edge].is_arc() {
+            let (at, edge) = &edges[ring][edge];
+            if edge.is_arc() {
                 return index;
             }
             let vertices = &rings[ring].vertices;
             let bits = |p: axiolid_core::Point2| [(p.x + 0.0).to_bits(), (p.y + 0.0).to_bits()];
             let (a, b) = (
-                bits(vertices[edge].point),
-                bits(vertices[(edge + 1) % vertices.len()].point),
+                bits(vertices[*at].point),
+                bits(vertices[(at + 1) % vertices.len()].point),
             );
             let (lo, hi) = if a <= b { (a, b) } else { (b, a) };
             *first_twin
@@ -429,7 +559,7 @@ pub(crate) fn build_charged(rings: &[ArcRing], charge: &mut Charge) -> Result<Ra
     let mut ring_hits = Vec::new();
     let mut scratch = (Vec::new(), Vec::new());
     for (index, &(ring, own)) in flat.iter().enumerate() {
-        let edge = &edges[ring][own];
+        let edge = &edges[ring][own].1;
         edge_tree.query_into(|b| b.overlaps(&edge.bounds), &mut hits, &mut stack);
         for &near in &hits {
             let (other, their) = flat[near];
@@ -440,7 +570,7 @@ pub(crate) fn build_charged(rings: &[ArcRing], charge: &mut Charge) -> Result<Ra
                 // Two later twins: neither keeps a piece.
                 continue;
             }
-            let theirs = &edges[other][their];
+            let theirs = &edges[other][their].1;
             let xs = if repeated[index] || repeated[near] {
                 match met_before.entry((named[index], named[near])) {
                     std::collections::hash_map::Entry::Occupied(held) => held.get().clone(),
@@ -492,9 +622,33 @@ pub(crate) fn build_charged(rings: &[ArcRing], charge: &mut Charge) -> Result<Ra
         }
     }
 
+    // The points the caller names are stops of the edges they lie inside
+    // (#344). An end of the edge is a stop already.
+    if !splits.is_empty() {
+        let at = BoxTree::new(
+            splits
+                .iter()
+                .map(|p| Bounds::around(std::slice::from_ref(p), 0.0))
+                .collect(),
+        );
+        for (index, &(ring, own)) in flat.iter().enumerate() {
+            let edge = &edges[ring][own].1;
+            debug_assert!(!edge.is_arc(), "split points are placed on straight edges");
+            at.query_into(|b| b.overlaps(&edge.bounds), &mut hits, &mut stack);
+            for &near in &hits {
+                let x = XPoint::from_f64(splits[near]);
+                if !edge.plainly_ends_at(&x) && edge.contains(&x) {
+                    cuts[index].push((x, None, None));
+                }
+            }
+        }
+    }
+
     // At most one piece between consecutive stops.
     let count: usize = cuts.iter().map(|stops| stops.len() - 1).sum();
     charge.add(count, budget::PER_PIECE)?;
+    #[cfg(test)]
+    PIECES.with(|c| c.set(c.get() + count));
     let mut pieces = Vec::with_capacity(count);
     let mut out = Vec::with_capacity(count);
     // Buffers reused for every edge: the rings met at each stop, the rings
@@ -503,7 +657,10 @@ pub(crate) fn build_charged(rings: &[ArcRing], charge: &mut Charge) -> Result<Ra
     let mut met: Vec<usize> = Vec::new();
     #[cfg(debug_assertions)]
     let mut candidates: Vec<usize> = Vec::new();
-    let cut_edges = flat.iter().copied().zip(edges.iter().flatten().zip(cuts));
+    let cut_edges = flat
+        .iter()
+        .copied()
+        .zip(edges.iter().flatten().map(|e| &e.1).zip(cuts));
     for (index, ((ring, own), (edge, mut meetings))) in cut_edges.enumerate() {
         // Stable: of the copies of one point, the first met stays first.
         meetings.sort_by(|a, b| match edge.order(&a.0, &b.0) {
@@ -630,7 +787,7 @@ pub(crate) fn build_charged(rings: &[ArcRing], charge: &mut Charge) -> Result<Ra
                     if carriers.iter().any(|c| c.0 == other) {
                         continue;
                     }
-                    let theirs = &edges[other][their];
+                    let theirs = &edges[other][their].1;
                     let twin = edge.same_segment(theirs);
                     if twin.is_some() || theirs.contains(&piece.sample) {
                         #[cfg(debug_assertions)]
@@ -671,11 +828,11 @@ pub(crate) fn build_charged(rings: &[ArcRing], charge: &mut Charge) -> Result<Ra
                     sign(Pred::Tangents {
                         at: &piece.sample,
                         u: &piece.tangent,
-                        v: &tangent_of(&edges[other][index]),
+                        v: &tangent_of(&edges[other][index].1),
                         cross: false,
                     }) == Sign::Positive
                 });
-                sources.push((other, index, same));
+                sources.push((other, edges[other][index].0, same));
             }
             let carried_by = |other: usize| carriers.iter().any(|c| c.0 == other);
             // The rings containing this piece, from the previous piece's,
@@ -750,6 +907,7 @@ pub(crate) fn build_charged(rings: &[ArcRing], charge: &mut Charge) -> Result<Ra
                     .collect()
             };
             let inside = match carried {
+                _ if !wind => Vec::new(),
                 Some(inside) => {
                     debug_assert_eq!(inside, counted(), "rings carried across a stop");
                     inside
@@ -757,7 +915,9 @@ pub(crate) fn build_charged(rings: &[ArcRing], charge: &mut Charge) -> Result<Ra
                 None => counted(),
             };
             charge.add(inside.len() + carriers.len(), budget::PER_MEMBER)?;
-            before = Some((inside.clone(), carriers.iter().map(|c| c.0).collect()));
+            if wind {
+                before = Some((inside.clone(), carriers.iter().map(|c| c.0).collect()));
+            }
             out.push(RawEdge {
                 from: 0,
                 to: 0,
@@ -838,8 +998,6 @@ pub(crate) fn build_charged(rings: &[ArcRing], charge: &mut Charge) -> Result<Ra
 
 #[cfg(test)]
 mod tests {
-    use axiolid_core::Point2;
-
     use super::*;
 
     fn rect(x0: f64, y0: f64, x1: f64, y1: f64) -> ArcRing {
@@ -864,5 +1022,129 @@ mod tests {
         let tested = CANDIDATES.with(std::cell::Cell::get);
         assert!(!raw.edges.is_empty());
         assert!(tested < 20 * k, "{tested} candidate tests for {k} rooms");
+    }
+
+    /// A deterministic soup of grid-snapped rectangles, many sharing
+    /// edges and corners.
+    fn grid_soup(count: usize, mut seed: u64) -> Vec<ArcRing> {
+        let mut next = move |n: u64| {
+            seed = seed
+                .wrapping_mul(6_364_136_223_846_793_005)
+                .wrapping_add(1_442_695_040_888_963_407);
+            (seed >> 33) % n
+        };
+        (0..count)
+            .map(|_| {
+                let (x, y) = (next(8) as f64, next(8) as f64);
+                rect(x, y, x + 1.0 + next(4) as f64, y + 1.0 + next(4) as f64)
+            })
+            .collect()
+    }
+
+    /// A piece's ends, rounded, its bulge bits and what carries it.
+    type Shape = (Point2, Point2, u64, Vec<(usize, usize, bool)>);
+
+    fn shape(raw: &Raw) -> Vec<Shape> {
+        raw.edges
+            .iter()
+            .map(|e| {
+                (
+                    raw.vertex_position(e.from),
+                    raw.vertex_position(e.to),
+                    e.bulge.to_bits(),
+                    e.sources.clone(),
+                )
+            })
+            .collect()
+    }
+
+    fn every_vertex(rings: &[ArcRing]) -> Vec<Point2> {
+        rings
+            .iter()
+            .flat_map(|r| r.vertices.iter().map(|v| v.point))
+            .collect()
+    }
+
+    #[test]
+    fn a_partial_build_of_whole_rings_cuts_as_the_ring_build() {
+        let mut soups = vec![
+            vec![rect(0.0, 0.0, 4.0, 4.0), rect(2.0, 2.0, 6.0, 6.0)],
+            // Shared edges and a corner on an edge.
+            vec![
+                rect(0.0, 0.0, 2.0, 2.0),
+                rect(2.0, 0.0, 4.0, 2.0),
+                rect(1.0, 2.0, 3.0, 3.0),
+            ],
+        ];
+        // A corridor with rooms standing on it.
+        let mut corridor = vec![rect(0.0, 0.0, 12.0, 1.0)];
+        corridor.extend((0..12).map(|i| rect(f64::from(i), 1.0, f64::from(i) + 1.0, 5.0)));
+        soups.push(corridor);
+        soups.extend((0..12).map(|seed| grid_soup(10 + seed as usize, seed)));
+        for (case, rings) in soups.iter().enumerate() {
+            let whole = build(rings).expect("the ring build");
+            let keep: Vec<Vec<bool>> = rings.iter().map(|r| vec![true; r.vertices.len()]).collect();
+            let partial =
+                build_partial(rings, &keep, &every_vertex(rings)).expect("a partial build");
+            assert_eq!(shape(&partial), shape(&whole), "soup {case}");
+            assert!(
+                partial.edges.iter().all(|e| e.inside.is_empty()),
+                "soup {case} counted windings"
+            );
+        }
+    }
+
+    #[test]
+    fn splits_cut_an_edge_at_points_on_it_only() {
+        let rings = [rect(0.0, 0.0, 4.0, 4.0)];
+        let keep = [vec![true; 4]];
+        let cuts = |splits: &[Point2]| {
+            build_partial(&rings, &keep, splits)
+                .expect("a build")
+                .edges
+                .len()
+        };
+        assert_eq!(cuts(&[]), 4);
+        // On the edge, inside it.
+        assert_eq!(cuts(&[Point2::new(1.0, 0.0)]), 5);
+        // Near the edge, a hair off it, either side.
+        assert_eq!(cuts(&[Point2::new(2.0, 1e-12)]), 4);
+        assert_eq!(cuts(&[Point2::new(2.0, -1e-12)]), 4);
+        // On the line, beyond the edge.
+        assert_eq!(cuts(&[Point2::new(5.0, 0.0)]), 4);
+        // At an end.
+        assert_eq!(cuts(&[Point2::new(0.0, 0.0), Point2::new(4.0, 0.0)]), 4);
+        // Twice, and on two edges.
+        assert_eq!(
+            cuts(&[
+                Point2::new(1.0, 0.0),
+                Point2::new(1.0, 0.0),
+                Point2::new(4.0, 3.0)
+            ]),
+            6
+        );
+        // A dropped edge is not cut, and its neighbours stay whole.
+        let keep = [vec![true, false, true, true]];
+        let raw = build_partial(&rings, &keep, &[Point2::new(4.0, 2.0)]).expect("a build");
+        assert_eq!(raw.edges.len(), 3);
+        assert!(raw.edges.iter().all(|e| e.sources[0].1 != 1));
+    }
+
+    #[test]
+    fn windings_list_the_rings_holding_a_point() {
+        let mut checked = 0;
+        for seed in 0..12u64 {
+            let rings = grid_soup(12, 100 + seed);
+            let raw = build(&rings).expect("the ring build");
+            let mut windings = Windings::new(&rings);
+            let mut held = Vec::new();
+            for (index, edge) in raw.edges.iter().enumerate() {
+                let carried = |ring: usize| edge.sources.iter().any(|s| s.0 == ring);
+                windings.holding(raw.sample(index), carried, &mut held);
+                assert_eq!(held, edge.inside, "seed {seed} piece {index}");
+                checked += held.len();
+            }
+        }
+        assert!(checked > 0, "no piece lay inside a ring");
     }
 }
