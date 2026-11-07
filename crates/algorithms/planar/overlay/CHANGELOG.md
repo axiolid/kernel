@@ -21,6 +21,25 @@ caret rule for `0.x` versions.
 
 ### Fixed
 
+- `MorphologyMode::Fast` fills a needle notch deeper than the disc. A wall of
+  needles 0.25 m deep under a disc of radius 0.4 m kept every notch, since no
+  chord was proposed over a notch deeper than `t`: #340's room with a column
+  and 124 such needles gave 562 corners in 0.42 s, 500 needles 2,066 corners in
+  5.0 s, both as `Exact`. Proposals now also pass `t` over a needle no wider
+  than `needle_width(t, budget) = 2 sqrt(2 t budget + budget^2)` whose
+  vertices project inside its mouth, and across a vertex exactly on the chord.
+  The bound of a notch deeper than `t` is the widest of its pieces between the
+  vertices exactly on the chord, one needle's (2.5e-8 for a 2 cm fixture)
+  instead of the whole wall's (2.5e-4), and a deep chord over the budget is
+  split at its on-line vertex nearest the middle. The 124 needles give 68
+  corners for a dilation and 72 for an erosion, in 0.005 s, and the 2,002 and
+  10,002 corner walls of `benches/disc_erosion.rs` (`deep`) in 0.014 to
+  0.017 s and 0.07 s. The side, the stated deviation and `Exact` are
+  unchanged, and the 30 cases of #330, #340 and #345 in that bench give the
+  same results bit for bit. A wall whose valleys are collinear only up to
+  rounding keeps them (#483). `src/fill.rs`, `src/cover.rs`, ADR 0087 (#428);
+  `scripts/probe_fast_morphology_mutants.py` lists the faults its tests must
+  catch.
 - `Region::new` refuses a polygon set whose rings cross into each other:
   part of a hole outside its own outer ring (`HoleOutsideOuter`), two holes
   of one polygon that cross, nest or repeat (`HolesOverlap`), and a point in

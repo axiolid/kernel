@@ -83,7 +83,8 @@ Validated, deterministic planar booleans (intersection, union, difference, xor) 
   proved to lie outside it, each used only when the excess it adds is within the caller's
   budget, and keeps the inner or outer side: the excess goes into `MorphologyBound`'s
   deviation and is reported by `Region::excess`. A wall of teeth then costs about its
-  corners; a rule engine takes it (`src/fill.rs`).
+  corners; a rule engine takes it (`src/fill.rs`). It fills needles deeper than the
+  disc too, each bounded by its own slab (#428).
   `scripts/probe_fast_morphology_mutants.py` lists the faults its tests must catch.
 
 ## Depends on

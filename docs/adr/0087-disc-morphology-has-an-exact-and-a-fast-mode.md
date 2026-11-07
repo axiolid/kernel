@@ -119,14 +119,13 @@ of the line (0.0125 m for a disc of radius 0.4 m, `t` 0.2 m). A wall of
 needles 0.05 m deep, under that disc, kept every notch: nothing was
 filled and the sum kept its quadratic cost.
 
-- **Proposals reach `t`, in two rounds.** `fill` proposes chords within
-  `t / 16` of their line as before, then chords within `t` over the edges
-  the first round left (each run of them alone). Proposing at `t` alone
-  fills the same notches but made #330's hole dilations 2 to 4 times
-  slower, so a wall of teeth is filled by the first round at the cost it
-  had and a wall of needles by the second. A needle deeper than `t` is
-  still kept whole, because no chord is proposed over it; proposing one is
-  a separate decision.
+- **Proposals reach `t`.** `fill` proposes chords within `t` of their
+  line. (This amendment first described two rounds, `t / 16` and then `t`
+  over the edges left; the code has proposed once, at `t`, since c4314c30,
+  and #428 corrects the record. On the 10,002-corner needle wall the inner
+  erosion's excess is therefore 9.0e-4, not the 2.0e-6 two rounds gave;
+  the time is the same. Two rounds would need their own issue.) A needle
+  deeper than `t` was kept whole until #428.
 - **Slab bound.** A notch whose spanned vertices all project onto the
   chord, of length `g`, has excess `e_W = sqrt(t^2 + g^2 / 4) - t`
   however deep it is. The proof is in `fill.rs`: a point within `t`
@@ -135,8 +134,8 @@ filled and the sum kept its quadratic cost.
   of the set. It joins the minimum of the depth and the gap bound. The
   fills of the needle walls measured here come from the gap bound (the
   tips lie on the chord), not from `e_W`, which only competes with it; for
-  a notch deeper than `t` inside the slab, which `excess` accepts but
-  `fill` does not reach, the minimum is of `e_W` and the depth. A notch
+  a notch deeper than `t` inside the slab (reached since #428), the
+  minimum is of `e_W` and the depth. A notch
   that overhangs the chord's ends and is deeper than `t` is refused as
   before. The triage's first formula, the sagitta
   `t - sqrt(t^2 - g^2 / 4)` of a disc over the mouth, says how far a disc
@@ -146,7 +145,8 @@ filled and the sum kept its quadratic cost.
 - **Cost.** The toothed rooms and holes of #330 (2,402, 5,002 and 10,002
   corners) give the same results bit for bit in `Fast` mode, in the same
   time as before (0.046 s and 0.042 s for the hole dilation at 10,002
-  corners, main and two rounds; 0.198 s with proposals at `t` alone). The
+  corners, main and the amendment; 0.198 s with proposals at `t` alone, a
+  variant not kept). The
   table of the three variants, and the needle walls' numbers, are in
   `docs/research/exact-morphology-on-needle-walls.md`.
 - **`Exact` is unchanged.** Its profile on the needle shape is in that
@@ -176,3 +176,37 @@ to over 20 GB at 50,000.
   hypotheses it rejected are in
   `docs/research/fast-morphology-on-toothed-floors.md`.
 
+## Amendment 2026-11-07: needles deeper than the disc (#428)
+
+Nothing proposed a chord over a needle deeper than `t`, and `excess`
+would have bounded one by the whole wall: for a wall of needles 0.25 m deep
+and 2e-4 apart, 2.5e-4 over 100 of them (2.06 m over a 4.5 m wall), where
+one needle's slab bound is 2.5e-8. #340's room with a column and 124 such
+needles gave 562 corners in 0.42 s, as `Exact`, and 500 needles 2,066
+corners in 5.0 s.
+
+- **Reach.** Past `t`, a proposal still pops a vertex when the chord is no
+  longer than `needle_width(t, budget) = 2 sqrt(2 t budget + budget^2)`,
+  the widest mouth whose slab bound is within the budget, and a box
+  containing what it spans projects inside it (a needle), or when the
+  vertex lies exactly on the chord between its ends (a valley join).
+  `chords`, the exact route, reaches none: bit for bit unchanged.
+- **Bound.** A notch deeper than `t` has the least of its whole bound and
+  the greatest bound of its pieces between the spanned vertices exactly on
+  the chord. The pieces cover the notch, each lies against the same line
+  with its spanned boundary in `S`, so `S' + B(t)` lies in
+  `S + B(t + max e_i)`. Shallow notches are not cut: it would be sound but
+  moves every earlier result by about `g^4 / t^3`.
+- **Split.** A deep chord over the budget is split at its on-line vertex
+  nearest the middle, not the farthest vertex: 7 chords and 12 corners on
+  a wall of needles with one shallow tooth, against 101 and 108.
+- **Contract.** Unchanged: every chord still goes through the proof, the
+  budget and the check for rings in its notch, so the side and the stated
+  deviation hold. The 30 earlier `fast` bench cases give the same hashes.
+- **Cost.** The 124 needles give 68 and 72 corners in 0.005 s. The numbers
+  are in `docs/research/fast-morphology-on-deep-needles.md`.
+- **Limit.** A join needs a vertex exactly on the chord, as the exact proof
+  does. Valleys collinear only up to rounding, as on a wall rotated by
+  30 degrees, are not joined: each needle is filled alone but the valleys
+  stay (2,500 needles: 385 to 456 corners against 68). A sound extension
+  is #483.

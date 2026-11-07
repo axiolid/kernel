@@ -59,17 +59,21 @@ depth.
 | erode, inner | 502 | 36 mm | 4 | 0.008 | 6 | 8.1e-4 |
 | erode, inner | 1,002 | 18 mm | 4 | 0.014 | 8 | 2.0e-4 |
 | erode, inner | 2,002 | 9.0 mm | 4 | 0.028 | 11 | 5.1e-5 |
-| erode, inner | 10,002 | 1.8 mm | 4 | 0.150 | 35 | 2.0e-6 |
+| erode, inner | 10,002 | 1.8 mm | 4 | 0.150 | 35 | 9.0e-4 (2.0e-6 as first measured, see the correction below) |
 | dilate, outer | 502 | 36 mm | 68 | 0.003 | 4 | 8.1e-4 |
 | dilate, outer | 1,002 | 18 mm | 68 | 0.005 | 4 | 2.0e-4 |
 | dilate, outer | 2,002 | 9.0 mm | 68 | 0.009 | 4 | 5.1e-5 |
 | dilate, outer | 10,002 | 1.8 mm | 68 | 0.046 | 6 | 2.0e-6 |
 
-Needles deeper than `t` are still kept by `Fast`: the proposals stop at
-`t`, so a wall of needles 0.25 m deep fills no notch (a unit test in
-`fill.rs`). Proposing chords over them is a separate decision.
+Needles deeper than `t` were kept by `Fast` here, because the proposals
+stopped at `t`; #428 fills them (`docs/research/fast-morphology-on-deep-needles.md`).
 
-## Why the proposals come in two rounds
+## Why the proposals came in two rounds
+
+Correction (#428): the code has proposed once, at `t`, since c4314c30; the
+two rounds below were measured but not kept. The inner erosion of the
+10,002-corner wall therefore has the excess of `t` alone, 9.0e-4, not
+2.0e-6; the times are those of the rounds' measurement.
 
 Proposing at `t` alone fills the same notches as the two rounds, with
 identical results (hashes) on all 24 cases of #330's toothed rooms and
