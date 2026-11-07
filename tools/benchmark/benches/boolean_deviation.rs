@@ -13,12 +13,14 @@
 //!
 //! Each case is validated before it is timed: the report must be one
 //! certified boolean bound within the request, and the planar one within
-//! `1e-11`.
+//! `1e-10`.
 
 use axiolid_contracts::ExecutionOptions;
 use axiolid_core::{BooleanOperator, Tolerance, Transform2, Transform3, Vec2, Vec3};
 use axiolid_mesh_boolean_boolmesh::BoolmeshBoolean;
-use axiolid_mesh_compile::deviation::COINCIDENT_OPERANDS;
+use axiolid_mesh_compile::deviation::{
+    BOOLEAN_ROUNDING_FLOOR, COINCIDENT_OPERANDS, TOLERANCE_READINGS,
+};
 use axiolid_mesh_compile::{DeviationBound, DeviationPath, ReferenceMeshCompiler};
 use axiolid_mesh_compile_contract::MeshCompiler;
 use axiolid_model::{
@@ -131,17 +133,25 @@ fn deviation_report(c: &mut Criterion) {
         .expect("a chord error");
     let compiler = ReferenceMeshCompiler::new(BoolmeshBoolean::new());
     for (name, (graph, root), ceiling) in
-        [("planar", planar(), 1e-11), ("curved", curved(), REQUEST)]
+        [("planar", planar(), 1e-10), ("curved", curved(), REQUEST)]
     {
         let (_, report) = compiler
             .compile_mesh_with_deviation(&graph, root, &options)
             .expect("the boolean compiles");
         // Besides the measurement, at most how far faces read as one
-        // surface within tolerance moved an operand (#324).
+        // surface within tolerance moved an operand (#324), and the readings
+        // and rounding floor that widen it (#421).
         let measured: Vec<_> = report
             .contributions
             .iter()
-            .filter(|c| c.detail != COINCIDENT_OPERANDS)
+            .filter(|c| {
+                ![
+                    COINCIDENT_OPERANDS,
+                    TOLERANCE_READINGS,
+                    BOOLEAN_ROUNDING_FLOOR,
+                ]
+                .contains(&c.detail)
+            })
             .collect();
         let [contribution] = measured.as_slice() else {
             panic!("{name}: one measured contribution expected, got {report:?}");
