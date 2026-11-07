@@ -35,6 +35,16 @@
 //! face then takes those samples, a planar face's straight edges included,
 //! whatever order the shell lists the faces in.
 //!
+//! A use's own pcurve need not walk the edge at the pace of the one it was
+//! sampled through. Each cached sample is located on it instead of being
+//! read at a uniform parameter ([`locate`], #413): the located parameters
+//! are strictly monotone, a sample that is nowhere on the pcurve is refused
+//! by name, and the largest distance of a sample from the surface at its
+//! parameters joins the trim terms of the deviation bound below. An exact
+//! boolean closes a pcurve's end onto its vertex only within its reading,
+//! which [`tessellate_exact`] admits up to the smaller of that reading and
+//! the tolerance.
+//!
 //! # Supports (#412)
 //!
 //! The tessellator holds no graph. It reads a [`view::ResolvedBRep`]: an
@@ -129,6 +139,7 @@ use crate::weld::EdgeSplits;
 
 mod edges;
 mod inversion;
+mod locate;
 mod trim;
 mod view;
 
@@ -295,7 +306,7 @@ pub fn tessellate(
     // Structure before handles: a broken topology is reported as such, not
     // as the first handle that does not resolve.
     check_tessellable(brep)?;
-    tessellate_resolved(&view::from_graph(brep, graph)?, tolerance, chord_error)
+    tessellate_resolved(&view::from_graph(brep, graph)?, tolerance, chord_error, 0.0)
 }
 
 /// Structure before geometry. A dangling handle or an open loop produces a
@@ -317,14 +328,24 @@ fn check_tessellable<C3, C2, S>(brep: &BRep<C3, C2, S>) -> GeomResult<()> {
 /// What [`tessellate`] does for a graph B-rep, with the same closure and
 /// certified [`Deviation`]: a family whose bound is not certified is
 /// `Unbounded` by name, never a number.
+///
+/// An exact boolean closes its result only within its reading, so a
+/// pcurve's end may sit up to `endpoint_slack` from its topology vertex,
+/// where a graph B-rep's may sit only within the chord budget (#413).
 pub(crate) fn tessellate_exact(
     exact: &axiolid_brep::ExactBRep,
     tolerance: axiolid_core::Tolerance,
     chord_error: Scalar,
+    endpoint_slack: Scalar,
 ) -> GeomResult<(TriMesh, MeshClosure, Deviation)> {
     check_tessellation_input_budget(exact.topology())?;
     check_tessellable(exact.topology())?;
-    tessellate_resolved(&view::from_exact(exact)?, tolerance, chord_error)
+    tessellate_resolved(
+        &view::from_exact(exact)?,
+        tolerance,
+        chord_error,
+        endpoint_slack,
+    )
 }
 
 /// [`tessellate`] over a B-rep whose supports are already resolved (#412).
@@ -332,6 +353,7 @@ fn tessellate_resolved(
     brep: &ResolvedBRep<'_>,
     tolerance: axiolid_core::Tolerance,
     chord_error: Scalar,
+    endpoint_slack: Scalar,
 ) -> GeomResult<(TriMesh, MeshClosure, Deviation)> {
     check_tessellation_input_budget(brep)?;
     check_tessellable(brep)?;
@@ -411,6 +433,7 @@ fn tessellate_resolved(
         brep,
         tolerance,
         chord_error,
+        endpoint_slack,
         closure,
         splits: shared_edge_splits(brep, &shells),
     };
@@ -517,6 +540,10 @@ struct FaceContext<'a> {
     tolerance: axiolid_core::Tolerance,
     /// How far a chord may sit from a curved face or edge (#165).
     chord_error: Scalar,
+    /// A pcurve's end may sit up to the larger of `chord_error` and this from
+    /// the first pcurve end welded to its topology vertex: an exact
+    /// boolean's reading (#413); zero for a graph B-rep.
+    endpoint_slack: Scalar,
     /// What the tessellated shells are: [`MeshClosure::Surface`] for a
     /// surface model, where a planar face that encloses no area covers
     /// nothing and is skipped (#171). In a solid it stays refused.
@@ -524,6 +551,14 @@ struct FaceContext<'a> {
     /// The corners planar faces insert into shared edges, which every face
     /// using such an edge takes too (#265).
     splits: EdgeSplits<Corner>,
+}
+
+impl FaceContext<'_> {
+    /// How far a pcurve's end may sit from the first pcurve end welded to
+    /// its topology vertex.
+    fn endpoint_limit(&self) -> Scalar {
+        self.chord_error.max(self.endpoint_slack)
+    }
 }
 
 #[allow(clippy::too_many_arguments)]
@@ -552,7 +587,7 @@ fn append_face(
                 welded,
                 cache,
                 total_curved_records,
-                ctx.chord_error,
+                (ctx.chord_error, ctx.endpoint_limit()),
                 |state| append_curved_face(state, ctx, face, surface, flip, &mut bound),
             )?;
             deviation.add(
@@ -1064,6 +1099,9 @@ struct CurvedMeshState<'a> {
     welded: &'a mut WeldedVertices,
     edge_samples: &'a mut EdgeSamples,
     chord_error: Scalar,
+    /// How far a pcurve's end may sit from the first pcurve end welded to
+    /// its topology vertex (#413).
+    endpoint_limit: Scalar,
     /// Boundary occurrences plus refinement vertices for this face. This is
     /// deliberately independent of shell vertices created by earlier faces.
     face_local_vertices: usize,
@@ -1077,7 +1115,7 @@ fn with_curved_face_transaction(
     welded: &mut WeldedVertices,
     edge_samples: &mut EdgeSamples,
     total_curved_records: &mut usize,
-    chord_error: Scalar,
+    (chord_error, endpoint_limit): (Scalar, Scalar),
     operation: impl FnOnce(&mut CurvedMeshState<'_>) -> GeomResult<()>,
 ) -> GeomResult<()> {
     let positions_start = mesh.positions.len();
@@ -1088,6 +1126,7 @@ fn with_curved_face_transaction(
         welded,
         edge_samples,
         chord_error,
+        endpoint_limit,
         face_local_vertices: 0,
         total_curved_records,
         new_welded: Vec::new(),
@@ -1246,29 +1285,13 @@ fn certified_edge_count(
         return n;
     };
     let (curve, domain) = (pcurve.curve, pcurve.span);
+    let breaks = axiolid_reference::bound::continuity_breaks2(curve, 1);
     let fits = |count: usize| -> Option<bool> {
         let at = |i: usize| {
             domain.start + (domain.end - domain.start) * (i as Scalar) / (count as Scalar)
         };
         for i in 0..count {
-            let (t0, t1) = (at(i), at(i + 1));
-            let d = axiolid_reference::bound::chord_bound2(curve, t0, t1)?;
-            let a = axiolid_reference::curve::evaluate2(curve, t0).ok()?;
-            let b = axiolid_reference::curve::evaluate2(curve, t1).ok()?;
-            let grow = Point2::splat(d);
-            let (lo, hi) = (a.min(b) - grow, a.max(b) + grow);
-            let bounds = oracle.bounds((lo.x, hi.x), (lo.y, hi.y))?;
-            let span = b - a;
-            let [x, y, z] = bounds.interpolation;
-            let along = 0.125
-                * (x * span.x * span.x + 2.0 * y * (span.x * span.y).abs() + z * span.y * span.y);
-            let along = if bounds.smooth {
-                along
-            } else {
-                bounds.du * span.x.abs() + bounds.dv * span.y.abs()
-            };
-            let lipschitz = (bounds.du * bounds.du + bounds.dv * bounds.dv).sqrt();
-            if lipschitz * d + along > tolerance {
+            if !span_fits(&oracle, (curve, &breaks), at(i), at(i + 1), tolerance)? {
                 return Some(false);
             }
         }
@@ -1285,6 +1308,87 @@ fn certified_edge_count(
     n
 }
 
+/// The chord bound of the pcurve span `ts` whose ends are `ends`, across any
+/// breaks inside it (a polyline corner, a chain or implicit join, a knot of
+/// full multiplicity), where [`axiolid_reference::bound::chord_bound2`] has
+/// none (#413).
+///
+/// Cut at the breaks, each piece is within its own bound `d_k` of its chord,
+/// whose ends are the pcurve's points at the cuts; those lie within `e` of
+/// the chord of the whole span, and a convex combination of them does too, so
+/// the span is within `max d_k + e` of its chord. `breaks` are the curve's
+/// breaks ([`axiolid_reference::bound::continuity_breaks2`]), found once by
+/// the caller.
+fn chord_bound_across_breaks(
+    (curve, breaks): (&axiolid_curve::Curve2, &[Scalar]),
+    (t0, t1): (Scalar, Scalar),
+    (p0, p1): (Point2, Point2),
+) -> Option<Scalar> {
+    let (lo, hi) = (t0.min(t1), t0.max(t1));
+    let mut cuts: Vec<Scalar> = breaks
+        .iter()
+        .copied()
+        .filter(|&k| k > lo && k < hi)
+        .collect();
+    if cuts.is_empty() {
+        return axiolid_reference::bound::chord_bound2(curve, t0, t1);
+    }
+    cuts.sort_by(Scalar::total_cmp);
+    if t0 > t1 {
+        cuts.reverse();
+    }
+    let along = p1 - p0;
+    let length = along.length_squared();
+    let mut worst_piece: Scalar = 0.0;
+    let mut off: Scalar = 0.0;
+    let mut from = t0;
+    for &cut in cuts.iter().chain(core::iter::once(&t1)) {
+        worst_piece = worst_piece.max(axiolid_reference::bound::chord_bound2(curve, from, cut)?);
+        if cut != t1 {
+            let p = axiolid_reference::curve::evaluate2(curve, cut).ok()?;
+            let t = if length > 0.0 {
+                ((p - p0).dot(along) / length).clamp(0.0, 1.0)
+            } else {
+                0.0
+            };
+            off = off.max((p - (p0 + along * t)).length());
+        }
+        from = cut;
+    }
+    let total = worst_piece + off;
+    total.is_finite().then_some(total)
+}
+
+/// Whether the pcurve span `[t0, t1]` has its certified 3D chord bound
+/// within `tolerance` (the terms [`certified_edge_count`] describes), or
+/// `None` when the bound cannot be had.
+fn span_fits(
+    oracle: &SurfaceBoundOracle<'_>,
+    (curve, breaks): (&axiolid_curve::Curve2, &[Scalar]),
+    t0: Scalar,
+    t1: Scalar,
+    tolerance: Scalar,
+) -> Option<bool> {
+    let a = axiolid_reference::curve::evaluate2(curve, t0).ok()?;
+    let b = axiolid_reference::curve::evaluate2(curve, t1).ok()?;
+    let d = chord_bound_across_breaks((curve, breaks), (t0, t1), (a, b))?;
+    let grow = Point2::splat(d);
+    let (lo, hi) = (a.min(b) - grow, a.max(b) + grow);
+    let bounds = oracle.bounds((lo.x, hi.x), (lo.y, hi.y))?;
+    let span = b - a;
+    let [x, y, z] = bounds.interpolation;
+    let along =
+        0.125 * (x * span.x * span.x + 2.0 * y * (span.x * span.y).abs() + z * span.y * span.y);
+    let along = if bounds.smooth {
+        along
+    } else {
+        bounds.du * span.x.abs() + bounds.dv * span.y.abs()
+    };
+    let lipschitz = (bounds.du * bounds.du + bounds.dv * bounds.dv).sqrt();
+    let misses = lipschitz * d + along > tolerance;
+    Some(!misses)
+}
+
 /// Sample a trim as `n` segments, including both endpoints.
 ///
 /// The complete sequence is cached so a reversed edge use can reverse it
@@ -1292,13 +1396,18 @@ fn certified_edge_count(
 /// point when appending the edge to a loop; the next edge contributes that
 /// junction.
 fn trim_samples(pcurve: &Pcurve<'_>, n: usize) -> GeomResult<Vec<axiolid_core::Point2>> {
+    uniform_times(pcurve, n)
+        .into_iter()
+        .map(|t| axiolid_reference::curve::evaluate2(pcurve.curve, t))
+        .collect()
+}
+
+/// The `n + 1` uniform parameters of a trim's span, both ends included.
+fn uniform_times(pcurve: &Pcurve<'_>, n: usize) -> Vec<Scalar> {
     let domain = pcurve.span;
-    let mut out = Vec::with_capacity(n + 1);
-    for i in 0..=n {
-        let t = domain.start + (domain.end - domain.start) * (i as Scalar) / (n as Scalar);
-        out.push(axiolid_reference::curve::evaluate2(pcurve.curve, t)?);
-    }
-    Ok(out)
+    (0..=n)
+        .map(|i| domain.start + (domain.end - domain.start) * (i as Scalar) / (n as Scalar))
+        .collect()
 }
 
 /// Boundary of a curved face in parameter space, paired with the shared 3D
@@ -1544,44 +1653,64 @@ fn curved_boundary(
                 out.shared.extend(shared.into_iter().take(n));
                 continue;
             };
-            let n = match state.edge_samples.get(&use_.edge) {
-                Some(cached) => cached.indices.len().checked_sub(1).ok_or_else(|| {
-                    GeomError::Degenerate("cached edge has no segments".to_owned())
-                })?,
-                None => edge_sample_count(&pcurve, surface, ctx.chord_error)?,
+            let (params, ts, shared) = match state.edge_samples.get(&use_.edge) {
+                // The edge pass sampled it: this use's pcurve need not walk
+                // it at the pace the sampling use's did (#413).
+                Some(cached) => {
+                    let (shared, _) = cached.in_direction(use_.orientation);
+                    let n = shared.len().checked_sub(1).ok_or_else(|| {
+                        GeomError::Degenerate("cached edge has no segments".to_owned())
+                    })?;
+                    state.reserve_face_vertices(n)?;
+                    let targets: Vec<Vec3> = shared
+                        .iter()
+                        .map(|&index| state.mesh.positions[index as usize])
+                        .collect();
+                    let limits = locate::Limits {
+                        interior: ctx.chord_error,
+                        end: state.endpoint_limit,
+                    };
+                    let located = locate::locate_samples(&pcurve, surface, &targets, limits)?;
+                    (located.params, located.ts, shared)
+                }
+                None => {
+                    let n = edge_sample_count(&pcurve, surface, ctx.chord_error)?;
+                    state.reserve_face_vertices(n)?;
+                    let params = trim_samples(&pcurve, n)?;
+                    // Evaluate the trim on the surface: these are the seam's
+                    // 3D points, and they are interned under the edge.
+                    let points: Vec<Vec3> = params
+                        .iter()
+                        .map(|p| axiolid_reference::surface::evaluate(surface, p.x, p.y))
+                        .collect::<GeomResult<_>>()?;
+                    let edge = brep
+                        .edges()
+                        .get(use_.edge.index())
+                        .ok_or_else(|| GeomError::InvalidInput("edge missing".to_string()))?;
+                    let (start_vertex, end_vertex) = if use_.orientation == Orientation::Forward {
+                        (edge.start, edge.end)
+                    } else {
+                        (edge.end, edge.start)
+                    };
+                    let shared = edge_samples(
+                        state,
+                        use_.edge,
+                        use_.orientation,
+                        start_vertex,
+                        end_vertex,
+                        &points,
+                        Err(inversion::THROUGH_PCURVE),
+                    )?;
+                    (params, uniform_times(&pcurve, n), shared)
+                }
             };
-            state.reserve_face_vertices(n)?;
-            let params = trim_samples(&pcurve, n)?;
-            bound.trim(&pcurve, n, &params);
+            let n = shared.len() - 1;
+            bound.trim(&pcurve, &ts, &params);
             if let (Some(end), Some(&start)) = (previous_end, params.first()) {
                 bound.gap(end, start, surface);
             }
             ring_first = ring_first.or_else(|| params.first().copied());
             previous_end = params.last().copied();
-            // Evaluate the trim on the surface: these are the seam's
-            // 3D points, and they are interned under the edge.
-            let points: Vec<Vec3> = params
-                .iter()
-                .map(|p| axiolid_reference::surface::evaluate(surface, p.x, p.y))
-                .collect::<GeomResult<_>>()?;
-            let edge = brep
-                .edges()
-                .get(use_.edge.index())
-                .ok_or_else(|| GeomError::InvalidInput("edge missing".to_string()))?;
-            let (start_vertex, end_vertex) = if use_.orientation == Orientation::Forward {
-                (edge.start, edge.end)
-            } else {
-                (edge.end, edge.start)
-            };
-            let shared = edge_samples(
-                state,
-                use_.edge,
-                use_.orientation,
-                start_vertex,
-                end_vertex,
-                &points,
-                Err(inversion::THROUGH_PCURVE),
-            )?;
             // The next edge contributes this edge's final junction.
             out.uv.extend(params.into_iter().take(n));
             out.shared.extend(shared.into_iter().take(n));
@@ -1693,7 +1822,7 @@ fn welded_vertex(
 ) -> GeomResult<u32> {
     if let Some(&existing) = state.welded.get(&vertex) {
         let disagreement = (state.mesh.positions[existing as usize] - point).length();
-        if !disagreement.is_finite() || disagreement > state.chord_error {
+        if !disagreement.is_finite() || disagreement > state.endpoint_limit {
             return Err(GeomError::Degenerate(
                 "pcurve endpoint disagrees with the welded topology vertex".to_owned(),
             ));
@@ -2491,23 +2620,26 @@ impl<'s> FaceBound<'s> {
         Some((b.du * b.du + b.dv * b.dv).sqrt())
     }
 
-    /// The lens terms of one pcurve sampled as `n` uniform spans.
-    fn trim(&mut self, pcurve: &Pcurve<'_>, n: usize, params: &[Point2]) {
+    /// The lens terms of one pcurve sampled at the parameters `ts`, whose
+    /// points are `params` (#413): a lens point is within `G d` of its chord.
+    /// The samples' distance off the surface is the vertex offset the
+    /// triangles' bound already carries.
+    fn trim(&mut self, pcurve: &Pcurve<'_>, ts: &[Scalar], params: &[Point2]) {
         if self.unbounded.is_some() {
             return;
         }
-        let (curve, domain) = (pcurve.curve, pcurve.span);
-        let at =
-            |i: usize| domain.start + (domain.end - domain.start) * (i as Scalar) / (n as Scalar);
-        for i in 0..n {
-            let Some(d) = axiolid_reference::bound::chord_bound2(curve, at(i), at(i + 1)) else {
+        let curve = pcurve.curve;
+        let breaks = axiolid_reference::bound::continuity_breaks2(curve, 1);
+        for (span, ends) in ts.windows(2).zip(params.windows(2)) {
+            let (a, b) = (ends[0], ends[1]);
+            let Some(d) = chord_bound_across_breaks((curve, &breaks), (span[0], span[1]), (a, b))
+            else {
                 self.unbounded("trim pcurve family with no chord bound");
                 return;
             };
             if d == 0.0 {
                 continue;
             }
-            let (a, b) = (params[i], params[i + 1]);
             let grow = Point2::splat(d);
             let Some(g) = self.lipschitz(a.min(b) - grow, a.max(b) + grow) else {
                 self.unbounded("surface has no derivative bound over a trim");
@@ -2928,6 +3060,7 @@ mod tests {
             welded: &mut welded,
             edge_samples: &mut edge_samples,
             chord_error: 1.0e-3,
+            endpoint_limit: 1.0e-3,
             face_local_vertices: 4,
             total_curved_records: &mut total_curved_records,
             new_welded: Vec::new(),
@@ -3042,6 +3175,7 @@ mod tests {
             welded: &mut welded,
             edge_samples: &mut edge_samples,
             chord_error: 1.0e-3,
+            endpoint_limit: 1.0e-3,
             face_local_vertices: 2,
             total_curved_records: &mut total_curved_records,
             new_welded: Vec::new(),
@@ -3105,6 +3239,120 @@ mod tests {
             Point2::new(1.0, 0.1),
         ];
         assert!((enclosing_radius(obtuse) - 1.0).abs() < 1e-12);
+    }
+
+    #[test]
+    fn a_chord_bound_across_a_corner_reaches_the_corner() {
+        let corner = Curve2::Polyline(Polyline2 {
+            points: vec![
+                Point2::new(0.0, 0.0),
+                Point2::new(1.0, 0.0),
+                Point2::new(1.0, 1.0),
+            ],
+            closed: false,
+        });
+        let ends = (Point2::new(0.5, 0.0), Point2::new(1.0, 0.5));
+        let bound = chord_bound_across_breaks((&corner, &[1.0]), (0.5, 1.5), ends).unwrap();
+        // The corner is 0.5 / sqrt 2 off the chord.
+        assert!((bound - 0.5 / 2.0_f64.sqrt()).abs() < 1e-12, "{bound}");
+        // Walked backwards it is the same span.
+        let back =
+            chord_bound_across_breaks((&corner, &[1.0]), (1.5, 0.5), (ends.1, ends.0)).unwrap();
+        assert!((back - bound).abs() < 1e-12, "{back}");
+    }
+
+    #[test]
+    fn a_pcurve_family_with_no_chord_bound_leaves_the_trim_unbounded_by_name() {
+        let surface = Surface::Plane(Plane {
+            frame: Frame3 {
+                origin: Point3::ZERO,
+                x: Vec3::X,
+                y: Vec3::Y,
+                z: Vec3::Z,
+            },
+        });
+        // A spline with a weight of no sign has no chord bound.
+        let spiral = Curve2::BSpline(axiolid_curve::BSplineCurve {
+            degree: 2,
+            control_points: vec![
+                Point2::new(0.0, 0.0),
+                Point2::new(0.5, 0.5),
+                Point2::new(1.0, 0.0),
+            ],
+            knots: vec![0.0, 1.0],
+            multiplicities: vec![3, 3],
+            weights: Some(vec![1.0, -1.0, 1.0]),
+            closed: false,
+            self_intersect: None,
+            knot_spec: axiolid_curve::KnotSpec::Unspecified,
+        });
+        assert_eq!(
+            axiolid_reference::bound::chord_bound2(&spiral, 0.0, 0.5),
+            None
+        );
+        let pcurve = Pcurve {
+            span: axiolid_reference::curve::domain2(&spiral),
+            curve: &spiral,
+            key: 0,
+        };
+        let mut bound = FaceBound::new(&surface);
+        let params = [Point2::new(0.0, 0.0), Point2::new(0.5, 0.1)];
+        bound.trim(&pcurve, &[0.0, 0.5], &params);
+        assert_eq!(
+            bound.finish(),
+            DeviationBound::Unbounded("trim pcurve family with no chord bound")
+        );
+    }
+
+    #[test]
+    fn a_chord_bound_across_a_hairpin_reaches_the_corner_past_the_chord() {
+        // Out to x = 1 and back: the corner projects past the chord's end at
+        // x = 0.7, 0.3 away, not onto it.
+        let hairpin = Curve2::Polyline(Polyline2 {
+            points: vec![
+                Point2::new(0.0, 0.0),
+                Point2::new(1.0, 0.0),
+                Point2::new(0.5, 0.0),
+            ],
+            closed: false,
+        });
+        let ends = (Point2::new(0.2, 0.0), Point2::new(0.7, 0.0));
+        let bound = chord_bound_across_breaks((&hairpin, &[1.0]), (0.2, 1.6), ends).unwrap();
+        assert!((bound - 0.3).abs() < 1e-12, "{bound}");
+    }
+
+    #[test]
+    fn a_chord_bound_across_a_spline_knot_adds_its_pieces() {
+        // Two quadratic arcs meeting in a corner at the knot 0.5.
+        let spline = Curve2::BSpline(axiolid_curve::BSplineCurve {
+            degree: 2,
+            control_points: vec![
+                Point2::new(0.0, 0.0),
+                Point2::new(0.25, 0.5),
+                Point2::new(0.5, 0.0),
+                Point2::new(0.75, -0.5),
+                Point2::new(1.0, 0.0),
+            ],
+            knots: vec![0.0, 0.5, 1.0],
+            multiplicities: vec![3, 2, 3],
+            weights: None,
+            closed: false,
+            self_intersect: None,
+            knot_spec: axiolid_curve::KnotSpec::Unspecified,
+        });
+        let at = |t| axiolid_reference::curve::evaluate2(&spline, t).unwrap();
+        let (a, corner, b) = (at(0.2), at(0.5), at(0.9));
+        let bound = chord_bound_across_breaks((&spline, &[0.5]), (0.2, 0.9), (a, b)).unwrap();
+        let piece = |t0, t1| axiolid_reference::bound::chord_bound2(&spline, t0, t1).unwrap();
+        let worst = piece(0.2, 0.5).max(piece(0.5, 0.9));
+        let along = b - a;
+        let off =
+            (corner - (a + along * ((corner - a).dot(along) / along.length_squared()))).length();
+        assert!(worst > 0.0 && off > 0.0);
+        assert!(
+            (bound - (worst + off)).abs() < 1e-12,
+            "{bound} against {worst} + {off}"
+        );
     }
 
     /// A seam vertex shared from the face across sits off this face's
@@ -3200,7 +3448,7 @@ mod tests {
             &mut welded,
             &mut edge_samples,
             &mut records,
-            1.0e-3,
+            (1.0e-3, 1.0e-3),
             |state| {
                 state.reserve_face_vertices(1)?;
                 state.push_face_position(Point3::new(4.0, 5.0, 6.0))?;
@@ -3269,6 +3517,7 @@ mod tests {
             welded: &mut welded,
             edge_samples: &mut edge_samples,
             chord_error: 1.0e-3,
+            endpoint_limit: 1.0e-3,
             face_local_vertices: 0,
             total_curved_records: &mut total_curved_records,
             new_welded: Vec::new(),

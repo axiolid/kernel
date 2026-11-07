@@ -12,7 +12,7 @@ use axiolid_brep::ExactBRepBuilder;
 use axiolid_brep_boolean::ToleranceDecisionKind;
 use axiolid_construct::extrude::extrude_profile_exact;
 use axiolid_construct::revolve_exact::revolve_profile_exact;
-use axiolid_contracts::ExecutionOptions;
+use axiolid_contracts::{ExecutionOptions, GeomError};
 use axiolid_core::{
     BooleanOperator, Frame3, Interval, Point2, Point3, Tolerance, Transform3, Vec2, Vec3,
 };
@@ -29,7 +29,6 @@ use axiolid_topology::{Edge, EdgeUse, Face, FaceBound, Loop, Orientation, Vertex
 
 use super::view::from_exact;
 use super::{tessellate_exact, Deviation};
-use crate::deviation::{DeviationBound, DeviationPath};
 use crate::exact::polyhedral::from_triangles;
 use crate::ReferenceExactCompiler;
 
@@ -58,7 +57,7 @@ fn circle(radius: f64) -> Profile {
 /// The mesh of `exact` at `chord`, which must be a closed solid.
 fn mesh_of(exact: &ExactBRep, chord: f64) -> (TriMesh, Deviation) {
     let (mesh, closure, deviation) =
-        tessellate_exact(exact, TOLERANCE, chord).expect("a tessellable exact B-rep");
+        tessellate_exact(exact, TOLERANCE, chord, 0.0).expect("a tessellable exact B-rep");
     assert_eq!(closure, MeshClosure::Solid);
     (mesh, deviation)
 }
@@ -207,6 +206,13 @@ fn an_exact_union_of_a_box_and_a_dowel_is_one_solid_within_its_bound() {
 /// polyline through its middle (a family with no chord bound) when
 /// `kinked`.
 fn cylinder_patch(kinked: bool) -> ExactBRep {
+    cylinder_patch_with_gap(kinked, 0.0)
+}
+
+/// [`cylinder_patch`] whose right edge's pcurve starts `gap` radians past
+/// the bottom edge's end, as an exact boolean's reading can leave two
+/// pcurves at their shared vertex.
+fn cylinder_patch_with_gap(kinked: bool, gap: f64) -> ExactBRep {
     let mut b = ExactBRepBuilder::default();
     let world = Frame3 {
         origin: Point3::ZERO,
@@ -285,7 +291,7 @@ fn cylinder_patch(kinked: bool) -> ExactBRep {
     let uses = [
         (bottom, bottom_span, Orientation::Forward),
         (
-            line(FRAC_PI_2, 0.0, 0.0, 1.0),
+            line(FRAC_PI_2 + gap, 0.0, 0.0, 1.0),
             Interval::new(0.0, 1.0),
             Orientation::Forward,
         ),
@@ -335,7 +341,7 @@ fn cylinder_patch(kinked: bool) -> ExactBRep {
 #[test]
 fn a_patch_whose_uses_run_against_their_edges_is_meshed_within_its_bound() {
     let patch = cylinder_patch(false);
-    let (mesh, closure, deviation) = tessellate_exact(&patch, TOLERANCE, 1e-2).unwrap();
+    let (mesh, closure, deviation) = tessellate_exact(&patch, TOLERANCE, 1e-2, 0.0).unwrap();
     assert_eq!(closure, MeshClosure::Surface);
     let bound = deviation.bound().expect("a certified bound");
     // The spans of the two walked-against uses run backward.
@@ -375,18 +381,24 @@ fn a_patch_whose_uses_run_against_their_edges_is_meshed_within_its_bound() {
 }
 
 #[test]
-fn a_pcurve_family_with_no_chord_bound_is_unbounded_by_name() {
-    let (_, _, deviation) = tessellate_exact(&cylinder_patch(true), TOLERANCE, 1e-2).unwrap();
-    assert_eq!(deviation.bound(), None);
-    let report = deviation.report(1e-2);
-    let named: Vec<_> = report.unbounded().map(|c| (c.path, c.bound)).collect();
-    assert_eq!(
-        named,
-        [(
-            DeviationPath::BRepFace,
-            DeviationBound::Unbounded("trim pcurve family with no chord bound")
-        )]
-    );
+fn a_polyline_pcurve_is_bounded_piecewise_across_its_corners() {
+    // The kinked bottom pcurve has corners no sample sits on: no chord bound
+    // holds across one, so the span is cut there (#413).
+    let patch = cylinder_patch(true);
+    let (mesh, _, deviation) = tessellate_exact(&patch, TOLERANCE, 1e-2, 0.0).unwrap();
+    let bound = deviation.bound().expect("a certified bound");
+    let area: f64 = mesh
+        .indices
+        .as_chunks::<3>()
+        .0
+        .iter()
+        .map(|t| {
+            let [a, b, c] = [t[0], t[1], t[2]].map(|i| mesh.positions[i as usize]);
+            0.5 * (b - a).cross(c - a).length()
+        })
+        .sum();
+    assert!((area - FRAC_PI_2).abs() <= bound * 4.0, "{area}");
+    assert!(deviation.report(1e-2).unbounded().next().is_none());
 }
 
 #[test]
@@ -415,4 +427,87 @@ fn a_pcurve_ranks_by_its_handle_not_by_its_use() {
         }
     }
     assert!(seen > 1);
+}
+
+/// Two cylinders crossing at `angle` about x, united in a graph compiled
+/// exactly: the section of their walls has no closed form, so it is traced.
+fn crossed_cylinders(angle: f64, radii: (f64, f64)) -> ExactBRep {
+    let mut builder = GeometryGraphBuilder::new();
+    let mut push = |node| builder.push(node).expect("a valid node");
+    let mut pipe = |radius: f64, transform: Transform3| {
+        let profile = push(GeometryNode::Profile(circle(radius)));
+        let solid = push(GeometryNode::SolidOperation(SolidOperation::Extrusion {
+            profile,
+            direction: Vec3::Z,
+            depth: 3.0,
+        }));
+        push(GeometryNode::Instance(Instance {
+            source: solid,
+            transform,
+        }))
+    };
+    let upright = pipe(
+        radii.0,
+        Transform3::from_translation(Vec3::new(0.0, 0.0, -1.5)),
+    );
+    let centred = Transform3::from_translation(Vec3::new(0.0, 0.0, -1.5));
+    let turn = Transform3::from_mat3(axiolid_core::Mat3::from_rotation_x(angle));
+    let tilted = pipe(radii.1, turn * centred);
+    let root = push(GeometryNode::SolidOperation(SolidOperation::Boolean {
+        left: upright,
+        right: tilted,
+        operator: BooleanOperator::Union,
+    }));
+    let graph = builder.finish(vec![root]).expect("a valid graph");
+    let options = ExecutionOptions::new(TOLERANCE);
+    let mut solids = ReferenceExactCompiler::new()
+        .compile_exact_batch_with_reports(&graph, &[root], &options)
+        .expect("exact union");
+    solids.remove(0).0
+}
+
+#[test]
+fn an_exact_union_across_a_traced_section_tessellates_to_one_solid() {
+    // The tilted pipe's section pcurves on the two walls walk the shared
+    // edge at paces nothing relates (#413).
+    for (angle, radii) in [(1.0, (0.5, 0.35)), (1.2, (0.6, 0.3))] {
+        let exact = crossed_cylinders(angle, radii);
+        assert!(
+            exact
+                .curves2()
+                .iter()
+                .any(|curve| matches!(curve, Curve2::Implicit(_))),
+            "the section is traced"
+        );
+        let (mesh, closure, _) = tessellate_exact(&exact, TOLERANCE, 1e-2, 0.0)
+            .unwrap_or_else(|e| panic!("{angle} {radii:?}: {e}"));
+        assert_eq!(closure, MeshClosure::Solid, "{angle} {radii:?}");
+        // The mesh inscribes the exact solid: a little under its volume.
+        let (mesh, exact) = (mesh_volume(&mesh), exact_volume(&exact));
+        assert!(
+            mesh <= exact * (1.0 + 1e-9) && mesh >= 0.97 * exact,
+            "{angle} {radii:?}: mesh volume {mesh}, exact {exact}"
+        );
+    }
+}
+
+#[test]
+fn an_exact_boolean_closes_a_vertex_within_its_reading_not_beyond_the_chord_budget() {
+    // Two pcurves meet at a vertex 1.6e-3 apart, above the chord budget.
+    let patch = cylinder_patch_with_gap(false, 1.6e-3);
+    let error = tessellate_exact(&patch, TOLERANCE, 1e-3, 0.0).expect_err("beyond the budget");
+    assert!(
+        matches!(&error, GeomError::Degenerate(text)
+            if text == "pcurve endpoint disagrees with the welded topology vertex"),
+        "{error:?}"
+    );
+    // The reading admits it, and a reading below the gap does not.
+    let (_, _, deviation) = tessellate_exact(&patch, TOLERANCE, 1e-3, 2e-3).unwrap();
+    let (_, _, closed) = tessellate_exact(&cylinder_patch(false), TOLERANCE, 1e-3, 2e-3).unwrap();
+    let (bound, flush) = (deviation.bound().unwrap(), closed.bound().unwrap());
+    assert!(
+        bound >= flush + 1.5e-3,
+        "the gap is in the bound: {bound}, {flush}"
+    );
+    assert!(tessellate_exact(&patch, TOLERANCE, 1e-3, 1e-3).is_err());
 }

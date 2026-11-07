@@ -92,6 +92,8 @@ pub(crate) fn boolean(
         &exact,
         options.tolerance(),
         crate::compiler::chord_error(options),
+        // The result closes only within the reading of its booleans.
+        report.linear().min(eps),
     )
     .map_err(|error| error.to_string())?;
     let name = format!("{operator:?}").to_lowercase();

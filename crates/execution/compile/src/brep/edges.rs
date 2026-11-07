@@ -22,14 +22,17 @@
 //!    samples refine every other face's. An edge with no pcurve on any use
 //!    is cut at its 3D curve's derivative breaks (#342), a polyline's
 //!    corners for one, and its requirement is one count per piece between
-//!    them, the largest per piece, their sum within the segment cap; an edge some use runs through a pcurve
-//!    is one uniform count over the whole edge, its breaks ignored.
+//!    them, the largest per piece, their sum within the segment cap; an edge
+//!    some use runs through a pcurve is one uniform count over the whole
+//!    edge, its breaks ignored.
 //! 2. Each edge is sampled once at that count. With no pcurve on any use it
 //!    is sampled along its 3D trace, in its own direction, and keeps its
 //!    span bounds on that curve. When a use has a pcurve, the samples are
 //!    that pcurve's image on its face, the use with the smallest pcurve node
-//!    taken; every other pcurve use must agree with them within the chord
-//!    budget, as before. Along its 3D trace each break is a sample, bit for
+//!    taken; every other pcurve use has them located on its own pcurve
+//!    ([`super::locate`], #413), within the chord budget, and the samples are
+//!    halved until the located spans of every such use meet the budget too,
+//!    up to the segment cap. Along its 3D trace each break is a sample, bit for
 //!    bit, so a straight piece is one exact span. A planar face states no requirement: one segment
 //!    between the vertices is all it needs.
 //! 3. The samples are interned as mesh vertices, endpoints welded to the
@@ -51,12 +54,15 @@ use axiolid_core::Vec3;
 use axiolid_topology::Orientation;
 
 use super::inversion::{self, EdgeTrace, SurfaceInverter};
+use super::locate::{locate_samples, Limits};
 use super::view::Pcurve;
 use super::{
-    edge_sample_count, edge_samples, takes_curved_path, trim_samples, with_curved_face_transaction,
-    EdgeSamples, FaceBound, FaceContext, SpanBounds, WeldedVertices, MAX_CURVED_EDGE_SEGMENTS,
+    edge_sample_count, edge_samples, span_fits, takes_curved_path, trim_samples,
+    with_curved_face_transaction, EdgeSamples, FaceBound, FaceContext, SpanBounds, WeldedVertices,
+    MAX_CURVED_EDGE_SEGMENTS,
 };
 use axiolid_mesh::TriMesh;
+use axiolid_reference::bound::SurfaceBoundOracle;
 
 /// What the faces using one edge need of it.
 struct EdgePlan<'g> {
@@ -64,6 +70,9 @@ struct EdgePlan<'g> {
     segments: Requirement,
     /// The pcurve use the samples are taken through, when a use has one.
     pcurve: Option<PcurveSource<'g>>,
+    /// Every pcurve use of the edge, the one sampled included: the samples
+    /// are located on each (#413).
+    uses: Vec<PcurveSource<'g>>,
 }
 
 /// How finely an edge is sampled.
@@ -78,6 +87,7 @@ enum Requirement {
 }
 
 /// A pcurve use of an edge: its trim, its face's surface and its direction.
+#[derive(Clone, Copy)]
 struct PcurveSource<'g> {
     pcurve: Pcurve<'g>,
     surface: &'g axiolid_surface::Surface,
@@ -100,7 +110,7 @@ pub(super) fn sample_shell_edges(
         welded,
         cache,
         total_curved_records,
-        ctx.chord_error,
+        (ctx.chord_error, ctx.endpoint_limit()),
         |state| {
             for (index, plan) in &plans {
                 let edge = ctx
@@ -205,12 +215,14 @@ fn plan_edges<'g>(
                     slot.insert(EdgePlan {
                         segments,
                         pcurve: source,
+                        uses: source.into_iter().collect(),
                     });
                 }
                 Entry::Occupied(slot) => {
                     let plan = slot.into_mut();
                     plan.segments.merge(segments)?;
                     if let Some(source) = source {
+                        plan.uses.push(source);
                         if plan
                             .pcurve
                             .as_ref()
@@ -276,9 +288,65 @@ fn planned_samples(
             inversion::spans_of(&trace, &fractions, &points).ok_or(inversion::NO_CHORD_BOUND);
         return Ok((points, Orientation::Forward, spans));
     };
-    let points = trim_samples(&source.pcurve, *n)?
-        .iter()
-        .map(|p| axiolid_reference::surface::evaluate(source.surface, p.x, p.y))
-        .collect::<GeomResult<Vec<_>>>()?;
-    Ok((points, source.sense, Err(inversion::THROUGH_PCURVE)))
+    // Halve the sampling use's span until the other uses' located spans
+    // meet the budget too, up to the cap (#413): a located span can be
+    // longer than the sampling use's own, and a boundary edge is never
+    // split by the face's interior refinement.
+    let mut n = *n;
+    loop {
+        let points = trim_samples(&source.pcurve, n)?
+            .iter()
+            .map(|p| axiolid_reference::surface::evaluate(source.surface, p.x, p.y))
+            .collect::<GeomResult<Vec<_>>>()?;
+        if n >= MAX_CURVED_EDGE_SEGMENTS || located_within_budget(ctx, plan, source, &points)? {
+            return Ok((points, source.sense, Err(inversion::THROUGH_PCURVE)));
+        }
+        n *= 2;
+    }
+}
+
+/// Whether every other pcurve use of the edge, with `points` (in the
+/// direction of `source`) located on it, has each span's certified chord
+/// bound within the chord budget. A use whose bound cannot be had counts as
+/// within: it is reported as it stands.
+fn located_within_budget(
+    ctx: &FaceContext<'_>,
+    plan: &EdgePlan<'_>,
+    source: &PcurveSource<'_>,
+    points: &[Vec3],
+) -> GeomResult<bool> {
+    let limits = Limits {
+        interior: ctx.chord_error,
+        end: ctx.endpoint_limit(),
+    };
+    for other in &plan.uses {
+        if other.pcurve.key == source.pcurve.key
+            && other.sense == source.sense
+            && std::ptr::eq(other.surface, source.surface)
+        {
+            continue;
+        }
+        let Some(oracle) = SurfaceBoundOracle::new(other.surface) else {
+            continue;
+        };
+        let mut targets = points.to_vec();
+        if other.sense != source.sense {
+            targets.reverse();
+        }
+        let located = locate_samples(&other.pcurve, other.surface, &targets, limits)?;
+        let breaks = axiolid_reference::bound::continuity_breaks2(other.pcurve.curve, 1);
+        for span in located.ts.windows(2) {
+            let fits = span_fits(
+                &oracle,
+                (other.pcurve.curve, &breaks),
+                span[0],
+                span[1],
+                ctx.chord_error,
+            );
+            if fits == Some(false) {
+                return Ok(false);
+            }
+        }
+    }
+    Ok(true)
 }
