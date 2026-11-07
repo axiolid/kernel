@@ -14,6 +14,10 @@ caret rule for `0.x` versions.
 - `MeshVisibleFacesRegistry` accepts `FaceGroups::Planar`: it checks that a
   region's group id is a triangle of the mesh and no later than any triangle
   the region lists, and does not recompute the groups (ADR 0106, #384).
+- `MeshHiddenLinesRegistry` accepts `EdgeKind::GroupBoundary` segments only
+  when `EdgeSelection::group_boundary` is set, and then refuses a
+  `PerTriangle` group slice of the wrong length naming the mesh (ADR 0106,
+  #385).
 
 ## [0.3.12] - 2026-11-03
 

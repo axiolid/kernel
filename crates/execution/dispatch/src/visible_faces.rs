@@ -18,7 +18,8 @@ use axiolid_mesh_hidden_lines_contract::{
 
 use crate::device::matches_device;
 use crate::view_checks::{
-    scratch_fits, validate_meshes, validate_region, validate_topology, validate_view, SharedLimits,
+    scratch_fits, validate_group_lengths, validate_meshes, validate_region, validate_topology,
+    validate_view, SharedLimits,
 };
 
 const LABEL: &str = "visible-face";
@@ -117,7 +118,7 @@ impl MeshVisibleFacesRegistry {
 
         // The allocating topology audit happens only after at least one provider
         // and the audit itself have been admitted by the memory budget.
-        validate_topology(request.meshes, options)?;
+        validate_topology(request.meshes, None, options)?;
 
         let mut last_retryable = None;
         for entry in &self.providers {
@@ -196,20 +197,7 @@ fn validate_request_shape(
     )?;
     validate_view(&request.view, options.tolerance().angular(), LABEL)?;
     validate_region(request.region, LABEL)?;
-    for entry in request.meshes {
-        if let FaceGroups::PerTriangle(groups) = entry.groups {
-            if groups.len() != entry.mesh.triangle_count() {
-                return Err(HiddenLineError::mesh(
-                    entry.id,
-                    GeomError::InvalidInput(format!(
-                        "{LABEL} mesh has {} face group(s) for {} triangle(s)",
-                        groups.len(),
-                        entry.mesh.triangle_count()
-                    )),
-                ));
-            }
-        }
-    }
+    validate_group_lengths(request.meshes, LABEL)?;
     Ok(())
 }
 

@@ -359,7 +359,8 @@ impl VisibleFaceOutcome {
 ///   returned;
 /// - [`FaceGroups::Planar`] is resolved by the provider as documented there,
 ///   exactly, with polled cancellation and a memory-budget refusal, and the
-///   result equals the `PerTriangle` request with the resolved groups;
+///   result equals the `PerTriangle` request with the resolved groups, except
+///   `exact_escalations`;
 /// - output storage is outside the scratch budget.
 pub trait MeshVisibleFaces: Backend {
     /// Scratch needed beyond inputs and result.

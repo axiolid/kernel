@@ -5,8 +5,11 @@
 //! one incident triangle is a boundary; with two it is a silhouette when the
 //! triangles' image orientations differ (edge-on is its own orientation),
 //! otherwise a crease when the normals' cosine is strictly below the
-//! threshold, decided exactly. The kind follows from the geometry; the
-//! selection only decides whether an edge of that kind is drawn.
+//! threshold, decided exactly, otherwise a group boundary when the resolved
+//! face groups of the two triangles differ (ADR 0106). The kind follows from
+//! the geometry and the groups; the selection only decides whether an edge
+//! of that kind is drawn, except that an edge is a crease only when a
+//! threshold is selected, and a group boundary only when `groups` is given.
 
 use std::cmp::Ordering;
 
@@ -16,7 +19,7 @@ use axiolid_exact::{sign_root, Arith, SignExpr};
 use axiolid_guarantees::Sign;
 use axiolid_mesh::TriMesh;
 use axiolid_mesh_hidden_lines_contract::{
-    EdgeKind, EdgeSelection, HiddenLineError, MeshId, MeshRole,
+    EdgeKind, EdgeSelection, FaceGroup, HiddenLineError, MeshId, MeshRole,
 };
 
 use crate::decide::decide;
@@ -97,6 +100,9 @@ pub(crate) struct MeshEdges<'a> {
     pub base: u32,
     /// The mesh's first triangle in the scene's triangle list.
     pub first_tri: usize,
+    /// The resolved group of each of the mesh's triangles; given only when
+    /// group boundaries are selected.
+    pub groups: Option<&'a [FaceGroup]>,
 }
 
 /// Append the mesh's triangles to `tris`, each with its exact image
@@ -219,7 +225,8 @@ pub(crate) fn collect(
                     triangle_points(input.mesh, &input.mesh.indices[3 * (t - first_tri)..][..3])
                 };
                 if tris[t1].sigma != tris[t2].sigma {
-                    // A silhouette is never a crease, selected or not.
+                    // A silhouette is never a crease or a group boundary,
+                    // selected or not.
                     selection.silhouette.then_some(EdgeKind::Silhouette)
                 } else if let Some(cosine) = selection.crease_cosine {
                     let crease = Crease {
@@ -227,10 +234,13 @@ pub(crate) fn collect(
                         second: &triangle(t2),
                         cosine,
                     };
-                    (decide(&crease, escalations).map_err(refuse)? == Ordering::Less)
-                        .then_some(EdgeKind::Crease)
+                    if decide(&crease, escalations).map_err(refuse)? == Ordering::Less {
+                        Some(EdgeKind::Crease)
+                    } else {
+                        group_boundary(input.groups, first.2, second.2)
+                    }
                 } else {
-                    None
+                    group_boundary(input.groups, first.2, second.2)
                 }
             }
             _ => {
@@ -253,6 +263,14 @@ pub(crate) fn collect(
         }
     }
     Ok(())
+}
+
+/// A group boundary when the mesh's triangles `t1` and `t2` (mesh-local) are
+/// in different groups; `None` when groups are not selected.
+fn group_boundary(groups: Option<&[FaceGroup]>, t1: u32, t2: u32) -> Option<EdgeKind> {
+    groups
+        .is_some_and(|g| g[t1 as usize] != g[t2 as usize])
+        .then_some(EdgeKind::GroupBoundary)
 }
 
 pub(crate) fn triangle_points(mesh: &TriMesh, corner: &[u32]) -> [Point3; 3] {

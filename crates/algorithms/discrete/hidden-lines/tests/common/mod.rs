@@ -113,6 +113,20 @@ pub fn try_draw(
     provider.hidden_lines(&request, &options)
 }
 
+/// `try_draw` with the caller's edge selection.
+pub fn try_draw_with(
+    provider: &dyn MeshHiddenLines,
+    meshes: &[HiddenLineMesh<'_>],
+    view: OrthographicView,
+    edges: EdgeSelection,
+) -> Result<HiddenLineOutcome, HiddenLineError> {
+    let request = HiddenLineRequest::new(meshes, view, edges, LIMITS);
+    let options = axiolid_contracts::ExecutionOptions::new(
+        axiolid_core::Tolerance::new(1e-9, 1e-9).expect("tolerance"),
+    );
+    provider.hidden_lines(&request, &options)
+}
+
 pub fn draw(
     provider: &dyn MeshHiddenLines,
     meshes: &[HiddenLineMesh<'_>],

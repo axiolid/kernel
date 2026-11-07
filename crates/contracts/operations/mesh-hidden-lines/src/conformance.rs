@@ -128,11 +128,7 @@ impl ConformanceSuite {
         }
 
         for refusal in refusals() {
-            let meshes: Vec<HiddenLineMesh<'_>> = refusal
-                .meshes
-                .iter()
-                .map(|f| HiddenLineMesh::new(f.id, f.role, &f.mesh))
-                .collect();
+            let meshes: Vec<HiddenLineMesh<'_>> = refusal.meshes.iter().map(mesh_of).collect();
             let request =
                 HiddenLineRequest::new(&meshes, refusal.view, refusal.edges, refusal.limits);
             match provider.hidden_lines(&request, &options) {
@@ -160,16 +156,25 @@ impl ConformanceSuite {
     }
 }
 
+/// The request mesh of a fixture, with its groups.
+fn mesh_of(f: &Fixture) -> HiddenLineMesh<'_> {
+    let mesh = HiddenLineMesh::new(f.id, f.role, &f.mesh);
+    if f.planar {
+        mesh.with_planar_groups()
+    } else if f.groups.is_empty() {
+        mesh
+    } else {
+        mesh.with_groups(&f.groups)
+    }
+}
+
 fn draw(
     provider: &dyn MeshHiddenLines,
     case: &Case,
     fixtures: &[Fixture],
     options: &ExecutionOptions,
 ) -> Result<HiddenLineOutcome, HiddenLineError> {
-    let meshes: Vec<HiddenLineMesh<'_>> = fixtures
-        .iter()
-        .map(|f| HiddenLineMesh::new(f.id, f.role, &f.mesh))
-        .collect();
+    let meshes: Vec<HiddenLineMesh<'_>> = fixtures.iter().map(mesh_of).collect();
     let mut request = HiddenLineRequest::new(&meshes, case.view, case.edges, case.limits);
     if let Some(region) = case.region {
         request = request.with_region(region);
@@ -191,6 +196,8 @@ fn check_orientation(
             id: f.id,
             role: f.role,
             mesh: reversed(&f.mesh),
+            groups: f.groups.clone(),
+            planar: f.planar,
         })
         .collect();
     match draw(provider, case, &flipped, options) {
@@ -250,7 +257,12 @@ fn check_outcome(report: &mut ConformanceReport, case: &Case, outcome: &HiddenLi
     }
 
     if let Some(rows) = &expect.rows {
-        for kind in [EdgeKind::Boundary, EdgeKind::Silhouette, EdgeKind::Crease] {
+        for kind in [
+            EdgeKind::Boundary,
+            EdgeKind::Silhouette,
+            EdgeKind::Crease,
+            EdgeKind::GroupBoundary,
+        ] {
             for visibility in [Visibility::Visible, Visibility::Hidden] {
                 let (want_count, want_length) = rows
                     .iter()
@@ -358,7 +370,11 @@ mod tests {
             _options: &ExecutionOptions,
         ) -> Result<HiddenLineOutcome, HiddenLineError> {
             if request.meshes.len() == 2 {
-                let error = GeomError::NotManifold("refused".into());
+                let error = if request.edges.group_boundary {
+                    GeomError::InvalidInput("refused".into())
+                } else {
+                    GeomError::NotManifold("refused".into())
+                };
                 return Err(if self.blame_offender {
                     HiddenLineError::mesh(request.meshes[1].id, error)
                 } else {
@@ -381,10 +397,11 @@ mod tests {
         }
     }
 
-    const REFUSAL_CASES: [&str; 5] = [
+    const REFUSAL_CASES: [&str; 6] = [
         "three triangles on one edge",
         "inconsistent winding",
         "sheet declared solid",
+        "group boundaries with a short group slice",
         "output limit",
         "candidate limit",
     ];
@@ -418,7 +435,7 @@ mod tests {
             blame_offender: false,
         });
         let wrong = refusal_failures(&report);
-        assert_eq!(wrong.len(), 3, "{wrong:?}");
+        assert_eq!(wrong.len(), 4, "{wrong:?}");
         for failure in wrong {
             assert!(matches!(
                 failure,

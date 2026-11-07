@@ -110,10 +110,11 @@ impl MeshHiddenLinesRegistry {
                 return Err(GeomError::BudgetExceeded { resource: "memory" }.into());
             }
         }
+        let groups = request.edges.group_boundary.then_some(LABEL);
         let mut refused = Vec::new();
         for entry in request.meshes {
             options.check_cancelled()?;
-            if let Some(error) = mesh_verdict(entry, options)? {
+            if let Some(error) = mesh_verdict(entry, groups, options)? {
                 refused.push(RefusedMesh::new(entry.id, error));
             }
         }
@@ -151,7 +152,11 @@ impl MeshHiddenLinesRegistry {
 
         // The allocating topology audit happens only after at least one provider
         // and the audit itself have been admitted by the memory budget.
-        validate_topology(request.meshes, options)?;
+        validate_topology(
+            request.meshes,
+            request.edges.group_boundary.then_some(LABEL),
+            options,
+        )?;
 
         let mut last_retryable = None;
         for entry in &self.providers {
@@ -260,6 +265,7 @@ fn validate_outcome(
         EdgeKind::Boundary => request.edges.boundary,
         EdgeKind::Silhouette => request.edges.silhouette,
         EdgeKind::Crease => request.edges.crease_cosine.is_some(),
+        EdgeKind::GroupBoundary => request.edges.group_boundary,
         _ => false,
     };
     let mut previous: Option<(usize, [u32; 2])> = None;

@@ -11,7 +11,7 @@ use axiolid_contracts::{ExecutionOptions, GeomError, ScratchRequirement};
 use axiolid_core::Aabb2;
 use axiolid_mesh::{audit_mesh_scratch_bytes, try_audit_mesh};
 use axiolid_mesh_hidden_lines_contract::{
-    HiddenLineError, HiddenLineMesh, MeshRole, OrthographicView,
+    FaceGroups, HiddenLineError, HiddenLineMesh, MeshRole, OrthographicView,
 };
 
 use crate::frame::validate_frame;
@@ -26,6 +26,34 @@ pub(crate) struct SharedLimits {
     pub meshes_resource: &'static str,
     pub vertices_resource: &'static str,
     pub triangles_resource: &'static str,
+}
+
+/// The fault of a `PerTriangle` group slice that does not have one id per
+/// triangle.
+pub(crate) fn group_length_fault(entry: &HiddenLineMesh<'_>, label: &str) -> Option<GeomError> {
+    match entry.groups {
+        FaceGroups::PerTriangle(groups) if groups.len() != entry.mesh.triangle_count() => {
+            Some(GeomError::InvalidInput(format!(
+                "{label} mesh has {} face group(s) for {} triangle(s)",
+                groups.len(),
+                entry.mesh.triangle_count()
+            )))
+        }
+        _ => None,
+    }
+}
+
+/// A `PerTriangle` group slice must have one id per triangle.
+pub(crate) fn validate_group_lengths(
+    meshes: &[HiddenLineMesh<'_>],
+    label: &str,
+) -> Result<(), HiddenLineError> {
+    for entry in meshes {
+        if let Some(error) = group_length_fault(entry, label) {
+            return Err(HiddenLineError::mesh(entry.id, error));
+        }
+    }
+    Ok(())
 }
 
 pub(crate) fn invalid(detail: impl Into<String>) -> HiddenLineError {
@@ -137,24 +165,31 @@ pub(crate) fn validate_region(region: Option<Aabb2>, label: &str) -> Result<(), 
 /// a provider.
 pub(crate) fn validate_topology(
     meshes: &[HiddenLineMesh<'_>],
+    groups: Option<&str>,
     options: &ExecutionOptions,
 ) -> Result<(), HiddenLineError> {
     for entry in meshes {
         options.check_cancelled()?;
-        if let Some(error) = mesh_verdict(entry, options)? {
+        if let Some(error) = mesh_verdict(entry, groups, options)? {
             return Err(HiddenLineError::mesh(entry.id, error));
         }
     }
     Ok(())
 }
 
-/// Why one mesh is refused, or `None` when it passes the audit. Shared by the
+/// Why one mesh is refused, or `None` when it passes the audit. `groups`
+/// names the operation when the mesh's face groups are read, so a short
+/// `PerTriangle` slice is a fault of the mesh. Shared by the
 /// registries' `validate_topology` and the hidden-line registry's `audit`, so
 /// both give the same verdict per mesh.
 pub(crate) fn mesh_verdict(
     entry: &HiddenLineMesh<'_>,
+    groups: Option<&str>,
     options: &ExecutionOptions,
 ) -> Result<Option<GeomError>, HiddenLineError> {
+    if let Some(fault) = groups.and_then(|label| group_length_fault(entry, label)) {
+        return Ok(Some(fault));
+    }
     let health = try_audit_mesh(entry.mesh, options.tolerance())
         .map_err(|_| GeomError::BudgetExceeded { resource: "memory" })?;
     if let Some((triangle, index)) = health.first_invalid_index {

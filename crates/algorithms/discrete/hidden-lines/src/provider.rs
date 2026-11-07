@@ -11,6 +11,7 @@ use axiolid_mesh_hidden_lines_contract::{
 
 use crate::broad::{Broad, BroadPhase};
 use crate::edges::{collect, DrawEdge, MeshEdges};
+use crate::groups::resolve_groups;
 use crate::occlusion::{resolve, Resolved, Scene, Work};
 use crate::output::endpoint;
 use crate::prepare::{prepare, Prepared, ResourceNames, SharedLimits};
@@ -112,6 +113,12 @@ fn draw(
     let memory = || HiddenLineError::from(GeomError::BudgetExceeded { resource: "memory" });
     let mut edges: Vec<DrawEdge> = Vec::new();
     for (index, (entry, range)) in request.meshes.iter().zip(&ranges).enumerate() {
+        // Groups are read only when their boundaries are drawn.
+        let groups = if request.edges.group_boundary {
+            Some(resolve_groups(entry, options, &mut escalations)?)
+        } else {
+            None
+        };
         let input = MeshEdges {
             index,
             id: entry.id,
@@ -119,6 +126,7 @@ fn draw(
             mesh: entry.mesh,
             base: range.base,
             first_tri: range.triangles.start,
+            groups: groups.as_deref(),
         };
         collect(
             &input,

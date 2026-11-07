@@ -7,14 +7,17 @@ registry test red.
 import probe_lib
 
 R = "crates/execution/dispatch/src/visible_faces.rs"
+V = "crates/execution/dispatch/src/view_checks.rs"
 TESTS = [
     "-p", "axiolid-dispatch", "--no-default-features", "--features", "mesh-hidden-lines",
     "--test", "mesh_visible_faces_contract",
 ]
 
 MUTANTS = [
-    ('group count unchecked', R, '            if groups.len() != entry.mesh.triangle_count() {', '            if false && groups.len() != entry.mesh.triangle_count() {', TESTS),
-    ('group count refusal loses its mesh id', R, '                return Err(HiddenLineError::mesh(\n                    entry.id,\n                    GeomError::InvalidInput(format!(\n                        "{LABEL} mesh has', '                return Err(HiddenLineError::request(\n                    GeomError::InvalidInput(format!(\n                        "{LABEL} mesh has', TESTS),
+    ('group count unchecked', V, '        FaceGroups::PerTriangle(groups) if groups.len() != entry.mesh.triangle_count() => {', '        FaceGroups::PerTriangle(groups) if false && groups.len() != entry.mesh.triangle_count() => {', TESTS),
+    ('group count refusal loses its mesh id', V, '        if let Some(error) = group_length_fault(entry, label) {\n            return Err(HiddenLineError::mesh(entry.id, error));', '        if let Some(error) = group_length_fault(entry, label) {\n            return Err(HiddenLineError::request(error));', TESTS),
+    ('a planar group id past the mesh accepted', R, '                    group.0 as usize >= count || region.triangles.iter().any(|&t| group.0 > t)', '                    region.triangles.iter().any(|&t| group.0 > t)', TESTS),
+    ('a planar group id after a listed triangle accepted', R, '                    group.0 as usize >= count || region.triangles.iter().any(|&t| group.0 > t)', '                    group.0 as usize >= count', TESTS),
     ('view change accepted', R, '    if outcome.view != request.view {', '    if false && outcome.view != request.view {', TESTS),
     ('region of a foreign mesh accepted', R, '            .position(|entry| entry.id == region.mesh)', '            .position(|entry| entry.id == region.mesh || true)', TESTS),
     ('short ring accepted', R, '            if ring.len() < 3 {', '            if false && ring.len() < 3 {', TESTS),

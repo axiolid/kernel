@@ -639,10 +639,11 @@ mod tests {
     use super::*;
     use crate::VisibleFaceEvidence;
 
-    const REFUSAL_CASES: [&str; 7] = [
+    const REFUSAL_CASES: [&str; 8] = [
         "three triangles on one edge",
         "inconsistent winding",
         "sheet declared solid",
+        "group boundaries with a short group slice",
         "group count mismatch",
         "region limit",
         "region vertex limit",
@@ -675,7 +676,9 @@ mod tests {
             if request.meshes.len() == 2 && request.meshes[1].id == MeshId(2) {
                 let mut error = GeomError::NotManifold("refused".into());
                 let groups = request.meshes[1].groups;
-                if matches!(groups, crate::FaceGroups::PerTriangle(g) if g.len() == 4) {
+                if matches!(groups, crate::FaceGroups::PerTriangle(g)
+                    if g.len() != request.meshes[1].mesh.triangle_count())
+                {
                     error = GeomError::InvalidInput("refused".into());
                 }
                 if request.meshes[1].mesh.triangle_count() == 12
@@ -743,7 +746,7 @@ mod tests {
             blame_offender: false,
         });
         let wrong = refusal_failures(&report);
-        assert_eq!(wrong.len(), 4, "{wrong:?}");
+        assert_eq!(wrong.len(), 5, "{wrong:?}");
         for failure in wrong {
             assert!(matches!(
                 failure,

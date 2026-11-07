@@ -9,15 +9,27 @@ use axiolid_core::{Aabb2, Frame3, Point2, Point3, Vec3};
 use axiolid_mesh::TriMesh;
 
 use crate::{
-    EdgeKind, EdgeSelection, HiddenLineLimits, MeshId, MeshRole, OrthographicView, SourceEdge,
-    Visibility,
+    EdgeKind, EdgeSelection, FaceGroup, HiddenLineLimits, MeshId, MeshRole, OrthographicView,
+    SourceEdge, Visibility,
 };
 
-/// One mesh of a scene.
+/// One mesh of a scene. An empty `groups` with `planar` unset leaves the
+/// groups at their default; `groups` are sent `PerTriangle` and `planar`
+/// sends `FaceGroups::Planar`. Only a request that selects group boundaries
+/// reads them.
 pub(crate) struct Fixture {
     pub id: MeshId,
     pub role: MeshRole,
     pub mesh: TriMesh,
+    pub groups: Vec<FaceGroup>,
+    pub planar: bool,
+}
+
+impl Fixture {
+    fn grouped(mut self, groups: &[u32]) -> Self {
+        self.groups = groups.iter().map(|&g| FaceGroup(g)).collect();
+        self
+    }
 }
 
 /// Expected count and total length of the segments of one kind and visibility.
@@ -208,6 +220,8 @@ fn solid(id: u64, mesh: TriMesh) -> Fixture {
         id: MeshId(id),
         role: MeshRole::Solid,
         mesh,
+        groups: Vec::new(),
+        planar: false,
     }
 }
 
@@ -216,6 +230,8 @@ fn sheet(id: u64, mesh: TriMesh) -> Fixture {
         id: MeshId(id),
         role: MeshRole::Sheet,
         mesh,
+        groups: Vec::new(),
+        planar: false,
     }
 }
 
@@ -304,7 +320,7 @@ fn isometric_cube(
 }
 
 pub(crate) fn cases() -> Vec<Case> {
-    use EdgeKind::{Boundary, Crease, Silhouette};
+    use EdgeKind::{Boundary, Crease, GroupBoundary, Silhouette};
     use Visibility::{Hidden, Visible};
     let l = iso_edge();
     let mut cases = Vec::new();
@@ -336,6 +352,89 @@ pub(crate) fn cases() -> Vec<Case> {
         EdgeSelection::new(None),
         vec![row(Silhouette, Visible, 6, 6.0 * l)],
         6,
+    ));
+    // With planar groups every cube edge is between two groups. The six
+    // outline edges stay silhouettes and the other six are group boundaries,
+    // visible at the near corner and hidden at the far one (the same edges as
+    // the creases above); a selected crease takes precedence.
+    let planar_cube = |name, edges, rows| {
+        let mut case = isometric_cube(name, Point3::ZERO, edges, rows, 12);
+        case.meshes[0].planar = true;
+        case
+    };
+    cases.push(planar_cube(
+        "isometric cube, planar group boundaries",
+        EdgeSelection::new(None).with_group_boundary(true),
+        vec![
+            row(Silhouette, Visible, 6, 6.0 * l),
+            row(GroupBoundary, Visible, 3, 3.0 * l),
+            row(GroupBoundary, Hidden, 3, 3.0 * l),
+        ],
+    ));
+    cases.push(planar_cube(
+        "isometric cube, a crease takes precedence over a group boundary",
+        crease_half().with_group_boundary(true),
+        full(),
+    ));
+    // A unit square sheet of two triangles in two groups, in plan. The four
+    // sides are boundaries; the diagonal between the groups is a group
+    // boundary only when they are selected, and `Single` groups have none.
+    let square = |name, edges, groups: &[u32], rows, selected, diagonal: bool| {
+        let sheet = sheet(1, sheet_quad(0.0, 0.0, 1.0, 1.0, 0.0));
+        let sheet = if groups.is_empty() {
+            sheet
+        } else {
+            sheet.grouped(groups)
+        };
+        case(
+            name,
+            vec![sheet],
+            plan(plan_frame()),
+            edges,
+            Expect {
+                rows: Some(rows),
+                edges: if diagonal {
+                    vec![EdgePieces {
+                        edge: edge(1, 0, 2),
+                        kind: GroupBoundary,
+                        pieces: vec![piece(Visible, [0.0, 0.0], [1.0, 1.0])],
+                    }]
+                } else {
+                    Vec::new()
+                },
+                selected_edges: Some(selected),
+                point_edges: Some(0),
+                clipped_edges: Some(0),
+            },
+        )
+    };
+    let selection = EdgeSelection::new(None);
+    cases.push(square(
+        "square sheet, group boundary between two groups",
+        selection.with_group_boundary(true),
+        &[0, 1],
+        vec![
+            row(Boundary, Visible, 4, 4.0),
+            row(GroupBoundary, Visible, 1, 2.0_f64.sqrt()),
+        ],
+        5,
+        true,
+    ));
+    cases.push(square(
+        "square sheet, groups ignored unless group boundaries are selected",
+        selection,
+        &[0, 1],
+        vec![row(Boundary, Visible, 4, 4.0)],
+        4,
+        false,
+    ));
+    cases.push(square(
+        "square sheet, one group has no group boundary",
+        selection.with_group_boundary(true),
+        &[],
+        vec![row(Boundary, Visible, 4, 4.0)],
+        4,
+        false,
     ));
     cases.push(isometric_cube(
         "isometric cube, visible only",
@@ -672,6 +771,8 @@ pub(crate) fn cases() -> Vec<Case> {
                     id: MeshId(1),
                     role: big_role,
                     mesh: capped_outer(),
+                    groups: Vec::new(),
+                    planar: false,
                 },
                 solid(2, capped_inner()),
             ],
@@ -937,6 +1038,15 @@ pub(crate) fn refusals() -> Vec<Refusal> {
             not_manifold,
         ),
     ];
+    // Group boundaries read the groups, so one id short of the triangles
+    // is the mesh's fault. Without them the groups are not read.
+    let mut short = refusal(
+        "group boundaries with a short group slice",
+        sheet(2, sheet_quad(0.0, 0.0, 1.0, 1.0, 0.0)).grouped(&[0]),
+        |e| matches!(e, GeomError::InvalidInput(_)),
+    );
+    short.edges = EdgeSelection::new(None).with_group_boundary(true);
+    refusals.push(short);
     let mut output = Refusal {
         name: "output limit",
         meshes: vec![solid(1, unit_cube())],
@@ -1244,7 +1354,7 @@ mod tests {
                 }
             }
         }
-        assert_eq!(names.len(), 21);
+        assert_eq!(names.len(), 26);
     }
 
     #[test]

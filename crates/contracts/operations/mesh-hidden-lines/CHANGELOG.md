@@ -16,6 +16,12 @@ caret rule for `0.x` versions.
   two triangles with parallel, same-facing normals, decided exactly, each named
   by its smallest triangle (ADR 0106, #384). Conformance gains the planar
   isometric cube, a flat sheet and a fold.
+- `EdgeKind::GroupBoundary` and `EdgeSelection::group_boundary` (default
+  `false`) with `EdgeSelection::with_group_boundary`: an edge between two
+  triangles of different face groups that is neither a silhouette nor a
+  selected crease. With the selection off the groups stay ignored and the
+  output is unchanged (ADR 0106, #385). Conformance gains the planar
+  isometric cube and a two-group square sheet.
 
 ## [0.1.4] - 2026-11-07
 

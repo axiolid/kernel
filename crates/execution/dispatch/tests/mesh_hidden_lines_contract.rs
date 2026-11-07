@@ -17,9 +17,9 @@ use axiolid_core::{Aabb2, Frame3, Point2, Point3, Tolerance, Vec3};
 use axiolid_dispatch::MeshHiddenLinesRegistry;
 use axiolid_mesh::TriMesh;
 use axiolid_mesh_hidden_lines_contract::{
-    EdgeKind, EdgeSelection, HiddenLineError, HiddenLineEvidence, HiddenLineLimits, HiddenLineMesh,
-    HiddenLineOutcome, HiddenLineRequest, HiddenLineSegment, MeshHiddenLines, MeshId, MeshRole,
-    OrthographicView, SourceEdge, Visibility,
+    EdgeKind, EdgeSelection, FaceGroup, HiddenLineError, HiddenLineEvidence, HiddenLineLimits,
+    HiddenLineMesh, HiddenLineOutcome, HiddenLineRequest, HiddenLineSegment, MeshHiddenLines,
+    MeshId, MeshRole, OrthographicView, SourceEdge, Visibility,
 };
 
 fn cube() -> TriMesh {
@@ -605,7 +605,7 @@ fn ordered_segments_are_accepted() {
 fn unselected_kinds_are_caught() {
     let (a, b) = (cube(), cube());
     let meshes = [mesh(1, MeshRole::Solid, &a), mesh(2, MeshRole::Solid, &b)];
-    let kinds: [(&str, EdgeSelection, EdgeKind); 3] = [
+    let kinds: [(&str, EdgeSelection, EdgeKind); 4] = [
         (
             "silhouette",
             selection().with_silhouette(false),
@@ -617,6 +617,11 @@ fn unselected_kinds_are_caught() {
             EdgeKind::Boundary,
         ),
         ("crease", EdgeSelection::new(None), EdgeKind::Crease),
+        (
+            "group boundary",
+            EdgeSelection::new(None),
+            EdgeKind::GroupBoundary,
+        ),
     ];
     for (name, edges, kind) in kinds {
         let request = HiddenLineRequest::new(&meshes, view(), edges, limits());
@@ -625,6 +630,10 @@ fn unselected_kinds_are_caught() {
             EdgeKind::Silhouette => |_, _| Ok(()),
             EdgeKind::Boundary => |_, o| {
                 o.segments[0].kind = EdgeKind::Boundary;
+                Ok(())
+            },
+            EdgeKind::GroupBoundary => |_, o| {
+                o.segments[0].kind = EdgeKind::GroupBoundary;
                 Ok(())
             },
             _ => |_, o| {
@@ -1056,4 +1065,81 @@ fn audit_verdict_equals_the_single_mesh_hidden_lines_error() {
             Ok(_) => assert!(audited.is_empty()),
         }
     }
+}
+
+#[test]
+fn a_group_boundary_segment_is_accepted_when_selected() {
+    let a = cube();
+    let meshes = [mesh(1, MeshRole::Solid, &a).with_planar_groups()];
+    let request = HiddenLineRequest::new(
+        &meshes,
+        view(),
+        EdgeSelection::new(None).with_group_boundary(true),
+        limits(),
+    );
+    let calls = counter();
+    registry(&calls, |_, o| {
+        o.segments[0].kind = EdgeKind::GroupBoundary;
+        Ok(())
+    })
+    .hidden_lines(&request, &options())
+    .expect("a selected group boundary");
+    assert_eq!(calls_of(&calls), 1);
+}
+
+#[test]
+fn group_slices_are_checked_only_when_group_boundaries_are_selected() {
+    let a = cube();
+    let short = [FaceGroup(0); 4];
+    let meshes = [
+        mesh(1, MeshRole::Solid, &a),
+        mesh(2, MeshRole::Solid, &a).with_groups(&short),
+    ];
+    let calls = counter();
+    let unselected = HiddenLineRequest::new(&meshes, view(), selection(), limits());
+    registry(&calls, well_behaved)
+        .hidden_lines(&unselected, &options())
+        .expect("groups are ignored");
+    assert_eq!(calls_of(&calls), 1);
+
+    let calls = counter();
+    let selected = HiddenLineRequest::new(
+        &meshes,
+        view(),
+        selection().with_group_boundary(true),
+        limits(),
+    );
+    let error = registry(&calls, well_behaved)
+        .hidden_lines(&selected, &options())
+        .expect_err("a short group slice");
+    assert_eq!(error.mesh, Some(MeshId(2)));
+    assert!(matches!(error.error, GeomError::InvalidInput(_)));
+    assert_eq!(calls_of(&calls), 0);
+}
+
+#[test]
+fn audit_lists_a_short_group_slice_exactly_when_group_boundaries_are_selected() {
+    let (good, short) = (cube(), cube());
+    let ids = [FaceGroup(0); 4];
+    let meshes = [
+        mesh(1, MeshRole::Solid, &good),
+        mesh(2, MeshRole::Solid, &short).with_groups(&ids),
+    ];
+    let registry = audit_registry();
+
+    let unselected = HiddenLineRequest::new(&meshes, view(), selection(), limits());
+    assert!(registry.audit(&unselected, &options()).unwrap().is_empty());
+
+    let selected = HiddenLineRequest::new(
+        &meshes,
+        view(),
+        selection().with_group_boundary(true),
+        limits(),
+    );
+    let refused = registry.audit(&selected, &options()).unwrap();
+    assert_eq!(audit_ids(&refused), [MeshId(2)]);
+    assert!(matches!(refused[0].error, GeomError::InvalidInput(_)));
+    let error = registry.hidden_lines(&selected, &options()).unwrap_err();
+    assert_eq!(error.mesh, Some(MeshId(2)));
+    assert_eq!(error.error, refused[0].error);
 }

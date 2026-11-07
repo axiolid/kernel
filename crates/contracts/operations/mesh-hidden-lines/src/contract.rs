@@ -36,8 +36,8 @@ pub struct HiddenLineMesh<'a> {
     pub role: MeshRole,
     /// Geometry. Winding does not change the outcome.
     pub mesh: &'a TriMesh,
-    /// Face groups, read by `MeshVisibleFaces` only; `MeshHiddenLines`
-    /// ignores them.
+    /// Face groups, read by `MeshVisibleFaces` and, when
+    /// [`EdgeSelection::group_boundary`] is set, by `MeshHiddenLines`.
     pub groups: FaceGroups<'a>,
 }
 
@@ -114,7 +114,12 @@ impl OrthographicView {
 /// is a silhouette when the two triangles' image orientations differ (a
 /// triangle seen edge-on is its own orientation, so the test is symmetric
 /// and independent of winding), and otherwise a crease when the cosine of
-/// the angle between their normals is strictly below `crease_cosine`.
+/// the angle between their normals is strictly below `crease_cosine`, and
+/// otherwise, when `group_boundary` is set, a group boundary when the two
+/// triangles are in different [`FaceGroup`]s (ADR 0106). The kinds are
+/// exclusive in that order: a silhouette is never a crease or a group
+/// boundary, and an edge that is a crease at `crease_cosine` is never a group
+/// boundary. With `group_boundary` unset the face groups are ignored.
 #[non_exhaustive]
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct EdgeSelection {
@@ -124,6 +129,11 @@ pub struct EdgeSelection {
     pub boundary: bool,
     /// Draw silhouette edges.
     pub silhouette: bool,
+    /// Draw edges between triangles of different face groups that are
+    /// neither silhouettes nor selected creases. The groups are resolved as
+    /// for `MeshVisibleFaces` ([`FaceGroups`]), and a `PerTriangle` slice of
+    /// the wrong length is refused.
+    pub group_boundary: bool,
     /// Also report the hidden pieces.
     pub hidden: bool,
 }
@@ -135,6 +145,7 @@ impl EdgeSelection {
             crease_cosine,
             boundary: true,
             silhouette: true,
+            group_boundary: false,
             hidden: true,
         }
     }
@@ -148,6 +159,12 @@ impl EdgeSelection {
     /// Select or deselect silhouette edges.
     pub const fn with_silhouette(mut self, silhouette: bool) -> Self {
         self.silhouette = silhouette;
+        self
+    }
+
+    /// Select or deselect group-boundary edges.
+    pub const fn with_group_boundary(mut self, group_boundary: bool) -> Self {
+        self.group_boundary = group_boundary;
         self
     }
 
@@ -247,6 +264,9 @@ pub enum EdgeKind {
     Silhouette,
     /// Two incident triangles meeting at a sharp angle.
     Crease,
+    /// Two incident triangles of different face groups that are neither a
+    /// silhouette nor a selected crease (ADR 0106).
+    GroupBoundary,
 }
 
 /// Whether a piece of an edge can be seen.
@@ -415,6 +435,10 @@ impl HiddenLineOutcome {
 /// - with `edges.hidden == false` no hidden segment is returned;
 /// - flipping every triangle gives identical segments and identical
 ///   evidence except `exact_escalations`;
+/// - with `edges.group_boundary` the groups are resolved exactly as for
+///   `MeshVisibleFaces`, and a `PerTriangle` group slice whose length differs
+///   from the triangle count is `InvalidInput` naming the mesh; without it
+///   the groups are not read;
 /// - endpoints are the exact points rounded once to nearest (see
 ///   [`HiddenLineSegment`]);
 /// - the tolerance of `options` applies to mesh audit and frame validation

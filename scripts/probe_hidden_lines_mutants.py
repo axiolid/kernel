@@ -20,6 +20,25 @@ PRE = "crates/algorithms/discrete/hidden-lines/src/prepare.rs"
 TESTS = ["-p", "axiolid-hidden-lines"]
 
 MUTANTS = [
+    # Group boundaries (#385, ADR 0106).
+    ('groups are read although group boundaries are not selected', PRO,
+     '        let groups = if request.edges.group_boundary {',
+     '        let groups = if true {', TESTS),
+    ('the group test runs before the crease test', EDG,
+     '                    if decide(&crease, escalations).map_err(refuse)? == Ordering::Less {',
+     '                    if group_boundary(input.groups, first.2, second.2).is_some() {\n'
+     '                        group_boundary(input.groups, first.2, second.2)\n'
+     '                    } else if decide(&crease, escalations).map_err(refuse)? == Ordering::Less {', TESTS),
+    ('a triangle is compared with its own group', EDG,
+     '        .is_some_and(|g| g[t1 as usize] != g[t2 as usize])',
+     '        .is_some_and(|g| g[t1 as usize] != g[t1 as usize])', TESTS),
+    ('a silhouette that is not selected becomes a group boundary', EDG,
+     '                    selection.silhouette.then_some(EdgeKind::Silhouette)',
+     '                    if selection.silhouette {\n'
+     '                        Some(EdgeKind::Silhouette)\n'
+     '                    } else {\n'
+     '                        group_boundary(input.groups, first.2, second.2)\n'
+     '                    }', TESTS),
     # What hides what.
     ('touching occludes', OCC,
      '            lift: Lift::Own,\n        },\n        true,',
@@ -62,8 +81,8 @@ MUTANTS = [
      '                if tris[t1].sigma != tris[t2].sigma {',
      '                if tris[t1].sigma.reverse() == tris[t2].sigma\n                    && tris[t1].sigma != Ordering::Equal\n                {', TESTS),
     ('crease threshold flipped', EDG,
-     '(decide(&crease, escalations).map_err(refuse)? == Ordering::Less)',
-     '(decide(&crease, escalations).map_err(refuse)? == Ordering::Greater)', TESTS),
+     'decide(&crease, escalations).map_err(refuse)? == Ordering::Less {\n                        Some(EdgeKind::Crease)',
+     'decide(&crease, escalations).map_err(refuse)? == Ordering::Greater {\n                        Some(EdgeKind::Crease)', TESTS),
     ('silhouette drawn when deselected', EDG,
      '                    selection.silhouette.then_some(EdgeKind::Silhouette)',
      '                    Some(EdgeKind::Silhouette).filter(|_| true)', TESTS),

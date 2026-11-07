@@ -15,7 +15,7 @@
 
 use std::cmp::Ordering;
 
-use axiolid_contracts::{BackendId, ExecutionOptions, GeomError, Operation};
+use axiolid_contracts::{ExecutionOptions, GeomError};
 use axiolid_core::Point3;
 use axiolid_exact::{Arith, SignExpr};
 use axiolid_guarantees::Sign;
@@ -55,10 +55,9 @@ pub(crate) fn resolve_groups(
             Ok(groups)
         }
         FaceGroups::Planar => planar(entry, options, escalations),
-        _ => Err(refuse(GeomError::Unsupported {
-            backend: BackendId::new("scalar-hidden-lines"),
-            operation: Operation::MeshVisibleFaces,
-        })),
+        _ => Err(refuse(GeomError::InvalidInput(
+            "unknown face group mode".into(),
+        ))),
     }
 }
 

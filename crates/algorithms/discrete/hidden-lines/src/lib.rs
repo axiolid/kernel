@@ -9,7 +9,9 @@
 //! parameter, and each sign is decided by the interval filter and, when that
 //! cannot decide, by dyadic big-integer arithmetic (`axiolid-exact`). Nothing
 //! is rounded before a decision; only the endpoints of the output pieces are,
-//! each the exact point rounded once to the nearest binary64.
+//! each the exact point rounded once to the nearest binary64. With
+//! `EdgeSelection::group_boundary` it also draws the edges between face
+//! groups, and `FaceGroups::Planar` derives the groups exactly (ADR 0106).
 //!
 //! [`ScalarVisibleFaces`] implements
 //! [`MeshVisibleFaces`](axiolid_mesh_hidden_lines_contract::MeshVisibleFaces)

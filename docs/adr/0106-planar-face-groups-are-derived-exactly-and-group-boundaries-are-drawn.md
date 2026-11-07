@@ -47,6 +47,20 @@ drawn lines then disagree.
 - **Conformance** gains the isometric cube with planar groups (each face is
   group `2k`), a flat sheet of four coplanar triangles that is one group, and a
   fold of two opposite-facing triangles over one edge that are two groups.
+- **`EdgeKind::GroupBoundary`** (amends 0090) is an edge with two triangles of
+  different resolved groups that is neither a silhouette nor a selected
+  crease. The precedence is silhouette, then crease (only when
+  `crease_cosine` is set and the edge is a crease), then group boundary.
+- **`EdgeSelection::group_boundary`** selects it and defaults to `false`
+  (`EdgeSelection::with_group_boundary`), so the output of every existing
+  request is unchanged bit for bit and the groups of a hidden-line request
+  stay ignored unless it is set. When it is set, the groups are resolved as
+  for visible faces (`Single`, `PerTriangle`, `Planar`), and a `PerTriangle`
+  slice of the wrong length is `InvalidInput` naming the mesh, from the
+  provider and from the registry before it calls one.
+- **Region outlines and drawn lines agree.** For `Planar` groups the drawn
+  group boundaries are the edges along which two visible regions of one
+  mesh meet inside a face of the mesh.
 
 ## Alternatives considered
 
@@ -55,6 +69,8 @@ drawn lines then disagree.
 | A tolerance on the angle between normals | Every decision in these operations is exact; a tolerance would make the grouping depend on a number the caller must tune, and on the order of the triangles. A caller who wants a tolerance still passes `PerTriangle`. |
 | Group by plane equation, not by edge-connectivity | Two disjoint coplanar patches would be one group, and a region could not be a face of the model. |
 | The largest or a view-dependent triangle as the id | The smallest index is stable under reversing the mesh and under the view, and equals the first triangle of the face in the usual builders. |
+| Draw group boundaries whenever groups are given | It changes the output of requests that carry groups for visible faces only, and `MeshHiddenLines` ignored them until now. |
+| A silhouette between two groups is a group boundary | A silhouette is drawn or not by its own selection; two kinds on one edge would make the output depend on both. |
 | Recompute `Planar` in the registry | It would run the exact pass twice per request; the provider's result is tested against a reference instead. |
 
 ## Consequences
@@ -84,5 +100,7 @@ drawn lines then disagree.
 - `crates/contracts/operations/mesh-hidden-lines`: `faces.rs`
   (`FaceGroups::Planar`), `contract.rs` (`with_planar_groups`),
   `face_fixtures.rs` and `conformance/faces.rs`.
-- `crates/algorithms/discrete/hidden-lines`: `groups.rs`, `faces.rs`.
-- `crates/execution/dispatch`: `visible_faces.rs`.
+- `crates/algorithms/discrete/hidden-lines`: `groups.rs`, `faces.rs`,
+  `edges.rs` (`collect`), `provider.rs`.
+- `crates/execution/dispatch`: `visible_faces.rs`, `hidden_lines.rs`,
+  `view_checks.rs`.

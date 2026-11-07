@@ -19,7 +19,7 @@ Exact scalar hidden-line drawings of triangle meshes in orthographic views.
 
 The exact scalar provider for `MeshHiddenLines` (ADR 0090): the visible and
 hidden pieces of the boundary, silhouette and crease edges of triangle
-meshes in an orthographic view. Visibility is decided exactly in the view's
+meshes (and, when selected, the edges between face groups, ADR 0106) in an orthographic view. Visibility is decided exactly in the view's
 affine frame, with the interval filter first and dyadic big integers when it
 cannot decide; no tolerance enters a decision, and the output endpoints are
 the exact points rounded once. It refuses what it cannot decide with a typed
@@ -41,7 +41,10 @@ each piece is labelled by the exact frontmost source at a symbolic side
 point, and the regions are traced from those labels. Region vertices are the
 exact points rounded once where no edge passes through the rounding cell of
 another vertex, and snap-rounded to the binary64 grid otherwise (ADR 0100).
-Sources tied in depth each receive the area.
+Sources tied in depth each receive the area. The groups are the caller's per
+triangle or, as `FaceGroups::Planar`, derived exactly: triangles join across
+an edge of exactly two triangles with parallel, same-facing normals, and a
+group is named by its smallest triangle (ADR 0106).
 A region whose area collapses under rounding is dropped and counted in the
 evidence, never refused.
 

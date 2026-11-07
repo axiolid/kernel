@@ -716,7 +716,10 @@ fn refusal_of(
 }
 
 fn clone_fixture(f: &crate::fixtures::Fixture) -> FaceFixture {
-    FaceFixture::new(f.id.0, f.role, f.mesh.clone())
+    let mut clone = FaceFixture::new(f.id.0, f.role, f.mesh.clone());
+    clone.groups = f.groups.clone();
+    clone.planar = f.planar;
+    clone
 }
 
 pub(crate) fn face_refusals() -> Vec<FaceRefusal> {
@@ -979,7 +982,7 @@ mod tests {
     #[test]
     fn refusals_name_their_mesh_where_one_is_at_fault() {
         let refusals = face_refusals();
-        assert_eq!(refusals.len(), 7);
+        assert_eq!(refusals.len(), 8);
         for r in &refusals {
             if let Some(id) = r.mesh {
                 assert!(r.meshes.iter().any(|m| m.id == id), "{}", r.name);

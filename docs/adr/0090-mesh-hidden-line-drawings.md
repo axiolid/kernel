@@ -5,6 +5,7 @@
 - **Deciders:** Friedrich Schrödter
 - **Supersedes:** —
 - **Amended by:** [0105](./0105-drawings-join-the-discrete-and-application-bundles.md): the contract joins `discrete`, the dispatch and providers join `application`.
+- **Amended by:** [0106](./0106-planar-face-groups-are-derived-exactly-and-group-boundaries-are-drawn.md): `EdgeKind::GroupBoundary` draws the edges between face groups.
 
 ## Context
 
