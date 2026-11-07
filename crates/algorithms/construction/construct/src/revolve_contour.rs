@@ -101,12 +101,13 @@ enum Contact {
 /// `[rim circle], seam, [rim circle], seam reversed` and leaves a gap along
 /// the pole line in its parameters, which consumers close (ADR 0059). An arc
 /// with exactly one end on the axis is a sphere when its circle is centred on
-/// the axis to rounding ([`CENTRE_ROUNDING`]); otherwise it is a spindle or
-/// horn torus and is refused by name, as is an arc with both ends on the
-/// axis. A vertex on the axis with no axis edge (a pinch point) is refused by
-/// name, and so is a vertex off the axis by no more than the tolerance, as
-/// neither on it nor clear of it, or a straight edge ending on the axis
-/// within the tolerance of perpendicular to it but not exactly.
+/// the axis to rounding (64 ulps of the coordinates it is computed from);
+/// otherwise it is a spindle or horn torus and is refused by name, as is an
+/// arc with both ends on the axis. A vertex on the axis with no axis edge (a
+/// pinch point) is refused by name, and so is a vertex off the axis by no
+/// more than the tolerance, as neither on it nor clear of it, or a straight
+/// edge ending on the axis within the tolerance of perpendicular to it but
+/// not exactly.
 /// Several separate contacts (a cavity along the axis) give one solid per
 /// outermost shell with the nested shells as its voids.
 pub fn revolve_arc_ring(
