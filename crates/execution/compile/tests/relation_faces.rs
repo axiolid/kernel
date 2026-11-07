@@ -11,10 +11,10 @@
 //! certified within the budget or the case fails.
 
 use std::collections::HashMap;
-use std::f64::consts::{FRAC_PI_2, FRAC_PI_4, PI, TAU};
+use std::f64::consts::{FRAC_PI_2, FRAC_PI_3, FRAC_PI_4, PI, TAU};
 
 use axiolid_contracts::{ExecutionOptions, GeomError, GeomResult, Operation};
-use axiolid_core::{Frame2, Frame3, Point2, Point3, Scalar, Tolerance, Vec2, Vec3};
+use axiolid_core::{Frame2, Frame3, Interval, Point2, Point3, Scalar, Tolerance, Vec2, Vec3};
 use axiolid_curve::{
     BSplineCurve3, Circle2, Circle3, Curve2, Curve3, KnotSpec, Line3, Polyline2, Polyline3,
 };
@@ -23,7 +23,7 @@ use axiolid_mesh::TriMesh;
 use axiolid_mesh_boolean_boolmesh::BoolmeshBoolean;
 use axiolid_mesh_compile::{DeviationBound, DeviationPath, DeviationReport, ReferenceMeshCompiler};
 use axiolid_mesh_compile_contract::MeshClosure;
-use axiolid_model::{GeometryGraphBuilder, GeometryNode, NodeId, SurfaceRelation};
+use axiolid_model::{GeometryGraphBuilder, GeometryNode, NodeId, RuledSide, SurfaceRelation};
 use axiolid_surface::{Cone, Cylinder, Plane, Sphere, Surface, Torus};
 use axiolid_topology::{
     BRep, Edge, EdgeUse, Face, FaceBound, Loop, Orientation, Shell, Solid, Vertex,
@@ -1065,4 +1065,135 @@ fn a_linear_extrusion_with_a_zero_direction_is_refused() {
     let support = |b: &mut GeometryGraphBuilder| extruded_circle(b, Vec3::ZERO);
     let error = refused(open_sheet(&support, &cylinder_sheet(true, None)));
     assert!(matches!(error, GeomError::InvalidInput(_)), "{error:?}");
+}
+
+// --- ruled surfaces -------------------------------------------------------------------
+
+const RULED: &str = "ruled surface";
+
+/// A ruled surface between two curves over intervals.
+fn ruled(b: &mut GeometryGraphBuilder, sides: [(Curve3, Scalar, Scalar); 2]) -> NodeId {
+    let [first, second] = sides.map(|(curve, start, end)| RuledSide::Curve {
+        curve: push_curve3(b, curve),
+        interval: Interval { start, end },
+    });
+    b.push(GeometryNode::SurfaceRelation(SurfaceRelation::Ruled {
+        first,
+        second,
+    }))
+    .unwrap()
+}
+
+#[test]
+fn two_circles_ruled_mesh_as_their_cylinder() {
+    let support = |b: &mut GeometryGraphBuilder| {
+        ruled(
+            b,
+            [
+                (horizontal_circle(0.0, 0.0, 0.0, RADIUS), 0.0, TAU),
+                (horizontal_circle(0.0, 0.0, HEIGHT, RADIUS), 0.0, TAU),
+            ],
+        )
+    };
+    let wall = Wall {
+        u: (0.0, 1.0),
+        v: (0.0, 1.0),
+        ..cylinder_wall(&support)
+    };
+    let expect = Solid3 {
+        family: RULED,
+        ..cylinder_solid()
+    };
+    assert_closed_wall("ruled circles", &wall, &expect);
+}
+
+fn arc_line_support(b: &mut GeometryGraphBuilder, reversed: bool) -> NodeId {
+    let line = line3(Point3::new(1.0, 0.0, 1.0), Vec3::new(-1.0, 1.0, 0.0));
+    let arc = horizontal_circle(0.0, 0.0, 0.0, 1.0);
+    if reversed {
+        ruled(b, [(arc, FRAC_PI_2, 0.0), (line, 1.0, 0.0)])
+    } else {
+        ruled(b, [(arc, 0.0, FRAC_PI_2), (line, 0.0, 1.0)])
+    }
+}
+
+/// An arc against a line, as Revit's `RuledSurface` writes one.
+fn arc_line_point(u: Scalar, v: Scalar) -> Point3 {
+    let angle = FRAC_PI_2 * u;
+    Point3::new(angle.cos(), angle.sin(), 0.0) * (1.0 - v) + Point3::new(1.0 - u, u, 1.0) * v
+}
+
+fn unit_sheet<'a>(
+    point: &'a dyn Fn(Scalar, Scalar) -> Point3,
+    curves: [Option<Curve3>; 4],
+) -> Sheet<'a> {
+    Sheet {
+        u: (0.0, 1.0),
+        v: (0.0, 1.0),
+        point,
+        curves,
+        pcurves: true,
+        hole: None,
+    }
+}
+
+#[test]
+fn an_arc_ruled_against_a_line_like_revit_s_meshes_within_its_bound() {
+    let support = |b: &mut GeometryGraphBuilder| arc_line_support(b, false);
+    let sheet = unit_sheet(
+        &arc_line_point,
+        [
+            Some(horizontal_circle(0.0, 0.0, 0.0, 1.0)),
+            None,
+            Some(line3(Point3::new(1.0, 0.0, 1.0), Vec3::new(-1.0, 1.0, 0.0))),
+            None,
+        ],
+    );
+    assert_sheet("arc against a line", &support, &sheet, RULED);
+}
+
+fn arcs_point(u: Scalar, v: Scalar) -> Point3 {
+    let (a, b) = (FRAC_PI_2 * u, FRAC_PI_3 * u);
+    Point3::new(a.cos(), a.sin(), 0.0) * (1.0 - v)
+        + Point3::new(0.5 * b.cos(), 0.5 * b.sin(), 1.0) * v
+}
+
+#[test]
+fn two_arcs_of_different_sweeps_ruled_mesh_within_their_bound() {
+    let support = |b: &mut GeometryGraphBuilder| {
+        ruled(
+            b,
+            [
+                (horizontal_circle(0.0, 0.0, 0.0, 1.0), 0.0, FRAC_PI_2),
+                (horizontal_circle(0.0, 0.0, 1.0, 0.5), 0.0, FRAC_PI_3),
+            ],
+        )
+    };
+    let sheet = unit_sheet(
+        &arcs_point,
+        [
+            Some(horizontal_circle(0.0, 0.0, 0.0, 1.0)),
+            None,
+            Some(horizontal_circle(0.0, 0.0, 1.0, 0.5)),
+            None,
+        ],
+    );
+    assert_sheet("arcs of different sweeps", &support, &sheet, RULED);
+}
+
+#[test]
+fn a_reversed_side_is_read_backwards() {
+    let support = |b: &mut GeometryGraphBuilder| arc_line_support(b, true);
+    let mirrored = |u: Scalar, v: Scalar| arc_line_point(1.0 - u, v);
+    // The arc now runs from the quarter turn back to the start.
+    let sheet = unit_sheet(
+        &mirrored,
+        [
+            Some(circle_in(Point3::ZERO, Vec3::Y, Vec3::X, 1.0)),
+            None,
+            Some(line3(Point3::new(0.0, 1.0, 1.0), Vec3::new(1.0, -1.0, 0.0))),
+            None,
+        ],
+    );
+    assert_sheet("reversed sides", &support, &sheet, RULED);
 }

@@ -273,10 +273,17 @@ fn face_surface<'g>(
             node,
             surface: RelationSurface::extrusion(graph, *swept_curve, *direction)?,
         })),
+        Some(GeometryNode::SurfaceRelation(node @ SurfaceRelation::Ruled { first, second })) => {
+            Ok(Some(Support::Relation {
+                node,
+                surface: RelationSurface::ruled(graph, first, second)?,
+            }))
+        }
         Some(GeometryNode::SurfaceRelation(_)) => Err(GeomError::UnsupportedInput {
             backend: crate::BACKEND_ID,
             operation: Operation::Tessellation,
-            input: "a B-rep face on a surface relation",
+            input: "a B-rep face on a surface relation other than a revolution, a linear \
+                    extrusion or a ruled surface",
         }),
         Some(_) => Err(GeomError::InvalidInput(format!(
             "face support {id:?} is not a Surface node"

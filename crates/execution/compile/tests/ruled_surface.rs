@@ -24,6 +24,7 @@ use axiolid_mesh_compile_contract::{CompileOutcome, MeshClosure, MeshCompiler};
 use axiolid_model::{
     GeometryGraph, GeometryGraphBuilder, GeometryNode, Instance, NodeId, RuledSide, SurfaceRelation,
 };
+use axiolid_surface::{Plane, Surface};
 use axiolid_topology::{
     BRep, Edge, EdgeUse, Face, FaceBound, Loop, Orientation, Shell, Solid, Vertex,
 };
@@ -764,22 +765,8 @@ fn the_exact_compiler_refuses_a_ruled_surface() {
     );
 }
 
-/// A B-rep face on a surface relation has no `Surface` to be tessellated
-/// over: refused as unsupported input, not as a malformed graph.
-#[test]
-fn a_brep_face_on_a_ruled_surface_is_refused_by_name() {
-    let a = line(Point3::ZERO, Vec3::X, (0.0, 1.0));
-    let b = line(Point3::new(0.0, 1.0, 1.0), Vec3::X, (0.0, 1.0));
-    let mut builder = GeometryGraphBuilder::new();
-    let first = side(&mut builder, &a);
-    let second = side(&mut builder, &b);
-    let ruled = builder
-        .push(GeometryNode::SurfaceRelation(SurfaceRelation::Ruled {
-            first,
-            second,
-        }))
-        .unwrap();
-
+/// A single quadrilateral face of straight edges, no pcurves, on `support`.
+fn straight_face_on(mut builder: GeometryGraphBuilder, support: NodeId) -> (GeometryGraph, NodeId) {
     let mut brep = BRep::default();
     let corners = [
         Point3::new(0.0, 0.0, 0.0),
@@ -811,7 +798,7 @@ fn a_brep_face_on_a_ruled_surface_is_refused_by_name() {
             .collect(),
     });
     let face = brep.add_face(Face {
-        surface: Some(ruled),
+        surface: Some(support),
         bounds: vec![FaceBound {
             loop_id: wire,
             orientation: Orientation::Forward,
@@ -828,7 +815,25 @@ fn a_brep_face_on_a_ruled_surface_is_refused_by_name() {
         voids: Vec::new(),
     });
     let root = builder.push(GeometryNode::BRep(brep)).unwrap();
-    let graph = builder.finish(vec![root]).unwrap();
+    (builder.finish(vec![root]).unwrap(), root)
+}
+
+/// A B-rep face on a ruled surface is meshed with pcurves on its edges
+/// (#411); one without them is refused by name, not as a malformed graph.
+#[test]
+fn a_ruled_face_whose_edges_have_no_pcurve_is_refused_by_name() {
+    let a = line(Point3::ZERO, Vec3::X, (0.0, 1.0));
+    let b = line(Point3::new(0.0, 1.0, 1.0), Vec3::X, (0.0, 1.0));
+    let mut builder = GeometryGraphBuilder::new();
+    let first = side(&mut builder, &a);
+    let second = side(&mut builder, &b);
+    let ruled = builder
+        .push(GeometryNode::SurfaceRelation(SurfaceRelation::Ruled {
+            first,
+            second,
+        }))
+        .unwrap();
+    let (graph, root) = straight_face_on(builder, ruled);
 
     let error = compiler()
         .compile_mesh(&graph, root, &options_with(CHORD))
@@ -838,7 +843,42 @@ fn a_brep_face_on_a_ruled_surface_is_refused_by_name() {
             error,
             GeomError::UnsupportedInput {
                 operation: Operation::Tessellation,
-                input: "a B-rep face on a surface relation",
+                input: "an edge use without a pcurve on a face over a surface relation",
+                ..
+            }
+        ),
+        "{error:?}"
+    );
+}
+
+/// A surface relation the tessellator does not read is refused as
+/// unsupported input, not as a malformed graph.
+#[test]
+fn a_brep_face_on_an_offset_surface_is_refused_by_name() {
+    let mut builder = GeometryGraphBuilder::new();
+    let plane = builder
+        .push(GeometryNode::Surface(Surface::Plane(Plane {
+            frame: frame(),
+        })))
+        .unwrap();
+    let offset = builder
+        .push(GeometryNode::SurfaceRelation(SurfaceRelation::Offset {
+            basis: plane,
+            distance: 0.1,
+            self_intersect: None,
+        }))
+        .unwrap();
+    let (graph, root) = straight_face_on(builder, offset);
+
+    let error = compiler()
+        .compile_mesh(&graph, root, &options_with(CHORD))
+        .unwrap_err();
+    assert!(
+        matches!(
+            error,
+            GeomError::UnsupportedInput {
+                operation: Operation::Tessellation,
+                input: "a B-rep face on a surface relation other than a revolution, a linear extrusion or a ruled surface",
                 ..
             }
         ),

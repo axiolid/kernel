@@ -99,7 +99,8 @@ const MAX_CELLS: usize = 1 << 20;
 const BUDGET: &str = "ruled surface cells";
 
 /// A resolved side.
-enum Side<'g> {
+#[derive(Debug, Clone, Copy)]
+pub(crate) enum Side<'g> {
     Curve {
         curve: &'g Curve3,
         start: Scalar,
@@ -152,6 +153,73 @@ impl Side<'_> {
                 Ok((end - start) * (end - start) * bounds.second)
             }
             Self::Apex(_) => Ok(0.0),
+        }
+    }
+}
+
+/// What a B-rep face on a ruled surface reads of a side (#411): the point
+/// and the derivatives at `u`, their bounds over a range of `u`, and where
+/// the side's tangent breaks.
+impl Side<'_> {
+    /// The side's point at `u`.
+    pub(crate) fn at(&self, u: Scalar) -> GeomResult<Point3> {
+        self.point(u, None)
+    }
+
+    /// `A'(u) = (t1 - t0) c'(t)`, zero for an apex.
+    pub(crate) fn derivative(&self, u: Scalar) -> GeomResult<Vec3> {
+        match self {
+            Self::Curve {
+                curve, start, end, ..
+            } => Ok(
+                axiolid_reference::curve::derivative3(curve, self.parameter(u, None))?
+                    * (end - start),
+            ),
+            Self::Apex(_) => Ok(Vec3::ZERO),
+        }
+    }
+
+    /// `A''(u) = (t1 - t0)^2 c''(t)`, zero for an apex.
+    #[cfg(test)]
+    pub(crate) fn second_derivative(&self, u: Scalar) -> GeomResult<Vec3> {
+        match self {
+            Self::Curve {
+                curve, start, end, ..
+            } => Ok(
+                axiolid_reference::curve::second_derivative3(curve, self.parameter(u, None))?
+                    * ((end - start) * (end - start)),
+            ),
+            Self::Apex(_) => Ok(Vec3::ZERO),
+        }
+    }
+
+    /// `sup |A'|` and `sup |A''|` over `u0..u1`, certified.
+    pub(crate) fn speeds(&self, u0: Scalar, u1: Scalar) -> Option<(Scalar, Scalar)> {
+        match self {
+            Self::Curve {
+                curve, start, end, ..
+            } => {
+                let (a, b) = (self.parameter(u0, None), self.parameter(u1, None));
+                let bounds =
+                    axiolid_reference::bound::curve_derivative_bounds3(curve, a.min(b), a.max(b))?;
+                let k = (end - start).abs();
+                Some((k * bounds.first, k * k * bounds.second))
+            }
+            Self::Apex(_) => Some((0.0, 0.0)),
+        }
+    }
+
+    /// The tangent breaks strictly inside `(0, 1)`, as `u`.
+    pub(crate) fn breaks_in_u(&self) -> Vec<Scalar> {
+        match self {
+            Self::Curve { curve, start, end } => {
+                axiolid_reference::bound::continuity_breaks3(curve, 1)
+                    .into_iter()
+                    .map(|t| (t - start) / (end - start))
+                    .filter(|u| *u > 0.0 && *u < 1.0)
+                    .collect()
+            }
+            Self::Apex(_) => Vec::new(),
         }
     }
 }
@@ -227,7 +295,7 @@ fn refused(input: &'static str) -> GeomError {
 }
 
 /// A side's curve and interval, refused by name where they cannot be read.
-fn resolve<'g>(graph: &'g GeometryGraph, side: &RuledSide) -> GeomResult<Side<'g>> {
+pub(crate) fn resolve<'g>(graph: &'g GeometryGraph, side: &RuledSide) -> GeomResult<Side<'g>> {
     match side {
         RuledSide::Apex(point) => {
             if !point.is_finite() {

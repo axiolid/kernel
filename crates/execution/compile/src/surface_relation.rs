@@ -1,4 +1,4 @@
-//! Swept surface relations, read as a B-rep face's support (#411, ADR 0103).
+//! Swept and ruled surface relations as a B-rep face's support (#411).
 //!
 //! A [`SurfaceRelation`](axiolid_model::SurfaceRelation) is a graph node, not
 //! an `axiolid_surface::Surface` value (ADR 0009), so the B-rep tessellator
@@ -21,6 +21,10 @@
 //!   the curve's own parameter and `v` is in units of the direction's
 //!   length: it is not normalised.
 //!
+//! - **Ruled:** ADR 0097, `S(u, v) = (1 - v) A(u) + v B(u)` over `u, v` in
+//!   `[0, 1]`, each side `A(u) = c(t0 + u (t1 - t0))` or an apex. A read
+//!   outside the unit square beyond the slack is refused.
+//!
 //! The swept curve is a line, circle, ellipse or B-spline (the family
 //! [`crate::ruled`] reads too); any other curve is refused by name. A
 //! B-spline is read only inside its domain, within a slack of
@@ -40,11 +44,20 @@
 //! swept curve lies strictly inside the box. An extrusion over `u0..u1` has
 //! `|S_u| = |c'|`, `|S_v| = |d|`, `|S_uu| = |c''|` and no mixed or `v`
 //! second derivative.
+//!
+//! A ruled surface bounds each side over the box, `a1 = k sup|c'|` and `a2 =
+//! k^2 sup|c''|` with `k = |t1 - t0|` (zero for an apex). With `um` the
+//! box's middle in `u` and `h` its width, `|S_uv| <= |B'(um) - A'(um)| + h/2
+//! (a2_A + a2_B)` and `|S_v| = |B - A| <= |B(um) - A(um)| + h/2 sup|S_uv|`;
+//! `|S_u|` and `|S_uu|` are largest at an end of the `v` range, being a
+//! blend of the sides' bounds, and `S_vv = 0`. The bounds are smooth unless
+//! a side's tangent break, mapped to `u`, lies strictly inside.
 
+use crate::ruled::{resolve, Side};
 use axiolid_contracts::{GeomError, GeomResult, Operation};
 use axiolid_core::{Interval, Point3, Scalar, Vec3};
 use axiolid_curve::Curve3;
-use axiolid_model::{GeometryGraph, GeometryNode, NodeId};
+use axiolid_model::{GeometryGraph, GeometryNode, NodeId, RuledSide};
 use axiolid_reference::bound::{
     continuity_breaks3, curve_derivative_bounds3, SurfaceBounds, ROUNDING,
 };
@@ -56,6 +69,10 @@ pub(crate) const SWEPT_CURVE_NOT_ATOMIC: &str = "a swept curve that is not an at
 /// A swept curve of a family that is not read.
 pub(crate) const SWEPT_CURVE_FAMILY: &str =
     "a swept curve other than a line, circle, ellipse or B-spline";
+
+/// A ruled surface read outside its unit parameter square.
+pub(crate) const OUTSIDE_RULED_SQUARE: &str =
+    "a ruled surface read outside its unit parameter square";
 
 /// A swept B-spline read outside its domain.
 pub(crate) const OUTSIDE_SWEPT_DOMAIN: &str =
@@ -149,6 +166,22 @@ pub(crate) enum RelationSurface<'g> {
         curve: SweptCurve<'g>,
         direction: Vec3,
     },
+    /// `S(u, v) = (1 - v) A(u) + v B(u)` over the unit square.
+    Ruled { sides: [Side<'g>; 2] },
+}
+
+/// A ruled-square parameter, clamped within the slack of `[0, 1]`.
+fn unit(t: Scalar) -> GeomResult<Scalar> {
+    if !(-DOMAIN_SLACK..=1.0 + DOMAIN_SLACK).contains(&t) {
+        return Err(GeomError::InvalidInput(OUTSIDE_RULED_SQUARE.into()));
+    }
+    Ok(t.clamp(0.0, 1.0))
+}
+
+/// A parameter box clamped to `[0, 1]`, or `None` when nothing is left.
+fn unit_box((lo, hi): (Scalar, Scalar)) -> Option<(Scalar, Scalar)> {
+    let (lo, hi) = (lo.min(hi).max(0.0), lo.max(hi).min(1.0));
+    (lo.is_finite() && hi.is_finite() && lo <= hi).then_some((lo, hi))
 }
 
 impl<'g> RelationSurface<'g> {
@@ -194,6 +227,17 @@ impl<'g> RelationSurface<'g> {
         })
     }
 
+    /// The ruled surface between two sides.
+    pub(crate) fn ruled(
+        graph: &'g GeometryGraph,
+        first: &RuledSide,
+        second: &RuledSide,
+    ) -> GeomResult<Self> {
+        Ok(Self::Ruled {
+            sides: [resolve(graph, first)?, resolve(graph, second)?],
+        })
+    }
+
     /// The point at `(u, v)`.
     pub(crate) fn evaluate(&self, u: Scalar, v: Scalar) -> GeomResult<Point3> {
         match self {
@@ -203,6 +247,10 @@ impl<'g> RelationSurface<'g> {
                 axis,
             } => Ok(*origin + rotate(*axis, u, curve.point(v)? - *origin)),
             Self::Extrusion { curve, direction } => Ok(curve.point(u)? + *direction * v),
+            Self::Ruled { sides } => {
+                let (u, v) = (unit(u)?, unit(v)?);
+                Ok(sides[0].at(u)? * (1.0 - v) + sides[1].at(u)? * v)
+            }
         }
     }
 
@@ -226,6 +274,19 @@ impl<'g> RelationSurface<'g> {
                 let (d1, d2) = curve.derivatives(u)?;
                 Ok([d1, *direction, d2, Vec3::ZERO, Vec3::ZERO])
             }
+            Self::Ruled { sides } => {
+                let (u, v) = (unit(u)?, unit(v)?);
+                let [a, b] = sides;
+                let (a1, a2) = (a.derivative(u)?, a.second_derivative(u)?);
+                let (b1, b2) = (b.derivative(u)?, b.second_derivative(u)?);
+                Ok([
+                    a1 * (1.0 - v) + b1 * v,
+                    b.at(u)? - a.at(u)?,
+                    a2 * (1.0 - v) + b2 * v,
+                    b1 - a1,
+                    Vec3::ZERO,
+                ])
+            }
         }
     }
 
@@ -234,6 +295,7 @@ impl<'g> RelationSurface<'g> {
         match self {
             Self::Revolution { curve, .. } => (Some(TAU), curve.is_conic().then_some(TAU)),
             Self::Extrusion { curve, .. } => (curve.is_conic().then_some(TAU), None),
+            Self::Ruled { .. } => (None, None),
         }
     }
 
@@ -242,6 +304,7 @@ impl<'g> RelationSurface<'g> {
         match self {
             Self::Revolution { .. } => "surface of revolution",
             Self::Extrusion { .. } => "surface of linear extrusion",
+            Self::Ruled { .. } => "ruled surface",
         }
     }
 }
@@ -273,6 +336,11 @@ impl<'g> RelationOracle<'g> {
         let breaks = match &surface {
             RelationSurface::Revolution { curve, .. } => [Vec::new(), curve.breaks()],
             RelationSurface::Extrusion { curve, .. } => [curve.breaks(), Vec::new()],
+            RelationSurface::Ruled { sides } => {
+                let mut breaks: Vec<Scalar> = sides.iter().flat_map(Side::breaks_in_u).collect();
+                breaks.sort_by(Scalar::total_cmp);
+                [breaks, Vec::new()]
+            }
         };
         Self { surface, breaks }
     }
@@ -309,6 +377,34 @@ impl<'g> RelationOracle<'g> {
                     dvv: d.second,
                     smooth: smooth(1, (v0, v1)),
                     interpolation: [reach, perp, d.second],
+                }
+            }
+            RelationSurface::Ruled { sides } => {
+                let (u0, u1) = unit_box(u)?;
+                let (v0, v1) = unit_box(v)?;
+                let (h, um) = (u1 - u0, 0.5 * (u0 + u1));
+                let [(a1, a2), (b1, b2)] = [sides[0].speeds(u0, u1)?, sides[1].speeds(u0, u1)?];
+                let (a, b) = (sides[0].at(um).ok()?, sides[1].at(um).ok()?);
+                let (da, db) = (sides[0].derivative(um).ok()?, sides[1].derivative(um).ok()?);
+                let duv = (db - da).length()
+                    + 0.5 * h * (a2 + b2)
+                    + ROUNDING * (da.length() + db.length());
+                let dv = (b - a).length() + 0.5 * h * duv + ROUNDING * (a.length() + b.length());
+                let blend = |a: Scalar, b: Scalar| {
+                    [v0, v1]
+                        .into_iter()
+                        .map(|v| (1.0 - v) * a + v * b)
+                        .fold(0.0, Scalar::max)
+                };
+                let (du, duu) = (blend(a1, b1), blend(a2, b2));
+                SurfaceBounds {
+                    du,
+                    dv,
+                    duu,
+                    duv,
+                    dvv: 0.0,
+                    smooth: smooth(0, (u0, u1)),
+                    interpolation: [duu, duv, 0.0],
                 }
             }
             RelationSurface::Extrusion { curve, direction } => {
@@ -359,6 +455,7 @@ mod tests {
     };
     use axiolid_model::GeometryGraphBuilder;
     use axiolid_surface::{Cone, Cylinder, Sphere, Surface, Torus};
+    use std::f64::consts::PI;
 
     fn frame_at(z: Scalar) -> Frame3 {
         Frame3 {
@@ -868,5 +965,213 @@ mod tests {
         let (graph, id) = curve_graph(polyline);
         let error = RelationSurface::extrusion(&graph, id, Vec3::Z).unwrap_err();
         assert_eq!(unsupported(error), SWEPT_CURVE_FAMILY);
+    }
+
+    enum Spec {
+        Curve(Box<Curve3>, Scalar, Scalar),
+        Apex(Point3),
+    }
+
+    impl Spec {
+        fn curve(curve: Curve3, start: Scalar, end: Scalar) -> Self {
+            Self::Curve(Box::new(curve), start, end)
+        }
+    }
+
+    /// A graph holding the curves of two sides, and the sides.
+    fn ruled_graph(specs: [Spec; 2]) -> (GeometryGraph, [RuledSide; 2]) {
+        let mut builder = GeometryGraphBuilder::new();
+        let mut first = None;
+        let sides = specs.map(|spec| match spec {
+            Spec::Curve(curve, start, end) => {
+                let id = builder.push(GeometryNode::Curve3(*curve)).unwrap();
+                first.get_or_insert(id);
+                RuledSide::Curve {
+                    curve: id,
+                    interval: Interval { start, end },
+                }
+            }
+            Spec::Apex(point) => RuledSide::Apex(point),
+        });
+        (builder.finish(vec![first.unwrap()]).unwrap(), sides)
+    }
+
+    fn unit_circle(z: Scalar, radius: Scalar) -> Curve3 {
+        Curve3::Circle(Circle3 {
+            frame: frame_at(z),
+            radius,
+        })
+    }
+
+    fn arc_and_line(reversed: bool) -> [Spec; 2] {
+        let (a, b) = if reversed {
+            ((core::f64::consts::FRAC_PI_2, 0.0), (1.0, 0.0))
+        } else {
+            ((0.0, core::f64::consts::FRAC_PI_2), (0.0, 1.0))
+        };
+        [
+            Spec::curve(unit_circle(0.0, 1.0), a.0, a.1),
+            Spec::curve(
+                line(Point3::new(1.0, 0.0, 1.0), Vec3::new(-1.0, 1.0, 0.0)),
+                b.0,
+                b.1,
+            ),
+        ]
+    }
+
+    fn ruled_cases() -> Vec<[Spec; 2]> {
+        let rational = profiles().remove(1).0;
+        vec![
+            arc_and_line(false),
+            arc_and_line(true),
+            [
+                Spec::curve(unit_circle(0.0, 1.0), 0.0, PI),
+                Spec::Apex(Point3::new(0.0, 0.0, 1.0)),
+            ],
+            [
+                Spec::curve(unit_circle(0.0, 1.0), 0.0, core::f64::consts::FRAC_PI_2),
+                Spec::curve(unit_circle(1.0, 0.5), 0.0, core::f64::consts::FRAC_PI_3),
+            ],
+            [
+                Spec::curve(rational, 0.9, 0.1),
+                Spec::curve(profiles().remove(0).0, 0.2, 4.0),
+            ],
+        ]
+    }
+
+    #[test]
+    fn ruled_evaluates_as_the_sheet_does() {
+        let (graph, [first, second]) = ruled_graph(arc_and_line(false));
+        let surface = RelationSurface::ruled(&graph, &first, &second).unwrap();
+        for (u, v) in grid().map(|(u, v)| ((u + 1.3) / 5.4, v * 2.0)) {
+            let angle = core::f64::consts::FRAC_PI_2 * u;
+            let a = Point3::new(angle.cos(), angle.sin(), 0.0);
+            let b = Point3::new(1.0 - u, u, 1.0);
+            let want = a * (1.0 - v) + b * v;
+            assert!((surface.evaluate(u, v).unwrap() - want).length() <= 1e-12);
+        }
+    }
+
+    #[test]
+    fn the_bounds_of_two_parallel_circles_have_no_twist() {
+        let (graph, [first, second]) = ruled_graph([
+            Spec::curve(unit_circle(0.0, 0.3), 0.0, TAU),
+            Spec::curve(unit_circle(0.5, 0.3), 0.0, TAU),
+        ]);
+        let surface = RelationSurface::ruled(&graph, &first, &second).unwrap();
+        let h = 0.1;
+        let b = bounds_of(surface, (0.2, 0.2 + h), (0.0, 1.0));
+        assert!(
+            b.duv <= 0.5 * h * 2.0 * TAU * TAU * 0.3 * (1.0 + 1e-9),
+            "{}",
+            b.duv
+        );
+        assert_eq!(b.dvv, 0.0);
+        assert!(b.smooth);
+    }
+
+    #[test]
+    fn ruled_bounds_dominate_sampled_derivatives() {
+        let mut random = Lcg(23);
+        for specs in ruled_cases() {
+            let (graph, [first, second]) = ruled_graph(specs);
+            let surface = RelationSurface::ruled(&graph, &first, &second).unwrap();
+            let oracle = RelationOracle::new(surface);
+            for _ in 0..50 {
+                let u0 = random.next();
+                let u1 = u0 + (1.0 - u0) * random.next();
+                let v0 = random.next();
+                let v1 = v0 + (1.0 - v0) * random.next();
+                let b = oracle.bounds((u0, u1), (v0, v1)).unwrap();
+                for _ in 0..30 {
+                    let u = u0 + (u1 - u0) * random.next();
+                    let v = v0 + (v1 - v0) * random.next();
+                    let [su, sv, suu, suv, svv] =
+                        surface.partials(u, v).unwrap().map(|x| x.length());
+                    let limit = |x: Scalar, bound: Scalar| {
+                        assert!(x <= bound * (1.0 + 1e-9), "{x} > {bound} at ({u}, {v})");
+                    };
+                    limit(su, b.du);
+                    limit(sv, b.dv);
+                    limit(suu, b.duu);
+                    limit(suv, b.duv);
+                    limit(svv, b.dvv);
+                    limit(suu, b.interpolation[0]);
+                    limit(suv, b.interpolation[1]);
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn the_ruled_partials_match_central_differences() {
+        let h = 1e-5;
+        for specs in ruled_cases() {
+            let (graph, [first, second]) = ruled_graph(specs);
+            let surface = RelationSurface::ruled(&graph, &first, &second).unwrap();
+            let (u, v) = (0.4, 0.7);
+            let at = |u: Scalar, v: Scalar| surface.evaluate(u, v).unwrap();
+            let [su, sv, suu, suv, _] = surface.partials(u, v).unwrap();
+            let close = |got: Vec3, want: Vec3, scale: Scalar| {
+                assert!(
+                    (got - want).length() <= scale * (1.0 + want.length()),
+                    "{got:?} vs {want:?}"
+                );
+            };
+            close((at(u + h, v) - at(u - h, v)) / (2.0 * h), su, 1e-6);
+            close((at(u, v + h) - at(u, v - h)) / (2.0 * h), sv, 1e-6);
+            close(
+                (at(u + h, v) - 2.0 * at(u, v) + at(u - h, v)) / (h * h),
+                suu,
+                1e-3,
+            );
+            let cross = (at(u + h, v + h) - at(u + h, v - h) - at(u - h, v + h) + at(u - h, v - h))
+                / (4.0 * h * h);
+            close(cross, suv, 1e-3);
+        }
+    }
+
+    #[test]
+    fn ruled_breaks_make_the_box_not_smooth() {
+        let (graph, [first, second]) = ruled_graph([
+            Spec::curve(kinked(), 0.0, 1.0),
+            Spec::curve(line(Point3::new(0.0, 1.0, 0.0), Vec3::Z), 0.0, 1.0),
+        ]);
+        let surface = RelationSurface::ruled(&graph, &first, &second).unwrap();
+        assert!(!bounds_of(surface, (0.4, 0.6), (0.0, 1.0)).smooth);
+        assert!(bounds_of(surface, (0.0, 0.4), (0.0, 1.0)).smooth);
+    }
+
+    #[test]
+    fn reading_outside_the_unit_square_is_refused() {
+        let (graph, [first, second]) = ruled_graph(arc_and_line(false));
+        let surface = RelationSurface::ruled(&graph, &first, &second).unwrap();
+        for (u, v) in [
+            (1.0 + 1e-6, 0.5),
+            (0.5, 1.0 + 1e-6),
+            (-1e-6, 0.5),
+            (0.5, -1e-6),
+        ] {
+            let error = surface.evaluate(u, v).unwrap_err();
+            assert!(
+                matches!(&error, GeomError::InvalidInput(text) if text == OUTSIDE_RULED_SQUARE),
+                "{error:?}"
+            );
+        }
+        assert!(surface.evaluate(1.0 + 1e-14, 0.5).is_ok());
+        let oracle = RelationOracle::new(surface);
+        assert!(oracle.bounds((0.5, 2.0), (0.0, 1.0)).is_some());
+        assert!(oracle.bounds((1.5, 2.0), (0.0, 1.0)).is_none());
+    }
+
+    #[test]
+    fn a_ruled_side_that_is_not_read_is_refused() {
+        let polyline = Curve3::Polyline(Polyline3 {
+            points: vec![Point3::ZERO, Point3::X],
+            closed: false,
+        });
+        let (graph, [first, second]) =
+            ruled_graph([Spec::curve(polyline, 0.0, 1.0), Spec::Apex(Point3::Z)]);
+        assert!(RelationSurface::ruled(&graph, &first, &second).is_err());
     }
 }
