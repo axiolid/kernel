@@ -262,6 +262,104 @@ fn a_stand_in_touching_another_within_the_tolerance_at_the_margin_is_no_cavity()
     assert!(exact);
 }
 
+/// The unit block less the slab of thickness `d` between two parallel
+/// planes through `(0, 0, 0.5)` tilted by `n = (0.3, 0, 1)`: the two
+/// stand-ins meet in a sliver the tolerance reads away and the exact
+/// boolean at zero tolerance cannot sew.
+#[test]
+fn stand_ins_met_only_within_the_tolerance_are_refused_by_name() {
+    let n = Vec3::new(0.3, 0.0, 1.0);
+    let d = 1e-9;
+    let mut g = Graph::new();
+    let block = unit_block(&mut g);
+    let above = g.local_side(Point3::new(0.0, 0.0, 0.5), n);
+    let below = g.local_side(Point3::new(0.0, 0.0, 0.5 + d), -n);
+    let slab = g.meet(above, below);
+    let root = g.minus(block, slab);
+    named(&refusal(g, root), "only within the tolerance");
+}
+
+/// Clipped by a strip along `z` that starts `d` short of the margin, the
+/// prism meets the plane's side in a sliver thinner than the tolerance at a
+/// vertex of the side: refused by name as well.
+#[test]
+fn a_prism_along_z_met_only_within_the_tolerance_is_refused_by_name() {
+    let (n, m) = (Vec3::new(0.3, 0.0, 1.0), margin());
+    let s = n.length();
+    // The farthest `x` of the plane's side over the block: its far corner.
+    let reach = 0.65 / s + m;
+    let x_max = (reach + 0.3 * reach) / s;
+    let d = 1e-9;
+    let mut g = Graph::new();
+    let block = unit_block(&mut g);
+    let half_space = g.local_side(Point3::new(0.0, 0.0, 0.5), n);
+    let boundary = g.push(GeometryNode::Curve2(Curve2::Polyline(Polyline2 {
+        points: vec![
+            Point2::new(x_max - d, -0.1),
+            Point2::new(x_max - d + 1.0, -0.1),
+            Point2::new(x_max - d + 1.0, 0.1),
+            Point2::new(x_max - d, 0.1),
+        ],
+        closed: true,
+    })));
+    let strip = g.push(GeometryNode::SolidOperation(
+        SolidOperation::BoundedHalfSpaceAlongZ {
+            half_space,
+            boundary,
+            placement: Transform3::IDENTITY,
+        },
+    ));
+    let root = g.minus(block, strip);
+    let error = refusal(g, root);
+    named(&error, "only within the tolerance");
+}
+
+/// A tool apart from the subject's envelope leaves nothing of the region
+/// there, however thin it is: the intersection is empty, not a refusal to
+/// sew a sliver thinner than the tolerance.
+#[test]
+fn a_sliver_stand_in_apart_from_the_subject_leaves_nothing() {
+    let reach = 0.5 + margin() - 1e-7;
+    let mut g = Graph::new();
+    let block = unit_block(&mut g);
+    let high = g.local_side(Point3::new(0.0, 0.0, 0.5), Vec3::Z);
+    let far = g.local_side(Point3::new(reach, 0.0, 0.0), Vec3::X);
+    let region = g.meet(high, far);
+    let root = g.meet(block, region);
+    let error = refusal(g, root);
+    assert!(
+        matches!(&error, GeomError::Degenerate(why) if why.contains("leaves nothing")),
+        "{error:?}"
+    );
+
+    // The same along `z`.
+    let mut g = Graph::new();
+    let block = unit_block(&mut g);
+    let half_space = g.local_side(Point3::new(0.0, 0.0, 0.5), Vec3::Z);
+    let boundary = g.push(GeometryNode::Curve2(Curve2::Polyline(Polyline2 {
+        points: vec![
+            Point2::new(reach, -0.1),
+            Point2::new(reach + 1.0, -0.1),
+            Point2::new(reach + 1.0, 0.1),
+            Point2::new(reach, 0.1),
+        ],
+        closed: true,
+    })));
+    let strip = g.push(GeometryNode::SolidOperation(
+        SolidOperation::BoundedHalfSpaceAlongZ {
+            half_space,
+            boundary,
+            placement: Transform3::IDENTITY,
+        },
+    ));
+    let root = g.meet(block, strip);
+    let error = refusal(g, root);
+    assert!(
+        matches!(&error, GeomError::Degenerate(why) if why.contains("leaves nothing")),
+        "{error:?}"
+    );
+}
+
 fn refusal(g: Graph, root: NodeId) -> GeomError {
     let graph = g.finish(vec![root]);
     compile(&graph, root).expect_err("refused")

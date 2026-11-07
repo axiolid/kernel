@@ -200,6 +200,17 @@ MUTANTS = [
      "                    leaves.extend(region(graph, *left)?);\n"
      "                    leaves.extend(region(graph, *right)?);\n"
      "                    break;", DEEP),
+    ("F6 stand-ins met only within the tolerance share nothing", CLIP,
+     "                                        Err(_) => {\n"
+     "                                            return Err(unsupported(STAND_IN_WITHIN_TOLERANCE))\n"
+     "                                        }",
+     "                                        Err(_) => return Ok(Cover::Misses),"),
+    ("F6z the prism along z met only within the tolerance shares nothing", CLIP,
+     "                        Err(_) => return Err(unsupported(STAND_IN_WITHIN_TOLERANCE)),",
+     "                        Err(_) => return Ok(Cover::Misses),"),
+    ("F7 a sliver tool apart from the subject is cut", CLIP,
+     "            Cover::Cuts(solid, _) if lies_apart(&solid, envelope) => Cover::Misses,",
+     "            Cover::Cuts(solid, _) if false && lies_apart(&solid, envelope) => Cover::Misses,"),
     ("F2a a boolean emptied within the tolerance is an identity", BOOLEAN,
      "return if emptiness_is_exact(&subject, &tool, operator) {",
      "return if true {"),

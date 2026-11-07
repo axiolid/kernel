@@ -134,7 +134,8 @@
 //! margin, and no cavity. There the result of the same boolean at zero
 //! tolerance ([`super::boolean::at_zero_tolerance`]), which reads nothing,
 //! is taken, empty or not, and it is refused by name only if that is no
-//! boolean. The model's
+//! boolean. A tool whose box lies wholly apart from the subject's envelope
+//! is decided `Misses` exactly, before any cut. The model's
 //! half-space carries a plane, so a curved base surface cannot reach this
 //! path.
 
@@ -400,7 +401,15 @@ impl ExactCompilation<'_> {
         let envelope = self.envelope(left)?;
         let tolerance = self.options.tolerance();
         let keeps = operator == BooleanOperator::Intersection;
-        let (solid, tool_report) = match self.region_cover(&region, envelope)? {
+        // A tool whose box lies apart from the subject's envelope leaves
+        // nothing of the region there, however thin the tool is: a sliver
+        // thinner than the tolerance is no solid the cut can be asked to
+        // sew, and need not be (#326).
+        let cover = match self.region_cover(&region, envelope)? {
+            Cover::Cuts(solid, _) if lies_apart(&solid, envelope) => Cover::Misses,
+            cover => cover,
+        };
+        let (solid, tool_report) = match cover {
             Cover::Misses if keeps => return Ok(Body::Empty(CLIP_EMPTIED)),
             Cover::Misses => return Ok(Body::Solid(subject)),
             Cover::Holds if keeps => return Ok(Body::Solid(subject)),
@@ -889,6 +898,15 @@ impl ExactCompilation<'_> {
             )),
         }
     }
+}
+
+/// Whether the box of `solid` lies wholly apart from `envelope`, exactly:
+/// no tolerance, and a box that cannot be bounded is not apart.
+fn lies_apart(solid: &ExactBRep, envelope: Envelope) -> bool {
+    edge_box(solid).is_ok_and(|bounds| {
+        (0..3)
+            .any(|axis| bounds.hi[axis] < envelope.lo[axis] || envelope.hi[axis] < bounds.lo[axis])
+    })
 }
 
 /// The box of a solid whose faces are bounded by their edges.
