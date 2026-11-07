@@ -14,7 +14,7 @@
 
 use axiolid_brep::ExactBRep;
 use axiolid_brep_audit::geometric_audit;
-use axiolid_brep_boolean::{boolean_with_report, BooleanError, BooleanReport};
+use axiolid_brep_boolean::{boolean_with_report, BooleanError, BooleanReport, ROUNDING_FACTOR};
 use axiolid_construct::boolean_exact::{boolean_arc_prisms_exact, ArcPrism};
 use axiolid_construct::extrude::extrude_profile_exact;
 use axiolid_core::{BooleanOperator, Interval, Point2, Tolerance, Transform3, Vec3};
@@ -60,6 +60,16 @@ const SITES: [Vec3; 4] = [
 /// The union of the column and the corbel on `face`, the corbel's turn
 /// composed from two half turns.
 fn union(theta: f64, face: usize, site: Vec3) -> Result<(ExactBRep, BooleanReport), BooleanError> {
+    union_at(theta, face, site, tol())
+}
+
+/// [`union`] at `tolerance`.
+fn union_at(
+    theta: f64,
+    face: usize,
+    site: Vec3,
+    tolerance: Tolerance,
+) -> Result<(ExactBRep, BooleanReport), BooleanError> {
     let ([cx, cy], [sx, sy]) = CORBEL_FACES[face];
     let column = extrude_profile_exact(&rect(0.4, 0.5), Vec3::Z, 6.0, tol()).expect("a column");
     let corbel = extrude_profile_exact(&rect(sx, sy), Vec3::Z, 0.5, tol()).expect("a corbel");
@@ -75,7 +85,7 @@ fn union(theta: f64, face: usize, site: Vec3) -> Result<(ExactBRep, BooleanRepor
                 * Transform3::from_translation(Vec3::new(cx, cy, 3.5))),
         )
         .expect("placed");
-    boolean_with_report(&column, &corbel, BooleanOperator::Union, tol())
+    boolean_with_report(&column, &corbel, BooleanOperator::Union, tolerance)
 }
 
 fn volume(brep: &ExactBRep) -> f64 {
@@ -172,9 +182,6 @@ fn outcome(result: Result<(ExactBRep, BooleanReport), BooleanError>, what: &str)
 /// Two 2 x 2 x 1 blocks offset by (1, 1), flush or stacked, charted in
 /// world coordinates: recentred, they are refused (the classifier cannot
 /// decide parameters of 6e5), and are cut as given, as at the origin.
-///
-/// The corbel difference at the far site is not here: it returns a result
-/// off its curve by more than the tolerance, a separate defect.
 #[test]
 fn world_charted_contours_far_from_the_origin_are_cut_as_given() {
     // flush, stacked: union, intersection, difference.
@@ -291,4 +298,159 @@ fn contact_far_from_the_origin_is_decided_as_at_the_origin() {
             }
         }
     }
+}
+
+/// The column and the corbel on its +x face of #445, placed in world
+/// coordinates at `site`: the corbel's bottom corners sit on the column's
+/// face x = site.x + 0.2.
+fn world_column_and_corbel(site: Vec3) -> (ExactBRep, ExactBRep) {
+    let (x, y, z) = (site.x, site.y, site.z);
+    (
+        contour_block(x - 0.2, y - 0.25, x + 0.2, y + 0.25, z, 6.0),
+        contour_block(x + 0.2, y - 0.1, x + 0.45, y + 0.1, z + 3.5, 0.5),
+    )
+}
+
+/// The largest distance of an edge end from its curve.
+fn vertex_residue(brep: &ExactBRep) -> f64 {
+    let topology = brep.topology();
+    let mut worst: f64 = 0.0;
+    for (index, edge) in topology.edges().iter().enumerate() {
+        let curve = &brep.curves3()[edge.curve.expect("a curve").index()];
+        let span = brep
+            .edge_interval(topology.edge_id_at(index).expect("an edge"))
+            .expect("an interval");
+        for (parameter, vertex) in [(span.start, edge.start), (span.end, edge.end)] {
+            let point = axiolid_evaluate::evaluate3(curve, parameter).expect("evaluates");
+            let at = topology.vertices()[vertex.index()].position;
+            worst = worst.max((point - at).length());
+        }
+    }
+    worst
+}
+
+/// #445: the corbel's bottom corner is the corbel's own vertex. A window
+/// crossing 1.2e-6 past the column's face used to replace the feature cut
+/// there, so the difference returned a vertex off its edge's curve with an
+/// exact report and the union was refused as not sewing. The corners now
+/// come out bit for bit, at every tolerance.
+#[test]
+fn a_world_charted_corbel_far_from_the_origin_is_cut_exactly() {
+    let sites = [
+        Vec3::ZERO,
+        FAR,
+        Vec3::new(6e5 + 0.1, 5.6e6 + 0.3, 200.0),
+        Vec3::new(6e5, 5.6e6, 0.3),
+    ];
+    let tolerances = [
+        Tolerance::METRE,
+        Tolerance::new(1e-7, 1e-9).expect("a tolerance"),
+        Tolerance::ZERO,
+    ];
+    for site in sites {
+        let (column, corbel) = world_column_and_corbel(site);
+        for tolerance in tolerances {
+            let cases = [
+                (
+                    "union",
+                    &column,
+                    &corbel,
+                    BooleanOperator::Union,
+                    Some(1.225),
+                ),
+                (
+                    "union swapped",
+                    &corbel,
+                    &column,
+                    BooleanOperator::Union,
+                    Some(1.225),
+                ),
+                (
+                    "intersection",
+                    &column,
+                    &corbel,
+                    BooleanOperator::Intersection,
+                    None,
+                ),
+                (
+                    "intersection swapped",
+                    &corbel,
+                    &column,
+                    BooleanOperator::Intersection,
+                    None,
+                ),
+                (
+                    "column - corbel",
+                    &column,
+                    &corbel,
+                    BooleanOperator::Difference,
+                    Some(1.2),
+                ),
+                (
+                    "corbel - column",
+                    &corbel,
+                    &column,
+                    BooleanOperator::Difference,
+                    Some(0.025),
+                ),
+            ];
+            for (name, a, b, operator, want) in cases {
+                let what = format!("{site:?} {tolerance:?} {name}");
+                let result = boolean_with_report(a, b, operator, tolerance);
+                let Some(want) = want else {
+                    assert!(
+                        matches!(result, Err(BooleanError::EmptyResult)),
+                        "{what}: {:?}",
+                        result.map(|r| r.1)
+                    );
+                    continue;
+                };
+                let (brep, report) = result.unwrap_or_else(|e| panic!("{what}: refused: {e}"));
+                assert!(report.is_exact(), "{what}: {report:?}");
+                assert_eq!(brep.topology().shells().len(), 1, "{what}");
+                if tolerance.linear() > 0.0 {
+                    let health = geometric_audit(&brep, Tolerance::METRE);
+                    assert!(health.is_consistent(), "{what}: {:?}", health.defects());
+                }
+                let measured = exact_properties(&brep, tolerance)
+                    .expect("measurable")
+                    .signed_volume;
+                assert!((measured - want).abs() <= 1e-6, "{what}: volume {measured}");
+                let residue = vertex_residue(&brep);
+                assert!(
+                    residue <= ROUNDING_FACTOR * report.extent(),
+                    "{what}: vertex {residue:e} off its curve"
+                );
+                if name == "column - corbel" {
+                    // The imprint's corners are the corbel's own vertices.
+                    let kept: Vec<_> = brep
+                        .topology()
+                        .vertices()
+                        .iter()
+                        .map(|v| v.position)
+                        .collect();
+                    for v in corbel.topology().vertices() {
+                        if v.position.x == site.x + 0.2 {
+                            assert!(kept.contains(&v.position), "{what}: {:?}", v.position);
+                        }
+                    }
+                }
+            }
+        }
+    }
+}
+
+/// A tolerance below what the coordinates resolve (one ulp at 5.6e6 is
+/// 9.3e-10) is refused by name, not answered with a vertex off its curve;
+/// at the origin the same cut is fine.
+#[test]
+fn a_tolerance_finer_than_far_coordinates_resolve_is_refused_by_name() {
+    let fine = Tolerance::new(1e-10, 1e-9).expect("a tolerance");
+    assert!(matches!(
+        union_at(0.001, 0, FAR, fine),
+        Err(BooleanError::VertexOffCurve)
+    ));
+    let (brep, _) = union_at(0.001, 0, Vec3::ZERO, fine).expect("fine at the origin");
+    let health = geometric_audit(&brep, fine);
+    assert!(health.is_consistent(), "{:?}", health.defects());
 }

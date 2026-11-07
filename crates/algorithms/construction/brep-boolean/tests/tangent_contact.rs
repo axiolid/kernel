@@ -16,7 +16,9 @@ use std::f64::consts::PI;
 
 use axiolid_brep::ExactBRep;
 use axiolid_brep_audit::geometric_audit;
-use axiolid_brep_boolean::{boolean_with_report, BooleanReport, ToleranceDecisionKind};
+use axiolid_brep_boolean::{
+    boolean_with_report, BooleanError, BooleanReport, ToleranceDecisionKind,
+};
 use axiolid_construct::extrude::extrude_profile_exact;
 use axiolid_core::{BooleanOperator, Mat3, Tolerance, Transform3, Vec3};
 use axiolid_measure::exact_properties;
@@ -186,4 +188,26 @@ fn ten_tolerances_off_touching_is_decided_exactly() {
             "{report:?}"
         );
     }
+}
+
+/// #445: far from the origin, a hole a hair short of the reading's reach
+/// leaves a vertex 1.00003e-6 off its curve (a traced section of the plane
+/// and the hole's cylinder, rounded at 5.6e6). It is past the tolerance, so
+/// the result is refused by name, not returned with a failing audit.
+#[test]
+fn a_far_tangent_hole_whose_vertex_would_lie_off_its_curve_is_refused_by_name() {
+    let far = Transform3::from_translation(Vec3::new(6e5, 5.6e6, 200.0))
+        * Transform3::from_axis_angle(Vec3::new(1.0, 2.0, 3.0).normalize(), 0.7);
+    let gap = 0.99999 * EPS;
+    let result = boolean_with_report(
+        &wall(far),
+        &hole(H - R + gap, far),
+        BooleanOperator::Difference,
+        Tolerance::METRE,
+    );
+    assert!(
+        matches!(result, Err(BooleanError::VertexOffCurve)),
+        "{:?}",
+        result.map(|r| r.1)
+    );
 }
