@@ -463,8 +463,7 @@ impl Scene {
         use axiolid::core::{Frame3, Point3, Tolerance, Vec3};
         use axiolid::mesh::TriMesh;
         use axiolid::mesh_hidden_lines::{
-            HiddenLineMesh, MeshId, MeshRole, OrthographicView, VisibleFaceLimits,
-            VisibleFaceRequest,
+            HiddenLineMesh, MeshId, MeshRole, View, VisibleFaceLimits, VisibleFaceRequest,
         };
 
         let context = context();
@@ -511,7 +510,7 @@ impl Scene {
             .collect();
         let vec = |v: [f64; 3]| Vec3::new(v[0], v[1], v[2]);
         let frame = &self.view.frame;
-        let mut view = OrthographicView::new(Frame3 {
+        let mut view = View::new(Frame3 {
             origin: vec(frame.origin),
             x: vec(frame.x),
             y: vec(frame.y),
