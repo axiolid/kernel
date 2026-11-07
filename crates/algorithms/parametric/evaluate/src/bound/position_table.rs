@@ -49,6 +49,9 @@
 //! at most `s` times it; the compensated sums' `16 eps s`; and the start
 //! frame's stretch, applied to all of these, with `8 eps (|origin| +
 //! stretch s)` for placing the point.
+//!
+//! [`IntrinsicPositionTable::max_error`] is one uniform bound for the whole
+//! table: all the remainders plus the roundings at the end (#393).
 
 use axiolid_core::{Point2, Point3, Scalar};
 use axiolid_curve::{Intrinsic2, Intrinsic3};
@@ -104,6 +107,8 @@ pub struct IntrinsicPositionTable {
     checkpoints: Vec<Checkpoint>,
     heading_rounding: Scalar,
     panels: usize,
+    /// The remainders of every panel together.
+    total_remainder: Scalar,
 }
 
 /// The remainder of one panel of width `w`.
@@ -233,6 +238,7 @@ impl IntrinsicPositionTable {
             checkpoints: Vec::with_capacity(total / CHECKPOINT_PANELS + 1),
             heading_rounding,
             panels: total,
+            total_remainder: 0.0,
         };
         let mut state = Checkpoint {
             sum: [(0.0, 0.0); 2],
@@ -244,6 +250,7 @@ impl IntrinsicPositionTable {
             }
             table.add_panel(index, &mut state)?;
         }
+        table.total_remainder = state.remainder;
         Some(table)
     }
 
@@ -353,6 +360,18 @@ impl IntrinsicPositionTable {
             frame.origin + frame.x * p.x + frame.y * p.y,
             self.placed_error(local, s),
         ))
+    }
+
+    /// A certified bound on the error of every point the table returns
+    /// (the error of [`Self::point2`] and [`Self::point3`] grows with `s`
+    /// and is never above it): the remainders of all panels and the
+    /// roundings of the end, through the start frame.
+    #[must_use]
+    pub fn max_error(&self) -> Scalar {
+        let local = inflate(
+            self.total_remainder + self.end * (self.heading_rounding + 16.0 * Scalar::EPSILON),
+        );
+        self.placed_error(local, self.end)
     }
 
     /// A certified bound on the rounding of the heading, in radians: what a

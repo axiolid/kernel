@@ -56,6 +56,10 @@
 //!   points are read with a certified error by [`IntrinsicPositions`], and
 //!   [`chord_bound2`] adds the distance of the evaluated ends from the
 //!   exact points (#414).
+//! - Elevated and banked curves over an intrinsic plan (#393): the plan's
+//!   and the profile's exact-chord bounds in quadrature, plus the distance
+//!   of the evaluated ends from the points of an
+//!   [`ElevatedPositionTable`] (`elevated_positions`).
 //! - Constant offsets `B + d u` (#317): `|P''|` from the basis's suprema
 //!   through the unit-vector rule of the certified station lengths
 //!   ([`offset_chord_bound2`]).
@@ -80,6 +84,7 @@ use crate::nurbs::SplineAxis;
 
 mod carrier;
 mod continuation;
+mod elevated_positions;
 mod enclosure;
 mod graph;
 mod implicit;
@@ -93,6 +98,7 @@ mod positions;
 mod section;
 mod separation;
 
+pub use elevated_positions::ElevatedPositionTable;
 pub use intrinsic::{intrinsic_chord_bound2, intrinsic_chord_bound3, intrinsic_derivative_bounds2};
 pub use offset::{offset_chord_bound2, offset_chord_bound3, offset_point2, offset_point3};
 pub use position_table::{IntrinsicPositionTable, MAX_TABLE_PANELS};
@@ -708,12 +714,25 @@ pub fn chord_bound2(curve: &Curve2, a: Scalar, b: Scalar) -> Option<Scalar> {
 }
 
 /// Certified chord bound of a 3D curve over `[a, b]`; see [`chord_bound2`].
+///
+/// An elevated or banked curve over an intrinsic plan charges the distance
+/// of its evaluated ends from the exact points (#393), as an intrinsic
+/// curve does in 2D; over a chain plan the evaluated ends are not charged
+/// yet (#438), and an intrinsic profile is not claimed by
+/// [`certifies_flattening3`].
 #[must_use]
 pub fn chord_bound3(curve: &Curve3, a: Scalar, b: Scalar) -> Option<Scalar> {
     if !(a.is_finite() && b.is_finite()) {
         return None;
     }
     if a == b {
+        // As for 2D (#414): an elevated or banked curve over an intrinsic
+        // plan carries its evaluated point's distance from the exact one
+        // (#393), read from the next representable span.
+        if over_intrinsic_plan(curve) {
+            return chord_bound3(curve, a, a.next_up())
+                .or_else(|| chord_bound3(curve, a.next_down(), a));
+        }
         return Some(0.0);
     }
     if breaks_inside(&continuity_breaks3(curve, 1), a, b) {
@@ -732,11 +751,24 @@ pub fn chord_bound3(curve: &Curve3, a: Scalar, b: Scalar) -> Option<Scalar> {
         Curve3::BSpline(spline) => bspline_bounds(spline, |p| [p.x, p.y, p.z], a, b)
             .map(|(_, chord, _)| inflate(taylor(b - a, chord))),
         // Plan and profile chord bounds at equal plan distance, composed
-        // in quadrature (#252; `crate::elevated`).
-        Curve3::Elevated(e) => crate::elevated::elevated_chord_bound(e, a, b),
-        Curve3::Banked(banked) => crate::elevated::banked_chord_bound(banked, a, b),
+        // in quadrature (#252; `crate::elevated`), and over an intrinsic
+        // plan the distance of the evaluated ends from the exact points
+        // (#393; `elevated_positions`).
+        Curve3::Elevated(_) | Curve3::Banked(_) => {
+            elevated_positions::evaluated_chord_bound3(curve, a, b)
+        }
         _ => curve_derivative_bounds3(curve, a, b).map(|d| inflate(taylor(b - a, d.second))),
     }
+}
+
+/// An elevated or banked curve whose plan is an intrinsic curve.
+fn over_intrinsic_plan(curve: &Curve3) -> bool {
+    let plan = match curve {
+        Curve3::Elevated(e) => &e.plan,
+        Curve3::Banked(b) => &b.base.plan,
+        _ => return false,
+    };
+    matches!(plan.as_ref(), Curve2::Intrinsic(_))
 }
 
 /// `h^2 / 8 * sup |c''|`.

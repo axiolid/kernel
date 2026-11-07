@@ -133,6 +133,13 @@ Latest release, 0.3.45 (2026-11-07):
 
 ### Changed
 
+- A swept disk along an elevated or banked curve over a chain plan, or under
+  an intrinsic (vertical clothoid) profile, is reported unbounded by name
+  (`UNCERTIFIED_DIRECTRIX_POINTS`, "the directrix's points have no certified
+  error") where it was reported certified (#393). The certificate read the
+  evaluator's points, which have no certified error. `TODO(#438)` lifts it
+  for chain plans, `TODO(#481)` for intrinsic profiles.
+
 - A flush slab whose openings were round-tripped through world coordinates
   (their sides moved by `9.3e-10`) is refused by name, `SKIN_WITHIN_ROUNDING`
   with the referee's reason, where 0.3.44 returned it with every opening
@@ -155,6 +162,16 @@ Latest release, 0.3.45 (2026-11-07):
   `axiolid-brep-boolean` with `BooleanError::VertexOffCurve`.
 
 ### Fixed
+
+- A swept disk along an elevated or banked curve over an intrinsic plan
+  (a clothoid) is certified against the exact tube (#393): the centre line
+  is read from an `ElevatedPositionTable` built at a thousandth of the
+  budget, whose error the bound carries, where the evaluator's own point
+  was taken as exact. Only a plan under a fast curvature law is far off:
+  a 0.3 m disk along a plan of curvature `0.002 sin(50 s)` over `[95, 98]`
+  at 1 mm was reported certified at 1.20e-3, and the exact tube lay 2.84e-3
+  from its mesh. On a clothoid the difference is about `1e-12`, within the
+  table's error.
 
 - A measured boolean whose exact result is all planar reports the other
   direction too (#329), as its own `DeviationPath::Boolean` contribution

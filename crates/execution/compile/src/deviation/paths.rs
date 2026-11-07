@@ -6,10 +6,11 @@ use axiolid_construct::pipe::{fixed_reference_plan, ring_reach, FixedReferencePl
 use axiolid_construct::profile::{profile_deviation, profile_rings, ProfileDeviation};
 use axiolid_contracts::{ExecutionOptions, GeomError, GeomResult};
 use axiolid_core::{Point3, Scalar, Vec3};
-use axiolid_curve::Curve3;
+use axiolid_curve::{Curve2, Curve3, Elevated3, ElevationLaw};
 use axiolid_mesh::TriMesh;
 use axiolid_model::{GeometryGraph, GeometryNode, NodeId, SolidOperation};
 use axiolid_primitive::Primitive;
+use axiolid_reference::bound::ElevatedPositionTable;
 
 use super::{Deviation, DeviationBound, DeviationPath};
 use crate::certify::{certify_thin_quads, Cell, Patch};
@@ -130,18 +131,24 @@ pub(crate) fn of_solid(
                         Curve3::Banked(_) => "banked curve",
                         _ => "B-spline",
                     };
-                    let bound = tube_bound(
-                        &curve,
-                        (span.start, span.end),
-                        *radius,
-                        *inner_radius,
-                        mesh,
-                        chord,
-                    )
-                    .map_or(
-                        DeviationBound::Unbounded("swept disk: the directrix could not be bounded"),
-                        DeviationBound::Certified,
-                    );
+                    let bound = if let Some(reason) = uncertified_points(&curve) {
+                        DeviationBound::Unbounded(reason)
+                    } else {
+                        tube_bound(
+                            &curve,
+                            (span.start, span.end),
+                            *radius,
+                            *inner_radius,
+                            mesh,
+                            chord,
+                        )
+                        .map_or(
+                            DeviationBound::Unbounded(
+                                "swept disk: the directrix could not be bounded",
+                            ),
+                            DeviationBound::Certified,
+                        )
+                    };
                     (DeviationPath::SweptDisk, detail, bound)
                 }
                 DirectrixKind::Other(name) => (
@@ -378,6 +385,43 @@ pub(crate) fn of_curve_bounded(
 
 // --- certified tubes and round primitives ------------------------------------
 
+/// Why a tube along an elevated or banked curve over a chain plan or under
+/// an intrinsic profile is unbounded: the points the certificate reads have
+/// no certified error.
+pub(crate) const UNCERTIFIED_DIRECTRIX_POINTS: &str = "swept disk: the directrix's points have no certified error (an elevated or banked curve over a chain plan, or under an intrinsic profile)";
+
+/// Share of the budget the tube's centre line may be off its exact points
+/// ([`ElevatedPositionTable`]): the bound carries it, and the rest of the
+/// budget is certified against the table's points.
+const TUBE_POSITION_SHARE: Scalar = 1e-3;
+
+/// The elevated curve under `curve`, or the one under a banked curve.
+fn elevated_base(curve: &Curve3) -> Option<&Elevated3> {
+    match curve {
+        Curve3::Elevated(e) => Some(e),
+        Curve3::Banked(b) => Some(&b.base),
+        _ => None,
+    }
+}
+
+/// Whether any piece of `law` is an intrinsic (vertical clothoid) profile.
+fn has_intrinsic_profile(law: &ElevationLaw) -> bool {
+    match law {
+        ElevationLaw::Intrinsic { .. } => true,
+        ElevationLaw::Piecewise { laws, .. } => laws.iter().any(has_intrinsic_profile),
+        _ => false,
+    }
+}
+
+/// [`UNCERTIFIED_DIRECTRIX_POINTS`] for a curve whose points have no
+/// certified error: an elevated or banked curve over a chain plan
+/// (TODO(#438)) or under an intrinsic profile (TODO(#481)).
+fn uncertified_points(curve: &Curve3) -> Option<&'static str> {
+    let base = elevated_base(curve)?;
+    (matches!(base.plan.as_ref(), Curve2::Chain(_)) || has_intrinsic_profile(&base.elevation))
+        .then_some(UNCERTIFIED_DIRECTRIX_POINTS)
+}
+
 /// A disk swept along a smooth curve: its wall (and inner wall), and the
 /// two end caps square to the curve.
 fn tube_bound(
@@ -393,17 +437,32 @@ fn tube_bound(
         return None;
     }
     let pieces = smooth_pieces(curve, lo, hi)?;
+    // The centre line of an elevated or banked curve over an intrinsic plan
+    // is read from a certified table, whose error the bound carries.
+    let positions = match elevated_base(curve) {
+        Some(base) if matches!(base.plan.as_ref(), Curve2::Intrinsic(_)) => Some(
+            ElevatedPositionTable::new(curve, TUBE_POSITION_SHARE * target, hi)?,
+        ),
+        _ => None,
+    };
+    let positions = positions.as_ref();
+    let error = positions.map_or(0.0, ElevatedPositionTable::max_error);
+    if error.is_nan() || error >= target {
+        return None;
+    }
     let mut walls: Vec<TubeWall<'_>> = Vec::new();
     for &(a, b) in &pieces {
         let reference = perpendicular(unit_tangent(curve, 0.5 * (a + b))?);
         walls.push(TubeWall {
             curve,
+            positions,
             reference,
             radius,
         });
         if let Some(r) = inner {
             walls.push(TubeWall {
                 curve,
+                positions,
                 reference,
                 radius: r,
             });
@@ -413,7 +472,7 @@ fn tube_bound(
     let caps: Vec<Disk> = [lo, hi]
         .iter()
         .map(|&s| {
-            let point = axiolid_reference::curve::evaluate3(curve, s).ok()?;
+            let point = centre(curve, positions, s)?;
             let t = unit_tangent(curve, s)?;
             let n = perpendicular(t);
             Some(Disk {
@@ -461,10 +520,20 @@ fn tube_bound(
         &patches,
         cells,
         mesh,
-        target,
-        target,
+        target - error,
+        target - error,
         TUBE_FLATNESS * target,
     )
+    .map(|certified| (certified + error) * (1.0 + axiolid_reference::bound::ROUNDING))
+}
+
+/// The centre of the tube at `s`: the certified table's point where there
+/// is one, else the evaluator's.
+fn centre(curve: &Curve3, positions: Option<&ElevatedPositionTable>, s: Scalar) -> Option<Point3> {
+    match positions {
+        Some(table) => table.point3(s).map(|(point, _)| point),
+        None => axiolid_reference::curve::evaluate3(curve, s).ok(),
+    }
 }
 
 /// Fraction of the target a tube quad may be twisted and still be covered
@@ -547,13 +616,17 @@ fn perpendicular(t: Vec3) -> Vec3 {
 /// `|T_theta theta| = r`.
 struct TubeWall<'c> {
     curve: &'c Curve3,
+    /// Certified centres within the table's `max_error` of the exact ones,
+    /// for a curve over an intrinsic plan: the wall is the exact tube moved
+    /// by at most that, since its frame is closed form.
+    positions: Option<&'c ElevatedPositionTable>,
     reference: Vec3,
     radius: Scalar,
 }
 
 impl Patch for TubeWall<'_> {
     fn jet(&self, s: Scalar, theta: Scalar) -> Option<(Point3, Vec3, Vec3)> {
-        let c = axiolid_reference::curve::evaluate3(self.curve, s).ok()?;
+        let c = centre(self.curve, self.positions, s)?;
         let c1 = axiolid_reference::curve::derivative3(self.curve, s).ok()?;
         let c2 = axiolid_reference::curve::second_derivative3(self.curve, s).ok()?;
         let sigma = c1.length();
@@ -699,11 +772,45 @@ mod tests {
         for (a, b) in smooth_pieces(&curve, 0.0, 1.0).unwrap() {
             let wall = TubeWall {
                 curve: &curve,
+                positions: None,
                 reference: perpendicular(unit_tangent(&curve, 0.5 * (a + b)).unwrap()),
                 radius: 1.0,
             };
             assert_second_bounded(&wall, (a, b), (0.0, core::f64::consts::TAU));
         }
+    }
+
+    #[test]
+    fn a_tube_wall_over_a_clothoid_plan_reads_certified_points() {
+        use axiolid_core::{Frame2, Point2, Vec2};
+        use axiolid_curve::{CurvatureLaw, Elevated3, Intrinsic2};
+        let frame = Frame2 {
+            origin: Point2::new(20.0, 10.0),
+            x: Vec2::new(0.8, 0.6),
+            y: Vec2::new(-0.6, 0.8),
+        };
+        let plan = Curve2::Intrinsic(Intrinsic2::new(
+            frame,
+            CurvatureLaw::clothoid(0.0, 1.0 / 120.0, 60.0),
+            60.0,
+        ));
+        let curve = Curve3::Elevated(Elevated3::new(
+            plan,
+            ElevationLaw::parabolic(50.0, 0.05, -0.03, 60.0),
+        ));
+        let table = ElevatedPositionTable::new(&curve, 1e-9, 60.0).unwrap();
+        let wall = TubeWall {
+            curve: &curve,
+            positions: Some(&table),
+            reference: perpendicular(unit_tangent(&curve, 41.0).unwrap()),
+            radius: 0.0,
+        };
+        let read = wall.jet(41.0, 0.0).unwrap().0;
+        assert_eq!(read, table.point3(41.0).unwrap().0);
+        // Not vacuous: the evaluator's own point differs from the table's.
+        let evaluated = axiolid_reference::curve::evaluate3(&curve, 41.0).unwrap();
+        assert_ne!(read, evaluated);
+        assert!(read.distance(evaluated) <= table.max_error() + 1e-9);
     }
 
     #[test]

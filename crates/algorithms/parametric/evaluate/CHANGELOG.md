@@ -44,6 +44,14 @@ caret rule for `0.x` versions.
   |D (x - y)|` over a parameter box, by Weyl's perturbation from the box
   centre, or `None` at a pole, an apex, a fold, a box too wide or a
   B-spline crease.
+- `bound::ElevatedPositionTable` (#393): certified points of an elevated or
+  banked curve over an intrinsic plan in plan distance, the plan's from an
+  `IntrinsicPositionTable`, the height and the pivot in closed form, each
+  point with a bound on its distance from the exact one. `None` for a chain
+  plan (`TODO(#438)`), an intrinsic profile, a held-rail cant, or an end
+  past the plan.
+- `bound::IntrinsicPositionTable::max_error` (#393): one certified bound on
+  the error of every point the table returns.
 
 ### Changed
 
@@ -63,6 +71,19 @@ caret rule for `0.x` versions.
   where its parameter rate changes; a lifted pcurve breaks where its space
   curve does. A span across one is refused by `chord_bound2`, as across a
   B-spline knot.
+
+### Fixed
+
+- `bound::chord_bound3` of an elevated or banked curve over an intrinsic
+  plan bounds the distance to the chord of the *evaluated* ends (#393), as
+  `chord_bound2` does for the plan itself: the exact-chord bound plus the
+  larger distance of an evaluated end from a certified table point. It
+  reported only the exact chord, 1.95e-5 on a plan with a curvature
+  `0.01 sin(50 s)` over `[96.4375, 96.5625]`, where the exact curve lies
+  2.83e-3 from the chord of the evaluated ends (the plan point is 1.4e-2
+  off at 96.5; `TODO(#480)`). The bound of a point span (`a == b`) is that
+  distance. A chain plan is unchanged (`TODO(#438)`), and so is an
+  intrinsic profile, which `certifies_flattening3` does not claim.
 
 ## [0.3.20] - 2026-11-03
 

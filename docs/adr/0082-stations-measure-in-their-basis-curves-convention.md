@@ -1842,3 +1842,62 @@ frames: a plan arc's centre reached, touched and cleared, a receding
 longitudinal offset, a sheet wholly past the centre, a ramp's axis, reversed
 tags, a turned sheet reported unbounded) and
 `scripts/probe_station_fold_mutants.py`.
+
+## Amendment 2026-11-07: certified points of elevated and banked curves over intrinsic plans (#393)
+
+Context: an elevated or banked curve over an intrinsic plan is written
+against the plan's arc length, and its point is the plan's point, which the
+evaluator estimates (`intrinsic_point`, budgeted from the plan's turning
+variation, not from how fast the heading oscillates). Two certificates read
+that estimate as exact. On a plan of curvature `0.01 sin(50 s)` the
+estimate is 1.4 cm off at 96.5 m; over `[96.4375, 96.5625]` the exact curve
+lies 2.8348e-3 from the chord of the evaluated ends, and `chord_bound3`
+reported 1.9531e-5 (the exact-chord bound `h^2 / 8 k`), 145 times too little
+(2.5e-6 against 5.7e-4 at amplitude 0.002). A 0.3 m disk along amplitude
+0.002 over `[95, 98]` at 1 mm was reported `Certified(1.1957e-3)`, and the
+exact tube lay 2.8435e-3 from its mesh. A chain plan with a cubic piece and
+a line plan under a vertical clothoid were reported certified on points
+with no error at all (`Certified(9.999e-4)`).
+
+- **Certificates read certified points.** `ElevatedPositionTable` takes the
+  plan's point from an `IntrinsicPositionTable` (ADR 0082, #361) and adds
+  the closed-form height and, for a banked curve, the pivot. Its error is
+  the plan table's; the height's and the pivot's own rounding is not
+  charged, as for every closed-form point in the tube certificate.
+  `IntrinsicPositionTable::max_error` is one uniform bound for the table.
+- **`chord_bound3` charges the evaluated ends.** For an elevated or banked
+  curve over an intrinsic plan the exact-chord bound plus the larger end's
+  distance of `evaluate3` from the table's point and that point's error, as
+  `chord_bound2` does for the plan itself (#414). The bound of a point span
+  is that distance, read from the next representable span. Over a line or a
+  circle it is unchanged bit for bit.
+- **The tube reads the table.** The tube wall and its end disks take their
+  centre from a table built at a thousandth of the budget; the derivatives
+  are closed form. The exact tube lies within `e` of the table's tube
+  (`e` the table's `max_error`), so the certificate runs at `target - e` and
+  adds `e`. A table that cannot be built, or `e` at or above the budget,
+  leaves the tube unbounded.
+- **Chain plans and intrinsic profiles are unbounded by name.** A tube
+  along an elevated or banked curve over a chain plan, or under an
+  intrinsic profile, reports `Unbounded(UNCERTIFIED_DIRECTRIX_POINTS)`.
+  Chain plans need a position table over pieces (`TODO(#438)`, which
+  also owns `chord_bound3` over them); intrinsic profiles need certified
+  heights (`TODO(#481)`). Both were certified before, which #361 (item 4)
+  had meant to keep refused or unbounded by name.
+- **Resolution of the estimate itself** is `TODO(#480)`.
+
+| Option | Why not |
+| --- | --- |
+| Certify the evaluator's eight-point Gauss read | It needs the sixteenth derivative of the heading's exponential; the #361 amendment rejected it. |
+| Make `evaluate3` return table points | It changes every consumer's bits and builds a table per call. |
+| A per-cell error in the `certify::Patch` trait | Not needed: the uniform error is a thousandth of the budget. |
+| Charge only the comparison in the tube | Reading the certified point is tighter and needs no trait change (the deviation from the wording of #393 is commented on the issue). |
+
+Evidence: `crates/algorithms/parametric/evaluate/src/bound/elevated_positions.rs`,
+`crates/algorithms/parametric/evaluate/tests/elevated_positions.rs` (points
+against the Fresnel series and the closed-form profile and pivot, the fast
+harmonic against compensated Simpson), `tests/intrinsic_position_table.rs`
+(`max_error`), `crates/execution/compile/src/deviation/paths.rs`,
+`crates/execution/compile/tests/elevated_directrix.rs` (exact centres, the
+chain plan and the intrinsic profile unbounded by name) and
+`scripts/probe_elevated_positions_mutants.py`.

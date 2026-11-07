@@ -462,6 +462,28 @@ fn the_reported_error_never_falls_along_the_curve() {
 }
 
 #[test]
+fn max_error_covers_every_point() {
+    // A loose target, remainder-dominated: the uniform bound sits within
+    // the target and above every point's own error (#393).
+    let spiral = Intrinsic2::new(
+        frame(),
+        CurvatureLaw::clothoid(0.0, 1.0 / 120.0, 60.0),
+        60.0,
+    );
+    let table = IntrinsicPositionTable::new2(&spiral, 1e-3, 60.0).unwrap();
+    let max = table.max_error();
+    assert!(max <= 1e-3, "{max}");
+    let mut last = 0.0;
+    for s in samples(60.0, 1000) {
+        let (_, error) = table.point2(s).unwrap();
+        assert!(error <= max, "{s}: {error} > {max}");
+        last = error;
+    }
+    // The remainders dominate: the last point is within half of it.
+    assert!(last >= 0.5 * max, "{last} vs {max}");
+}
+
+#[test]
 fn a_ten_kilometre_alignment_needs_few_panels() {
     let alignment = Alignment::new(vec![
         Piece::Line(2000.0),

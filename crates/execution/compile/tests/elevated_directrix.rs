@@ -18,8 +18,8 @@ use std::f64::consts::{PI, TAU};
 use axiolid_contracts::{ExecutionOptions, GeomError};
 use axiolid_core::{Frame2, Point2, Point3, Scalar, Tolerance, Vec2, Vec3};
 use axiolid_curve::{
-    BSplineCurve2, BankConvention, Banked3, CantLaw, CantPiece, Circle2, CurvatureLaw, Curve2,
-    Curve3, Elevated3, ElevationLaw, Intrinsic2, KnotSpec, Line2, RailSide,
+    BSplineCurve2, BankConvention, Banked3, CantLaw, CantPiece, Chain2, ChainPiece2, Circle2,
+    CurvatureLaw, Curve2, Curve3, Elevated3, ElevationLaw, Intrinsic2, KnotSpec, Line2, RailSide,
 };
 use axiolid_measure::proximity::closest_point_on_triangle;
 use axiolid_measure::volume_properties;
@@ -122,6 +122,48 @@ fn banked() -> Curve3 {
 }
 
 const LENGTH: Scalar = 60.0;
+
+/// `int_0^s (cos(a u^2), sin(a u^2)) du` by its power series.
+fn fresnel(a: Scalar, s: Scalar) -> Vec2 {
+    let (mut x, mut y) = (0.0, 0.0);
+    let mut factorial = 1.0;
+    for n in 0..40 {
+        if n > 0 {
+            factorial *= n as Scalar;
+        }
+        let value = a.powi(n) * s.powi(2 * n + 1) / (factorial * (2 * n + 1) as Scalar);
+        match n % 4 {
+            0 => x += value,
+            1 => y += value,
+            2 => x -= value,
+            _ => y -= value,
+        }
+    }
+    Vec2::new(x, y)
+}
+
+/// The exact centre of `curve` at plan distance `t`, written here and not
+/// read back from the evaluator, whose point over an intrinsic plan is an
+/// estimate: the clothoid from the Fresnel integrals' series (its heading
+/// is `d^2 / 14400`), the profile and the pivot in closed form. Straight
+/// and arc plans are exact in the evaluator.
+fn exact_centre(curve: &Curve3, t: Scalar) -> Point3 {
+    let (base, pivot) = match curve {
+        Curve3::Elevated(e) => (e, 0.0),
+        Curve3::Banked(b) => (&b.base, b.pivot_at(t).unwrap().0),
+        _ => return axiolid_reference::curve::evaluate3(curve, t).unwrap(),
+    };
+    if !matches!(base.plan.as_ref(), Curve2::Intrinsic(_)) {
+        return axiolid_reference::curve::evaluate3(curve, t).unwrap();
+    }
+    let w = world();
+    let f = fresnel(1.0 / 14400.0, t);
+    Point3::new(
+        w.origin.x + w.x.x * f.x + w.y.x * f.y,
+        w.origin.y + w.x.y * f.x + w.y.y * f.y,
+        base.elevation.height_at(t).unwrap() + pivot,
+    )
+}
 
 // --- graph building ----------------------------------------------------------
 
@@ -231,7 +273,7 @@ fn span(a: Scalar, b: Scalar, n: usize) -> impl Iterator<Item = Scalar> + Clone 
 /// its two end disks, square to the curve.
 fn tube_samples(curve: &Curve3, (a, b): (Scalar, Scalar), radius: Scalar, n: usize) -> Vec<Point3> {
     let frame = |t: Scalar| {
-        let c = axiolid_reference::curve::evaluate3(curve, t).unwrap();
+        let c = exact_centre(curve, t);
         let d = axiolid_reference::curve::derivative3(curve, t)
             .unwrap()
             .normalize();
@@ -343,7 +385,7 @@ fn assert_tube(
     // Both end sections stand square to the exact curve, not to the end
     // chords: every vertex of an end ring lies in the normal plane there.
     for end in [range.0, range.1] {
-        let c = axiolid_reference::curve::evaluate3(curve, end).unwrap();
+        let c = exact_centre(curve, end);
         let t = axiolid_reference::curve::derivative3(curve, end)
             .unwrap()
             .normalize();
@@ -648,6 +690,82 @@ fn a_grade_break_is_unbounded_by_name() {
         (10.0, 60.0),
         "elevated curve",
     );
+}
+
+/// A tube along an elevated curve over a chain plan, or under an intrinsic
+/// profile, reads points with no certified error (#393): unbounded by
+/// name, where the exact tube lay 2.8 mm from a mesh certified at 1 mm.
+/// The chain is a line, a cubic Bezier `y = x^3 / (6 R L)` and an arc.
+#[test]
+fn a_disk_along_a_chain_plan_or_an_intrinsic_profile_is_unbounded_by_name() {
+    let (radius, length): (Scalar, Scalar) = (300.0, 40.0);
+    let rise = length.powi(3) / (6.0 * radius * length);
+    let chain = Curve2::Chain(Chain2::new(
+        world(),
+        vec![
+            ChainPiece2::Intrinsic {
+                curvature: CurvatureLaw::Constant { curvature: 0.0 },
+                length: 20.0,
+            },
+            ChainPiece2::Parametric {
+                curve: Curve2::BSpline(BSplineCurve2 {
+                    degree: 3,
+                    control_points: vec![
+                        Point2::new(0.0, 0.0),
+                        Point2::new(length / 3.0, 0.0),
+                        Point2::new(2.0 * length / 3.0, 0.0),
+                        Point2::new(length, rise),
+                    ],
+                    knots: vec![0.0, 1.0],
+                    multiplicities: vec![4, 4],
+                    weights: None,
+                    closed: false,
+                    self_intersect: None,
+                    knot_spec: KnotSpec::Unspecified,
+                }),
+                start: 0.0,
+                length,
+            },
+            ChainPiece2::Parametric {
+                curve: Curve2::Circle(Circle2 {
+                    frame: Frame2 {
+                        origin: Point2::new(0.0, radius),
+                        x: Vec2::new(0.0, -1.0),
+                        y: Vec2::new(1.0, 0.0),
+                    },
+                    radius,
+                }),
+                start: 0.0,
+                length: 40.0,
+            },
+        ],
+    ));
+    let cases = [
+        (
+            "chain plan",
+            elevated(&chain, &ElevationLaw::constant_grade(50.0, 0.04)),
+            (5.0, 95.0),
+        ),
+        (
+            "intrinsic profile",
+            elevated(
+                &straight(),
+                &ElevationLaw::intrinsic(0.0, 0.01, CurvatureLaw::clothoid(0.0, 1.0 / 300.0, 60.0)),
+            ),
+            (5.0, 55.0),
+        ),
+    ];
+    for (name, curve, range) in cases {
+        let (mesh, report) =
+            compile(|g| disk(g, curve.clone(), 0.3, Some(range)), &options(1e-3)).unwrap();
+        volume(&mesh, name);
+        assert_eq!(report.contributions[0].path, DeviationPath::SweptDisk);
+        assert!(report.bound.is_none(), "{name}: {report:?}");
+        let DeviationBound::Unbounded(reason) = &report.contributions[0].bound else {
+            panic!("{name}: {:?}", report.contributions[0].bound);
+        };
+        assert!(reason.contains("no certified error"), "{name}: {reason}");
+    }
 }
 
 #[test]

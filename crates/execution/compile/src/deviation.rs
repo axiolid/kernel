@@ -59,8 +59,11 @@
 //!   elevated or banked curve without a grade break (#252, its derivative
 //!   bounds in plan distance from `axiolid_reference::elevated`), certified
 //!   against the exact tube (walls, bore and square end caps) by branch and
-//!   bound, below; an elevated curve whose grade breaks is unbounded by
-//!   name. A straight plan under a constant grade is a segment.
+//!   bound, below, its centre over an intrinsic plan read from a certified
+//!   position table whose error the bound carries (#393); an elevated curve
+//!   whose grade breaks, or over a chain plan, or under an intrinsic
+//!   profile, is unbounded by name. A straight plan under a constant grade
+//!   is a segment.
 //!   Fixed-reference sweeps along a segment, or along a circle whose plane
 //!   the reference is normal to, by #231; other frame laws, polyline and
 //!   composite directrices are unbounded here.

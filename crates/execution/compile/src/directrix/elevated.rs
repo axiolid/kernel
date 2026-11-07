@@ -18,6 +18,11 @@
 //! roll, and the rolled section frames are what station-placed sections
 //! stand in (`crate::station`).
 //!
+//! A disk swept along one is certified against the exact tube, its centre
+//! over an intrinsic plan read from a certified position table (#393). Over
+//! a chain plan, or under an intrinsic profile, the points have no
+//! certified error and the deviation is unbounded by name.
+//!
 //! A straight plan under a profile of degree at most one is a straight 3D
 //! segment, so it resolves as one for the exact swept disk and the
 //! deviation report, like a line.
