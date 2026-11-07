@@ -106,7 +106,7 @@ axiolid-curve = { path = "crates/representations/analytic/curve", version = "0.3
 axiolid-linear = { path = "crates/representations/analytic/linear", version = "0.3.4", default-features = false }
 axiolid-surface = { path = "crates/representations/analytic/surface", version = "0.3.5" }
 axiolid-topology = { path = "crates/representations/topology", version = "0.3.2" }
-axiolid-brep = { path = "crates/representations/brep", version = "0.3.4" }
+axiolid-brep = { path = "crates/representations/brep", version = "0.3.7" }
 axiolid-tessellation-contract = { path = "crates/contracts/operations/tessellate", version = "0.3.3" }
 axiolid-collide = { path = "crates/algorithms/query/collide", version = "0.3.1" }
 axiolid-spatial = { path = "crates/algorithms/query/spatial", version = "0.3.5" }

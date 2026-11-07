@@ -191,7 +191,7 @@ dependencies = [
 
 [[package]]
 name = "axiolid-brep"
-version = "0.3.6"
+version = "0.3.7"
 dependencies = [
  "axiolid-core",
  "axiolid-curve",

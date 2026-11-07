@@ -18,7 +18,7 @@ Every page here is generated from the crate itself: its manifest, its crate docu
 
 | Crate | Role | Latest release | Description |
 | --- | --- | --- | --- |
-| [`axiolid-brep`](./crates/axiolid-brep) | `representation.composed` | 0.3.6 | Exact analytic B-rep result contracts over neutral topology |
+| [`axiolid-brep`](./crates/axiolid-brep) | `representation.composed` | 0.3.7 | Exact analytic B-rep result contracts over neutral topology |
 | [`axiolid-curve`](./crates/axiolid-curve) | `representation.atomic` | 0.3.12 | Exact, format-neutral curve values: lines, conics, B-splines, natural-equation and elevated curves. |
 | [`axiolid-field`](./crates/axiolid-field) | `representation.sampled` | 0.3.4 | Frame-neutral layered spatial-field values and validated sampling configuration. |
 | [`axiolid-fixtures`](./crates/axiolid-fixtures) | `representation.fixtures` | 0.3.3 | Shared adversarial and degenerate geometry fixtures with provenance |

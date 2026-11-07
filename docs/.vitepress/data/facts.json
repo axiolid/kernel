@@ -40,10 +40,10 @@
       "description": "Exact analytic B-rep result contracts over neutral topology",
       "layer": "representations",
       "path": "crates/representations/brep",
-      "released": "0.3.6",
+      "released": "0.3.7",
       "released_date": "2026-11-07",
       "role": "representation.composed",
-      "version": "0.3.6"
+      "version": "0.3.7"
     },
     "axiolid-brep-audit": {
       "description": "Geometric consistency auditing for exact boundary representations",

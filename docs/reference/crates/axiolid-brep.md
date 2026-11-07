@@ -8,7 +8,7 @@ Exact analytic B-rep result contracts over neutral topology.
 
 | | |
 | --- | --- |
-| Latest release | 0.3.6 (2026-11-07) |
+| Latest release | 0.3.7 (2026-11-07) |
 | crates.io | [`axiolid-brep`](https://crates.io/crates/axiolid-brep) |
 | Facade | [`axiolid`](./axiolid) feature `brep` |
 | Layer | representations (`representation.composed`) |
@@ -34,11 +34,13 @@ evaluate, intersect, tessellate or traverse geometry.
 
 ## Changes
 
-Latest release, 0.3.6 (2026-11-07):
+Latest release, 0.3.7 (2026-11-07):
 
 ### Added
 
-- The package now ships `LICENSE` and `LICENSE-COMMERCIAL` (symlinks to the
-  repository root), so the licence texts travel with the archive (#358).
+- `ExactBRep::translated_exactly` (#418): a translation that is `None`
+  unless every vertex, frame origin, curve origin and control point moves
+  with no rounding, so the copy is the exact translate and translating
+  back returns the coordinates.
 
 Full history: [`crates/representations/brep/CHANGELOG.md`](https://github.com/axiolid/kernel/blob/main/crates/representations/brep/CHANGELOG.md)
