@@ -89,7 +89,9 @@ owns graph traversal and dispatch; the construction algorithms themselves
   (`S - 0 = S`, `0 - T = 0`, `S & 0 = 0`, `S | 0 = S`). The mesh compiler's
   root may be empty; the exact compiler's is refused as `Degenerate`, an
   `ExactBRep` being unable to be empty. A boolean whose exact result and
-  mesh are both empty is certified at `0` (`deviation::EMPTY_RESULT`).
+  mesh are both empty is certified at `0`, widened by its readings
+  (`deviation::EMPTY_RESULT`). An emptiness the general boolean reads only
+  within the tolerance is refused, not absorbed.
 
 ## Depends on
 
@@ -318,9 +320,17 @@ Latest release, 0.3.45 (2026-11-07):
   still refuses an empty root, `Degenerate`, since an `ExactBRep` cannot be
   empty; the mesh compiler returns an empty mesh, `MeshClosure::Solid`, as
   before. A skin a subject has pending (#400) passes through an identity to
-  the root of its chain, where the referee decides it. A boolean whose
-  exact result and mesh are both empty reports `EMPTY_RESULT` at `0`; an
-  empty exact result against a mesh with triangles, or the reverse, is
-  unbounded by name.
+  the root of its chain, where the referee decides it. An emptiness the
+  general boolean reads only within the tolerance (operands overlapping by
+  less than it) is not an identity: it is refused as `Degenerate`, as
+  before, since the other operand would pass through with an exact report
+  and the cavity dropped. A boolean whose exact result and mesh are both
+  empty reports `EMPTY_RESULT` at `0`, widened by the report's readings and
+  rounding floor, and unbounded when the empty result is that of flattened
+  operands; an empty exact result against a mesh with triangles, or the
+  reverse, is unbounded by name.
+- A region, or a union with one, of tens of thousands of nested
+  intersections no longer overflows the stack: it is read iteratively, once
+  per compilation (#326).
 
 Full history: [`crates/execution/compile/CHANGELOG.md`](https://github.com/axiolid/kernel/blob/main/crates/execution/compile/CHANGELOG.md)

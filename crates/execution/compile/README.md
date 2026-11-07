@@ -81,4 +81,6 @@ cargo add axiolid-mesh-compile
   (`S - 0 = S`, `0 - T = 0`, `S & 0 = 0`, `S | 0 = S`). The mesh compiler's
   root may be empty; the exact compiler's is refused as `Degenerate`, an
   `ExactBRep` being unable to be empty. A boolean whose exact result and
-  mesh are both empty is certified at `0` (`deviation::EMPTY_RESULT`).
+  mesh are both empty is certified at `0`, widened by its readings
+  (`deviation::EMPTY_RESULT`). An emptiness the general boolean reads only
+  within the tolerance is refused, not absorbed.

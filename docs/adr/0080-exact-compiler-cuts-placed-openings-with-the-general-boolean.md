@@ -961,7 +961,19 @@ exactly since #378; the gaps were the region as a tool and the empty operand.
   (`ExactBRepError::Empty`). The mesh compiler decides an identity before any
   frame or cut, and a skin the subject has pending passes through to the root
   of its chain. The deviation report certifies "both empty" at `0`
-  (`EMPTY_RESULT`) and names the two mismatches unbounded.
+  (`EMPTY_RESULT`), widened by the report's readings and rounding floor, and
+  unbounded when the empty result is that of operands flattened within a
+  warped slab width; it names the two mismatches unbounded.
+- **Only an exact emptiness is an identity.** `BooleanError::EmptyResult`
+  carries no report, so "nothing left" decided within the tolerance
+  (operands overlapping by less than it, planes a sliver apart) is
+  indistinguishable from an exact one, and passing the other operand through
+  would drop the cavity and call the result exact. The exact compiler asks
+  the same boolean at `Tolerance::ZERO`, which reads nothing: empty there too
+  is empty, anything else is refused as `Degenerate`, as before empty
+  bodies. The envelope decisions (`far < 0`, `near > 0`) are exact and kept.
+  Carrying the session report on the error would be the alternative; it is
+  a change to `axiolid-brep-boolean`'s public error and was not made here.
 - **Rejected.** Rewriting `S - R` to `S - (S & R)`: it works, but costs one
   more boolean whose faces all coincide with the subject's. Sizing every leaf
   over the subject's envelope: the far faces then coincide, the report stops
