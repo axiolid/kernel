@@ -154,6 +154,12 @@ fn graph(scene: Scene, y_lo: Scalar) -> (GeometryGraph, NodeId) {
 }
 
 fn graph_between(scene: Scene, y: (Scalar, Scalar)) -> (GeometryGraph, NodeId) {
+    graph_less(scene, y, false)
+}
+
+/// [`graph_between`], less an intersection that leaves nothing when
+/// `nothing` (#326): a box and a half-space above it.
+fn graph_less(scene: Scene, y: (Scalar, Scalar), nothing: bool) -> (GeometryGraph, NodeId) {
     let mut builder = GeometryGraphBuilder::new();
     let in_frame = Transform2::from_cols(Vec2::X, Vec2::Y, Vec2::new(WIDTH / 2.0, THICKNESS / 2.0));
     let wall = wall(
@@ -227,6 +233,47 @@ fn graph_between(scene: Scene, y: (Scalar, Scalar)) -> (GeometryGraph, NodeId) {
             let clip = clip(&mut builder, plane, frame, y);
             difference(&mut builder, wall, clip)
         }
+    };
+    let root = if nothing {
+        let profile = push(
+            &mut builder,
+            GeometryNode::Profile(Profile::Rectangle(RectangleProfile {
+                x: 1.0,
+                y: 1.0,
+                thickness: None,
+                outer_radius: None,
+                inner_radius: None,
+            })),
+        );
+        let block = push(
+            &mut builder,
+            GeometryNode::SolidOperation(SolidOperation::Extrusion {
+                profile,
+                direction: Vec3::Z,
+                depth: 1.0,
+            }),
+        );
+        let above = push(
+            &mut builder,
+            GeometryNode::HalfSpace(HalfSpace {
+                boundary: Plane3 {
+                    origin: Point3::new(0.0, 0.0, 10.0),
+                    normal: Vec3::Z,
+                },
+                agreement: true,
+            }),
+        );
+        let empty = push(
+            &mut builder,
+            GeometryNode::SolidOperation(SolidOperation::Boolean {
+                left: block,
+                right: above,
+                operator: BooleanOperator::Intersection,
+            }),
+        );
+        difference(&mut builder, root, empty)
+    } else {
+        root
     };
     (builder.finish(vec![root]).expect("a valid graph"), root)
 }
@@ -538,4 +585,22 @@ fn a_referee_that_reads_features_above_the_reach_is_not_accepted() {
     };
     assert!(text.starts_with(SKIN_WITHIN_ROUNDING), "{text}");
     assert!(text.contains("above the rounding reach"), "{text}");
+}
+
+/// A skin the mesh cut leaves pending (#400) waits for the root of its chain
+/// of clips; a difference by nothing (#326) is the subject, so it is that
+/// root's to decide, and the result is the plain case's, bit for bit.
+#[test]
+fn a_skin_pending_under_an_empty_tool_is_decided_at_the_root() {
+    let frame = world(13.475, -15.95, 7);
+    let scene = Scene::World { frame };
+    let (plain, _, _) = compile_reported(scene, (0.0, THICKNESS)).expect("decided");
+    let (graph, root) = graph_less(scene, (0.0, THICKNESS), true);
+    let (outcome, report) = ReferenceMeshCompiler::new(BoolmeshBoolean::new())
+        .compile_mesh_with_deviation(&graph, root, &ExecutionOptions::new(Tolerance::MILLIMETRE))
+        .expect("decided");
+    let detail = report.contributions[0].detail;
+    assert!(detail.starts_with(REFEREED), "{detail}");
+    assert_eq!(outcome.closure, MeshClosure::Solid);
+    assert_eq!(outcome.mesh, plain);
 }

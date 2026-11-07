@@ -8,7 +8,8 @@
 //! `ExactBRep`, so an empty root stays a named `Degenerate` refusal; the
 //! mesh compiler's root is an empty mesh.
 //!
-//! The wall is `6 x 0.3 x 3` under a rigid placement; `Hmiss` is the side of
+//! Each case is built once and run through both compilers. The wall is
+//! `6 x 0.3 x 3` under a rigid placement; `Hmiss` is the side of
 //! `z = 3.5` above it, `Hover` the side of `z = -0.5` above, which holds the
 //! whole wall.
 
@@ -17,7 +18,10 @@ use axiolid_contracts::{ExecutionOptions, GeomError};
 use axiolid_core::{BooleanOperator, Plane3, Point3, Tolerance, Transform3, Vec3};
 use axiolid_exact_compile_contract::ExactCompiler;
 use axiolid_measure::exact_properties;
-use axiolid_mesh_compile::ReferenceExactCompiler;
+use axiolid_mesh::TriMesh;
+use axiolid_mesh_boolean_boolmesh::BoolmeshBoolean;
+use axiolid_mesh_compile::{ReferenceExactCompiler, ReferenceMeshCompiler};
+use axiolid_mesh_compile_contract::{MeshClosure, MeshCompiler};
 use axiolid_model::{
     GeometryGraph, GeometryGraphBuilder, GeometryNode, Instance, NodeId, SolidOperation,
 };
@@ -145,9 +149,229 @@ fn rect(x: f64, y: f64) -> Profile {
     })
 }
 
-fn exact(graph: Graph, root: NodeId) -> Result<ExactBRep, GeomError> {
-    let graph = graph.finish(vec![root]);
-    ReferenceExactCompiler::new().compile_exact(&graph, root, &options())
+/// What a case compiles to.
+#[derive(Clone, Copy)]
+enum Want {
+    /// The wall under this placement, as the operand itself.
+    Wall(Transform3),
+    /// Nothing; the exact compiler's refusal of it as a root says this.
+    Nothing(&'static str),
+}
+
+struct Case {
+    graph: Graph,
+    root: NodeId,
+    want: Want,
+}
+
+const CLIP_EMPTIED: &str = "exact half-space clip leaves nothing of the subject";
+
+fn apart() -> Transform3 {
+    building() * Transform3::from_translation(Vec3::new(0.0, 2.0, 0.0))
+}
+
+/// `wall - (wall & Hmiss)`: the tool is the clip's empty intersection.
+fn difference_by_empty_clip() -> Case {
+    let placement = building();
+    let mut g = Graph::new();
+    let wall = g.wall(placement);
+    let miss = g.miss(placement);
+    let nothing = g.meet(wall, miss);
+    let root = g.minus(wall, nothing);
+    Case {
+        graph: g,
+        root,
+        want: Want::Wall(placement),
+    }
+}
+
+/// `(wall - Hover) | wall2`: an empty subject united with a wall.
+fn union_with_empty_subject() -> Case {
+    let placement = building();
+    let mut g = Graph::new();
+    let wall = g.wall(placement);
+    let over = g.over(placement);
+    let nothing = g.minus(wall, over);
+    let wall2 = g.wall(apart());
+    let root = g.join(nothing, wall2);
+    Case {
+        graph: g,
+        root,
+        want: Want::Wall(apart()),
+    }
+}
+
+/// `wall - (wall - Hover)`.
+fn difference_by_emptied_wall() -> Case {
+    let placement = building();
+    let mut g = Graph::new();
+    let wall = g.wall(placement);
+    let over = g.over(placement);
+    let nothing = g.minus(wall, over);
+    let root = g.minus(wall, nothing);
+    Case {
+        graph: g,
+        root,
+        want: Want::Wall(placement),
+    }
+}
+
+/// `(wall - Hover) - wall2`: nothing, less a wall.
+fn empty_subject_less_a_wall() -> Case {
+    let placement = building();
+    let mut g = Graph::new();
+    let wall = g.wall(placement);
+    let over = g.over(placement);
+    let nothing = g.minus(wall, over);
+    let wall2 = g.wall(apart());
+    let root = g.minus(nothing, wall2);
+    Case {
+        graph: g,
+        root,
+        want: Want::Nothing(CLIP_EMPTIED),
+    }
+}
+
+/// `wall - (wall & wall_far)`: the general boolean's empty result.
+fn difference_by_disjoint_intersection() -> Case {
+    let placement = building();
+    let far = Transform3::from_translation(Vec3::new(100.0, 0.0, 0.0)) * placement;
+    let mut g = Graph::new();
+    let wall = g.wall(placement);
+    let away = g.wall(far);
+    let nothing = g.meet(wall, away);
+    let root = g.minus(wall, nothing);
+    Case {
+        graph: g,
+        root,
+        want: Want::Wall(placement),
+    }
+}
+
+/// `wall & wall_far` on its own.
+fn disjoint_intersection() -> Case {
+    let placement = building();
+    let far = Transform3::from_translation(Vec3::new(100.0, 0.0, 0.0)) * placement;
+    let mut g = Graph::new();
+    let wall = g.wall(placement);
+    let away = g.wall(far);
+    let root = g.meet(wall, away);
+    Case {
+        graph: g,
+        root,
+        want: Want::Nothing("exact boolean intersection leaves nothing"),
+    }
+}
+
+/// A column of radius 0.5 and a plane 0.6 from its axis, facing out: the
+/// column's box reaches across the plane, the column does not, so the
+/// clip's boolean is what finds nothing.
+fn column_by_a_plane_it_misses(g: &mut Graph) -> NodeId {
+    let placement = general();
+    let profile = Profile::Circle(CircleProfile {
+        radius: 0.5,
+        thickness: None,
+    });
+    let column = g.extrusion(profile, H);
+    let column = g.instance(column, placement);
+    let d = 0.6 / 2.0_f64.sqrt();
+    let plane = g.world_half_space(
+        Point3::new(d, d, 0.0),
+        Vec3::new(1.0, 1.0, 0.0).normalize(),
+        placement,
+    );
+    g.meet(column, plane)
+}
+
+fn the_column_clip_alone() -> Case {
+    let mut g = Graph::new();
+    let root = column_by_a_plane_it_misses(&mut g);
+    Case {
+        graph: g,
+        root,
+        want: Want::Nothing(CLIP_EMPTIED),
+    }
+}
+
+fn difference_by_the_column_clip() -> Case {
+    let placement = building();
+    let mut g = Graph::new();
+    let nothing = column_by_a_plane_it_misses(&mut g);
+    let wall = g.wall(placement);
+    let root = g.minus(wall, nothing);
+    Case {
+        graph: g,
+        root,
+        want: Want::Wall(placement),
+    }
+}
+
+/// `wall - Instance(wall_local & Hmiss_local, building)`.
+fn difference_by_an_instance_of_nothing() -> Case {
+    let placement = building();
+    let mut g = Graph::new();
+    let wall = g.wall(placement);
+    let local = g.local_wall();
+    let miss = g.local_half_space(Point3::new(0.0, 0.0, H + 0.5), Vec3::Z);
+    let nothing = g.meet(local, miss);
+    let placed = g.instance(nothing, placement);
+    let root = g.minus(wall, placed);
+    Case {
+        graph: g,
+        root,
+        want: Want::Wall(placement),
+    }
+}
+
+/// `wall & Hmiss` at the root.
+fn empty_root() -> Case {
+    let placement = building();
+    let mut g = Graph::new();
+    let wall = g.wall(placement);
+    let miss = g.miss(placement);
+    let root = g.meet(wall, miss);
+    Case {
+        graph: g,
+        root,
+        want: Want::Nothing(CLIP_EMPTIED),
+    }
+}
+
+fn every_case() -> Vec<(&'static str, Case)> {
+    vec![
+        ("difference by an empty clip", difference_by_empty_clip()),
+        ("union with an empty subject", union_with_empty_subject()),
+        (
+            "difference by an emptied wall",
+            difference_by_emptied_wall(),
+        ),
+        ("an empty subject less a wall", empty_subject_less_a_wall()),
+        (
+            "difference by a disjoint intersection",
+            difference_by_disjoint_intersection(),
+        ),
+        ("a disjoint intersection", disjoint_intersection()),
+        ("the column clip alone", the_column_clip_alone()),
+        (
+            "difference by the column clip",
+            difference_by_the_column_clip(),
+        ),
+        (
+            "difference by an instance of nothing",
+            difference_by_an_instance_of_nothing(),
+        ),
+        ("an empty root", empty_root()),
+    ]
+}
+
+fn wall_only(placement: Transform3) -> (GeometryGraph, NodeId) {
+    let mut g = Graph::new();
+    let wall = g.wall(placement);
+    (g.finish(vec![wall]), wall)
+}
+
+fn exact(graph: &GeometryGraph, root: NodeId) -> Result<ExactBRep, GeomError> {
+    ReferenceExactCompiler::new().compile_exact(graph, root, &options())
 }
 
 fn volume(brep: &ExactBRep) -> f64 {
@@ -156,151 +380,92 @@ fn volume(brep: &ExactBRep) -> f64 {
         .signed_volume
 }
 
-/// The exact result of `body`, which must be the wall's volume, and equal
-/// to the exact result of `same`, built in a graph of its own.
-fn is_the_wall(graph: Graph, body: NodeId, same: impl FnOnce(&mut Graph) -> NodeId) -> ExactBRep {
-    let mut other = Graph::new();
-    let wanted = same(&mut other);
-    let wanted = exact(other, wanted).expect("the operand compiles");
-    let solid = exact(graph, body).expect("the identity absorbs the empty operand");
-    assert!(
-        (volume(&solid) - volume(&wanted)).abs() <= 1e-9 * volume(&wanted),
-        "volume {}, expected {}",
-        volume(&solid),
-        volume(&wanted)
-    );
-    assert_eq!(solid, wanted, "the operand itself, not a rebuilt copy");
-    solid
-}
-
-fn degenerate(graph: Graph, root: NodeId, part: &str) {
-    match exact(graph, root) {
-        Err(GeomError::Degenerate(why)) => {
-            assert!(why.contains(part), "{why:?} must say `{part}`");
+#[test]
+fn the_exact_compiler_absorbs_an_empty_operand_and_refuses_an_empty_root() {
+    for (name, case) in every_case() {
+        let Case { graph, root, want } = case;
+        let graph = graph.finish(vec![root]);
+        match want {
+            Want::Wall(placement) => {
+                let (other, wall) = wall_only(placement);
+                let wanted = exact(&other, wall).expect("the operand compiles");
+                let solid = exact(&graph, root)
+                    .unwrap_or_else(|error| panic!("{name}: the identity absorbs it: {error:?}"));
+                assert!(
+                    (volume(&solid) - volume(&wanted)).abs() <= 1e-9 * volume(&wanted),
+                    "{name}: volume {}, expected {}",
+                    volume(&solid),
+                    volume(&wanted)
+                );
+                assert_eq!(solid, wanted, "{name}: the operand itself, not a copy");
+            }
+            Want::Nothing(why) => match exact(&graph, root) {
+                Err(GeomError::Degenerate(text)) => {
+                    assert!(text.contains(why), "{name}: {text:?} must say `{why}`");
+                }
+                other => panic!("{name}: expected Degenerate({why}), got {other:?}"),
+            },
         }
-        other => panic!("expected Degenerate({part}), got {other:?}"),
     }
 }
 
-const CLIP_EMPTIED: &str = "exact half-space clip leaves nothing of the subject";
+fn compiler() -> ReferenceMeshCompiler<BoolmeshBoolean> {
+    ReferenceMeshCompiler::new(BoolmeshBoolean::new())
+}
 
-#[test]
-fn a_difference_by_an_empty_intersection_is_the_wall() {
-    let placement = building();
-    let mut g = Graph::new();
-    let wall = g.wall(placement);
-    let miss = g.miss(placement);
-    let nothing = g.meet(wall, miss);
-    let body = g.minus(wall, nothing);
-    let solid = is_the_wall(g, body, |g| g.wall(placement));
-    assert!((volume(&solid) - WALL).abs() <= 1e-9 * WALL);
+fn mesh_volume(mesh: &TriMesh) -> f64 {
+    mesh.indices
+        .as_chunks::<3>()
+        .0
+        .iter()
+        .map(|t| {
+            let [a, b, c] = [0, 1, 2].map(|i| mesh.positions[t[i] as usize]);
+            a.dot(b.cross(c))
+        })
+        .sum::<f64>()
+        / 6.0
 }
 
 #[test]
-fn an_empty_difference_is_absorbed_by_a_union_and_by_a_difference() {
-    let placement = building();
-    let apart = placement * Transform3::from_translation(Vec3::new(0.0, 2.0, 0.0));
-
-    // (wall - Hover) | wall2 is wall2.
-    let mut g = Graph::new();
-    let wall = g.wall(placement);
-    let over = g.over(placement);
-    let nothing = g.minus(wall, over);
-    let wall2 = g.wall(apart);
-    let body = g.join(nothing, wall2);
-    is_the_wall(g, body, |g| g.wall(apart));
-
-    // wall - (wall - Hover) is the wall.
-    let mut g = Graph::new();
-    let wall = g.wall(placement);
-    let over = g.over(placement);
-    let nothing = g.minus(wall, over);
-    let body = g.minus(wall, nothing);
-    is_the_wall(g, body, |g| g.wall(placement));
-
-    // (wall - Hover) - wall2 is empty, and so a refused root.
-    let mut g = Graph::new();
-    let wall = g.wall(placement);
-    let over = g.over(placement);
-    let nothing = g.minus(wall, over);
-    let wall2 = g.wall(apart);
-    let body = g.minus(nothing, wall2);
-    degenerate(g, body, CLIP_EMPTIED);
+fn the_mesh_compiler_absorbs_an_empty_operand_and_returns_an_empty_root() {
+    for (name, case) in every_case() {
+        let Case { graph, root, want } = case;
+        let graph = graph.finish(vec![root]);
+        let outcome = compiler()
+            .compile_mesh_reported(&graph, root, &options())
+            .unwrap_or_else(|error| panic!("{name}: {error:?}"));
+        assert_eq!(outcome.closure, MeshClosure::Solid, "{name}");
+        match want {
+            Want::Wall(placement) => {
+                let (other, wall) = wall_only(placement);
+                let wanted = compiler()
+                    .compile_mesh(&other, wall, &options())
+                    .expect("the operand compiles");
+                assert_eq!(outcome.mesh, wanted, "{name}: the operand's mesh itself");
+                assert!(
+                    (mesh_volume(&outcome.mesh) - WALL).abs() <= 1e-9 * WALL,
+                    "{name}"
+                );
+            }
+            Want::Nothing(_) => {
+                assert!(outcome.mesh.indices.is_empty(), "{name}: no triangles");
+            }
+        }
+    }
 }
 
 #[test]
-fn a_general_boolean_that_leaves_nothing_is_an_empty_tool() {
-    // The wall's intersection with a wall far away: the general boolean
-    // reports `EmptyResult`, which is an empty operand, not a refusal.
-    let placement = building();
-    let far = Transform3::from_translation(Vec3::new(100.0, 0.0, 0.0)) * placement;
+fn an_authored_empty_mesh_is_still_a_refused_tool() {
     let mut g = Graph::new();
-    let wall = g.wall(placement);
-    let away = g.wall(far);
-    let nothing = g.meet(wall, away);
-    let body = g.minus(wall, nothing);
-    is_the_wall(g, body, |g| g.wall(placement));
-
-    // On its own the intersection is a refused root, as before.
-    let mut g = Graph::new();
-    let wall = g.wall(placement);
-    let away = g.wall(far);
-    let nothing = g.meet(wall, away);
-    degenerate(g, nothing, "exact boolean intersection leaves nothing");
-}
-
-#[test]
-fn a_plane_that_crosses_the_envelope_but_not_the_column_leaves_nothing() {
-    // A column of radius 0.5 and a plane 0.6 from its axis, facing out: the
-    // column's box reaches across the plane, the column does not, so the
-    // clip's boolean is what finds nothing.
-    let placement = general();
-    let r = 0.5;
-    let build = |g: &mut Graph| {
-        let profile = Profile::Circle(CircleProfile {
-            radius: r,
-            thickness: None,
-        });
-        let column = g.extrusion(profile, H);
-        let column = g.instance(column, placement);
-        let d = 0.6 / 2.0_f64.sqrt();
-        let plane = g.world_half_space(
-            Point3::new(d, d, 0.0),
-            Vec3::new(1.0, 1.0, 0.0).normalize(),
-            placement,
-        );
-        g.meet(column, plane)
-    };
-    let mut g = Graph::new();
-    let nothing = build(&mut g);
-    degenerate(g, nothing, CLIP_EMPTIED);
-
-    let mut g = Graph::new();
-    let nothing = build(&mut g);
     let wall = g.wall(building());
-    let body = g.minus(wall, nothing);
-    is_the_wall(g, body, |g| g.wall(building()));
-}
-
-#[test]
-fn an_instance_of_an_empty_boolean_is_empty() {
-    let placement = building();
-    let mut g = Graph::new();
-    let wall = g.wall(placement);
-    let local = g.local_wall();
-    let miss = g.local_half_space(Point3::new(0.0, 0.0, H + 0.5), Vec3::Z);
-    let nothing = g.meet(local, miss);
-    let placed = g.instance(nothing, placement);
-    let body = g.minus(wall, placed);
-    is_the_wall(g, body, |g| g.wall(placement));
-}
-
-#[test]
-fn an_empty_root_is_a_named_refusal() {
-    let placement = building();
-    let mut g = Graph::new();
-    let wall = g.wall(placement);
-    let miss = g.miss(placement);
-    let nothing = g.meet(wall, miss);
-    degenerate(g, nothing, CLIP_EMPTIED);
+    let empty = g.push(GeometryNode::TriMesh(TriMesh::default()));
+    let root = g.minus(wall, empty);
+    let graph = g.finish(vec![root]);
+    let error = compiler()
+        .compile_mesh(&graph, root, &options())
+        .expect_err("a surface model encloses no volume");
+    assert!(
+        matches!(&error, GeomError::InvalidInput(text) if text.starts_with("boolean tool is a surface model")),
+        "{error:?}"
+    );
 }

@@ -960,6 +960,12 @@ impl<B: MeshBoolean> ReferenceMeshCompiler<B> {
     /// worse: where it is refused, for any reason (the unmerged-contact
     /// guard included), the operands are cut in the world frame as before.
     ///
+    /// An operand with no triangles (a clip that left nothing, an
+    /// intersection of disjoint solids) decides the boolean by an identity
+    /// before any frame or cut (#326, [`crate::empty`]): the subject, the
+    /// tool or nothing, as built, with no deviation of a cut. A skin the
+    /// subject has pending passes through to the root of its chain.
+    ///
     /// A boolean the world-frame mesh cut cannot settle is decided by the
     /// exact compiler (#391, #423, [`crate::referee`]): when faces of its operands
     /// nearly share a plane within the linear tolerance, or when the cut is
@@ -976,53 +982,76 @@ impl<B: MeshBoolean> ReferenceMeshCompiler<B> {
         budget: Budget,
         (cache, root): (&Cache, NodeId),
     ) -> GeomResult<(Built, Decided)> {
-        if let Ok(Some(built)) =
-            self.boolean_in_shared_frame(graph, (left, right), operator, options, budget, cache)
-        {
-            return Ok((built, Decided::Mesh));
-        }
-        // A clip is a constructed stand-in with no coordinates of its own:
-        // cut in its subject's frame, never worse than the world cut below
-        // (#400, ADR 0102).
-        if let Ok(Some(built)) =
-            self.clip_in_subject_frame(graph, (left, right), operator, options, budget, cache)
-        {
-            return Ok((built, Decided::Mesh));
-        }
         let subject = self.cached(cache, left, budget)?;
         refuse_surface_operand(subject, "subject")?;
         let clipping = matches!(
             operator,
             axiolid_core::BooleanOperator::Difference | axiolid_core::BooleanOperator::Intersection
         );
-        let bounded_tool = match clip_tool(graph, right) {
-            Some((tool, placement)) if clipping => {
+        let clip = clip_tool(graph, right).filter(|_| clipping);
+        // Any other tool is a node of its own, built before this one.
+        let built_tool = match clip {
+            Some(_) => None,
+            None => {
+                let built = self.cached(cache, right, budget)?;
+                refuse_surface_operand(built, "tool")?;
+                Some(built)
+            }
+        };
+        // An empty operand decides the boolean by an identity, before any
+        // frame or cut (#326, `crate::empty`).
+        let identity = crate::empty::identity(
+            operator,
+            subject.mesh.indices.is_empty(),
+            built_tool.is_some_and(|built| built.mesh.indices.is_empty()),
+        );
+        if identity.is_none() {
+            if let Ok(Some(built)) =
+                self.boolean_in_shared_frame(graph, (left, right), operator, options, budget, cache)
+            {
+                return Ok((built, Decided::Mesh));
+            }
+            // A clip is a constructed stand-in with no coordinates of its
+            // own: cut in its subject's frame, never worse than the world cut
+            // below (#400, ADR 0102).
+            if let Ok(Some(built)) =
+                self.clip_in_subject_frame(graph, (left, right), operator, options, budget, cache)
+            {
+                return Ok((built, Decided::Mesh));
+            }
+        }
+        let bounded_tool = match clip {
+            Some((tool, placement)) if identity.is_none() => {
                 Some(self.clip_tool_mesh(graph, tool, placement, &subject.mesh, options)?)
             }
             _ => None,
         };
         // A half-space is built here from the subject, so it has no
         // upstream fates of its own.
-        let (tool, tool_fates, tool_deviation) = match bounded_tool.as_ref() {
-            Some(tool) => (tool, None, None),
-            None => {
-                let built = self.cached(cache, right, budget)?;
-                refuse_surface_operand(built, "tool")?;
-                (&built.mesh, Some(&built.fates), Some(&built.deviation))
-            }
+        let nothing = TriMesh::default();
+        let (tool, tool_fates, tool_deviation) = match (bounded_tool.as_ref(), built_tool) {
+            (Some(tool), _) => (tool, None, None),
+            (None, Some(built)) => (&built.mesh, Some(&built.fates), Some(&built.deviation)),
+            (None, None) => (&nothing, None, None),
         };
-        let cut = self.boolean_of(
-            subject,
-            (tool, tool_fates, tool_deviation),
-            operator,
-            options,
-            budget.placed,
-        );
+        let cut = match identity {
+            Some(identity) => {
+                identity_cut(identity, subject, built_tool).map_err(CutRefusal::Other)
+            }
+            None => self.boolean_of(
+                subject,
+                (tool, tool_fates, tool_deviation),
+                operator,
+                options,
+                budget.placed,
+            ),
+        };
         // A boolean the mesh cut cannot settle is decided by the exact
         // compiler (#391, #423, ADR 0098). It is never worse than the mesh path:
         // where the referee refuses, an unsettled but valid mesh result is
         // returned as before, and a contact refusal keeps its message and
         // names the referee's reason.
+        let half_space_tool = clip.is_some();
         let referee = |reason: &mut Option<String>,
                        against: Option<crate::referee::Against<'_>>,
                        rounding: Option<Scalar>| {
@@ -1031,21 +1060,16 @@ impl<B: MeshBoolean> ReferenceMeshCompiler<B> {
             // referee. The extra-shell trigger of #423 leaves it to the mesh
             // result; a skin within rounding is decided for it too (#400,
             // ADR 0102).
-            if bounded_tool.is_some() && rounding.is_none() {
+            if half_space_tool && rounding.is_none() {
                 *reason = Some("the tool is a half-space clipped to the subject".to_owned());
                 return Ok(None);
             }
-            let tool = if bounded_tool.is_some() {
-                None
-            } else {
-                Some(self.cached(cache, right, budget)?)
-            };
             match crate::referee::boolean(
                 graph,
                 id,
                 operator,
                 options,
-                (subject, tool),
+                (subject, built_tool),
                 against,
                 rounding,
             ) {
@@ -1170,6 +1194,9 @@ impl<B: MeshBoolean> ReferenceMeshCompiler<B> {
     /// The result keeps its unplaced form in [`Built::local`], so an
     /// enclosing boolean in the same frame cuts against it: a chain of
     /// corbels on a column stays in the column's frame.
+    ///
+    /// Its operands are the caller's, already refused if they are surface
+    /// models and not empty (#326).
     fn boolean_in_shared_frame(
         &self,
         graph: &GeometryGraph,
@@ -1206,8 +1233,6 @@ impl<B: MeshBoolean> ReferenceMeshCompiler<B> {
                 return Ok(None);
             }
         }
-        refuse_surface_operand(subject, "subject")?;
-        refuse_surface_operand(tool, "tool")?;
         let offset = crate::frame::relative_offset(subject_frame, tool_frame).ok_or_else(|| {
             GeomError::InvalidInput("operand translations have no finite offset".into())
         })?;
@@ -1268,7 +1293,8 @@ impl<B: MeshBoolean> ReferenceMeshCompiler<B> {
     /// subject's faces are exactly axis-aligned; where the linear parts
     /// differ, its faces lie a residue off them and the snap lands them. The
     /// result is placed by the frame and keeps its unplaced form in
-    /// [`Built::local`].
+    /// [`Built::local`]. The subject is the caller's, already refused if it
+    /// is a surface model and not empty (#326).
     fn clip_in_subject_frame(
         &self,
         graph: &GeometryGraph,
@@ -1293,7 +1319,6 @@ impl<B: MeshBoolean> ReferenceMeshCompiler<B> {
         let Some(relative) = crate::frame::relative(frame, chain) else {
             return Ok(None);
         };
-        refuse_surface_operand(subject, "subject")?;
         let local_budget = instance_local_budget(frame, budget, 0.0)?;
         let local_options = local_options(options, local_budget)?;
         let tool = self.clip_tool_mesh(graph, tool, relative, &subject.mesh, &local_options)?;
@@ -1833,6 +1858,45 @@ impl<B: MeshBoolean> ReferenceMeshCompiler<B> {
             }),
         }
     }
+}
+
+/// The cut of a boolean with an empty operand (#326): the subject or the
+/// tool as it is, or nothing, by the identity table. Nothing is cut, so no
+/// snap, skin or contact is read; a skin the subject carries stays pending,
+/// for the root of its chain to decide.
+fn identity_cut(
+    identity: crate::empty::Identity,
+    subject: &Built,
+    tool: Option<&Built>,
+) -> GeomResult<MeshCut> {
+    use crate::empty::Identity;
+    let built = match identity {
+        Identity::Subject => {
+            let mut built = subject.clone();
+            let skin = built.pending_skin.take();
+            return Ok(MeshCut {
+                built,
+                unsettled: false,
+                skin,
+            });
+        }
+        Identity::Tool => tool
+            .ok_or_else(|| {
+                GeomError::InvalidInput("boolean identity names a tool that was not built".into())
+            })?
+            .clone(),
+        Identity::Empty => channels::after_boolean(
+            TriMesh::default(),
+            &subject.fates,
+            tool.map(|built| &built.fates),
+            Vec::new(),
+        ),
+    };
+    Ok(MeshCut {
+        built,
+        unsettled: false,
+        skin: None,
+    })
 }
 
 /// `error` with the reason the exact referee refused to decide it.

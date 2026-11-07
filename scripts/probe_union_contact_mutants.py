@@ -42,7 +42,6 @@ R = ["-p", "axiolid-mesh-compile", "--test", "rotated_face_contact"]
 S = ["-p", "axiolid-mesh-compile", "--test", "thin_skin"]
 L = ["-p", "axiolid-mesh-compile", "--lib"]
 I = ["-p", "axiolid-inspect"]
-T = ["-p", "axiolid-mesh-compile", "--test", "surface_models"]
 PR = ["-p", "axiolid-mesh-compile", "--test", "placement_rounding"]
 
 def edits(*changes):
@@ -52,8 +51,8 @@ def edits(*changes):
 SIMILAR = (FRAME, "        && is_similarity(t)\n", "        && true\n")
 FALLBACK = (
     COMPILER,
-    "        if let Ok(Some(built)) =\n            self.boolean_in_shared_frame(graph, (left, right), operator, options, budget, cache)\n        {",
-    "        if let Some(built) =\n            self.boolean_in_shared_frame(graph, (left, right), operator, options, budget, cache)?\n        {",
+    "            if let Ok(Some(built)) =\n                self.boolean_in_shared_frame(graph, (left, right), operator, options, budget, cache)\n            {",
+    "            if let Some(built) =\n                self.boolean_in_shared_frame(graph, (left, right), operator, options, budget, cache)?\n            {",
 )
 GUARD = (
     COMPILER,
@@ -121,9 +120,6 @@ MUTANTS = [
     ("shared frame cut at the world tolerance", COMPILER,
      ".with_tolerance(local_budget.tolerance)",
      ".with_tolerance(options.tolerance())", [U]),
-    ("shared frame takes surface operands", COMPILER,
-     '        refuse_surface_operand(subject, "subject")?;\n        refuse_surface_operand(tool, "tool")?;\n',
-     "        let _ = (subject, tool);\n", [T]),
     ("union snap moves inward", SNAP,
      "            if !whole && outward[k][i] * (face.at - p[k]) < 0.0 || !whole && outward[k][i] == 0.0 {",
      "            if !whole && outward[k][i] == 0.0 {", [U]),
