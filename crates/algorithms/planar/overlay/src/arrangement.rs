@@ -112,6 +112,32 @@ pub struct ArrangementRegion {
     pub holes: Vec<Vec<EdgeUse>>,
 }
 
+/// Each ring validated ([`validate_arc_ring`], the first refusal returned)
+/// and turned counter-clockwise, as [`ArcArrangement::new`] takes them;
+/// also whether each was reversed.
+///
+/// # Errors
+///
+/// Any [`validate_arc_ring`] refusal, with the ring's own reason.
+pub(crate) fn oriented_rings(
+    rings: &[ArcRing],
+    tolerance: Tolerance,
+) -> Result<(Vec<ArcRing>, Vec<bool>), OverlayError> {
+    let mut oriented = Vec::with_capacity(rings.len());
+    let mut reversed = Vec::with_capacity(rings.len());
+    for ring in rings {
+        validate_arc_ring(ring, tolerance)?;
+        let flip = arc_orientation(ring) == Sign::Negative;
+        oriented.push(if flip {
+            reverse_arc_ring(ring)
+        } else {
+            ring.clone()
+        });
+        reversed.push(flip);
+    }
+    Ok((oriented, reversed))
+}
+
 /// The plane cut by several simple arc rings.
 ///
 /// Built once, queried many times: [`Self::regions`] selects any set of
@@ -144,18 +170,7 @@ impl ArcArrangement {
     ///
     /// Any [`validate_arc_ring`] refusal, with the ring's own reason.
     pub fn new(rings: &[ArcRing], tolerance: Tolerance) -> Result<Self, OverlayError> {
-        let mut oriented = Vec::with_capacity(rings.len());
-        let mut reversed = Vec::with_capacity(rings.len());
-        for ring in rings {
-            validate_arc_ring(ring, tolerance)?;
-            let flip = arc_orientation(ring) == Sign::Negative;
-            oriented.push(if flip {
-                reverse_arc_ring(ring)
-            } else {
-                ring.clone()
-            });
-            reversed.push(flip);
-        }
+        let (oriented, reversed) = oriented_rings(rings, tolerance)?;
         let mut raw = arrangement::build(&oriented)?;
         let counts: Vec<usize> = rings.iter().map(|ring| ring.vertices.len()).collect();
         let edges = raw

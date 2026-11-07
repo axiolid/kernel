@@ -88,7 +88,6 @@ impl BoxTree {
     /// (#344). Stops at the first, so a search for any witness costs the
     /// path to it, not every candidate. `test` must pass a node's box
     /// whenever it passes a box inside it.
-    #[allow(dead_code)] // read by `term_union` (next commit)
     pub(crate) fn first(
         &self,
         test: impl Fn(&Bounds) -> bool,

@@ -105,7 +105,7 @@ use axiolid_exact::{certify, Arith, SignExpr};
 use axiolid_guarantees::Sign;
 
 use crate::arc::ArcRing;
-use crate::arrangement::ArcArrangement;
+use crate::arrangement::{ArcArrangement, ArrangementRegion, EdgeUse};
 use crate::region::Region;
 use crate::{validate_ring, OverlayError, Polygon, Ring};
 
@@ -549,6 +549,15 @@ enum Rule {
 }
 
 impl Rule {
+    /// The index of the first convex piece ring in the rule's ring list.
+    #[allow(dead_code)]
+    fn first_piece(&self) -> usize {
+        match self {
+            Self::Sum(terms) => terms.pieces,
+            Self::Erosion { own, terms, .. } => own + terms.pieces,
+        }
+    }
+
     fn holds(&self, rings: &[usize]) -> bool {
         match self {
             Self::Sum(terms) => terms.holds(rings, 0),
@@ -734,19 +743,32 @@ pub(crate) fn region_of(
     had_input: bool,
     tolerance: Tolerance,
 ) -> Result<Region, OverlayError> {
+    let regions = arrangement.regions_holding(inside)?;
+    region_from(regions, |uses| arrangement.ring(uses), had_input, tolerance)
+}
+
+/// The tail of [`region_of`]: the linked `regions`, their boundaries built
+/// by `ring` over the rounded vertices, presented, settled and validated.
+/// Shared with `crate::term_union` (#344), so both routes round, present
+/// and settle alike.
+pub(crate) fn region_from(
+    regions: Vec<ArrangementRegion>,
+    ring: impl Fn(&[EdgeUse]) -> ArcRing,
+    had_input: bool,
+    tolerance: Tolerance,
+) -> Result<Region, OverlayError> {
     let straight = |ring: ArcRing| Ring {
         points: ring.vertices.iter().map(|v| v.point).collect(),
     };
     let mut polygons = Vec::new();
-    for region in arrangement.regions_holding(inside)? {
-        let Some(outer) = crate::arc_overlay::presented(arrangement.ring(&region.outer), tolerance)
-        else {
+    for region in regions {
+        let Some(outer) = crate::arc_overlay::presented(ring(&region.outer), tolerance) else {
             continue;
         };
         let holes = region
             .holes
             .iter()
-            .filter_map(|h| crate::arc_overlay::presented(arrangement.ring(h), tolerance))
+            .filter_map(|h| crate::arc_overlay::presented(ring(h), tolerance))
             .map(straight)
             .collect();
         polygons.push(Polygon {
@@ -1227,10 +1249,22 @@ impl Region {
     }
 }
 
+/// The arrangement route, kept as the oracle of `crate::term_union` (#344):
+/// every ring in one [`ArcArrangement`], the faces read by `holds`.
+#[cfg(test)]
+fn by_arrangement(
+    rings: &[ArcRing],
+    holds: impl Fn(&[usize]) -> bool,
+    tolerance: Tolerance,
+) -> Result<Region, OverlayError> {
+    let arrangement = ArcArrangement::new(rings, tolerance)?;
+    region_of(&arrangement, holds, true, tolerance)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::Polygon;
+    use crate::{term_union, Polygon};
 
     fn ring(points: &[(f64, f64)]) -> Ring {
         Ring {
@@ -1632,5 +1666,465 @@ mod tests {
                 assert_eq!(a.unwrap().polygons(), b.unwrap().polygons());
             }
         }
+    }
+
+    /// A deterministic generator for the seeded cases.
+    struct Lcg(u64);
+
+    impl Lcg {
+        fn next(&mut self) -> f64 {
+            self.0 = self
+                .0
+                .wrapping_mul(6_364_136_223_846_793_005)
+                .wrapping_add(1_442_695_040_888_963_407);
+            (self.0 >> 11) as f64 / (1u64 << 53) as f64
+        }
+
+        fn below(&mut self, n: usize) -> usize {
+            ((self.next() * n as f64) as usize).min(n - 1)
+        }
+    }
+
+    /// `term_union` and the arrangement route give the same `Result`: equal
+    /// polygons and proof, or the same refusal.
+    fn assert_same_route(rings: &[ArcRing], rule: &Rule, t: Tolerance, name: &str) {
+        let new = term_union::region(rings, rule.first_piece(), |r| rule.holds(r), t);
+        let old = by_arrangement(rings, |r| rule.holds(r), t);
+        match (new, old) {
+            (Ok(new), Ok(old)) => {
+                assert_eq!(new.polygons(), old.polygons(), "{name}");
+                assert_eq!(new.validated(), old.validated(), "{name}");
+            }
+            (new, old) => assert_eq!(new.map(|_| ()), old.map(|_| ()), "{name}"),
+        }
+    }
+
+    /// Both operations, the hulls trimmed and, with `whole`, untrimmed.
+    fn assert_same_routes(name: &str, region: &Region, part: &Part, whole: bool, t: Tolerance) {
+        for covers in [true, false].into_iter().take(if whole { 2 } else { 1 }) {
+            let parts = std::slice::from_ref(part);
+            let (rings, rule) = region.sum_rule(parts, covers, t);
+            assert_same_route(&rings, &rule, t, &format!("{name}: sum, covers {covers}"));
+            let (rings, rule) = region.erosion_rule(parts, covers, t);
+            assert_same_route(
+                &rings,
+                &rule,
+                t,
+                &format!("{name}: erosion, covers {covers}"),
+            );
+        }
+    }
+
+    /// A rectangle `w x h` about the origin, turned by `angle`.
+    fn turned_rectangle(w: f64, h: f64, angle: f64) -> Vec<Point2> {
+        let (s, c) = angle.sin_cos();
+        [(-w, -h), (w, -h), (w, h), (-w, h)]
+            .iter()
+            .map(|&(x, y)| Point2::new(0.5 * (c * x - s * y), 0.5 * (s * x + c * y)))
+            .collect()
+    }
+
+    fn disc(radius: f64) -> Vec<Point2> {
+        (0..64)
+            .map(|i| {
+                let a = f64::from(i) * std::f64::consts::TAU / 64.0;
+                Point2::new(radius * a.cos(), radius * a.sin())
+            })
+            .collect()
+    }
+
+    /// One group of the furniture benchmark (a C-shaped sofa, a round table
+    /// and an L-shaped desk, `3 * arc + 8` corners) about `(cx, cy)`.
+    fn furniture_group(cx: f64, cy: f64, arc: usize) -> Vec<Vec<Point2>> {
+        let round = |radius: f64, from: f64, to: f64| -> Vec<Point2> {
+            (0..=arc)
+                .map(|i| {
+                    let a = (from + (to - from) * i as f64 / arc as f64).to_radians();
+                    Point2::new(cx + radius * a.cos(), cy + radius * a.sin())
+                })
+                .collect()
+        };
+        let mut sofa = round(1.0, 60.0, 300.0);
+        sofa.extend(round(0.6, 300.0, 60.0));
+        let table = (0..arc)
+            .map(|i| {
+                let a = (360.0 * i as f64 / arc as f64).to_radians();
+                Point2::new(cx + 0.35 * a.cos(), cy + 0.35 * a.sin())
+            })
+            .collect();
+        let desk = [
+            (1.2, -0.7),
+            (2.8, -0.7),
+            (2.8, 0.0),
+            (1.9, 0.0),
+            (1.9, 0.7),
+            (1.2, 0.7),
+        ]
+        .iter()
+        .map(|&(x, y)| Point2::new(cx + x, cy + y))
+        .collect();
+        vec![sofa, table, desk]
+    }
+
+    /// The outlines of `groups` groups of furniture on a grid, five to a
+    /// row, and the free floor about them. With `far`, the scene is turned
+    /// 2.3 degrees and placed at survey coordinates.
+    fn furniture(groups: usize, arc: usize, far: bool) -> (Region, Region) {
+        let t = Tolerance::METRE;
+        let (s, c) = if far {
+            2.3f64.to_radians().sin_cos()
+        } else {
+            (0.0, 1.0)
+        };
+        let (x0, y0) = if far {
+            (640_000.0, 5_650_000.0)
+        } else {
+            (0.0, 0.0)
+        };
+        let at = |p: Point2| Point2::new(x0 + c * p.x - s * p.y, y0 + s * p.x + c * p.y);
+        let outlines: Vec<Vec<Point2>> = (0..groups)
+            .flat_map(|g| furniture_group(4.0 * (g % 5) as f64, 2.4 * (g / 5) as f64, arc))
+            .map(|r| r.into_iter().map(at).collect())
+            .collect();
+        let rings = |points: &[Point2]| Ring {
+            points: points.to_vec(),
+        };
+        let (cols, rows) = (groups.min(5) as f64, groups.div_ceil(5) as f64);
+        let floor: Vec<Point2> = [
+            (-2.2, -2.2),
+            (4.0 * cols + 0.2, -2.2),
+            (4.0 * cols + 0.2, 2.4 * rows + 0.2),
+            (-2.2, 2.4 * rows + 0.2),
+        ]
+        .iter()
+        .map(|&(x, y)| at(Point2::new(x, y)))
+        .collect();
+        let furniture = Region::new(
+            outlines
+                .iter()
+                .map(|r| Polygon {
+                    outer: rings(r),
+                    holes: Vec::new(),
+                })
+                .collect(),
+            t,
+        )
+        .unwrap();
+        let free = Region::new(
+            vec![Polygon {
+                outer: rings(&floor),
+                holes: outlines.iter().map(|r| rings(r)).collect(),
+            }],
+            t,
+        )
+        .unwrap();
+        (furniture, free)
+    }
+
+    /// A star-shaped polygon about `(cx, cy)`, with a hole when `hole`.
+    fn star(rng: &mut Lcg, corners: usize, (cx, cy): (f64, f64), hole: bool) -> Polygon {
+        let ring_at = |rng: &mut Lcg, lo: f64, hi: f64, n: usize| -> Ring {
+            let mut angles: Vec<f64> = (0..n)
+                .map(|i| (i as f64 + 0.1 + 0.8 * rng.next()) * std::f64::consts::TAU / n as f64)
+                .collect();
+            angles.sort_by(f64::total_cmp);
+            Ring {
+                points: angles
+                    .iter()
+                    .map(|a| {
+                        let r = lo + (hi - lo) * rng.next();
+                        Point2::new(cx + r * a.cos(), cy + r * a.sin())
+                    })
+                    .collect(),
+            }
+        };
+        let outer = ring_at(rng, 2.0, 5.0, corners);
+        let holes = if hole {
+            let mut h = ring_at(rng, 0.4, 0.8, 6);
+            // A hole is clockwise.
+            h.points.reverse();
+            vec![h]
+        } else {
+            Vec::new()
+        };
+        Polygon { outer, holes }
+    }
+
+    #[test]
+    fn the_term_union_reads_every_sum_as_the_arrangement_did() {
+        let t = Tolerance::new(1e-9, 1e-9).unwrap();
+        let compared = std::cell::Cell::new(0);
+        let check = |name: &str, region: &Region, part: &Part| {
+            assert_same_routes(name, region, part, true, t);
+            compared.set(compared.get() + 1);
+        };
+        // Walls of teeth, collinear corners, columns and an island, with a
+        // square, an L and a disc.
+        let l_shape = polygon_part(&shapes()[0].0, &[], t).unwrap();
+        let square = Part::Pieces(vec![turned_rectangle(0.9, 0.9, 0.0)]);
+        let round = Part::Pieces(vec![disc(0.3)]);
+        for (name, region) in walls() {
+            for (shape, part, whole) in [
+                ("square", &square, false),
+                ("L", &l_shape, true),
+                ("disc", &round, false),
+            ] {
+                assert_same_routes(&format!("{name} by {shape}"), &region, part, whole, t);
+                compared.set(compared.get() + 1);
+            }
+        }
+        // A region with a hole and several polygons, every shape of the
+        // shape tests as cut pieces and as rings.
+        let region = u_with_hole();
+        for (i, (outer, holes)) in shapes().iter().enumerate() {
+            check(
+                &format!("u, shape {i} cut"),
+                &region,
+                &polygon_part(outer, holes, t).unwrap(),
+            );
+            let whole = Part::Rings(
+                std::iter::once(outer.points.clone())
+                    .chain(holes.iter().map(|h| h.points.clone()))
+                    .collect(),
+            );
+            check(&format!("u, shape {i} whole"), &region, &whole);
+        }
+        let apart = |x: f64| Polygon {
+            outer: ring(&[(x, 0.0), (x + 2.0, 0.0), (x + 2.0, 2.0), (x, 2.0)]),
+            holes: vec![],
+        };
+        let three = Region::new(vec![apart(0.0), apart(3.0), apart(6.0)], t).unwrap();
+        for (i, (outer, holes)) in shapes().iter().enumerate() {
+            check(
+                &format!("three, shape {i}"),
+                &three,
+                &polygon_part(outer, holes, t).unwrap(),
+            );
+        }
+        // Axis-aligned and turned rectangles, the set's edges on the
+        // boundary, a corner at the origin, and the disc morphology's
+        // 64-gon at two radii.
+        let rects = [
+            (
+                "axis, corner at the origin",
+                [(0.0, 0.0), (1.7, 0.0), (1.7, 0.9), (0.0, 0.9)]
+                    .iter()
+                    .map(|&(x, y)| Point2::new(x, y))
+                    .collect::<Vec<_>>(),
+            ),
+            ("axis, centred", turned_rectangle(1.7, 0.9, 0.0)),
+            ("turned", turned_rectangle(1.7, 0.9, 30f64.to_radians())),
+        ];
+        for (name, k) in rects {
+            check(name, &region, &Part::Pieces(vec![k.clone()]));
+            check(&format!("{name}, three"), &three, &Part::Pieces(vec![k]));
+        }
+        for radius in [0.3, 0.75] {
+            check(
+                &format!("disc {radius}"),
+                &region,
+                &Part::Pieces(vec![disc(radius)]),
+            );
+        }
+        assert!(compared.get() > 30, "{}", compared.get());
+    }
+
+    #[test]
+    fn the_term_union_reads_furniture_as_the_arrangement_did() {
+        // Near the origin and placed far away and turned.
+        let t = Tolerance::new(1e-9, 1e-9).unwrap();
+        let check = |name: &str, region: &Region, part: &Part| {
+            assert_same_routes(name, region, part, false, t);
+        };
+        for (groups, far) in [(1, false), (1, true), (2, true)] {
+            let (sum, free) = furniture(groups, 48, far);
+            for (shape, k) in [
+                ("axis", turned_rectangle(1.7, 0.9, 0.0)),
+                ("turned", turned_rectangle(1.7, 0.9, 30f64.to_radians())),
+            ] {
+                let part = Part::Pieces(vec![k]);
+                check(
+                    &format!("furniture {groups} far {far} {shape}, sum"),
+                    &sum,
+                    &part,
+                );
+                check(
+                    &format!("furniture {groups} far {far} {shape}, floor"),
+                    &free,
+                    &part,
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn the_term_union_reads_random_scenes_as_the_arrangement_did() {
+        // Star-shaped polygons, some with a hole, a random convex shape,
+        // on a grid or far from the origin.
+        let mut compared = 0;
+        let mut rng = Lcg(344);
+        let mut valid = 0;
+        for case in 0..40 {
+            let n = 1 + rng.below(3);
+            let far = case % 2 == 1;
+            let offset = if far {
+                (640_000.0, 5_650_000.0)
+            } else {
+                (0.0, 0.0)
+            };
+            let snap = |p: Point2| {
+                if far {
+                    p
+                } else {
+                    Point2::new((p.x * 64.0).round() / 64.0, (p.y * 64.0).round() / 64.0)
+                }
+            };
+            let mut polygons = Vec::new();
+            for i in 0..n {
+                let corners = 8 + rng.below(33);
+                let centre = (offset.0 + 14.0 * i as f64, offset.1 + 14.0 * rng.next());
+                let hole = rng.below(3) == 0;
+                let mut polygon = star(&mut rng, corners, centre, hole);
+                for r in std::iter::once(&mut polygon.outer).chain(polygon.holes.iter_mut()) {
+                    r.points.iter_mut().for_each(|p| *p = snap(*p));
+                }
+                polygons.push(polygon);
+            }
+            let Ok(region) = Region::new(polygons, Tolerance::METRE) else {
+                continue;
+            };
+            valid += 1;
+            let k = {
+                let sides = 3 + rng.below(6);
+                let mut angles: Vec<f64> = (0..sides)
+                    .map(|i| {
+                        (f64::from(i as u32) + 0.1 + 0.8 * rng.next()) * std::f64::consts::TAU
+                            / sides as f64
+                    })
+                    .collect();
+                angles.sort_by(f64::total_cmp);
+                let away = if rng.below(3) == 0 { 0.7 } else { 0.0 };
+                let (rx, ry) = (0.3 + 1.5 * rng.next(), 0.3 + 1.5 * rng.next());
+                angles
+                    .iter()
+                    .map(|a| snap(Point2::new(away + rx * a.cos(), ry * a.sin())))
+                    .collect::<Vec<_>>()
+            };
+            let Ok(part) = polygon_part(&Ring { points: k }, &[], Tolerance::METRE) else {
+                continue;
+            };
+            assert_same_routes(
+                &format!("random {case}"),
+                &region,
+                &part,
+                true,
+                Tolerance::METRE,
+            );
+            compared += 1;
+        }
+        assert!(valid >= 20, "only {valid} random scenes were valid");
+        assert!(compared >= 20, "{compared}");
+    }
+
+    #[test]
+    fn fast_mode_rings_are_read_as_the_arrangement_did() {
+        // The filled rings of the fast disc morphology (#330), as that
+        // mode reads them: a toothed room and needle walls.
+        let t = Tolerance::new(1e-9, 1e-9).unwrap();
+        let needle_room = |teeth: usize, depth: f64, spacing: f64| {
+            let width = teeth as f64 * spacing;
+            let mut points: Vec<(f64, f64)> = (0..=2 * teeth)
+                .map(|k| {
+                    let x = width * k as f64 / (2 * teeth) as f64;
+                    (x, if k % 2 == 1 { depth } else { 0.0 })
+                })
+                .collect();
+            points.extend([(width, 3.0), (0.0, 3.0)]);
+            Region::new(
+                vec![Polygon {
+                    outer: ring(&points),
+                    holes: vec![],
+                }],
+                t,
+            )
+            .unwrap()
+        };
+        let mut cases = vec![
+            ("needles", needle_room(200, 0.05, 2e-4)),
+            ("deep needles", needle_room(100, 0.5, 2e-4)),
+        ];
+        cases.extend(
+            walls()
+                .into_iter()
+                .filter(|(n, _)| *n == "teeth in" || *n == "notch"),
+        );
+        let mut compared = 0;
+        for (name, region) in &cases {
+            for erode in [false, true] {
+                let own = rings_of(region.polygons());
+                let shape = Layout::new(region.polygons());
+                let sides: Vec<Sign> = Set::Region(shape.clone())
+                    .sides(&own)
+                    .into_iter()
+                    .map(|s| if erode { s.flip() } else { s })
+                    .collect();
+                let radius = 0.2;
+                let filled = crate::fill::fill(&own, &sides, 0.5 * radius, 1e-3, t.linear());
+                let parts = [Part::Pieces(vec![disc(radius)])];
+                let (rings, rule) = if erode {
+                    erosion_rule_of(filled.rings, shape, &parts, true, t)
+                } else {
+                    sum_rule_of(&filled.rings, shape, &parts, true, t)
+                };
+                assert_same_route(&rings, &rule, t, &format!("{name}, erosion {erode}"));
+                compared += 1;
+            }
+        }
+        assert_eq!(compared, 8);
+    }
+
+    #[test]
+    fn refusals_match_the_arrangement_route() {
+        let t = Tolerance::METRE;
+        let from = |points: &[(f64, f64)]| {
+            ArcRing::from_points(
+                &points
+                    .iter()
+                    .map(|&(x, y)| Point2::new(x, y))
+                    .collect::<Vec<_>>(),
+            )
+        };
+        let set = from(&[(0.0, 0.0), (4.0, 0.0), (4.0, 4.0), (0.0, 4.0)]);
+        let piece = from(&[(1.0, 1.0), (3.0, 1.0), (3.0, 3.0), (1.0, 3.0)]);
+        let union = |rings: &[usize]| !rings.is_empty();
+        let lists = [
+            ("a valid list", vec![set.clone(), piece.clone()]),
+            (
+                "a zero-area piece",
+                vec![set.clone(), from(&[(1.0, 1.0), (2.0, 2.0), (3.0, 3.0)])],
+            ),
+            (
+                "a repeated vertex",
+                vec![
+                    set.clone(),
+                    from(&[(1.0, 1.0), (3.0, 1.0), (3.0, 1.0), (3.0, 3.0), (1.0, 3.0)]),
+                ],
+            ),
+            (
+                "a zero-area set ring",
+                vec![from(&[(0.0, 0.0), (1.0, 1.0), (2.0, 2.0)]), piece.clone()],
+            ),
+        ];
+        let mut refused = 0;
+        for (name, rings) in &lists {
+            let new = term_union::region(rings, 1, union, t);
+            let old = by_arrangement(rings, union, t);
+            refused += usize::from(new.is_err());
+            match (new, old) {
+                (Ok(new), Ok(old)) => assert_eq!(new.polygons(), old.polygons(), "{name}"),
+                (new, old) => assert_eq!(new.map(|_| ()), old.map(|_| ()), "{name}"),
+            }
+        }
+        assert_eq!(refused, 3);
     }
 }

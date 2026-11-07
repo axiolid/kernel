@@ -128,7 +128,6 @@ pub(crate) fn orient_doubles(a: Point2, b: Point2, c: Point2) -> Sign {
 /// Whether `s` lies strictly inside the convex counter-clockwise ring with
 /// vertices `ccw` (#344): exactly, every `orient(ccw[i], ccw[i + 1], s)` is
 /// positive.
-#[allow(dead_code)] // read by `term_union` (next commit)
 pub(crate) fn inside_convex(s: &XPoint, ccw: &[XPoint]) -> bool {
     (0..ccw.len()).all(|i| orient(&ccw[i], &ccw[(i + 1) % ccw.len()], s) == Sign::Positive)
 }

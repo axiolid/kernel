@@ -120,7 +120,6 @@ impl Raw {
 
     /// The exact point strictly inside piece `index`, the one the piece's
     /// memberships were read at.
-    #[allow(dead_code)] // read by `term_union` (next commit)
     pub(crate) fn sample(&self, index: usize) -> &XPoint {
         &self.pieces[index].sample
     }
@@ -243,7 +242,6 @@ impl Winder {
 /// Winding numbers of closed rings around exact points: the rings'
 /// monotone parts, a box tree over the rings and, per long ring, over its
 /// parts (the ring build's counting, shared).
-#[allow(dead_code)] // read by `term_union` (next commit)
 pub(crate) struct Windings {
     rings: Vec<Winder>,
     tree: BoxTree,
@@ -252,7 +250,6 @@ pub(crate) struct Windings {
     stack: Vec<usize>,
 }
 
-#[allow(dead_code)] // read by `term_union` (next commit)
 impl Windings {
     pub(crate) fn new(rings: &[ArcRing]) -> Self {
         let rings: Vec<Winder> = rings
@@ -391,7 +388,6 @@ pub(crate) fn build_charged(rings: &[ArcRing], charge: &mut Charge) -> Result<Ra
 /// # Errors
 ///
 /// As [`build`].
-#[allow(dead_code)] // read by `term_union` (next commit)
 pub(crate) fn build_partial(
     rings: &[ArcRing],
     keep: &[Vec<bool>],
