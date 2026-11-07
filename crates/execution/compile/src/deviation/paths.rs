@@ -537,7 +537,7 @@ fn tube_bound(
             });
         }
     }
-    error += jets.max(caps_charge);
+    error = tube_error(error, jets, caps_charge);
     if !error.is_finite() || error >= target {
         return None;
     }
@@ -555,6 +555,12 @@ fn tube_bound(
         TUBE_FLATNESS * target,
     )
     .map(|certified| (certified + error) * (1.0 + axiolid_reference::bound::ROUNDING))
+}
+
+/// What the tube's bound carries beyond the certificate: the centre's error
+/// and the larger of the walls' jet charge and the end disks' tilt.
+fn tube_error(centre: Scalar, jets: Scalar, caps: Scalar) -> Scalar {
+    centre + jets.max(caps)
 }
 
 /// The charge for one wall piece `(a, b)` read from a table whose tangent and
@@ -961,6 +967,181 @@ mod tests {
         let evaluated = axiolid_reference::curve::evaluate3(&curve, 41.0).unwrap();
         assert_ne!(read, evaluated);
         assert!(read.distance(evaluated) <= table.max_error() + 1e-9);
+    }
+
+    fn chain_frame() -> axiolid_core::Frame2 {
+        use axiolid_core::{Point2, Vec2};
+        axiolid_core::Frame2 {
+            origin: Point2::new(20.0, 10.0),
+            x: Vec2::new(0.8, 0.6),
+            y: Vec2::new(-0.6, 0.8),
+        }
+    }
+
+    /// A tube wall over an elevated harmonic chain plan (a straight 20 m, then
+    /// `k = 0.01 sin 50 s`) reads the chain table's centre: the evaluator's
+    /// point is 1.4e-2 off at 116.5 (#438).
+    #[test]
+    fn a_tube_wall_over_a_harmonic_chain_plan_reads_certified_points() {
+        use axiolid_curve::{Chain2, ChainPiece2, CurvatureLaw, Elevated3};
+        let plan = Curve2::Chain(Chain2::new(
+            chain_frame(),
+            vec![
+                ChainPiece2::Intrinsic {
+                    curvature: CurvatureLaw::Constant { curvature: 0.0 },
+                    length: 20.0,
+                },
+                ChainPiece2::Intrinsic {
+                    curvature: CurvatureLaw::Sinusoid {
+                        mean: 0.0,
+                        amplitude: 0.01,
+                        angular_frequency: 50.0,
+                        phase: 0.0,
+                    },
+                    length: 100.0,
+                },
+            ],
+        ));
+        let curve = Curve3::Elevated(Elevated3::new(
+            plan,
+            ElevationLaw::constant_grade(50.0, 0.04),
+        ));
+        let table = ElevatedPositionTable::new(&curve, 1e-6, 119.0).unwrap();
+        let wall = TubeWall {
+            curve: &curve,
+            positions: Some(&table),
+            span: (116.0, 117.0),
+            reference: perpendicular(unit_tangent(&curve, 116.5).unwrap()),
+            radius: 0.0,
+        };
+        let read = wall.jet(116.5, 0.0).unwrap().0;
+        assert_eq!(read, table.point3(116.5).unwrap().0);
+        let evaluated = axiolid_reference::curve::evaluate3(&curve, 116.5).unwrap();
+        assert!(
+            read.distance(evaluated) > 1e-2,
+            "{}",
+            read.distance(evaluated)
+        );
+    }
+
+    /// `y = a x^3` by its binomial series: arc length from 0 to `x`.
+    fn cubic_series(a: Scalar, x: Scalar) -> Scalar {
+        let z = 9.0 * a * a * x.powi(4);
+        let (mut binomial, mut power, mut sum) = (1.0, 1.0, 0.0);
+        for n in 0..200 {
+            let term = binomial * power / (4.0 * Scalar::from(n) + 1.0);
+            sum += term;
+            if term.abs() < 1e-30 {
+                break;
+            }
+            binomial *= (0.5 - Scalar::from(n)) / (Scalar::from(n) + 1.0);
+            power *= z;
+        }
+        x * sum
+    }
+
+    /// A wall built from a coarse table's jets over a cubic chain plan stays
+    /// within the charge of the exact series wall, and the charge is not
+    /// zero (#438).
+    #[test]
+    fn a_wall_from_a_coarse_chain_table_stays_within_its_charge() {
+        use axiolid_core::{Point3, Vec2};
+        use axiolid_curve::{BSplineCurve2, Chain2, ChainPiece2, Elevated3};
+        let (reach, a) = (40.0, 1.0 / (6.0 * 300.0 * 40.0));
+        let cubic = Curve2::BSpline(BSplineCurve2 {
+            degree: 3,
+            control_points: vec![
+                axiolid_core::Point2::new(0.0, 0.0),
+                axiolid_core::Point2::new(reach / 3.0, 0.0),
+                axiolid_core::Point2::new(2.0 * reach / 3.0, 0.0),
+                axiolid_core::Point2::new(reach, a * reach * reach * reach),
+            ],
+            knots: vec![0.0, 1.0],
+            multiplicities: vec![4, 4],
+            weights: None,
+            closed: false,
+            self_intersect: None,
+            knot_spec: KnotSpec::Unspecified,
+        });
+        let frame = chain_frame();
+        let curve = Curve3::Elevated(Elevated3::new(
+            Curve2::Chain(Chain2::new(
+                frame,
+                vec![ChainPiece2::Parametric {
+                    curve: cubic,
+                    start: 0.0,
+                    length: 40.0,
+                }],
+            )),
+            ElevationLaw::constant_grade(50.0, 0.04),
+        ));
+        // Coarse: the enclosures are wide, so the tangent and curvature
+        // errors are large.
+        let table = ElevatedPositionTable::new(&curve, 1e-3, 39.0).unwrap();
+        let [e0, e1, e2] = table.jet_errors();
+        assert!(e1 > 1e-9 && e2 > 1e-9, "{e1:e} {e2:e}");
+        let (lo, hi, radius) = (10.0, 30.0, 0.3);
+        let charge = piece_jet_charge(&curve, &table, (lo, hi), radius).unwrap();
+        assert!(charge > 0.0);
+        let wall = TubeWall {
+            curve: &curve,
+            positions: Some(&table),
+            span: (lo, hi),
+            reference: perpendicular(unit_tangent(&curve, 0.5 * (lo + hi)).unwrap()),
+            radius,
+        };
+        // The exact centre jet at plan distance `s`, from the series.
+        let exact = |s: Scalar| {
+            let mut x = s;
+            for _ in 0..60 {
+                x -= (cubic_series(a, x) - s) / (1.0 + 9.0 * a * a * x.powi(4)).sqrt();
+            }
+            let slope = 3.0 * a * x * x;
+            let heading = slope.atan();
+            let kappa = 6.0 * a * x / (1.0 + slope * slope).powf(1.5);
+            let world = |v: Vec2| frame.x * v.x + frame.y * v.y;
+            let p = world(Vec2::new(x, a * x * x * x));
+            let t = world(Vec2::new(heading.cos(), heading.sin()));
+            let n = world(Vec2::new(-heading.sin(), heading.cos())) * kappa;
+            (
+                Point3::new(frame.origin.x + p.x, frame.origin.y + p.y, 50.0 + 0.04 * s),
+                Vec3::new(t.x, t.y, 0.04),
+                Vec3::new(n.x, n.y, 0.0),
+            )
+        };
+        let mut worst = (0.0_f64, 0.0_f64, 0.0_f64);
+        for i in 0..=20 {
+            let s = lo + (hi - lo) * Scalar::from(i) / 20.0;
+            for j in 0..8 {
+                let theta = core::f64::consts::TAU * Scalar::from(j) / 8.0;
+                let read = wall.jet(s, theta).unwrap();
+                let truth = wall_jet(wall.reference, radius, exact(s), theta).unwrap();
+                worst.0 = worst.0.max(read.0.distance(truth.0));
+                worst.1 = worst.1.max((read.1 - truth.1).length());
+                worst.2 = worst.2.max((read.2 - truth.2).length());
+            }
+        }
+        assert!(
+            worst.0 > 0.0 && worst.1 > 0.0,
+            "{worst:?}: nothing to charge"
+        );
+        assert!(
+            worst.0 <= e0 + charge,
+            "point {:e} over {:e}",
+            worst.0,
+            e0 + charge
+        );
+        assert!(worst.1 <= charge, "s partial {:e} over {charge:e}", worst.1);
+        assert!(
+            worst.2 <= charge,
+            "theta partial {:e} over {charge:e}",
+            worst.2
+        );
+        // The bound carries the larger of the walls' and the disks' charge.
+        let speed = table.jet3_on(hi, SeamSide::Incoming).unwrap().1.length();
+        let caps = radius * 2.0 * e1 / speed;
+        let carried = tube_error(e0, charge, caps);
+        assert!(carried >= e0 + charge && carried >= e0 + caps && carried > e0);
     }
 
     /// Over an intrinsic plan the table's derivatives are exact closed forms:
