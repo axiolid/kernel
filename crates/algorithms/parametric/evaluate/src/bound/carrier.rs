@@ -52,7 +52,10 @@ pub(super) fn torus(
     let s = frame_stretch3(frame);
     let (cmin, cmax) = cos_range(v0, v1);
     let r = minor.abs();
-    let ring = (major + r * cmin).abs().max((major + r * cmax).abs());
+    // Linear in the cosine, so right for either sign of `minor`.
+    let ring = (major + minor * cmin)
+        .abs()
+        .max((major + minor * cmax).abs());
     smooth(
         s * ring,
         s * r,

@@ -525,7 +525,8 @@ fn a_spline_carrier_without_a_pair_and_a_curve_without_bounds_have_none() {
     assert!(chord_bound2(&on_plane, 0.1, 0.9).is_none());
     // Non-finite spans and a point span.
     assert!(chord_bound2(&on_plane, 0.1, Scalar::NAN).is_none());
-    assert_eq!(chord_bound2(&on_plane, 0.5, 0.5), Some(0.0));
+    // A point span of a curve without a bound is not bounded either.
+    assert!(chord_bound2(&on_plane, 0.5, 0.5).is_none());
 }
 
 #[test]
@@ -612,4 +613,83 @@ fn a_spike_in_the_guide_between_two_honest_ends_is_refused_or_held() {
     if let Some(bound) = chord_bound2(&curve, lo, hi) {
         assert!(sample <= bound, "{sample} above {bound}");
     }
+}
+
+#[test]
+fn a_point_span_carries_the_offset_of_a_curve_off_its_carrier() {
+    let plane = common::rotated();
+    let line = Curve3::Line(axiolid_curve::Line3 {
+        origin: plane.origin + plane.x * 0.1 + plane.z * 1e-3,
+        direction: plane.x * 0.5 + plane.y * 0.2,
+    });
+    let curve = lifted(line, Carrier::Plane(plane), (0.0, 1.0), |t| {
+        Point2::new(0.1 + 0.5 * t, 0.2 * t)
+    });
+    let point = chord_bound2(&curve, 0.4, 0.4).expect("bounded");
+    let tiny = chord_bound2(&curve, 0.4, 0.4 + 1e-12).expect("bounded");
+    assert!((1e-3..1.1e-3).contains(&point), "{point}");
+    assert!((point - tiny).abs() < 1e-6, "{point} {tiny}");
+}
+
+/// A plane's cut of a torus whose minor radius is negative, read on that
+/// plane: the ring `R + minor cos v` is widest at `v = pi`.
+#[test]
+fn a_plane_section_of_a_torus_with_a_negative_minor_radius() {
+    let frame = Frame3 {
+        origin: Point3::ZERO,
+        x: Vec3::X,
+        y: Vec3::Y,
+        z: Vec3::Z,
+    };
+    let (major, minor) = (2.0, -1.0);
+    let raw = Vec3::new(0.3, 0.2, 0.9);
+    let n = raw / raw.length();
+    let d = -0.5;
+    let g = AngleGraph2 {
+        a: trig(major * n.x, minor * n.x, 0.0),
+        b: trig(major * n.y, minor * n.y, 0.0),
+        c: trig(d, 0.0, -n.z * minor),
+        branch: Branch::Plus,
+    };
+    let section = Curve3::TorusSection(TorusSection3 {
+        torus: TorusCarrier {
+            frame,
+            major_radius: major,
+            minor_radius: minor,
+        },
+        graph: g,
+    });
+    let px = n.cross(Vec3::X);
+    let px = px / px.length();
+    let py = n.cross(px);
+    let plane = Frame3 {
+        origin: Point3::ZERO + n * d,
+        x: px,
+        y: py,
+        z: n,
+    };
+    let point = move |t: Scalar| {
+        let u = g.angle(t).expect("defined");
+        let ring = major + minor * t.cos();
+        let p = (frame.x * u.cos() + frame.y * u.sin()) * ring + frame.z * (minor * t.sin());
+        let r = p - plane.origin;
+        Point2::new(r.dot(px), r.dot(py))
+    };
+    let curve = lifted(section, Carrier::Plane(plane), (0.3, 3.6), point);
+    let mut bounded = 0;
+    for (lo, hi) in [
+        (2.6, 3.5),
+        (2.9, 3.4),
+        (3.0, 3.3),
+        (2.8, 3.0),
+        (3.1, 3.2),
+        (0.5, 1.0),
+    ] {
+        if let Some(bound) = chord_bound2(&curve, lo, hi) {
+            bounded += 1;
+            let sample = sampled(&point, lo, hi);
+            assert!(sample <= bound, "[{lo}, {hi}]: {sample} above {bound}");
+        }
+    }
+    assert!(bounded >= 3, "only {bounded} spans bounded");
 }

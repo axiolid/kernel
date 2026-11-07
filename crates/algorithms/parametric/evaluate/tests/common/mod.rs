@@ -130,6 +130,17 @@ pub fn cases() -> Vec<Case> {
             u: (0.0, 1.2),
             v: (-1.0, 1.0),
         },
+        // A negative minor radius: the ring is widest at `v = pi`.
+        Case {
+            name: "torus with a negative minor radius",
+            carrier: Carrier::Torus(TorusCarrier {
+                frame: rotated(),
+                major_radius: 2.0,
+                minor_radius: -1.0,
+            }),
+            u: (0.0, 0.6),
+            v: (2.9, 3.4),
+        },
         Case {
             name: "spline",
             carrier: Carrier::Spline(Box::new(patch())),

@@ -33,6 +33,7 @@ SEP = D + "separation.rs"
 LIF = D + "lifted.rs"
 CON = D + "continuation.rs"
 SEC = D + "section.rs"
+CAR = D + "carrier.rs"
 GRA = D + "graph.rs"
 IMP = D + "implicit.rs"
 PAI = D + "pair.rs"
@@ -46,6 +47,7 @@ SECU = E + ["--lib", "bound::section"]
 PAIT = E + ["--test", "pair_chord_bound"]
 PAIU = E + ["--lib", "bound::pair"]
 INTT = E + ["--test", "intrinsic_chord_bound"]
+CART = E + ["--test", "carrier_bounds"]
 BREAKS = E + ["--lib", "implicit_and_pair_sections"]
 
 MUTANTS = [
@@ -144,6 +146,10 @@ MUTANTS = [
     ('the table\'s error is dropped', INT,
      '        Some(Iv::point(d.hi).add(Iv::point(error)).hi)',
      '        Some(d.hi)', [INTT]),
+    # The carrier's bounds.
+    ('a torus ring is read with the absolute minor radius', CAR,
+     '    let ring = (major + minor * cmin)\n        .abs()\n        .max((major + minor * cmax).abs());',
+     '    let ring = (major + r * cmin)\n        .abs()\n        .max((major + r * cmax).abs());', [CART, SEPT]),
     # The wiring.
     ('a lifted pcurve has no bound', B,
      '            lifted::chord_bound(l, lo, hi).map(inflate)',
@@ -151,6 +157,9 @@ MUTANTS = [
     ('a lifted pcurve is bounded by zero', B,
      '            lifted::chord_bound(l, lo, hi).map(inflate)',
      '            Some(0.0)', [LIFT]),
+    ('a point span carries no end error', B,
+     '            return chord_bound2(curve, a, a.next_up())\n                .or_else(|| chord_bound2(curve, a.next_down(), a));',
+     '            return Some(0.0);', [LIFT, INTT]),
     ('a lifted pcurve has no breaks', B,
      '        Curve2::Lifted(l) => continuity_breaks3(&l.curve, k),',
      '        Curve2::Lifted(_) => Vec::new(),', [BREAKS]),

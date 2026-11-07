@@ -2676,6 +2676,9 @@ Every publishable crate versions and publishes independently ([ADR 0067](/adr/00
   *evaluated* ends (#414). That differs from the exact chord only for the
   families whose evaluation is an estimate, which carry the difference:
   lifted pcurves and intrinsic curves.
+- `bound::chord_bound2` of a point span (`a == b`) of a lifted or an
+  intrinsic pcurve is the evaluated point's own certified error, no longer
+  zero, and `None` where the curve has no bound (#414).
 - `curve::flatten2` accepts a span of a lifted or an intrinsic pcurve only
   when its certified chord bound is within the tolerance too (#414), where
   it relied on the midpoint sagitta alone; `certifies_flattening2` still

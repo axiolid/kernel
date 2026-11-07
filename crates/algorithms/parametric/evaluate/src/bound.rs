@@ -656,6 +656,13 @@ pub fn chord_bound2(curve: &Curve2, a: Scalar, b: Scalar) -> Option<Scalar> {
         return None;
     }
     if a == b {
+        // A point has no chord, but the families whose evaluated point is
+        // off the exact one carry that distance (#414): read it from the
+        // next representable span.
+        if matches!(curve, Curve2::Lifted(_) | Curve2::Intrinsic(_)) {
+            return chord_bound2(curve, a, a.next_up())
+                .or_else(|| chord_bound2(curve, a.next_down(), a));
+        }
         return Some(0.0);
     }
     if breaks_inside(&continuity_breaks2(curve, 1), a, b) {

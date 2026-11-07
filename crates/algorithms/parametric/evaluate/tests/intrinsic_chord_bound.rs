@@ -162,6 +162,7 @@ fn a_span_outside_the_length_or_without_a_law_bound_has_none() {
     assert!(chord_bound2(&curve, -1.0, 5.0).is_none());
     assert!(chord_bound2(&curve, 5.0, 10.5).is_none());
     assert!(chord_bound2(&curve, 5.0, Scalar::NAN).is_none());
-    assert_eq!(chord_bound2(&curve, 3.0, 3.0), Some(0.0));
+    // A point span carries the evaluated end's own error.
+    assert!(chord_bound2(&curve, 3.0, 3.0).is_some_and(|b| b < 1e-9));
     assert!(chord_bound2(&curve, 2.0, 3.0).is_some());
 }
