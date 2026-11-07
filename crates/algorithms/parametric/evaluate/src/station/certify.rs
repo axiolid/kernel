@@ -424,6 +424,32 @@ impl<'c> Native<'c> {
         out.max(1.0)
     }
 
+    /// A B-spline's degree over its smallest positive knot span: the
+    /// factor by which de Boor's derivative control points amplify the
+    /// rounding of its data; zero for any other curve.
+    fn knot_rate(&self) -> Scalar {
+        let (degree, knots) = match self {
+            Self::Two(curve) => match curve.as_ref() {
+                Curve2::BSpline(spline) => (spline.degree, &spline.knots),
+                _ => return 0.0,
+            },
+            Self::Three(curve) => match curve.as_ref() {
+                Curve3::BSpline(spline) => (spline.degree, &spline.knots),
+                _ => return 0.0,
+            },
+        };
+        let narrowest = knots
+            .windows(2)
+            .map(|w| w[1] - w[0])
+            .filter(|span| *span > 0.0)
+            .fold(Scalar::INFINITY, Scalar::min);
+        if narrowest.is_finite() {
+            degree as Scalar / narrowest
+        } else {
+            0.0
+        }
+    }
+
     /// Certified suprema of `|B'|`, `|B''|`, `|B'''|` over `[a, b]`.
     fn bounds(&self, a: Scalar, b: Scalar) -> GeomResult<CurveDerivativeBounds> {
         match self {
@@ -451,6 +477,17 @@ impl<'c> Native<'c> {
             let d = self.derivative(t)?;
             Ok((d, VELOCITY_ROUNDING * d.length()))
         };
+        // `P''` in closed form. De Boor's derivative control points
+        // difference neighbours `1 / knot span` apart, so the rounding
+        // allowed also covers the cancellation there.
+        let acceleration = |t: Scalar| {
+            let a = self.second_derivative(t)?;
+            let d = self.bounds(t, t)?;
+            Ok((
+                a,
+                VELOCITY_ROUNDING * (a.length() + d.second + d.first * self.knot_rate()),
+            ))
+        };
         let bounds = |a: Scalar, b: Scalar| {
             let d = self.bounds(a, b)?;
             Ok((d.second, Some(d.third)))
@@ -458,6 +495,7 @@ impl<'c> Native<'c> {
         run(&Measured {
             point: &point,
             velocity: &velocity,
+            acceleration: &acceleration,
             bounds: &bounds,
             scale: self.extent(),
         })
@@ -1066,6 +1104,61 @@ pub(crate) fn atomic_seams(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// The acceleration the exact frame law's curvature rests on (#406)
+    /// against a central difference of the velocity, which its error
+    /// covers: an ellipse, a cubic and a rational quadratic B-spline.
+    #[test]
+    fn the_native_acceleration_matches_a_difference_of_its_velocity() {
+        use axiolid_curve::{BSplineCurve2, Ellipse2, KnotSpec};
+        let spline = |degree: u16, knots: Vec<Scalar>, multiplicities: Vec<u32>, n: usize| {
+            Curve2::BSpline(BSplineCurve2 {
+                degree,
+                control_points: (0..n)
+                    .map(|i| Point2::new(3.0 * i as Scalar, ((i * i) % 5) as Scalar))
+                    .collect(),
+                knots,
+                multiplicities,
+                weights: (degree == 2).then(|| (0..n).map(|i| 1.0 + 0.2 * i as Scalar).collect()),
+                closed: false,
+                self_intersect: None,
+                knot_spec: KnotSpec::Unspecified,
+            })
+        };
+        let curves = [
+            Curve2::Ellipse(Ellipse2 {
+                frame: Frame2 {
+                    origin: Point2::new(30.0, 0.0),
+                    x: Vec2::X,
+                    y: Vec2::Y,
+                },
+                semi_axis_x: 20.0,
+                semi_axis_y: 10.0,
+            }),
+            spline(3, vec![0.0, 0.5, 1.0], vec![4, 1, 4], 5),
+            spline(2, vec![0.0, 0.3, 1.0], vec![3, 1, 3], 4),
+        ];
+        let h = 1e-5;
+        for curve in &curves {
+            let native = Native::of(StationCurve::Two(curve), 0.0, 1.0).unwrap();
+            native
+                .measured(|measured| {
+                    for t in [0.05, 0.2, 0.41, 0.7, 0.93] {
+                        let (a, error) = (measured.acceleration)(t)?;
+                        let (up, _) = (measured.velocity)(t + h)?;
+                        let (down, _) = (measured.velocity)(t - h)?;
+                        let difference = (up - down) / (2.0 * h);
+                        assert!(
+                            (a - difference).length() <= error + 1e-6,
+                            "{a:?} against {difference:?}, error {error}"
+                        );
+                        assert!(error > 0.0 && error < 1e-6, "{error}");
+                    }
+                    Ok(())
+                })
+                .unwrap();
+        }
+    }
 
     /// The suprema the leaning section's jets use are upper bounds of
     /// `cos(atan p)`, `sin(atan p)` and their first three derivatives:

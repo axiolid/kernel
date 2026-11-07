@@ -54,7 +54,7 @@ use axiolid_core::{Scalar, Vec3};
 use axiolid_curve::{Curve3, SeamSide};
 
 use super::bend::{closed_raw_jet, lipschitz, presented};
-use super::{FrameLaw, FrameReading, Slot, KEEPS_UP_TOLERANCE};
+use super::{read_frame_bounds, FrameLaw, FrameReading, Slot, KEEPS_UP_TOLERANCE};
 use crate::station::StationCurve;
 
 /// One rate of a section frame law over a span (#406).
@@ -141,7 +141,7 @@ impl FrameLaw<'_, '_> {
         let at = self.locate(a, b)?;
         let mid = 0.5 * (at.from + at.to);
         let (m, _) = at.piece.read_at(mid, SeamSide::Outgoing);
-        let (jet, roll, measure) = match self.slots[at.slot].get()? {
+        let (jet, roll, measure, spanned) = match self.slots[at.slot].get()? {
             Slot::Closed => {
                 let raw = closed_raw_jet(&at.piece, mid)?;
                 let banked = match at.piece.curve {
@@ -152,6 +152,7 @@ impl FrameLaw<'_, '_> {
                     Jet::exact(presented(&at.piece, raw)?),
                     roll_of(&at.piece, banked, m, raw),
                     bounds.measure,
+                    bounds,
                 )
             }
             Slot::Intrinsic(reader) => {
@@ -160,9 +161,38 @@ impl FrameLaw<'_, '_> {
                     Jet::exact(presented(&at.piece, raw)?),
                     roll_of(&at.piece, reader.banked(), m, raw),
                     bounds.measure,
+                    bounds,
                 )
             }
-            Slot::Read(_) | Slot::Unbounded => return None,
+            Slot::Read(reader) => {
+                // The exact law's true distance may lie `measure` off the
+                // one read: its Lipschitz constants are taken over the span
+                // widened by it, which must not cross a point where the
+                // curvature may jump.
+                let widening = bounds.measure;
+                let from = (at.from - widening).max(0.0);
+                let to = (at.to + widening).min(at.piece.length());
+                let wide = read_frame_bounds(reader, &at.piece, from, to, at.table, reading)?;
+                let (ta, tb) = reader
+                    .span_parameters(&at.piece, from, to, at.table)
+                    .ok()??;
+                let (lo, hi) = (ta.min(tb), ta.max(tb));
+                if reader.bend_breaks().iter().any(|&k| lo < k && k < hi) {
+                    return None;
+                }
+                let jet = reader.jet(&at.piece, mid, at.table).ok()??;
+                (
+                    Jet {
+                        velocity_error: jet.tangent_error,
+                        acceleration_error: jet.curvature_error,
+                        ..Jet::exact(presented(&at.piece, (jet.tangent, jet.curvature))?)
+                    },
+                    Some((0.0, 0.0)),
+                    widening.max(wide.measure),
+                    wide,
+                )
+            }
+            Slot::Unbounded => return None,
         };
         let Jet {
             v,
@@ -182,7 +212,7 @@ impl FrameLaw<'_, '_> {
         }
         let (rounding, axis) = (64.0 * Scalar::EPSILON, bounds.axis_error);
         let reach = 0.5 * (b - a) + measure;
-        let lip = lipschitz(&bounds, plan);
+        let lip = lipschitz(&spanned, plan);
 
         let forward_error = (rounding + 2.0 * axis) * length + ev;
         let floor = speed - ev;
@@ -201,7 +231,7 @@ impl FrameLaw<'_, '_> {
                 v.dot(frame.up),
                 rounding * length + ev,
                 reach,
-                bounds.point[1],
+                spanned.point[1],
             )
         } else {
             RateBounds::ZERO
@@ -224,7 +254,7 @@ impl FrameLaw<'_, '_> {
             let error = rounding * (phi.abs() + 4.0 * dt.length() / rho_floor)
                 + (turn_in + 4.0 * dt.length() * tangent_error) / rho_floor
                 + phi_error;
-            let slope = bounds.up[0] * bounds.lateral[0] + bounds.lateral[1];
+            let slope = spanned.up[0] * spanned.lateral[0] + spanned.lateral[1];
             RateBounds::around(middle, error, reach, slope)
         };
         let out = FrameRates {

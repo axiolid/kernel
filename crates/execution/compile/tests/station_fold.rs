@@ -432,7 +432,7 @@ fn a_turned_section_is_checked_conservatively_and_never_refused() {
 }
 
 #[test]
-fn a_frame_read_by_quadrature_is_checked_conservatively_and_never_refused() {
+fn a_frame_read_by_quadrature_is_decided_by_its_exact_curvature() {
     let ellipse = || {
         Curve2::Ellipse(Ellipse2 {
             frame: Frame2 {
@@ -449,7 +449,7 @@ fn a_frame_read_by_quadrature_is_checked_conservatively_and_never_refused() {
     assert!(matches!(mesh(&graph, root), Outcome::Certified));
     let (graph, root) = along(ellipse(), StationFrame::Section, constant(7.5, 0.0), 10.0);
     match mesh(&graph, root) {
-        Outcome::Unbounded(reason) => assert!(reason.contains("cannot be excluded"), "{reason}"),
+        Outcome::Refused(reason) => assert!(reason.contains("sections fold"), "{reason}"),
         other => panic!("{other:?}"),
     }
 }

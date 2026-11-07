@@ -221,7 +221,7 @@ impl<'r, 'g> SectionLaw<'r, 'g> {
         // bend's radius); only a frame without one is checked conservatively.
         let verdict = if plain && self.fold_frames.has_bend(span.lo, span.hi) {
             let first = self.fold_frames.bend(span.lo, span.hi, reading);
-            self.bisect(span, first, reading, margin, visited)?
+            self.bisect(span, first, (reading, margin, identity), visited)?
         } else {
             self.conservative(span, reading, margin, identity)?
         };
@@ -263,8 +263,7 @@ impl<'r, 'g> SectionLaw<'r, 'g> {
         &self,
         span: Span,
         first: Option<BendBounds>,
-        reading: FrameReading,
-        margin: Scalar,
+        (reading, margin, identity): (FrameReading, Scalar, &SectionFrame),
         visited: &mut usize,
     ) -> GeomResult<Verdict> {
         let long_rate = self.long_rate(span.i);
@@ -279,11 +278,15 @@ impl<'r, 'g> SectionLaw<'r, 'g> {
             }
             let Some(bend) = known.or_else(|| self.fold_frames.bend(lo, hi, reading)) else {
                 // Not bounded over this width: halve it, and where it stays
-                // so (a vertical tangent) leave it undecided, the other
-                // spans still decided.
+                // so (a vertical tangent, a span across a curvature break
+                // of a frame read by quadrature) leave it to the
+                // conservative bound, the other spans still decided.
                 let mid = 0.5 * (lo + hi);
                 if depth >= CONSERVATIVE_FOLD_DEPTH || !(mid > lo && mid < hi) {
-                    verdict = Err(FOLD_NOT_EXCLUDED);
+                    let part = Span { lo, hi, ..span };
+                    if !matches!(self.advancing(part, reading, margin, identity)?, Ok(true)) {
+                        verdict = Err(FOLD_NOT_EXCLUDED);
+                    }
                 } else {
                     stack.push((mid, hi, depth + 1, None));
                     stack.push((lo, mid, depth + 1, None));

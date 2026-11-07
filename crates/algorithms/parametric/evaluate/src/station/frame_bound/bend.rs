@@ -50,8 +50,13 @@
 //! - `sigma`: `sup |O''| + sup |O'| sup |N'|`;
 //! - `beta_L`: `sup |L'| sup |N'| + sup |N''|`, and `beta_U` likewise.
 //!
-//! Frames read by quadrature (an ellipse, a B-spline, an offset) and
-//! every frame without certified bounds have no bend.
+//! A frame read by quadrature (an ellipse, a B-spline) has the bend of its
+//! exact law, whose jet is the curve's unit tangent and its curvature
+//! vector from a certified second derivative (#406, `PieceReader::jet`);
+//! the bend is not bounded over a span across a point where the curvature
+//! may jump (a B-spline's knot of too low a multiplicity), and an offset
+//! beside such a curve has none yet. Every frame without certified bounds
+//! has no bend.
 
 use axiolid_core::{Scalar, Vec3};
 use axiolid_curve::{Curve2, Curve3, SeamSide};
@@ -188,10 +193,12 @@ impl FrameLaw<'_, '_> {
     /// twice a bend's radius), which halving the span usually decides. It
     /// can stay `None` however narrow the span (a vertical tangent under the
     /// plan reading, joints after a piece read by quadrature that cannot be
-    /// certified, a placement whose columns are not orthogonal). `false` for
-    /// frames read by quadrature, every frame without a closed form and a
-    /// piece placed at a station whose frame is not exact (unless the law
-    /// reads placements as exact, [`FrameLaw::with_placements_read_as_exact`]).
+    /// certified, a placement whose columns are not orthogonal, and for a
+    /// frame read by quadrature a span across a point where its curvature
+    /// may jump). `false` for every frame without a closed form or a
+    /// certified second derivative and a piece placed at a station whose
+    /// frame is not exact (unless the law reads placements as exact,
+    /// [`FrameLaw::with_placements_read_as_exact`]).
     #[must_use]
     pub fn has_bend(&self, a: Scalar, b: Scalar) -> bool {
         let Some(at) = self.locate(a, b) else {
@@ -217,6 +224,7 @@ impl FrameLaw<'_, '_> {
                 let (m, _) = at.piece.read_at(mid, SeamSide::Outgoing);
                 reader.jet(m).is_some()
             }
+            Some(Slot::Read(reader)) => matches!(reader.jet(&at.piece, mid, at.table), Ok(Some(_))),
             _ => false,
         }
     }
@@ -228,7 +236,7 @@ impl FrameLaw<'_, '_> {
     ///
     /// `None` wherever [`Self::rates`] is: a chain, a span the jet is not
     /// bounded over, and a frame read by quadrature whose span crosses a
-    /// point where its curvature may jump.
+    /// point where its curvature may jump (#406).
     #[must_use]
     pub fn bend(&self, a: Scalar, b: Scalar, reading: FrameReading) -> Option<BendBounds> {
         let rates = self.rates(a, b, reading)?;

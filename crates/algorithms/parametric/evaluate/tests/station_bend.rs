@@ -228,7 +228,7 @@ fn a_gradient_curve_over_a_clothoid_bends_in_the_plan_and_the_profile() {
 }
 
 #[test]
-fn frames_read_by_quadrature_and_chains_have_no_bend() {
+fn frames_read_by_quadrature_have_a_bend_and_chains_none() {
     let ellipse = Curve2::Ellipse(Ellipse2 {
         frame: Frame2 {
             origin: Point2::new(30.0, 0.0),
@@ -265,15 +265,20 @@ fn frames_read_by_quadrature_and_chains_have_no_bend() {
             length: 60.0,
         }],
     ));
-    for (name, curve) in [
-        ("ellipse", StationCurve::Two(&ellipse)),
-        ("b-spline", StationCurve::Three(&spline)),
-        ("chain", StationCurve::Two(&chain)),
+    for (name, curve, bent) in [
+        ("ellipse", StationCurve::Two(&ellipse), true),
+        ("b-spline", StationCurve::Three(&spline), true),
+        ("chain", StationCurve::Two(&chain), false),
     ] {
         let law = FrameLaw::atomic(curve, None, TOLERANCE).unwrap();
         for reading in [FrameReading::Section, FrameReading::Plan] {
-            assert!(law.bend(5.0, 8.0, reading).is_none(), "{name}");
+            let bend = law.bend(5.0, 8.0, reading);
+            assert_eq!(bend.is_some(), bent, "{name}");
+            if let Some(bend) = bend {
+                assert!(contains(bend.forward, 1.0), "{name}");
+            }
         }
+        assert_eq!(law.has_bend(5.0, 8.0), bent, "{name}");
     }
 }
 
@@ -403,5 +408,5 @@ fn a_span_too_long_for_a_bound_still_has_a_closed_form_bend() {
         semi_axis_y: 6.0,
     });
     let law = FrameLaw::atomic(StationCurve::Two(&ellipse), None, TOLERANCE).unwrap();
-    assert!(!law.has_bend(1.0, 2.0));
+    assert!(law.has_bend(1.0, 2.0));
 }

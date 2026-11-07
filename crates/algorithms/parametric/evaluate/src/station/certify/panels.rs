@@ -280,13 +280,17 @@ pub(super) fn adapt<P>(
 
 // --- chords -------------------------------------------------------------------------
 
-/// A curve measured by chords: its point and its velocity at a native
-/// parameter, each with an absolute error beyond rounding, and suprema of
+/// A curve measured by chords: its point, velocity and acceleration at a
+/// native parameter, each with an absolute error beyond rounding, and suprema of
 /// `|P''|` and, where bounded, `|P'''|` over a parameter interval; and the
 /// coordinate magnitude a point's rounding is relative to.
 pub(super) struct Measured<'a> {
     pub(super) point: &'a dyn Fn(Scalar) -> GeomResult<(Point3, Scalar)>,
     pub(super) velocity: &'a dyn Fn(Scalar) -> GeomResult<(Vec3, Scalar)>,
+    /// `P''` at a native parameter with its absolute error: what the
+    /// exact frame law's curvature rests on (#406). Not used by the length
+    /// certificates.
+    pub(super) acceleration: &'a dyn Fn(Scalar) -> GeomResult<(Vec3, Scalar)>,
     pub(super) bounds: &'a dyn Fn(Scalar, Scalar) -> GeomResult<(Scalar, Option<Scalar>)>,
     pub(super) scale: Scalar,
 }

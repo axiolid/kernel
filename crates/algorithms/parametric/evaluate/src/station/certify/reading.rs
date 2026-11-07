@@ -77,6 +77,18 @@ pub(crate) struct ReadLaw {
     pub(crate) axis_error: Scalar,
 }
 
+/// The exact frame law's jet at the native parameter a read stands at, in
+/// the piece's own measure and direction (#406): the unit tangent `O'` and
+/// the curvature vector `O'' = (P'' - (P''.V) V) / |P'|^2`, `V = P' / |P'|`,
+/// each with a certified error.
+#[derive(Debug, Clone, Copy)]
+pub(crate) struct ReadJet {
+    pub(crate) tangent: Vec3,
+    pub(crate) curvature: Vec3,
+    pub(crate) tangent_error: Scalar,
+    pub(crate) curvature_error: Scalar,
+}
+
 /// A piece whose frames are read by quadrature, with its own length
 /// measured once by chord panels.
 pub(crate) struct PieceReader<'c> {
@@ -88,6 +100,9 @@ pub(crate) struct PieceReader<'c> {
     planar: bool,
     /// Native parameters where the curve's tangent may jump.
     corners: Vec<Scalar>,
+    /// Native parameters where its curvature may jump: `P''` is continuous
+    /// between them (#406).
+    bend_breaks: Vec<Scalar>,
 }
 
 /// The exact frame at `point` with unit tangent `tangent`, as the kernel
@@ -146,6 +161,7 @@ impl<'c> PieceReader<'c> {
                 Ok(Some(Self {
                     planar: matches!(base.curve, StationCurve::Two(_)) && level,
                     increasing: base.reversed == piece.reversed,
+                    bend_breaks: beside.breaks.clone(),
                     source: Source::Offset(Box::new((offset, beside))),
                     table: lengths,
                     corners: Vec::new(),
@@ -172,6 +188,7 @@ impl<'c> PieceReader<'c> {
                     source: Source::Curve(Box::new(native)),
                     table: lengths,
                     corners,
+                    bend_breaks: breaks,
                 }))
             }
         }
@@ -211,6 +228,89 @@ impl<'c> PieceReader<'c> {
                 beside.native.parameter(mb).map(Some)
             }
         }
+    }
+
+    /// Native parameters where the curve's curvature may jump: the exact
+    /// law's curvature is continuous between them (#406).
+    pub(crate) fn bend_breaks(&self) -> &[Scalar] {
+        &self.bend_breaks
+    }
+
+    /// The native parameters the reads at the distances `from` (read from
+    /// the outgoing side) and `to` (from the incoming one) into the piece
+    /// stand at; `None` where the offset's length table is missing (#406).
+    ///
+    /// # Errors
+    ///
+    /// The evaluators' refusals.
+    pub(crate) fn span_parameters(
+        &self,
+        piece: &StationPiece<'c>,
+        from: Scalar,
+        to: Scalar,
+        table: Option<&OffsetTable>,
+    ) -> GeomResult<Option<(Scalar, Scalar)>> {
+        let mut out = [0.0; 2];
+        for (slot, (u, side)) in out
+            .iter_mut()
+            .zip([(from, SeamSide::Outgoing), (to, SeamSide::Incoming)])
+        {
+            let (m, _) = piece.read_at(u, side);
+            let Some(t) = self.parameter(m, table)? else {
+                return Ok(None);
+            };
+            *slot = t;
+        }
+        Ok(Some((out[0], out[1])))
+    }
+
+    /// The exact frame law's jet at the distance `u` into the piece, read
+    /// from the outgoing side as a frame is, at the native parameter that
+    /// read stands at (#406); `None` where the speed is not certified
+    /// positive.
+    ///
+    /// # Errors
+    ///
+    /// The evaluators' refusals, and the offset's until its acceleration
+    /// is certified.
+    pub(crate) fn jet(
+        &self,
+        piece: &StationPiece<'c>,
+        u: Scalar,
+        table: Option<&OffsetTable>,
+    ) -> GeomResult<Option<ReadJet>> {
+        let (m, _) = piece.read_at(u, SeamSide::Outgoing);
+        let Some(t) = self.parameter(m, table)? else {
+            return Ok(None);
+        };
+        self.measured(|curve| {
+            let (velocity, slip) = (curve.velocity)(t)?;
+            let (acceleration, accel_error) = (curve.acceleration)(t)?;
+            let speed = velocity.length();
+            if !(speed.is_finite() && speed > 2.0 * slip) {
+                return Ok(None);
+            }
+            let low = speed - slip;
+            let unit = velocity / speed;
+            let size = acceleration.length();
+            let tangent_error = 2.0 * slip / low;
+            let rounding = 64.0 * Scalar::EPSILON;
+            let curvature_error = ((accel_error + 2.0 * size * tangent_error) / (low * low)
+                + 3.0 * size * slip / (low * low * low))
+                * (1.0 + rounding)
+                + rounding * size / (low * low);
+            let out = ReadJet {
+                tangent: self.travel() * unit,
+                curvature: (acceleration - unit * acceleration.dot(unit)) / (speed * speed),
+                tangent_error,
+                curvature_error,
+            };
+            let finite = out.tangent.is_finite()
+                && out.curvature.is_finite()
+                && out.tangent_error.is_finite()
+                && out.curvature_error.is_finite();
+            Ok(finite.then_some(out))
+        })
     }
 
     /// The certified frame law of `piece` between the distances `from <

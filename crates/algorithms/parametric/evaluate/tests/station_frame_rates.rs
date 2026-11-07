@@ -10,8 +10,9 @@
 
 use axiolid_core::{Frame2, Frame3, Point2, Point3, Scalar, Transform3, Vec2, Vec3};
 use axiolid_curve::{
-    BankConvention, Banked3, CantLaw, CantPiece, Circle2, Circle3, CurvatureLaw, Curve2, Curve3,
-    Elevated3, ElevationLaw, Intrinsic2, Line2, SeamSide,
+    BSplineCurve, BSplineCurve2, BankConvention, Banked3, CantLaw, CantPiece, Chain2, ChainPiece2,
+    Circle2, Circle3, CurvatureLaw, Curve2, Curve3, Elevated3, ElevationLaw, Ellipse2, Intrinsic2,
+    KnotSpec, Line2, SeamSide,
 };
 use axiolid_evaluate::station::{
     station_section2, station_section3, CompositeBasis, FrameLaw, FrameRates, FrameReading,
@@ -20,44 +21,74 @@ use axiolid_evaluate::station::{
 
 const TOLERANCE: Scalar = 1e-7;
 const H: Scalar = 1e-5;
+/// The step of the differences of frames read by quadrature, whose own
+/// quadrature errors (about `1e-9`) a smaller one would amplify.
+const H_READ: Scalar = 1e-3;
 
 fn contains(rate: &RateBounds, value: Scalar) -> bool {
     rate.range[0] - 1e-7 <= value && value <= rate.range[1] + 1e-7
 }
 
 /// `U . L'` by a central difference of the frame's lateral axis.
-fn twist_at(frame: &dyn Fn(Scalar) -> SectionFrame, s: Scalar) -> Scalar {
-    let rate = (frame(s + H).lateral - frame(s - H).lateral) / (2.0 * H);
+fn twist_at(frame: &dyn Fn(Scalar) -> SectionFrame, s: Scalar, h: Scalar) -> Scalar {
+    let rate = (frame(s + h).lateral - frame(s - h).lateral) / (2.0 * h);
     frame(s).up.dot(rate)
 }
 
 /// `O' . U` by a central difference of the frame's point.
-fn rise_at(frame: &dyn Fn(Scalar) -> SectionFrame, s: Scalar) -> Scalar {
-    let rate = (frame(s + H).point - frame(s - H).point) / (2.0 * H);
+fn rise_at(frame: &dyn Fn(Scalar) -> SectionFrame, s: Scalar, h: Scalar) -> Scalar {
+    let rate = (frame(s + h).point - frame(s - h).point) / (2.0 * h);
     rate.dot(frame(s).up)
 }
 
-/// The twist and the rise sampled over `[lo, hi]` lie within the rates'
-/// ranges, and their middle values within their errors of the references.
-fn check(rates: &FrameRates, frame: &dyn Fn(Scalar) -> SectionFrame, (lo, hi): (Scalar, Scalar)) {
+/// `L . T'` and `U . T'` by a central difference of the frame's tangent.
+fn bends_at(frame: &dyn Fn(Scalar) -> SectionFrame, s: Scalar, h: Scalar) -> (Scalar, Scalar) {
+    let rate = (frame(s + h).tangent - frame(s - h).tangent) / (2.0 * h);
+    let at = frame(s);
+    (at.lateral.dot(rate), at.up.dot(rate))
+}
+
+/// The bends, the twist and the rise sampled over `[lo, hi]` lie within the
+/// rates' ranges, and their middle values within their errors (and
+/// `slack`) of the references.
+fn check_with(
+    rates: &FrameRates,
+    frame: &dyn Fn(Scalar) -> SectionFrame,
+    (lo, hi): (Scalar, Scalar),
+    (h, slack): (Scalar, Scalar),
+) {
+    let at = |s: Scalar| {
+        let (lateral, up) = bends_at(frame, s, h);
+        [
+            (&rates.lateral, lateral, "lateral"),
+            (&rates.up, up, "up"),
+            (&rates.twist, twist_at(frame, s, h), "twist"),
+            (&rates.rise, rise_at(frame, s, h), "rise"),
+        ]
+    };
     for i in 0..=40 {
         let s = lo + (hi - lo) * Scalar::from(i) / 40.0;
-        let (twist, rise) = (twist_at(frame, s), rise_at(frame, s));
-        assert!(contains(&rates.twist, twist), "twist {twist} at {s}");
-        assert!(contains(&rates.rise, rise), "rise {rise} at {s}");
+        for (rate, reference, name) in at(s) {
+            assert!(
+                rate.range[0] - slack <= reference && reference <= rate.range[1] + slack,
+                "{name} {reference} at {s}: {:?}",
+                rate.range
+            );
+        }
     }
-    let mid = 0.5 * (lo + hi);
-    for (rate, reference, name) in [
-        (&rates.twist, twist_at(frame, mid), "twist"),
-        (&rates.rise, rise_at(frame, mid), "rise"),
-    ] {
+    for (rate, reference, name) in at(0.5 * (lo + hi)) {
         assert!(
-            (rate.middle - reference).abs() <= rate.error + 1e-7,
+            (rate.middle - reference).abs() <= rate.error + slack,
             "{name} {} against {reference}, error {}",
             rate.middle,
             rate.error
         );
     }
+}
+
+/// [`check_with`] for the frames read in closed form.
+fn check(rates: &FrameRates, frame: &dyn Fn(Scalar) -> SectionFrame, span: (Scalar, Scalar)) {
+    check_with(rates, frame, span, (H, 1e-7));
 }
 
 fn plan_of(frame: SectionFrame) -> SectionFrame {
@@ -369,5 +400,239 @@ fn bend_is_the_projection_of_the_rates() {
             bend.middle_error,
             [rates.forward.error, rates.lateral.error, rates.up.error]
         );
+    }
+}
+
+// --- frames read by quadrature ----------------------------------------------------
+
+/// The ellipse of semi-axes 20 and 10 about `(30, 0)`.
+fn ellipse() -> Curve2 {
+    Curve2::Ellipse(Ellipse2 {
+        frame: Frame2 {
+            origin: Point2::new(30.0, 0.0),
+            x: Vec2::X,
+            y: Vec2::Y,
+        },
+        semi_axis_x: 20.0,
+        semi_axis_y: 10.0,
+    })
+}
+
+/// The ellipse's parameter at arc length `s` from `t = 0`, by RK4 on
+/// `dt/ds = 1 / |P'(t)|` with step `1e-3`.
+fn ellipse_parameter(s: Scalar) -> Scalar {
+    let speed = |t: Scalar| (400.0 * t.sin().powi(2) + 100.0 * t.cos().powi(2)).sqrt();
+    let steps = (s / 1e-3).ceil().max(1.0) as usize;
+    let h = s / steps as Scalar;
+    let mut t = 0.0;
+    for _ in 0..steps {
+        let k1 = 1.0 / speed(t);
+        let k2 = 1.0 / speed(t + 0.5 * h * k1);
+        let k3 = 1.0 / speed(t + 0.5 * h * k2);
+        let k4 = 1.0 / speed(t + h * k3);
+        t += h * (k1 + 2.0 * k2 + 2.0 * k3 + k4) / 6.0;
+    }
+    t
+}
+
+/// The ellipse's signed curvature `a b / (a^2 sin^2 t + b^2 cos^2 t)^(3/2)`.
+fn ellipse_curvature(t: Scalar) -> Scalar {
+    200.0 / (400.0 * t.sin().powi(2) + 100.0 * t.cos().powi(2)).powf(1.5)
+}
+
+#[test]
+fn an_ellipse_bends_at_its_curvature() {
+    let curve = ellipse();
+    let law = FrameLaw::atomic(StationCurve::Two(&curve), None, TOLERANCE).unwrap();
+    for reading in [FrameReading::Section, FrameReading::Plan] {
+        // Narrow enough to tell the sign of the bend, at the sharpest end.
+        let sharp = law.rates(0.0, 1.0, reading).unwrap();
+        assert!(sharp.lateral.range[0] > 0.0, "{:?}", sharp.lateral);
+        assert!(contains(&sharp.lateral, 0.2) && contains(&sharp.forward, 1.0));
+        for span in [(0.05, 1.05), (10.0, 14.0), (30.0, 33.0)] {
+            let rates = law.rates(span.0, span.1, reading).unwrap();
+            for i in 0..=20 {
+                let s = span.0 + (span.1 - span.0) * Scalar::from(i) / 20.0;
+                let kappa = ellipse_curvature(ellipse_parameter(s));
+                assert!(contains(&rates.lateral, kappa), "{kappa} at {s}");
+            }
+            let mid = 0.5 * (span.0 + span.1);
+            let kappa = ellipse_curvature(ellipse_parameter(mid));
+            assert!(
+                (rates.lateral.middle - kappa).abs() <= rates.lateral.error + 1e-9,
+                "{} against {kappa}, error {}",
+                rates.lateral.middle,
+                rates.lateral.error
+            );
+            // A plane curve neither twists, rises nor bends upward, and
+            // its error is the certified one, not a loose estimate.
+            for rate in [&rates.twist, &rates.rise, &rates.up] {
+                assert!(contains(rate, 0.0));
+            }
+            assert!(rates.lateral.error < 1e-6, "{}", rates.lateral.error);
+            check_with(
+                &rates,
+                &|s| station_section2(&curve, s).unwrap(),
+                span,
+                (H_READ, 1e-6),
+            );
+        }
+    }
+}
+
+#[test]
+fn a_reversed_ellipse_piece_bends_the_other_way() {
+    let curve = ellipse();
+    let piece = StationPiece::between(StationCurve::Two(&curve), 0.0, 20.0)
+        .unwrap()
+        .reversed();
+    let basis = CompositeBasis::new(vec![piece]).unwrap();
+    let law = FrameLaw::composite(&basis, TOLERANCE).unwrap();
+    // The reversed piece's distance `s` is the forward arc length `20 - s`.
+    let span = (18.9, 19.9);
+    let rates = law.rates(span.0, span.1, FrameReading::Section).unwrap();
+    assert!(rates.lateral.range[1] < 0.0, "{:?}", rates.lateral);
+    for i in 0..=20 {
+        let s = span.0 + (span.1 - span.0) * Scalar::from(i) / 20.0;
+        let kappa = -ellipse_curvature(ellipse_parameter(20.0 - s));
+        assert!(contains(&rates.lateral, kappa), "{kappa} at {s}");
+    }
+    check_with(
+        &rates,
+        &|s| piece.section_on(s, SeamSide::Outgoing).unwrap(),
+        span,
+        (H_READ, 1e-6),
+    );
+}
+
+/// A 3D cubic B-spline climbing gently, about 30 long.
+fn spline3() -> Curve3 {
+    Curve3::BSpline(BSplineCurve {
+        degree: 3,
+        control_points: vec![
+            Point3::new(0.0, 0.0, 0.0),
+            Point3::new(8.0, 2.0, 0.5),
+            Point3::new(16.0, -3.0, 1.5),
+            Point3::new(24.0, 2.0, 2.0),
+            Point3::new(30.0, 6.0, 2.2),
+        ],
+        knots: vec![0.0, 0.5, 1.0],
+        multiplicities: vec![4, 1, 4],
+        weights: None,
+        closed: false,
+        self_intersect: None,
+        knot_spec: KnotSpec::Unspecified,
+    })
+}
+
+#[test]
+fn a_3d_b_spline_bends_and_twists_as_its_frames_turn() {
+    let curve = spline3();
+    let law = FrameLaw::atomic(StationCurve::Three(&curve), None, TOLERANCE).unwrap();
+    for (span, reading) in [
+        ((3.0, 5.0), FrameReading::Section),
+        ((12.0, 14.0), FrameReading::Section),
+        ((20.0, 22.0), FrameReading::Section),
+        ((12.0, 14.0), FrameReading::Plan),
+    ] {
+        let rates = law.rates(span.0, span.1, reading).unwrap();
+        let plan = reading == FrameReading::Plan;
+        let frame = |s: Scalar| {
+            let frame = station_section3(&curve, s).unwrap();
+            if plan {
+                plan_of(frame)
+            } else {
+                frame
+            }
+        };
+        check_with(&rates, &frame, span, (H_READ, 1e-6));
+        if !plan {
+            assert!(contains(&rates.rise, 0.0) && rates.rise.range == [0.0, 0.0]);
+        }
+    }
+    // A space curve twists its reference-up frame: narrowly enough to see,
+    // where it twists most.
+    let frame = |s: Scalar| station_section3(&curve, s).unwrap();
+    let (at, _) = (1..290)
+        .map(|i| {
+            (
+                0.1 * Scalar::from(i),
+                twist_at(&frame, 0.1 * Scalar::from(i), H_READ),
+            )
+        })
+        .max_by(|a, b| a.1.abs().total_cmp(&b.1.abs()))
+        .unwrap();
+    let twisting = law
+        .rates(at - 0.004, at + 0.004, FrameReading::Section)
+        .unwrap();
+    assert!(
+        twisting.twist.range[0] > 0.0 || twisting.twist.range[1] < 0.0,
+        "{:?} at {at}",
+        twisting.twist
+    );
+}
+
+/// A quadratic plan B-spline whose curvature jumps at its interior knot.
+fn quadratic() -> Curve2 {
+    Curve2::BSpline(BSplineCurve2 {
+        degree: 2,
+        control_points: vec![
+            Point2::new(0.0, 0.0),
+            Point2::new(12.0, 0.0),
+            Point2::new(12.0, 12.0),
+            Point2::new(24.0, 14.0),
+        ],
+        knots: vec![0.0, 0.5, 1.0],
+        multiplicities: vec![3, 1, 3],
+        weights: None,
+        closed: false,
+        self_intersect: None,
+        knot_spec: KnotSpec::Unspecified,
+    })
+}
+
+#[test]
+fn a_span_across_a_curvature_break_has_no_rates() {
+    let curve = quadratic();
+    let law = FrameLaw::atomic(StationCurve::Two(&curve), None, TOLERANCE).unwrap();
+    // Spans of 0.05 along the curve: the ones across the knot have bounds
+    // but no rates, every other has both.
+    let mut across = Vec::new();
+    let mut s = 1.0;
+    while law.bounds(s, s + 0.05, FrameReading::Section).is_some() {
+        for reading in [FrameReading::Section, FrameReading::Plan] {
+            let rates = law.rates(s, s + 0.05, reading);
+            if rates.is_none() {
+                across.push(s);
+            }
+            assert_eq!(rates.is_some(), law.bend(s, s + 0.05, reading).is_some());
+        }
+        s += 0.05;
+    }
+    assert!(s > 20.0, "scanned to {s}");
+    // The knot: one span, found by both readings.
+    assert!(
+        (2..=4).contains(&across.len()) && across[across.len() - 1] - across[0] < 0.06,
+        "{across:?}"
+    );
+    assert!(law.has_bend(across[0], across[0] + 0.05));
+}
+
+#[test]
+fn chains_have_no_rates() {
+    let chain = Curve2::Chain(Chain2::new(
+        Frame2 {
+            origin: Point2::ZERO,
+            x: Vec2::X,
+            y: Vec2::Y,
+        },
+        vec![ChainPiece2::Intrinsic {
+            curvature: CurvatureLaw::clothoid(0.0, 1.0 / 30.0, 60.0),
+            length: 60.0,
+        }],
+    ));
+    let law = FrameLaw::atomic(StationCurve::Two(&chain), None, TOLERANCE).unwrap();
+    for reading in [FrameReading::Section, FrameReading::Plan] {
+        assert!(law.rates(5.0, 8.0, reading).is_none());
     }
 }

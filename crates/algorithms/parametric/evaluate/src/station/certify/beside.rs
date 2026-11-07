@@ -490,9 +490,12 @@ fn offset_chords<R>(
             _ => 0.0,
         };
     let shift = placement.map_or(0.0, |rigid| rigid.translation.abs().max_element());
+    // The offset's acceleration needs the base's third derivative (#406).
+    let acceleration = |_: Scalar| -> GeomResult<(Vec3, Scalar)> { Err(uncertified()) };
     run(&Measured {
         point: &point,
         velocity: &velocity,
+        acceleration: &acceleration,
         bounds: &bounds,
         scale: native.extent() + reach + shift,
     })

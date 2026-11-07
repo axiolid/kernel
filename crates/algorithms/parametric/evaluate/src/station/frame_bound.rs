@@ -121,6 +121,15 @@
 //! before it; its distance from the certified joint
 //! ([`super::CompositeBasis::joint_intervals`]) adds to the measure.
 //!
+//! The rates of such a frame ([`FrameLaw::rates`], #406) are those of the
+//! exact law: its `O'` is the unit tangent and its `O''` the curvature
+//! vector `(P'' - (P''.V) V) / |P'|^2` (`V = P' / |P'|`), from the curve's
+//! closed-form second derivative at the native parameter a read stands at,
+//! within a certified error (`PieceReader::jet`). The Lipschitz constants
+//! above hold only where `P''` is continuous, so a span (widened by its
+//! measure) whose native range strictly contains a point where it may jump
+//! (a B-spline's knot of multiplicity above `degree - 2`) has no rates.
+//!
 //! # Intrinsic curves (#361)
 //!
 //! An intrinsic curve's heading is the closed-form integral of its
