@@ -100,7 +100,7 @@ use crate::exact::ExactMeasureError;
 use crate::exact_distance::witness;
 use crate::exact_distance::Key as DistanceKey;
 use crate::exact_distance::{
-    critical_toward, point_lower_bound, surface_of, Element, Metric, Shape, Side,
+    closed, critical_toward, floor, point_lower_bound, surface_of, Element, Metric, Shape, Side,
 };
 use crate::mesh_hausdorff::HausdorffBounds;
 
@@ -331,14 +331,13 @@ impl<'a> Nearest<'a> {
     }
 
     /// `d(p, boundary)` to within `accuracy` (never finer than the
-    /// rounding the bounds already carry), or as far as the step budget
-    /// allows; `None` when no boundary point was reached.
+    /// rounding floor of [`floor`]), or as far as the step budget allows; `None` when no boundary point was reached.
     fn query(
         &mut self,
         p: Point3,
         accuracy: Scalar,
     ) -> Result<Option<PointDistance>, ExactMeasureError> {
-        let accuracy = accuracy.max(1e-12 * (1.0 + p.length()));
+        let scale = p.length() + self.side.scale;
         // Ties pop first come, first served: the third entry counts up.
         let mut heap = BinaryHeap::new();
         let mut order = 0;
@@ -369,7 +368,9 @@ impl<'a> Nearest<'a> {
                 }
             }
             let upper = best.map_or(Scalar::INFINITY, |(d, ..)| d);
-            if upper.is_finite() && (bound >= upper || upper - bound <= accuracy) {
+            if upper.is_finite()
+                && (bound >= upper || closed(bound, upper, accuracy, floor(scale, upper)))
+            {
                 break;
             }
             steps += 1;
@@ -1231,35 +1232,41 @@ mod tests {
         assert!(found[0][0].shifted.is_none());
     }
 
-    /// A point 0.02 under a box's bottom, under its edge or its face: the
-    /// patches of that face tie along its own normal, and the edge spans'
-    /// witnesses have to be in hand before they are refined (#318).
+    /// A point 0.02 under a box's bottom, under its edge or its face, at the
+    /// origin and in georeferenced coordinates: the patches of that face tie
+    /// along its own normal, and the edge spans' witnesses have to be in
+    /// hand before they are refined (#318).
     #[test]
     fn a_point_under_an_edge_finds_the_edge_witness() {
         use super::Nearest;
         use crate::exact_distance::fixtures::unit_box;
-        use crate::exact_distance::{Metric, Side};
-        let b = unit_box(Point3::new(0.0, 0.0, 0.02));
-        let mut nearest = Nearest::new(Side::new(&b, 1e-12, Metric::Space).expect("a side"));
-        for k in 1..64 {
-            let t = f64::from(k) / 64.0;
-            for p in [Point3::new(t, 0.0, 0.0), Point3::new(t, t, 0.0)] {
-                let found = nearest
-                    .query(p, 1e-10)
-                    .expect("evaluates")
-                    .expect("a boundary point");
-                assert!(
-                    found.lower <= 0.02 && 0.02 <= found.upper + 1e-15,
-                    "{p:?}: [{}, {}]",
-                    found.lower,
-                    found.upper
-                );
-                assert!(
-                    found.upper - found.lower <= 1e-10,
-                    "{p:?}: [{}, {}]",
-                    found.lower,
-                    found.upper
-                );
+        use crate::exact_distance::{floor, Metric, Side};
+        for shift in [Vec3::ZERO, Vec3::new(450_000.0, 5_600_000.0, 0.0)] {
+            let b = unit_box(Point3::ZERO + shift + Vec3::new(0.0, 0.0, 0.02));
+            let mut nearest = Nearest::new(Side::new(&b, 1e-12, Metric::Space).expect("a side"));
+            for k in 1..64 {
+                let t = f64::from(k) / 64.0;
+                for q in [Point3::new(t, 0.0, 0.0), Point3::new(t, t, 0.0)] {
+                    let p = q + shift;
+                    let found = nearest
+                        .query(p, 1e-10)
+                        .expect("evaluates")
+                        .expect("a boundary point");
+                    let slack = 32.0 * f64::EPSILON * (p.length() + found.nearest.length());
+                    let settled = floor(p.length() + nearest.side.scale, found.upper);
+                    assert!(
+                        found.lower <= 0.02 && 0.02 <= found.upper + slack,
+                        "{p:?}: [{}, {}]",
+                        found.lower,
+                        found.upper
+                    );
+                    assert!(
+                        found.upper - found.lower <= 1e-10_f64.max(settled),
+                        "{p:?}: [{}, {}]",
+                        found.lower,
+                        found.upper
+                    );
+                }
             }
         }
     }
@@ -1274,10 +1281,10 @@ mod tests {
         let b = unit_box(Point3::ZERO);
         let mut nearest = Nearest::new(Side::new(&b, 1e-12, Metric::Space).expect("a side"));
         let found = nearest
-            .query(Point3::new(0.37, 0.61, 1.5), 1e-10)
+            .query(Point3::new(0.37, 0.61, 1.5), 1e-12)
             .expect("evaluates")
             .expect("a boundary point");
         assert!(found.lower <= 0.5 && 0.5 <= found.upper, "{found:?}");
-        assert!(found.upper - found.lower <= 1e-10, "{found:?}");
+        assert!(found.upper - found.lower <= 1e-12, "{found:?}");
     }
 }

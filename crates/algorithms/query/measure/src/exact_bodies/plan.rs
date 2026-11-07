@@ -40,7 +40,7 @@
 use axiolid_core::{Point2, Scalar, Tolerance};
 
 use super::{distance, BodyDistance, BodyMeasureError, Items, PlacedBody};
-use crate::exact_distance::{overlap_search, Clearance, Metric, PlanOverlap};
+use crate::exact_distance::{closed, overlap_search, Clearance, Metric, PlanOverlap};
 
 /// Plan distance between two bodies of exact solids -- between their
 /// shadows on the XY plane -- to within `accuracy` (#237): the least over
@@ -72,7 +72,7 @@ pub fn body_plan_boundary_distance<'a, 'b>(
         b.into(),
         tolerance,
         Metric::Plan,
-        &mut |lower, upper| upper - lower <= accuracy,
+        &mut |lower, upper, floor| closed(lower, upper, accuracy, floor),
     )
 }
 
@@ -92,7 +92,9 @@ pub fn body_plan_boundary_clearance<'a, 'b>(
         b.into(),
         tolerance,
         Metric::Plan,
-        &mut |lower, upper| upper < limit || lower > limit,
+        &mut |lower, upper, floor| {
+            upper < limit || lower > limit || closed(lower, upper, 0.0, floor)
+        },
     )?;
     let clearance = found.bounds.against(limit);
     Ok((found, clearance))

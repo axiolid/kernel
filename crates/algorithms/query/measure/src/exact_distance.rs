@@ -48,6 +48,14 @@
 //! the limit is cleared. The step budget is fixed; when it runs out the
 //! interval returned is still sound, only wider.
 //!
+//! Where a lower bound does not depend on a patch's size -- along a planar
+//! patch's own normal, against a parallel planar patch or a line edge -- the
+//! minimum is reached on a whole region and the bound is right from the
+//! start; what never closes is the upper bound, since patch centres line up
+//! only by chance. Such ties close on foot witnesses (`witness`): the foot,
+//! on a planar face, of the other element's witness, and the closest points
+//! of two line spans, each certified as any witness is (#318).
+//!
 //! # Touching and crossing boundaries
 //!
 //! Where the boundaries meet, the distance is zero, but witnesses at patch
@@ -59,14 +67,71 @@
 //! or a point of a line edge and the point of a planar face at the same
 //! place, each evaluated on its own boundary as any witness is, the face's
 //! certified by the face's domain. Two such points no farther apart than
-//! the rounding margin the lower bounds carry end the search with
+//! the rounding margin (128 ulps of the points' magnitudes: about `6e-14`
+//! at unit scale) end the search with
 //! `[0, d]`, `d` their distance and they the witnesses: no lower bound can
 //! rise above zero there, so this is the interval the search would only
 //! converge to. Two boxes sharing a face, or crossing, stop within a few
-//! steps. A gap wider than that margin (a nanometre at unit scale) is never
-//! taken for a touch, and boundaries that are apart measure exactly as
+//! steps. A gap wider than that margin is never taken for a touch, and boundaries that are apart measure exactly as
 //! before. Curved faces and circle or ellipse edges show no touch this way
 //! and are refined as before.
+//!
+//! # Rounding (#318)
+//!
+//! Every margin is derived from the magnitudes the computed numbers are
+//! summed from, in units of `eps` (`f64::EPSILON`, twice the unit
+//! roundoff), not from `1e-12` of the points' magnitudes, which left an
+//! interval about `1e-5` wide at georeferenced coordinates (450000,
+//! 5600000), where a point cannot be computed to better than a few `1e-9`.
+//!
+//! `M` is the summed magnitude of the terms a point of an element is
+//! computed from, taken at the element's farthest parameters. It never
+//! grows when an element is split, since a child's rectangle or span lies
+//! in its parent's:
+//!
+//! | element | `M` |
+//! |---|---|
+//! | plane patch | `|o| + |u| Lu + |v| Lv` |
+//! | cylinder patch | `|o| + 2 |r| s + |u| Lu + |v| Lv` |
+//! | elliptical cylinder patch | `|o| + (|a| + |b|) s + ...` |
+//! | cone patch | `|o| + 2 (|r| + |v| tan(angle)) s + ...` |
+//! | sphere patch | `|o| + 3 |r| s + ...` |
+//! | torus patch | `|o| + (2 R + 3 r) s + ...` |
+//! | B-spline patch | the largest control point |
+//! | line span | `|o| + |t| |d|` |
+//! | circle span | `|o| + (2 + |t|) |r| s` |
+//! | ellipse span | `|o| + (|a| + |b| + |t| max(|a|, |b|)) s` |
+//!
+//! where `o` is the frame origin, `s` the frame's scale, `Lu` and `Lv` the
+//! Lipschitz bounds of the parameters. A side's scale `S` is the largest
+//! `M` over its root elements, and every element of that side is padded by
+//! it. The pad is therefore the same for every element, so it cannot
+//! reorder the queue: a pair's lower bound is its geometric bound less a
+//! constant of the whole search, and the rounding floor enters once.
+//!
+//! The margins, with `u = eps / 2` the unit roundoff and `gamma_n` the usual
+//! `n u / (1 - n u)`:
+//!
+//! - `POINT` (16): a computed centre or witness against the exact point.
+//!   A coordinate sums at most twelve rounded terms of magnitude at most
+//!   `M` (`gamma_12 = 6 eps`), a vector's length takes a factor `sqrt 3`
+//!   (10.4 `eps`), and the midpoint of the parameters and a cone's apex add
+//!   the rest.
+//! - `PROJECTION` (8): each end of a projected range `d . x`: a sum of
+//!   rounded products of terms at most `M` against a unit direction.
+//! - `RATIO` (8): relative: lengths, sums, differences, and directions that
+//!   are unit only to rounding.
+//! - `FLOOR` (128): the width a search settles at, in `eps (S_a + S_b)`.
+//!   At zero size the computed bound may lie `2 (POINT + PROJECTION) eps
+//!   (S_a + S_b) = 48 eps (S_a + S_b)` below the exact one, and the
+//!   witnesses' own evaluation adds up to `32 eps (S_a + S_b)`: 80, with
+//!   room to spare.
+//!
+//! The libm functions the evaluators call are assumed within one ulp.
+//! The floor is about `3.2e-7` at (450000, 5600000) and about `6e-14` at
+//! unit scale. It only stops refinement and changes neither bound; an
+//! accuracy below it settles at it and is never reported as met, so the
+//! width of the interval returned shows what was reached.
 //!
 //! # In plan
 //!
@@ -114,6 +179,20 @@ const MAX_STEPS: usize = 400_000;
 /// Pairs refined before [`plan_overlap`] reports it could not decide.
 pub(crate) const OVERLAP_STEPS: usize = 20_000;
 
+/// Rounding margins, in units of `eps * S`, where `S` is a side's rounding
+/// scale: the largest summed magnitude `M` of the terms an element's points
+/// are computed from (see "Rounding" in the module docs for the derivations).
+///
+/// A computed centre or witness against the exact point it stands for.
+pub(crate) const POINT_EPSILONS: Scalar = 16.0;
+/// Each end of a projected range `d . x`.
+pub(crate) const PROJECTION_EPSILONS: Scalar = 8.0;
+/// Relative: lengths, sums, differences and directions that are unit only
+/// to rounding.
+pub(crate) const RATIO_EPSILONS: Scalar = 8.0;
+/// The width an interval settles at, in units of `eps * (S_a + S_b)`.
+pub(crate) const FLOOR_EPSILONS: Scalar = 128.0;
+
 /// An interval certain to contain the distance between two boundaries.
 #[derive(Debug, Clone, PartialEq)]
 pub struct DistanceBounds {
@@ -154,6 +233,10 @@ impl DistanceBounds {
 
 /// Distance between the boundaries of `a` and `b`, to within `accuracy`.
 ///
+/// An accuracy below the rounding floor settles at the floor and is never
+/// reported as met: the interval returned shows its width (see "Rounding"
+/// in the module docs).
+///
 /// # Errors
 ///
 /// A face whose domain cannot be bounded (an unbounded surface trimmed by a
@@ -166,9 +249,13 @@ pub fn boundary_distance(
     tolerance: Tolerance,
 ) -> Result<DistanceBounds, ExactMeasureError> {
     let accuracy = accuracy.max(0.0);
-    Ok(search(a, b, tolerance, Metric::Space, &mut |lower, upper| {
-        upper - lower <= accuracy
-    })?
+    Ok(search(
+        a,
+        b,
+        tolerance,
+        Metric::Space,
+        &mut |lower, upper, floor| closed(lower, upper, accuracy, floor),
+    )?
     .bounds)
 }
 
@@ -196,10 +283,12 @@ pub fn plan_boundary_distance(
     tolerance: Tolerance,
 ) -> Result<DistanceBounds, ExactMeasureError> {
     let accuracy = accuracy.max(0.0);
-    Ok(search(a, b, tolerance, Metric::Plan, &mut |lower, upper| {
-        upper - lower <= accuracy
-    })?
-    .bounds)
+    Ok(
+        search(a, b, tolerance, Metric::Plan, &mut |lower, upper, floor| {
+            closed(lower, upper, accuracy, floor)
+        })?
+        .bounds,
+    )
 }
 
 /// [`plan_boundary_distance`] refined only until it clears `limit`.
@@ -213,8 +302,8 @@ pub fn plan_boundary_clearance(
     limit: Scalar,
     tolerance: Tolerance,
 ) -> Result<(DistanceBounds, Clearance), ExactMeasureError> {
-    let bounds = search(a, b, tolerance, Metric::Plan, &mut |lower, upper| {
-        upper < limit || lower > limit
+    let bounds = search(a, b, tolerance, Metric::Plan, &mut |lower, upper, floor| {
+        upper < limit || lower > limit || closed(lower, upper, 0.0, floor)
     })?
     .bounds;
     let clearance = bounds.against(limit);
@@ -283,7 +372,7 @@ pub(crate) fn overlap_search(
         tolerance,
         Metric::Plan,
         OVERLAP_STEPS,
-        &mut |lower, _| lower > 0.0,
+        &mut |lower, _, _| lower > 0.0,
     )?;
     if let Some(at) = found.overlap {
         return Ok((PlanOverlap::Overlapping { at }, Some(found.on)));
@@ -404,6 +493,10 @@ fn level_frame(
 
 /// Refine the distance only until it clears `limit`.
 ///
+/// Like an accuracy below the rounding floor, a limit within the floor of
+/// the distance settles at the floor and is never decided: the result is
+/// [`Clearance::Indeterminate`].
+///
 /// # Errors
 ///
 /// As [`boundary_distance`].
@@ -413,9 +506,15 @@ pub fn boundary_clearance(
     limit: Scalar,
     tolerance: Tolerance,
 ) -> Result<(DistanceBounds, Clearance), ExactMeasureError> {
-    let bounds = search(a, b, tolerance, Metric::Space, &mut |lower, upper| {
-        upper < limit || lower > limit
-    })?
+    let bounds = search(
+        a,
+        b,
+        tolerance,
+        Metric::Space,
+        &mut |lower, upper, floor| {
+            upper < limit || lower > limit || closed(lower, upper, 0.0, floor)
+        },
+    )?
     .bounds;
     let clearance = bounds.against(limit);
     Ok((bounds, clearance))
@@ -484,6 +583,10 @@ pub(crate) struct Side<'a> {
     /// closest point on that boundary is found through the edges.
     edges_bounded: Vec<bool>,
     pub(crate) elements: Vec<Element>,
+    /// `S`: the largest `M` over the root elements, the rounding scale of a
+    /// search over this side. Every element is padded by it, so the pads
+    /// cannot reorder the queue (#318).
+    pub(crate) scale: Scalar,
 }
 
 impl<'a> Side<'a> {
@@ -499,6 +602,7 @@ impl<'a> Side<'a> {
             domains: Vec::with_capacity(topology.faces().len()),
             edges_bounded: Vec::with_capacity(topology.faces().len()),
             elements: Vec::new(),
+            scale: 0.0,
         };
         for face in topology.faces() {
             let mut bounded = true;
@@ -523,6 +627,9 @@ impl<'a> Side<'a> {
             let surface = surface_of(brep, face.surface)?;
             side.domains.push(Domain::new(brep, face, surface, linear)?);
         }
+        // First the scale, over every root element; then the elements, all
+        // padded by it.
+        let mut roots = Vec::with_capacity(topology.faces().len());
         for (index, face) in topology.faces().iter().enumerate() {
             let surface = surface_of(brep, face.surface)?;
             let (lo, hi) = match &side.domains[index] {
@@ -531,10 +638,10 @@ impl<'a> Side<'a> {
                     "an unbounded face trimmed by a pcurve family the distance query cannot bound",
                 ))?,
             };
-            if let Some(element) = side.face_element(index, lo, hi, false)? {
-                side.elements.push(element);
-            }
+            side.scale = side.scale.max(patch_scale(surface, lo, hi)?);
+            roots.push((index, lo, hi));
         }
+        let mut spans = Vec::new();
         for (index, edge) in topology.edges().iter().enumerate() {
             let Some(curve) = edge.curve.and_then(|id| brep.curves3().get(id.index())) else {
                 continue;
@@ -545,7 +652,21 @@ impl<'a> Side<'a> {
             else {
                 continue;
             };
-            if let Some(element) = edge_element(curve, index, span.start, span.end)? {
+            if let Some(scale) = span_scale(curve, span.start, span.end) {
+                side.scale = side.scale.max(scale);
+            }
+            spans.push((curve, index, span));
+        }
+        if !side.scale.is_finite() {
+            return Err(crate::exact::EVALUATION);
+        }
+        for (index, lo, hi) in roots {
+            if let Some(element) = side.face_element(index, lo, hi, false)? {
+                side.elements.push(element);
+            }
+        }
+        for (curve, index, span) in spans {
+            if let Some(element) = edge_element(curve, index, span.start, span.end, side.scale)? {
                 side.elements.push(element);
             }
         }
@@ -578,8 +699,8 @@ impl<'a> Side<'a> {
                 }
             }
         }
-        let (centre, radius) = patch_sphere(surface, lo, hi)?;
-        let plan_radius = patch_plan_radius(surface, lo, hi, centre, radius)?;
+        let (centre, radius) = patch_sphere(surface, lo, hi, self.scale)?;
+        let plan_radius = patch_plan_radius(surface, lo, hi, centre, radius, self.scale)?;
         let witness = if inside {
             Some(point_on(surface, mid)?)
         } else {
@@ -659,7 +780,7 @@ impl<'a> Side<'a> {
                 let tm = 0.5 * (t0 + t1);
                 let mut out = Vec::with_capacity(2);
                 for (a, b) in [(t0, tm), (tm, t1)] {
-                    if let Some(child) = edge_element(curve, edge, a, b)? {
+                    if let Some(child) = edge_element(curve, edge, a, b, self.scale)? {
                         out.push(child);
                     }
                 }
@@ -798,6 +919,7 @@ fn patch_plan_radius(
     hi: Point2,
     centre: Point3,
     radius: Scalar,
+    scale: Scalar,
 ) -> Result<Scalar, ExactMeasureError> {
     if let Surface::BSpline(spline) = surface {
         let reach = spline
@@ -806,11 +928,11 @@ fn patch_plan_radius(
             .flatten()
             .map(|p| flat_length(*p - centre))
             .fold(0.0, Scalar::max);
-        return Ok(pad(centre, reach).min(radius));
+        return Ok(pad(reach, scale).min(radius));
     }
     let (lu, lv) = plan_lipschitz(surface, lo, hi)?;
     let plan = 0.5 * ((hi.x - lo.x).abs() * lu + (hi.y - lo.y).abs() * lv);
-    Ok(pad(centre, plan).min(radius))
+    Ok(pad(plan, scale).min(radius))
 }
 
 /// Largest `|cos v|` over `[a, b]`.
@@ -834,6 +956,7 @@ fn patch_sphere(
     surface: &Surface,
     lo: Point2,
     hi: Point2,
+    scale: Scalar,
 ) -> Result<(Point3, Scalar), ExactMeasureError> {
     if let Surface::BSpline(spline) = surface {
         if let Some(weights) = &spline.weights {
@@ -857,17 +980,109 @@ fn patch_sphere(
             .iter()
             .map(|p| (*p - centre).length())
             .fold(0.0, Scalar::max);
-        return Ok((centre, pad(centre, radius)));
+        return Ok((centre, pad(radius, scale)));
     }
     let centre = point_on(surface, (lo + hi) * 0.5)?;
     let (lu, lv) = lipschitz(surface, lo, hi)?;
     let radius = 0.5 * ((hi.x - lo.x).abs() * lu + (hi.y - lo.y).abs() * lv);
-    Ok((centre, pad(centre, radius)))
+    Ok((centre, pad(radius, scale)))
 }
 
-/// Widen a bounding radius by the rounding its centre may carry.
-pub(crate) fn pad(centre: Point3, radius: Scalar) -> Scalar {
-    radius + 1e-12 * (centre.length() + radius) + Scalar::MIN_POSITIVE
+/// Widen a bounding radius by the rounding its centre may carry: the radius
+/// itself is a computed length, and the centre is a computed point whose
+/// error scales with the side's `scale` (`S`), the same for every element,
+/// not with the distance from the origin alone.
+pub(crate) fn pad(radius: Scalar, scale: Scalar) -> Scalar {
+    radius * (1.0 + RATIO_EPSILONS * Scalar::EPSILON)
+        + POINT_EPSILONS * Scalar::EPSILON * scale
+        + Scalar::MIN_POSITIVE
+}
+
+/// The width an interval settles at, whatever accuracy is asked: the
+/// rounding of the lower bounds at zero size (about `32 eps S`, twice that
+/// here) and of the upper, for a search of scale `scale` (`S_a + S_b`, or
+/// `|p| + S` for a point) (#318).
+pub(crate) fn floor(scale: Scalar, upper: Scalar) -> Scalar {
+    FLOOR_EPSILONS * Scalar::EPSILON * scale + RATIO_EPSILONS * Scalar::EPSILON * upper
+}
+
+/// Whether `[lower, upper]` is as narrow as asked, or as the rounding
+/// allows (#318). An accuracy below the floor is never reported as met: the
+/// interval returned shows its width.
+pub(crate) fn closed(lower: Scalar, upper: Scalar, accuracy: Scalar, floor: Scalar) -> bool {
+    upper - lower <= accuracy.max(floor)
+}
+
+/// `M` of a patch: the magnitude of the terms `S(u, v)` is summed from. The
+/// frame origin, the frame-scaled radii and the parameter terms
+/// `|u| Lu + |v| Lv` at the patch's farthest parameters.
+fn patch_scale(surface: &Surface, lo: Point2, hi: Point2) -> Result<Scalar, ExactMeasureError> {
+    if let Surface::BSpline(spline) = surface {
+        let scale = spline
+            .control_points
+            .iter()
+            .flatten()
+            .map(|p| p.length())
+            .fold(0.0, Scalar::max);
+        return if scale.is_finite() {
+            Ok(scale)
+        } else {
+            Err(crate::exact::EVALUATION)
+        };
+    }
+    let (lu, lv) = lipschitz(surface, lo, hi)?;
+    let params = lo.x.abs().max(hi.x.abs()) * lu + lo.y.abs().max(hi.y.abs()) * lv;
+    let scale = match surface {
+        Surface::Plane(p) => p.frame.origin.length() + params,
+        Surface::Cylinder(c) => {
+            c.frame.origin.length() + 2.0 * c.radius.abs() * frame_scale(&c.frame) + params
+        }
+        Surface::EllipticalCylinder(c) => {
+            c.frame.origin.length()
+                + (c.semi_axis_x.abs() + c.semi_axis_y.abs()) * frame_scale(&c.frame)
+                + params
+        }
+        Surface::Cone(c) => {
+            let reach = lo.y.abs().max(hi.y.abs());
+            c.frame.origin.length()
+                + 2.0 * (c.radius.abs() + reach * c.semi_angle.tan().abs()) * frame_scale(&c.frame)
+                + params
+        }
+        Surface::Sphere(s) => {
+            s.frame.origin.length() + 3.0 * s.radius.abs() * frame_scale(&s.frame) + params
+        }
+        Surface::Torus(t) => {
+            t.frame.origin.length()
+                + (2.0 * t.major_radius.abs() + 3.0 * t.minor_radius.abs()) * frame_scale(&t.frame)
+                + params
+        }
+        _ => {
+            return Err(ExactMeasureError::NonPlanarFace(crate::exact::family(
+                surface,
+            )))
+        }
+    };
+    if scale.is_finite() {
+        Ok(scale)
+    } else {
+        Err(crate::exact::EVALUATION)
+    }
+}
+
+/// `M` of an edge span, or `None` for a curve family with no bound here.
+fn span_scale(curve: &Curve3, t0: Scalar, t1: Scalar) -> Option<Scalar> {
+    let t = t0.abs().max(t1.abs());
+    match curve {
+        Curve3::Line(line) => Some(line.origin.length() + t * line.direction.length()),
+        Curve3::Circle(c) => {
+            Some(c.frame.origin.length() + (2.0 + t) * c.radius.abs() * frame_scale(&c.frame))
+        }
+        Curve3::Ellipse(e) => {
+            let (a, b) = (e.semi_axis_x.abs(), e.semi_axis_y.abs());
+            Some(e.frame.origin.length() + (a + b + t * a.max(b)) * frame_scale(&e.frame))
+        }
+        _ => None,
+    }
 }
 
 /// An edge span with its enclosing sphere and its midpoint as a witness,
@@ -877,6 +1092,7 @@ fn edge_element(
     edge: usize,
     t0: Scalar,
     t1: Scalar,
+    scale: Scalar,
 ) -> Result<Option<Element>, ExactMeasureError> {
     let speed = match curve {
         Curve3::Line(line) => line.direction.length(),
@@ -897,9 +1113,9 @@ fn edge_element(
         _ => speed,
     };
     let centre = evaluate3(curve, 0.5 * (t0 + t1)).map_err(|_| crate::exact::EVALUATION)?;
-    let radius = pad(centre, 0.5 * (t1 - t0).abs() * speed);
+    let radius = pad(0.5 * (t1 - t0).abs() * speed, scale);
     let plan_radius = if plan_speed.is_finite() {
-        pad(centre, 0.5 * (t1 - t0).abs() * plan_speed).min(radius)
+        pad(0.5 * (t1 - t0).abs() * plan_speed, scale).min(radius)
     } else {
         radius
     };
@@ -1030,6 +1246,9 @@ impl Side<'_> {
         element: &Element,
         d: Vec3,
     ) -> Result<(Scalar, Scalar), ExactMeasureError> {
+        // Rounding in the projection itself, on either range, the same for
+        // every element of the side (#318).
+        let pad = PROJECTION_EPSILONS * Scalar::EPSILON * self.scale;
         let sphere = match self.metric {
             Metric::Space => sphere_range(element, d),
             // A horizontal direction reads only the projection, which the
@@ -1123,7 +1342,7 @@ impl Side<'_> {
                         // takes its ends.
                         let (big, small) = (torus.major_radius, torus.minor_radius);
                         if big.is_nan() || big <= small.abs() {
-                            return Ok(sphere);
+                            return Ok((sphere.0 - pad, sphere.1 + pad));
                         }
                         let base = torus.frame.origin.dot(d);
                         let (w_lo, w_hi) =
@@ -1179,15 +1398,8 @@ impl Side<'_> {
                 }
             }
         };
-        Ok(match exact {
-            Some((lo, hi)) => {
-                // Rounding in the projection itself.
-                let pad =
-                    1e-12 * (element.centre.length() + element.radius + lo.abs().max(hi.abs()));
-                (lo.max(sphere.0) - pad, hi.min(sphere.1) + pad)
-            }
-            None => sphere,
-        })
+        let (lo, hi) = exact.map_or(sphere, |(lo, hi)| (lo.max(sphere.0), hi.min(sphere.1)));
+        Ok((lo - pad, hi + pad))
     }
 }
 
@@ -1206,7 +1418,7 @@ fn lower_bound(
         (b.centre - a.centre, a.radius + b.radius)
     };
     let gap = offset.length();
-    let rounding = 1e-12 * (a.centre.length() + b.centre.length() + gap);
+    let rounding = RATIO_EPSILONS * Scalar::EPSILON * (gap + reach);
     let mut best = (gap - reach - rounding).max(0.0);
     // Between projections only horizontal directions separate them: a
     // normal counts by its horizontal part.
@@ -1229,7 +1441,7 @@ fn lower_bound(
         let (b_lo, b_hi) = side_b.project(b, d)?;
         best = best.max(b_lo - a_hi).max(a_lo - b_hi);
     }
-    Ok(best)
+    Ok(best * (1.0 - RATIO_EPSILONS * Scalar::EPSILON))
 }
 
 /// A lower bound on the distance from the point `p` to every point of
@@ -1242,7 +1454,7 @@ pub(crate) fn point_lower_bound(
 ) -> Result<Scalar, ExactMeasureError> {
     let offset = element.centre - p;
     let gap = offset.length();
-    let rounding = 1e-12 * (p.length() + element.centre.length() + gap);
+    let rounding = RATIO_EPSILONS * Scalar::EPSILON * (gap + element.radius);
     let mut best = (gap - element.radius - rounding).max(0.0);
     let directions = [(gap > 0.0).then(|| offset / gap), element.normal];
     for d in directions.into_iter().flatten() {
@@ -1253,10 +1465,10 @@ pub(crate) fn point_lower_bound(
         let d = d / length;
         let (lo, hi) = side.project(element, d)?;
         let x = p.dot(d);
-        let pad = 1e-12 * (p.length() + x.abs());
+        let pad = PROJECTION_EPSILONS * Scalar::EPSILON * p.length();
         best = best.max(lo - x - pad).max(x - hi - pad);
     }
-    Ok(best)
+    Ok(best * (1.0 - RATIO_EPSILONS * Scalar::EPSILON))
 }
 
 /// Total order on finite lower bounds for the heap.
@@ -1295,7 +1507,7 @@ pub(crate) fn search(
     b: &ExactBRep,
     tolerance: Tolerance,
     metric: Metric,
-    done: &mut dyn FnMut(Scalar, Scalar) -> bool,
+    done: &mut dyn FnMut(Scalar, Scalar, Scalar) -> bool,
 ) -> Result<Found, ExactMeasureError> {
     search_within(a, b, tolerance, metric, MAX_STEPS, done)
 }
@@ -1306,7 +1518,7 @@ pub(crate) fn search_within(
     tolerance: Tolerance,
     metric: Metric,
     max_steps: usize,
-    done: &mut dyn FnMut(Scalar, Scalar) -> bool,
+    done: &mut dyn FnMut(Scalar, Scalar, Scalar) -> bool,
 ) -> Result<Found, ExactMeasureError> {
     search_with(a, b, tolerance, metric, max_steps, done, true)
 }
@@ -1319,12 +1531,13 @@ fn search_with(
     tolerance: Tolerance,
     metric: Metric,
     max_steps: usize,
-    done: &mut dyn FnMut(Scalar, Scalar) -> bool,
+    done: &mut dyn FnMut(Scalar, Scalar, Scalar) -> bool,
     early_touch: bool,
 ) -> Result<Found, ExactMeasureError> {
     let linear = tolerance.linear().max(1e-12);
     let side_a = Side::new(a, linear, metric)?;
     let side_b = Side::new(b, linear, metric)?;
+    let scale = side_a.scale + side_b.scale;
     let apart = |p: Point3, q: Point3| match metric {
         Metric::Space => (p - q).length(),
         Metric::Plan => flat_length(p - q),
@@ -1394,7 +1607,7 @@ fn search_with(
             }
         }
         let upper = best.map_or(Scalar::INFINITY, |(d, ..)| d);
-        if upper.is_finite() && (bound >= upper || done(bound, upper)) {
+        if upper.is_finite() && (bound >= upper || done(bound, upper, floor(scale, upper))) {
             break;
         }
         steps += 1;
@@ -1689,20 +1902,23 @@ mod tests {
     //! its cone.
 
     use super::{
-        critical_possible, flat_length, normal_spread, patch_plan_radius, patch_sphere,
-        plan_lipschitz, Element, Metric, Shape,
+        critical_possible, flat_length, floor, normal_spread, pad, patch_plan_radius, patch_scale,
+        patch_sphere, plan_lipschitz, Element, Metric, Shape, Side, PROJECTION_EPSILONS,
     };
     use axiolid_core::{Frame3, Point2, Point3, Vec3};
     use axiolid_evaluate::surface::partials;
     use axiolid_evaluate::surface::{evaluate, normal};
     use axiolid_surface::{Cone, Cylinder, EllipticalCylinder, Plane, Sphere, Surface, Torus};
 
-    fn frame() -> Frame3 {
+    /// A georeferenced shift (#318).
+    const FAR: Vec3 = Vec3::new(450_000.0, 5_600_000.0, 0.0);
+
+    fn frame_at(shift: Vec3) -> Frame3 {
         // Off the origin and turned, so no term vanishes by symmetry.
         let x = Vec3::new(0.6, 0.8, 0.0);
         let z = Vec3::new(0.0, 0.0, 1.0);
         Frame3 {
-            origin: Point3::new(1.5, -2.0, 0.75),
+            origin: Point3::new(1.5, -2.0, 0.75) + shift,
             x,
             y: z.cross(x),
             z,
@@ -1710,7 +1926,11 @@ mod tests {
     }
 
     fn families() -> Vec<(Surface, Point2, Point2)> {
-        let f = frame();
+        families_at(Vec3::ZERO)
+    }
+
+    fn families_at(shift: Vec3) -> Vec<(Surface, Point2, Point2)> {
+        let f = frame_at(shift);
         vec![
             (
                 Surface::Plane(Plane { frame: f }),
@@ -1776,9 +1996,85 @@ mod tests {
     }
 
     #[test]
+    fn rounding_margins_are_the_derived_constants() {
+        assert_eq!(pad(0.0, 1.0), 16.0 * f64::EPSILON + f64::MIN_POSITIVE);
+        assert_eq!(floor(3.0, 0.0), 128.0 * f64::EPSILON * 3.0);
+        let origin = Point3::new(450_000.0, 5_600_000.0, 0.0);
+        let plane = Surface::Plane(Plane {
+            frame: Frame3 {
+                origin,
+                x: Vec3::X,
+                y: Vec3::Y,
+                z: Vec3::Z,
+            },
+        });
+        let scale = patch_scale(&plane, Point2::new(0.0, 0.0), Point2::new(1.0, 1.0));
+        assert_eq!(scale.expect("bounded"), origin.length() + 2.0);
+    }
+
+    /// `M(child) <= M(parent)`: the pad of a side, taken from its root
+    /// elements, covers every element a split yields.
+    #[test]
+    fn child_scales_never_exceed_their_parent() {
+        for shift in [Vec3::ZERO, FAR] {
+            for (surface, lo, hi) in families_at(shift) {
+                let whole = patch_scale(&surface, lo, hi).expect("bounded");
+                let mid = (lo + hi) * 0.5;
+                for (a, b) in [
+                    (lo, mid),
+                    (Point2::new(mid.x, lo.y), Point2::new(hi.x, mid.y)),
+                    (Point2::new(lo.x, mid.y), Point2::new(mid.x, hi.y)),
+                    (mid, hi),
+                ] {
+                    let part = patch_scale(&surface, a, b).expect("bounded");
+                    assert!(part <= whole, "{surface:?}: {part} > {whole}");
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn every_far_patch_point_lies_in_its_sphere() {
+        for (surface, lo, hi) in families_at(FAR) {
+            let scale = patch_scale(&surface, lo, hi).expect("bounded");
+            let (centre, radius) = patch_sphere(&surface, lo, hi, scale).expect("bounded");
+            let mut reach: f64 = 0.0;
+            for p in samples(lo, hi) {
+                let point = evaluate(&surface, p.x, p.y).expect("point");
+                reach = reach.max((point - centre).length());
+            }
+            assert!(
+                reach <= radius,
+                "{surface:?}: reach {reach} > radius {radius}"
+            );
+            assert!(
+                radius <= 4.0 * reach + 1e-9,
+                "{surface:?}: {radius} vs {reach}"
+            );
+        }
+    }
+
+    #[test]
+    fn a_far_projection_carries_its_pad() {
+        use super::fixtures::unit_box;
+        let b = unit_box(Point3::ZERO + FAR);
+        let side = Side::new(&b, 1e-12, Metric::Space).expect("a side");
+        let top = side
+            .elements
+            .iter()
+            .find(|e| matches!(e.shape, Shape::Face { .. }) && e.centre.z == 1.0)
+            .expect("the top face");
+        let (lo, hi) = side.project(top, Vec3::Z).expect("projects");
+        let pad = PROJECTION_EPSILONS * f64::EPSILON * side.scale;
+        assert!(pad > 1e-9, "{pad}");
+        assert!(hi - lo >= 2.0 * pad - 4.0 * f64::EPSILON, "[{lo}, {hi}]");
+    }
+
+    #[test]
     fn every_patch_point_lies_in_its_sphere() {
         for (surface, lo, hi) in families() {
-            let (centre, radius) = patch_sphere(&surface, lo, hi).expect("bounded");
+            let scale = patch_scale(&surface, lo, hi).expect("bounded");
+            let (centre, radius) = patch_sphere(&surface, lo, hi, scale).expect("bounded");
             let mut reach: f64 = 0.0;
             for p in samples(lo, hi) {
                 let point = evaluate(&surface, p.x, p.y).expect("point");
@@ -1828,8 +2124,9 @@ mod tests {
             .into_iter()
             .flat_map(|(s, lo, hi)| [(s.clone(), lo, hi), (tilt(s), lo, hi)]);
         for (surface, lo, hi) in cases {
-            let (centre, radius) = patch_sphere(&surface, lo, hi).expect("bounded");
-            let plan = patch_plan_radius(&surface, lo, hi, centre, radius).expect("bounded");
+            let scale = patch_scale(&surface, lo, hi).expect("bounded");
+            let (centre, radius) = patch_sphere(&surface, lo, hi, scale).expect("bounded");
+            let plan = patch_plan_radius(&surface, lo, hi, centre, radius, scale).expect("bounded");
             assert!(plan <= radius);
             let mut reach: f64 = 0.0;
             for p in samples(lo, hi) {

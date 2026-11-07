@@ -338,3 +338,105 @@ fn a_far_block_is_found_on_a_wall_whose_centre_faces_away() {
     contains(&bounds, expected);
     assert!(bounds.upper - bounds.lower <= 1e-6, "{bounds:?}");
 }
+
+/// A georeferenced position: the margins the lower bounds carry scale with
+/// the coordinates, so these fixtures sit where they are largest (#318).
+const FAR_X: f64 = 450_000.0;
+const FAR_Y: f64 = 5_600_000.0;
+
+/// `bounds` contains `truth`, allowing the upper end the rounding of the
+/// witnesses' coordinates (32 ulps of their magnitudes).
+fn holds_far(bounds: &axiolid_measure::DistanceBounds, truth: f64) {
+    let slack = 32.0 * f64::EPSILON * (bounds.point_a.length() + bounds.point_b.length());
+    assert!(
+        bounds.lower <= truth && truth <= bounds.upper + slack,
+        "[{}, {}] must contain {truth} (slack {slack})",
+        bounds.lower,
+        bounds.upper
+    );
+}
+
+/// A regular `n`-gon of circumradius 0.2 about `(cx, cy)`, counter-clockwise
+/// from angle `start`; the first corner is `first` when given.
+fn ngon(n: usize, cx: f64, cy: f64, start: f64, first: Option<Point2>) -> Vec<Point2> {
+    (0..n)
+        .map(|k| {
+            if let (0, Some(p)) = (k, first) {
+                return p;
+            }
+            let theta = start + core::f64::consts::TAU * k as f64 / n as f64;
+            Point2::new(cx + 0.2 * theta.cos(), cy + 0.2 * theta.sin())
+        })
+        .collect()
+}
+
+#[test]
+fn regular_prisms_far_from_the_origin_close_as_at_the_origin() {
+    for n in [8_usize, 32, 128] {
+        for (x, y) in [(0.0, 0.0), (FAR_X, FAR_Y)] {
+            let a_corners = ngon(n, x, y, 0.0, None);
+            let b_corners = ngon(
+                n,
+                x + 1.1,
+                y,
+                core::f64::consts::PI,
+                Some(Point2::new(x + 1.1 - 0.2, y)),
+            );
+            // The facing corners are the nearest points of the two prisms.
+            let truth = b_corners[0].x - a_corners[0].x;
+            let a = block(&a_corners, 0.0, 3.0);
+            let b = block(&b_corners, 0.0, 3.0);
+            let bounds = boundary_distance(&a, &b, 1e-6, tol()).expect("bounded");
+            holds_far(&bounds, truth);
+            assert!(
+                bounds.upper - bounds.lower <= 1e-6,
+                "n = {n} at ({x}, {y}): [{}, {}] did not close",
+                bounds.lower,
+                bounds.upper
+            );
+        }
+    }
+}
+
+fn wall_and_column() -> (ExactBRep, ExactBRep, f64) {
+    let rect = |x0: f64, x1: f64, y0: f64, y1: f64| {
+        [
+            Point2::new(x0, y0),
+            Point2::new(x1, y0),
+            Point2::new(x1, y1),
+            Point2::new(x0, y1),
+        ]
+    };
+    let wall = block(&rect(FAR_X, FAR_X + 4.0, FAR_Y, FAR_Y + 0.25), 0.0, 3.0);
+    let column = block(
+        &rect(FAR_X + 4.3, FAR_X + 4.8, FAR_Y, FAR_Y + 0.5),
+        0.0,
+        3.0,
+    );
+    // The gap between the x coordinates as stored: exact, unlike 0.3.
+    (wall, column, (FAR_X + 4.3) - (FAR_X + 4.0))
+}
+
+#[test]
+fn a_wall_and_a_column_far_from_the_origin_close_as_at_the_origin() {
+    let (wall, column, truth) = wall_and_column();
+    let bounds = boundary_distance(&wall, &column, 1e-6, tol()).expect("bounded");
+    holds_far(&bounds, truth);
+    assert!(
+        bounds.upper - bounds.lower <= 1e-6,
+        "[{}, {}] did not close",
+        bounds.lower,
+        bounds.upper
+    );
+}
+
+#[test]
+fn clearance_far_from_the_origin_is_decided() {
+    let (wall, column, truth) = wall_and_column();
+    let (_, below) = boundary_clearance(&wall, &column, truth + 1e-6, tol()).expect("decided");
+    assert_eq!(below, Clearance::Below);
+    let (_, above) = boundary_clearance(&wall, &column, truth - 1e-6, tol()).expect("decided");
+    assert_eq!(above, Clearance::Above);
+    let (_, exact) = boundary_clearance(&wall, &column, truth, tol()).expect("decided");
+    assert_eq!(exact, Clearance::Indeterminate);
+}

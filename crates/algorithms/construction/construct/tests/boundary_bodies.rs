@@ -659,10 +659,11 @@ fn a_central_block_covers_what_a_corner_block_leaves_open() {
 
 #[test]
 fn a_lift_below_rounding_is_refused_not_glued() {
-    // A column 1e-13 above its footing: neither a certified gap nor exact
-    // contact.
+    // A column 4 ulps above its footing: neither a certified gap nor exact
+    // contact. It is below the rounding margins (#318), which are ulps of
+    // the coordinates now, so 1e-13 is a gap they can certify.
     let other = [block(0.5, 2.5, 0.0, 2.0, 3.0)];
-    let lifted = vec![footing(), column(0.3, 0.5 + 1e-13, 3.0)];
+    let lifted = vec![footing(), column(0.3, 0.5 + 4.0 * f64::EPSILON, 3.0)];
     assert!(matches!(
         refused(one_sided_body_boundary_hausdorff(
             &lifted,

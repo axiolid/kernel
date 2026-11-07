@@ -139,7 +139,7 @@ use axiolid_surface::Surface;
 
 use crate::exact::ExactMeasureError;
 use crate::exact_distance::{
-    search, search_within, surface_of, Clearance, DistanceBounds, Metric, Shape, Side,
+    closed, search, search_within, surface_of, Clearance, DistanceBounds, Metric, Shape, Side,
     OVERLAP_STEPS,
 };
 use crate::exact_hausdorff::{witnessed, Cut, MAX_SPLITS};
@@ -413,7 +413,7 @@ pub fn body_boundary_distance<'a, 'b>(
         b.into(),
         tolerance,
         Metric::Space,
-        &mut |lower, upper| upper - lower <= accuracy,
+        &mut |lower, upper, floor| closed(lower, upper, accuracy, floor),
     )
 }
 
@@ -433,7 +433,9 @@ pub fn body_boundary_clearance<'a, 'b>(
         b.into(),
         tolerance,
         Metric::Space,
-        &mut |lower, upper| upper < limit || lower > limit,
+        &mut |lower, upper, floor| {
+            upper < limit || lower > limit || closed(lower, upper, 0.0, floor)
+        },
     )?;
     let clearance = found.bounds.against(limit);
     Ok((found, clearance))
@@ -446,7 +448,7 @@ fn distance(
     b: PlacedBody<'_>,
     tolerance: Tolerance,
     metric: Metric,
-    done: &mut dyn FnMut(Scalar, Scalar) -> bool,
+    done: &mut dyn FnMut(Scalar, Scalar, Scalar) -> bool,
 ) -> Result<BodyDistance, BodyMeasureError> {
     let (a, b) = Items::pair(a, b)?;
     let found = search(&a.brep, &b.brep, tolerance, metric, done)?;
@@ -1106,7 +1108,7 @@ fn boundaries_apart(
         tolerance,
         Metric::Space,
         OVERLAP_STEPS,
-        &mut |lower, _| lower > 0.0,
+        &mut |lower, _, _| lower > 0.0,
     )?;
     Ok(found.bounds.lower > 0.0)
 }

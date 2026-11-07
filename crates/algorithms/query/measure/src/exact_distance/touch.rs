@@ -16,11 +16,12 @@
 //! boundary exactly as any witness is (on the edge's curve; on the face's
 //! surface at parameters inside a certified-inside patch, or that the
 //! face's domain certifies), so the two are boundary points whatever they
-//! are found to be. They count only when no more than the rounding margin
-//! the lower bounds carry apart ([`within_rounding`]): no lower bound can
-//! then rise above zero, so the interval `[0, d]` they give is what the
-//! search would converge to, reached at once. A gap wider than that margin
-//! is never taken for a touch; it is measured by the search as before.
+//! are found to be. They count only when no more than 128 ulps of their
+//! magnitudes apart ([`within_rounding`], the floor of `FLOOR_EPSILONS`):
+//! no lower bound can then rise above zero, so the interval `[0, d]` they
+//! give is what the search would converge to, reached at once. A gap wider
+//! than that margin (about `6e-14` at unit scale) is never taken for a
+//! touch; it is measured by the search as before.
 //!
 //! Curved faces and circle or ellipse edges show nothing here; such a
 //! contact is still found by refinement.
@@ -31,7 +32,7 @@ use axiolid_evaluate::evaluate3;
 use axiolid_surface::Surface;
 
 use super::witness::plane_parameters;
-use super::{point_on, surface_of, Element, Shape, Side};
+use super::{point_on, surface_of, Element, Shape, Side, FLOOR_EPSILONS};
 use crate::exact::ExactMeasureError;
 
 /// A point of `a` and a point of `b`, on their boundaries and within
@@ -52,11 +53,11 @@ pub(super) fn touch(
     })
 }
 
-/// Whether two points are no farther apart than the rounding margin a
-/// lower bound between elements about them carries (see `lower_bound`).
+/// Whether two points are no farther apart than the rounding floor of
+/// their magnitudes (`FLOOR_EPSILONS`).
 pub(super) fn within_rounding(p: Point3, q: Point3) -> bool {
     let d = (p - q).length();
-    d <= 1e-12 * (p.length() + q.length())
+    d <= FLOOR_EPSILONS * Scalar::EPSILON * (p.length() + q.length())
 }
 
 /// The line carrying edge `edge`, when it is one, and its span in order.
@@ -220,10 +221,10 @@ mod tests {
     use axiolid_surface::{Plane, Surface};
     use axiolid_topology::{Edge, EdgeUse, Face, FaceBound, Loop, Orientation, Vertex};
 
-    use super::super::{search_with, Found, Metric, MAX_STEPS};
+    use super::super::{closed, search_with, Found, Metric, MAX_STEPS};
     use super::{segment_parameters, touch, within_rounding};
     use crate::exact_distance::fixtures::{cuboid, unit_box};
-    use crate::exact_distance::Side;
+    use crate::exact_distance::{Side, FLOOR_EPSILONS, RATIO_EPSILONS};
 
     /// A one-face sheet on the plane `z = 0` bounded by the polygon
     /// `corners`, counter-clockwise.
@@ -317,7 +318,7 @@ mod tests {
             tol(),
             Metric::Space,
             MAX_STEPS,
-            &mut |lower, upper| upper - lower <= accuracy,
+            &mut |lower, upper, floor| closed(lower, upper, accuracy, floor),
             touch,
         )
         .expect("bounded")
@@ -478,6 +479,68 @@ mod tests {
         assert!(found.bounds.lower <= 1e-9 && 1e-9 <= found.bounds.upper + 1e-15);
     }
 
+    /// A georeferenced position (#318).
+    fn far() -> Point3 {
+        Point3::new(450_000.0, 5_600_000.0, 0.0)
+    }
+
+    #[test]
+    fn a_far_gap_of_a_micrometre_is_measured_as_a_gap() {
+        let gap = 1.0 + 2.0_f64.powi(-20);
+        let a = unit_box(far());
+        let b = unit_box(far() + Vec3::new(0.25, 0.125, gap));
+        let found = unchanged(&a, &b, 1e-9);
+        let expected = gap - 1.0;
+        assert!(found.bounds.lower > 0.0, "{:?}", found.bounds);
+        assert!(
+            found.bounds.lower <= expected && expected <= found.bounds.upper,
+            "{:?}",
+            found.bounds
+        );
+        assert!(found.steps < 1000, "{} steps", found.steps);
+    }
+
+    #[test]
+    fn far_boxes_apart_settle_at_the_floor() {
+        let apart = |o: Point3| {
+            distance(
+                &unit_box(o),
+                &unit_box(o + Vec3::new(0.0, 0.0, 1.25)),
+                0.0,
+                true,
+            )
+        };
+        let near = apart(Point3::ZERO);
+        let georef = apart(far());
+        for found in [&near, &georef] {
+            assert!(
+                found.bounds.lower <= 0.25 && 0.25 <= found.bounds.upper,
+                "{:?}",
+                found.bounds
+            );
+            assert!(found.steps < 10_000, "{} steps", found.steps);
+        }
+        assert!(
+            georef.steps <= 2 * near.steps + 16,
+            "{} steps against {} near",
+            georef.steps,
+            near.steps
+        );
+        let width = georef.bounds.upper - georef.bounds.lower;
+        let bound = FLOOR_EPSILONS * f64::EPSILON * 2.0 * (far().length() + 8.0)
+            + RATIO_EPSILONS * f64::EPSILON * 0.25;
+        assert!(width <= bound, "width {width} > {bound}");
+    }
+
+    #[test]
+    fn two_far_boxes_sharing_a_face_meet_in_a_few_steps() {
+        meets_early(
+            &unit_box(far()),
+            &unit_box(far() + Vec3::new(0.0, 0.0, 1.0)),
+            8,
+        );
+    }
+
     #[test]
     fn separated_boxes_measure_as_before() {
         let a = unit_box(Point3::ZERO);
@@ -602,6 +665,23 @@ mod tests {
             Vec3::Z * 0.5,
         );
         closes_on(&a, &b, 0.5, 1e-9, 1000);
+        // Far from the origin, where the witnesses carry their rounding.
+        let a = cuboid(far(), Vec3::X * 2.0, Vec3::Y * 2.0, Vec3::Z);
+        let b = cuboid(
+            far() + Vec3::new(0.8, 0.8, 1.5),
+            Vec3::X * 0.4,
+            Vec3::Y * 0.4,
+            Vec3::Z * 0.5,
+        );
+        let found = distance(&a, &b, 1e-6, true);
+        let bounds = &found.bounds;
+        let slack = 32.0 * f64::EPSILON * (bounds.point_a.length() + bounds.point_b.length());
+        assert!(
+            bounds.lower <= 0.5 && 0.5 <= bounds.upper + slack,
+            "{bounds:?}"
+        );
+        assert!(bounds.upper - bounds.lower <= 1e-6, "{bounds:?}");
+        assert!(found.steps < 1000, "{} steps", found.steps);
     }
 
     #[test]
