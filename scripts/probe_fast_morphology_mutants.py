@@ -6,7 +6,9 @@ Each mutant weakens one step -- the mode switch either way, the side of
 the set whose notches are filled, each condition on a chord (its exact
 proof, the depth within the disc or the slab, the budget, no ring inside its notch),
 the excess (the gap term, the supports, the depth bound, the slab bound), splitting a
-refused chord, the trim of a chord not proved (#345),
+refused chord (at the vertex nearest the middle for a deep one, #428), the
+proposals' reach over needles and its extent box (#428), the pieces of a deep
+notch's bound, the trim of a chord not proved (#345),
 the ring a fill would close, the inscribed polygon drawn in
 by the excess and the deviation carrying it, and the budget's refusal --
 and must turn a test red.
@@ -15,8 +17,8 @@ Equivalent mutants, deliberately not listed:
 - the `f64` slack on the excess (64 ulps of the largest coordinate) and its
   final widening: they cover rounding of the excess's own arithmetic, far
   below what any sampled test point can resolve;
-- splitting a chord too deep or over the budget at another vertex than
-  the farthest: every split ends in single edges, so only which shorter
+- splitting a chord too deep or over the budget, not deeper than the disc,
+  at another vertex than the farthest: every split ends in single edges, so only which shorter
   chords are found changes, and with it the cost and the excess, both
   within the stated bounds (the split of a chord not proved, which
   decides whether a wall of teeth is filled at all, is listed);
@@ -25,14 +27,20 @@ Equivalent mutants, deliberately not listed:
   the same test;
 - the order of the halving limits over the supports: the bound is a
   minimum over all of them.
+- the box of a part in `Along::merged` with its corners on one side of the
+  part only: proposals are a choice only, the spanned vertices lie on one
+  side of their chord, and `excess` checks every chord it is given.
 """
 import probe_lib
 
 F = "crates/algorithms/planar/overlay/src/fill.rs"
+C = "crates/algorithms/planar/overlay/src/cover.rs"
 M = "crates/algorithms/planar/overlay/src/minkowski.rs"
 UNIT = ["-p", "axiolid-overlay", "--lib", "fill::"]
 ROUTE = ["-p", "axiolid-overlay", "--test", "minkowski"]
 BOTH = [UNIT, ROUTE]
+PROPOSALS = ["-p", "axiolid-overlay", "--lib", "cover::"]
+ALL = [PROPOSALS, UNIT, ROUTE]
 
 MUTANTS = [
     ('the exact mode fills notches', M,
@@ -85,11 +93,11 @@ MUTANTS = [
      '    let g = len + slack;',
      '    let g = 0.5 * len + slack;', BOTH),
     ('the depth ceiling dropped on a notch deeper than the disc', F,
-     '        return wide.map(|w| w.min(deepest)).filter(|e| e.is_finite());',
-     '        return wide.filter(|e| e.is_finite());', BOTH),
+     '        return (wide.map(|w| w.min(deepest)).filter(|e| e.is_finite()), true);',
+     '        return (wide.filter(|e| e.is_finite()), true);', BOTH),
     ('proposals reach only a sixteenth of the disc', F,
-     '        let mut pending = cover::proposals(&boundary, outside, t);',
-     '        let mut pending = cover::proposals(&boundary, outside, t / 16.0);', BOTH),
+     '            depth: t,\n            needle: needle_width(t, budget),',
+     '            depth: t / 16.0,\n            needle: needle_width(t, budget),', BOTH),
     ('the gap term halved', F,
      '        best = best.min(top + slack + g * g / (8.0 * t));',
      '        best = best.min(top + slack + g * g / (16.0 * t));', BOTH),
@@ -103,11 +111,11 @@ MUTANTS = [
      '    let mut best = deepest;',
      '    let mut best = f64::INFINITY;', BOTH),
     ('a refused chord not split', F,
-     '            let k = split_step(points, chord, deepest);\n            pending.push(Chord {\n                from: (chord.from + k) % n,',
-     '            let k = split_step(points, chord, deepest);\n            continue;\n            #[allow(unreachable_code)]\n            pending.push(Chord {\n                from: (chord.from + k) % n,', BOTH),
+     '            let k = cut.unwrap_or_else(|| split_step(points, chord, deepest));\n            pending.push(Chord {\n                from: (chord.from + k) % n,',
+     '            let k = cut.unwrap_or_else(|| split_step(points, chord, deepest));\n            continue;\n            #[allow(unreachable_code)]\n            pending.push(Chord {\n                from: (chord.from + k) % n,', BOTH),
     ('a chord not proved split at its farthest vertex', F,
-     '            let k = split_step(points, chord, deepest);',
-     '            let k = split_step(points, chord, deepest || true);', BOTH),
+     '            let k = cut.unwrap_or_else(|| split_step(points, chord, deepest));',
+     '            let k = cut.unwrap_or_else(|| split_step(points, chord, deepest || true));', BOTH),
     ('equally far vertices split at the first, not the middle', F,
      '            far.then(from_middle(j).cmp(&from_middle(i)))',
      '            far.then(std::cmp::Ordering::Equal)', BOTH),
@@ -123,6 +131,49 @@ MUTANTS = [
      '[(1, 0), (0, 1), (1, 1)]', '[(1, 0)]', BOTH),
     ('the trim without both edges', F,
      '[(1, 0), (0, 1), (1, 1)]', '[(1, 0), (0, 1)]', BOTH),
+    # #428: needles deeper than the disc.
+    ('proposals reach no needle', F,
+     '            needle: needle_width(t, budget),',
+     '            needle: 0.0,', BOTH),
+    ('the needle width halved', F,
+     '    2.0 * (2.0 * t * budget + budget * budget).sqrt()',
+     '    (2.0 * t * budget + budget * budget).sqrt()', BOTH),
+    ('a notch deeper than the disc not cut into pieces', F,
+     '    if !deep {\n        return (whole, false);',
+     '    if true {\n        return (whole, deep);', BOTH),
+    ('pieces bounded by the narrowest', F,
+     '.map(|(m, e)| m.max(e));',
+     '.map(|(m, e)| m.min(e));', BOTH),
+    ('a piece without a bound left out', F,
+     '            pieces = pieces\n                .zip(notch_bound(&polygon[from..=to], t).0)\n                .map(|(m, e)| m.max(e));',
+     '            pieces = pieces.map(|m| {\n                notch_bound(&polygon[from..=to], t).0.map_or(m, |e| m.max(e))\n            });', BOTH),
+    ('a notch cut at every spanned vertex', F,
+     '        .filter(|&i| cover::on_segment(a, b, polygon[i]))\n        .chain([last])',
+     '        .filter(|&i| i > 0)\n        .chain([last])', BOTH),
+    ('a needle wall over the budget split at its farthest vertex', F,
+     '                Verdict::TooBig { cut: true } => cut_step(points, chord),',
+     '                Verdict::TooBig { cut: true } => None,', BOTH),
+    ('a needle wall split at its first vertex on the chord', F,
+     '        .min_by_key(|&i| ((2 * i).abs_diff(chord.span), i))',
+     '        .min_by_key(|&i| i)', BOTH),
+    ('no needle proposed past the reach', C,
+     '    if reach.needle.is_nan() || reach.needle <= 0.0 {\n        return false;',
+     '    if true {\n        return false;', ALL),
+    ('needles not joined across a valley on the chord', C,
+     '    if orient(u, w, v) == Sign::Zero && between(u, w, v) {',
+     '    if false {', ALL),
+    ('a needle of any width proposed', C,
+     '    len <= reach.needle && spans.lo >= 0.0 && spans.hi <= len',
+     '    spans.lo >= 0.0 && spans.hi <= len', ALL),
+    ('a needle leaning past its mouth proposed', C,
+     '    len <= reach.needle && spans.lo >= 0.0 && spans.hi <= len',
+     '    len <= reach.needle', ALL),
+    ('the extent without the vertex extended over', C,
+     '        let (mut lo, mut hi) = (along(w), along(w));',
+     '        let (mut lo, mut hi) = (f64::INFINITY, f64::NEG_INFINITY);', ALL),
+    ("the extent without the parts' boxes", C,
+     '            if part.lo > part.hi {',
+     '            if true {', ALL),
 ]
 
 probe_lib.main(MUTANTS, timeout=600)
