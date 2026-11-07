@@ -389,10 +389,10 @@ fn the_composed_chord_bound_holds_and_is_not_loose() {
 #[test]
 fn flattening_is_certified_for_closed_form_profiles() {
     for (name, curve, length) in curves() {
-        // An intrinsic profile has no certified heights (#481), and a chain
-        // plan's evaluated ends carry no certified gap (#438): neither is
-        // claimed, though `chord_bound3` still bounds the exact chord.
-        let closed = !name.ends_with("intrinsic") && !name.starts_with("chain");
+        // An intrinsic profile has no certified heights (#481): it is not
+        // claimed, though `chord_bound3` still bounds the exact chord. A
+        // chain plan is, its evaluated ends charged to a table (#438).
+        let closed = !name.ends_with("intrinsic");
         assert_eq!(certifies_flattening3(&curve), closed, "{name}");
         for tol in [1e-3, 1e-4] {
             let points = flatten3(&curve, Interval::new(0.0, length), tol, 20).unwrap();

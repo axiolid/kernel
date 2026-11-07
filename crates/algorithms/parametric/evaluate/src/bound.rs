@@ -721,10 +721,9 @@ pub fn chord_bound2(curve: &Curve2, a: Scalar, b: Scalar) -> Option<Scalar> {
 
 /// Certified chord bound of a 3D curve over `[a, b]`; see [`chord_bound2`].
 ///
-/// An elevated or banked curve over an intrinsic plan charges the distance
-/// of its evaluated ends from the exact points (#393), as an intrinsic
-/// curve does in 2D; over a chain plan the evaluated ends are not charged
-/// yet (#438), and an intrinsic profile is not claimed by
+/// An elevated or banked curve over an intrinsic or a chain plan charges the
+/// distance of its evaluated ends from the exact points (#393, #438), as an
+/// intrinsic curve does in 2D; an intrinsic profile is not claimed by
 /// [`certifies_flattening3`].
 #[must_use]
 pub fn chord_bound3(curve: &Curve3, a: Scalar, b: Scalar) -> Option<Scalar> {
@@ -733,9 +732,9 @@ pub fn chord_bound3(curve: &Curve3, a: Scalar, b: Scalar) -> Option<Scalar> {
     }
     if a == b {
         // As for 2D (#414): an elevated or banked curve over an intrinsic
-        // plan carries its evaluated point's distance from the exact one
-        // (#393), read from the next representable span.
-        if over_intrinsic_plan(curve) {
+        // plan or a chain carries its evaluated point's distance from the
+        // exact one (#393, #438), read from the next representable span.
+        if over_measured_plan(curve) {
             return chord_bound3(curve, a, a.next_up())
                 .or_else(|| chord_bound3(curve, a.next_down(), a));
         }
@@ -767,14 +766,15 @@ pub fn chord_bound3(curve: &Curve3, a: Scalar, b: Scalar) -> Option<Scalar> {
     }
 }
 
-/// An elevated or banked curve whose plan is an intrinsic curve.
-fn over_intrinsic_plan(curve: &Curve3) -> bool {
+/// An elevated or banked curve whose plan is an intrinsic curve or a chain:
+/// a plan whose evaluated point is off the exact one.
+fn over_measured_plan(curve: &Curve3) -> bool {
     let plan = match curve {
         Curve3::Elevated(e) => &e.plan,
         Curve3::Banked(b) => &b.base.plan,
         _ => return false,
     };
-    matches!(plan.as_ref(), Curve2::Intrinsic(_))
+    matches!(plan.as_ref(), Curve2::Intrinsic(_) | Curve2::Chain(_))
 }
 
 /// `h^2 / 8 * sup |c''|`.

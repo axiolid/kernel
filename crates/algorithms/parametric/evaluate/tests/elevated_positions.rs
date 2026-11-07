@@ -1,5 +1,5 @@
 //! Certified positions of elevated and banked curves over an intrinsic
-//! plan (#393).
+//! plan (#393) or a chain plan (#438).
 //!
 //! The points of a gradient curve and of a banked one over a clothoid are
 //! held to a reference written here and independent of the rule under test
@@ -14,8 +14,10 @@ use axiolid_curve::{
     BankConvention, Banked3, CantLaw, CantPiece, Chain2, ChainPiece2, Circle2, CurvatureLaw,
     Curve2, Curve3, Elevated3, ElevationLaw, Intrinsic2, Line2,
 };
-use axiolid_evaluate::bound::{certifies_flattening3, chord_bound3, ElevatedPositionTable};
-use axiolid_evaluate::curve::evaluate3;
+use axiolid_evaluate::bound::{
+    certifies_flattening3, chord_bound3, ElevatedPositionTable, SeamSide,
+};
+use axiolid_evaluate::curve::{derivative3, evaluate3, second_derivative3};
 use axiolid_evaluate::elevated::{banked_chord_bound, elevated_chord_bound};
 
 fn world() -> Frame2 {
@@ -345,12 +347,12 @@ fn a_chord_bound_over_a_line_or_a_circle_plan_is_the_exact_chord_bound() {
     }
 }
 
-/// A chain plan's evaluated ends carry no certified gap (#438): the exact
-/// chord bound under-reports (1.95e-5 against 2.8e-3 over this span, and
-/// zero at a point against 1.4e-2), so the curve is not claimed certified.
-#[test]
-fn a_chain_plan_is_not_certified_for_flattening() {
-    let chain = Curve2::Chain(Chain2::new(
+// --- chain plans (#438) ----------------------------------------------------------
+
+/// A straight 20 m, then the fast harmonic over 100 m: the evaluator's point
+/// is 1.4e-2 off at 116.5.
+fn harmonic_chain() -> Curve2 {
+    Curve2::Chain(Chain2::new(
         world(),
         vec![
             ChainPiece2::Intrinsic {
@@ -367,12 +369,237 @@ fn a_chain_plan_is_not_certified_for_flattening() {
                 length: 100.0,
             },
         ],
-    ));
-    let curve = Curve3::Elevated(Elevated3::new(
-        chain,
+    ))
+}
+
+fn chain_elevated() -> Curve3 {
+    Curve3::Elevated(Elevated3::new(
+        harmonic_chain(),
         ElevationLaw::constant_grade(50.0, 0.04),
+    ))
+}
+
+fn chain_banked() -> Curve3 {
+    Curve3::Banked(Banked3::new(
+        Elevated3::new(harmonic_chain(), ElevationLaw::constant_grade(50.0, 0.04)),
+        CantLaw::new(vec![CantPiece::constant(120.0, 0.05)]),
+        CantLaw::zero(120.0),
+        1.5,
+        BankConvention::TangentRotation,
+    ))
+}
+
+/// The exact points of the chain at the multiples of `1 / 4096` in
+/// `[from, to]`: the straight's 20 m along the start tangent, then the
+/// harmonic's.
+fn chain_points(from: Scalar, to: Scalar) -> Vec<(Scalar, Point3)> {
+    let shift = Vec3::new(20.0 * world().x.x, 20.0 * world().x.y, 0.04 * 20.0);
+    harmonic_points(AMPLITUDE, from - 20.0, to - 20.0)
+        .into_iter()
+        .map(|(s, p)| (s + 20.0, p + shift))
+        .collect()
+}
+
+#[test]
+fn a_chord_bound_over_a_chain_plan_covers_the_evaluated_ends() {
+    // The exact-chord bound is 1.95e-5 here, the exact arc 2.8348e-3 from
+    // the chord of the evaluated ends: the chain's evaluated ends are as
+    // far off as the harmonic's alone.
+    let (lo, hi) = (116.4375, 116.5625);
+    for (name, curve) in [("elevated", chain_elevated()), ("banked", chain_banked())] {
+        // A banked curve is never claimed whole; the elevated one is.
+        assert_eq!(certifies_flattening3(&curve), name == "elevated", "{name}");
+        let a = evaluate3(&curve, lo).unwrap();
+        let b = evaluate3(&curve, hi).unwrap();
+        let exact = chain_points(lo, hi)
+            .into_iter()
+            .filter(|&(s, _)| s <= hi)
+            .map(|(_, p)| {
+                // The banked curve rides the pivot, zero here, and the
+                // elevated height is the same closed form.
+                segment_distance(p, a, b)
+            })
+            .fold(0.0, Scalar::max);
+        let bound = chord_bound3(&curve, lo, hi).expect("a bound");
+        assert!(exact >= 2.8348e-3, "{name}: the reference moved: {exact:e}");
+        assert!(
+            bound >= exact,
+            "{name}: {bound:e} below the exact {exact:e}"
+        );
+        assert!(bound <= 2.9e-3, "{name}: {bound:e} is not tight");
+        let at = chord_bound3(&curve, 116.5, 116.5).expect("a bound at a point");
+        assert!(
+            (1.39e-2..=1.5e-2).contains(&at),
+            "{name}: {at:e} at a point"
+        );
+    }
+}
+
+#[test]
+fn the_chain_plan_points_of_a_gradient_curve_are_certified() {
+    // As the intrinsic plan's: every point of the table within its own
+    // error of the exact one, and the error under the table's maximum.
+    let curve = chain_elevated();
+    let table = ElevatedPositionTable::new(&curve, 1e-6, 119.0).expect("a table");
+    assert!(table.max_error() > 0.0);
+    for (s, exact) in chain_points(0.0, 119.0).into_iter().step_by(509) {
+        let (point, error) = table.point3(s).expect("a point");
+        assert!(error <= table.max_error());
+        assert!(
+            point.distance(exact) <= error + 1e-12,
+            "s = {s}: {:e} from the exact point, above its error {error:e}",
+            point.distance(exact)
+        );
+    }
+}
+
+/// The cubic `y = x^3 / (6 R X)` over `X` as a Bezier, with its arc length
+/// by the binomial series (as `tests/arc_length_chain.rs`).
+fn cubic(a: Scalar, reach: Scalar) -> Curve2 {
+    Curve2::BSpline(axiolid_curve::BSplineCurve2 {
+        degree: 3,
+        control_points: vec![
+            Point2::new(0.0, 0.0),
+            Point2::new(reach / 3.0, 0.0),
+            Point2::new(2.0 * reach / 3.0, 0.0),
+            Point2::new(reach, a * reach.powi(3)),
+        ],
+        knots: vec![0.0, 1.0],
+        multiplicities: vec![4, 4],
+        weights: None,
+        closed: false,
+        self_intersect: None,
+        knot_spec: axiolid_curve::KnotSpec::PiecewiseBezier,
+    })
+}
+
+fn cubic_length(a: Scalar, x: Scalar) -> Scalar {
+    let z = 9.0 * a * a * x.powi(4);
+    let (mut binomial, mut power, mut sum) = (1.0, 1.0, 0.0);
+    for n in 0..200 {
+        let term = binomial * power / (4.0 * n as Scalar + 1.0);
+        sum += term;
+        if term.abs() < 1e-30 {
+            break;
+        }
+        binomial *= (0.5 - n as Scalar) / (n as Scalar + 1.0);
+        power *= z;
+    }
+    x * sum
+}
+
+fn cubic_abscissa(a: Scalar, length: Scalar) -> Scalar {
+    let mut x = length;
+    for _ in 0..50 {
+        x -= (cubic_length(a, x) - length) / (1.0 + 9.0 * a * a * x.powi(4)).sqrt();
+    }
+    x
+}
+
+const STRAIGHT: Scalar = 50.0;
+const TRANSITION: Scalar = 60.0;
+const RADIUS: Scalar = 300.0;
+
+fn layout() -> Curve2 {
+    Curve2::Chain(Chain2::new(
+        world(),
+        vec![
+            ChainPiece2::Parametric {
+                curve: Curve2::Line(Line2 {
+                    origin: Vec2::ZERO,
+                    direction: Vec2::X,
+                }),
+                start: 0.0,
+                length: STRAIGHT,
+            },
+            ChainPiece2::Parametric {
+                curve: cubic(1.0 / (6.0 * RADIUS * TRANSITION), TRANSITION),
+                start: 0.0,
+                length: TRANSITION,
+            },
+            ChainPiece2::Intrinsic {
+                curvature: CurvatureLaw::circular(1.0 / RADIUS),
+                length: 40.0,
+            },
+        ],
+    ))
+}
+
+/// The layout's exact local point, heading and curvature at `d`.
+fn layout_exact(d: Scalar) -> (Vec2, Scalar, Scalar) {
+    let a = 1.0 / (6.0 * RADIUS * TRANSITION);
+    if d < STRAIGHT {
+        return (Vec2::new(d, 0.0), 0.0, 0.0);
+    }
+    if d < STRAIGHT + TRANSITION {
+        let x = cubic_abscissa(a, d - STRAIGHT);
+        let slope = 3.0 * a * x * x;
+        return (
+            Vec2::new(STRAIGHT + x, a * x.powi(3)),
+            slope.atan(),
+            6.0 * a * x / (1.0 + slope * slope).powf(1.5),
+        );
+    }
+    let x = cubic_abscissa(a, TRANSITION);
+    let heading = (3.0 * a * x * x).atan();
+    let join = Vec2::new(STRAIGHT + x, a * x.powi(3));
+    let phi = (d - STRAIGHT - TRANSITION) / RADIUS;
+    let arc = Vec2::new(RADIUS * phi.sin(), RADIUS * (1.0 - phi.cos()));
+    let (s, c) = heading.sin_cos();
+    (
+        join + Vec2::new(c * arc.x - s * arc.y, s * arc.x + c * arc.y),
+        heading + phi,
+        1.0 / RADIUS,
+    )
+}
+
+#[test]
+fn an_elevated_curve_over_a_cubic_chain_reads_its_series_plan() {
+    // Gradient 0.01 into 0.0148 over the chain's 150 m: z = 10 + 0.01 d +
+    // 0.0048 d^2 / 300.
+    let curve = Curve3::Elevated(Elevated3::new(
+        layout(),
+        ElevationLaw::parabolic(10.0, 0.01, 0.0148, 150.0),
     ));
-    assert!(!certifies_flattening3(&curve));
-    let bound = chord_bound3(&curve, 116.4375, 116.5625).expect("the exact chord");
-    assert!(bound < 1e-4, "{bound:e}");
+    let table = ElevatedPositionTable::new(&curve, 1e-9, 150.0).expect("a table");
+    let [e0, e1, e2] = table.jet_errors();
+    assert_eq!(e0, table.max_error());
+    assert!(e0 > 0.0 && e1 > 0.0 && e2 > 0.0);
+    let w = world();
+    for k in 0..=150 {
+        let d = k as Scalar;
+        let (local, heading, kappa) = layout_exact(d);
+        let z = 10.0 + 0.01 * d + 0.0048 * d * d / 300.0;
+        let exact = place(local, z);
+        let (point, derivative, second) = {
+            let (p, c1, c2) = table.jet3_on(d, SeamSide::Outgoing).expect("a jet");
+            (p, c1, c2)
+        };
+        let (read, error) = table.point3(d).expect("a point");
+        assert_eq!(read, point);
+        assert!(error <= e0);
+        assert!(point.distance(exact) <= error, "d = {d}");
+        // c' = (tangent, z'), c'' = (k n, z'').
+        let tangent = w.x * heading.cos() + w.y * heading.sin();
+        let normal = w.x * -heading.sin() + w.y * heading.cos();
+        let grade = 0.01 + 0.0048 * d / 150.0;
+        let exact1 = Vec3::new(tangent.x, tangent.y, grade);
+        let exact2 = Vec3::new(normal.x * kappa, normal.y * kappa, 0.0048 / 150.0);
+        assert!((derivative - exact1).length() <= e1, "c' at {d}");
+        assert!((second - exact2).length() <= e2, "c'' at {d}");
+    }
+}
+
+#[test]
+fn the_jet_over_an_intrinsic_plan_is_the_curves_own() {
+    let curve = gradient_curve();
+    let table = ElevatedPositionTable::new(&curve, 1e-6, 60.0).expect("a table");
+    let [_, e1, e2] = table.jet_errors();
+    assert_eq!((e1, e2), (0.0, 0.0));
+    for d in [0.0, 12.5, 30.0, 59.0] {
+        let (point, c1, c2) = table.jet3_on(d, SeamSide::Outgoing).expect("a jet");
+        assert_eq!(point, table.point3(d).unwrap().0);
+        assert_eq!(c1, derivative3(&curve, d).unwrap());
+        assert_eq!(c2, second_derivative3(&curve, d).unwrap());
+    }
 }
