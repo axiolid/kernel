@@ -9,57 +9,8 @@ caret rule for `0.x` versions.
 
 ## [Unreleased]
 
-## [0.3.20] - 2026-11-03
-
 ### Added
 
-- `StationPiece::native_span`, `CompositeBasis::distance_interval_at` and
-  `CompositeBasis::end_points` (#424): the native parameters the kernel
-  reads at a piece's start and end measures (so a graph compiler cutting a
-  composite flattens each piece between the parameters a station reads),
-  a certified interval for the length from the composite's start to the
-  point read at a distance (a point where every length is stored data), and
-  the points read at distance `0` and at the length.
-
-- `FrameLaw::bend` and `BendBounds` (#361): certified bounds, over a
-  seam-free span, of the coefficients of the signed bend of a section frame
-  law, `O'.N`, `L.N'` and `U.N'` (`N` the frame's tangent), in the section
-  and the plan reading. A section point moves along the plane normal at
-  `O'.N + long' - a L.N' - b U.N'`, so a caller can tell where the section
-  planes stop advancing (a fold). Closed-form frames only: a line, a circle,
-  a polyline's segment, an elevated or banked curve over a line or a
-  circle, and an intrinsic curve; frames read by quadrature and every frame
-  without bounds have no bend (`None`). `FrameLawBounds::forward` bounds
-  `O'.N` from below for every frame with bounds. `FrameLaw::has_bend` tells a frame with a
-  closed-form bend, which a narrower span bounds, from one without.
-- `station::FrameLaw::error_at` and `StationFrameError` (#405): how far
-  the frame read at ONE station lies from the exact frame law's, its point
-  and each axis, for a part placed at a station on a curved basis. A frame
-  read in closed form (a circle, a polyline, an elevated or banked curve
-  over a line or a circle) is charged its rounding, an intrinsic curve's is
-  compared with the exact one, and a distance resolved by the arc-length
-  inverse, or after joints measured by quadrature, carries the exact frame
-  to the one read through the derivative bounds. `None` for a frame read by
-  quadrature, a piece placed inexactly, a station within the resolution of
-  a seam it is not on, and every family `FrameLaw::bounds` leaves
-  unbounded.
-
-- `FrameLaw::atomic_placed` (#408): `FrameLaw::atomic` for a curve whose
-  placement may be inexact.
-- `FrameLaw::with_placements_read_as_exact` (#408): bounds the frames of a
-  piece placed inexactly as read, to decide what depends on them alone (a
-  fold of the section planes); `error_at` stays `None` for such a piece.
-
-- `bound::chord_bound2` bounds `Curve2::QuadraticGraph` and
-  `Curve2::AngleGraph` pcurves (#414), which it left unbounded. The root
-  `w(t)` of `F(t, w) = 0` has `w'' = -(F_tt + 2 F_tw w' + F_ww w'^2) / F_w`;
-  interval enclosures of `F`'s partials (outward-rounded, from enclosed
-  trigonometric coefficients) over the span by a certified height range
-  bound it, on pieces of the span, and `None` is returned where the root
-  may be undefined on the span or `F_w` is not bounded away from zero (a
-  branch end nearby). Each computed end carries a certified root (a sign
-  change of `F` in outward-rounded intervals), and an angle graph whose
-  height box reaches the `+-pi` cut of `AngleGraph2::angle` is refused.
 - `bound::chord_bound2` bounds `Curve2::Lifted` pcurves (#414): a space
   curve read in a surface's parameters, `S(p(t)) = c(t)`. The implicit
   function theorem, with a certified separation of the surface's
@@ -112,6 +63,60 @@ caret rule for `0.x` versions.
   where its parameter rate changes; a lifted pcurve breaks where its space
   curve does. A span across one is refused by `chord_bound2`, as across a
   B-spline knot.
+
+## [0.3.20] - 2026-11-03
+
+### Added
+
+- `StationPiece::native_span`, `CompositeBasis::distance_interval_at` and
+  `CompositeBasis::end_points` (#424): the native parameters the kernel
+  reads at a piece's start and end measures (so a graph compiler cutting a
+  composite flattens each piece between the parameters a station reads),
+  a certified interval for the length from the composite's start to the
+  point read at a distance (a point where every length is stored data), and
+  the points read at distance `0` and at the length.
+
+- `FrameLaw::bend` and `BendBounds` (#361): certified bounds, over a
+  seam-free span, of the coefficients of the signed bend of a section frame
+  law, `O'.N`, `L.N'` and `U.N'` (`N` the frame's tangent), in the section
+  and the plan reading. A section point moves along the plane normal at
+  `O'.N + long' - a L.N' - b U.N'`, so a caller can tell where the section
+  planes stop advancing (a fold). Closed-form frames only: a line, a circle,
+  a polyline's segment, an elevated or banked curve over a line or a
+  circle, and an intrinsic curve; frames read by quadrature and every frame
+  without bounds have no bend (`None`). `FrameLawBounds::forward` bounds
+  `O'.N` from below for every frame with bounds. `FrameLaw::has_bend` tells a frame with a
+  closed-form bend, which a narrower span bounds, from one without.
+- `station::FrameLaw::error_at` and `StationFrameError` (#405): how far
+  the frame read at ONE station lies from the exact frame law's, its point
+  and each axis, for a part placed at a station on a curved basis. A frame
+  read in closed form (a circle, a polyline, an elevated or banked curve
+  over a line or a circle) is charged its rounding, an intrinsic curve's is
+  compared with the exact one, and a distance resolved by the arc-length
+  inverse, or after joints measured by quadrature, carries the exact frame
+  to the one read through the derivative bounds. `None` for a frame read by
+  quadrature, a piece placed inexactly, a station within the resolution of
+  a seam it is not on, and every family `FrameLaw::bounds` leaves
+  unbounded.
+
+- `FrameLaw::atomic_placed` (#408): `FrameLaw::atomic` for a curve whose
+  placement may be inexact.
+- `FrameLaw::with_placements_read_as_exact` (#408): bounds the frames of a
+  piece placed inexactly as read, to decide what depends on them alone (a
+  fold of the section planes); `error_at` stays `None` for such a piece.
+
+- `bound::chord_bound2` bounds `Curve2::QuadraticGraph` and
+  `Curve2::AngleGraph` pcurves (#414), which it left unbounded. The root
+  `w(t)` of `F(t, w) = 0` has `w'' = -(F_tt + 2 F_tw w' + F_ww w'^2) / F_w`;
+  interval enclosures of `F`'s partials (outward-rounded, from enclosed
+  trigonometric coefficients) over the span by a certified height range
+  bound it, on pieces of the span, and `None` is returned where the root
+  may be undefined on the span or `F_w` is not bounded away from zero (a
+  branch end nearby). Each computed end carries a certified root (a sign
+  change of `F` in outward-rounded intervals), and an angle graph whose
+  height box reaches the `+-pi` cut of `AngleGraph2::angle` is refused.
+  Lifted pcurves (`Curve2::Lifted`) and `Curve2::Intrinsic` stay unbounded
+  by `chord_bound2`; #414 remains open for them.
 
 ### Fixed
 

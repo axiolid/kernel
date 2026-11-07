@@ -9,24 +9,6 @@ caret rule for `0.x` versions.
 
 ## [Unreleased]
 
-## [0.3.14] - 2026-11-04
-
-### Added
-
-- `cycle_volume_properties` measures the signed volume and centroid of a mesh
-  that is a closed oriented cycle (every edge used equally often in each
-  direction), such as shells that share an edge. It is bit-identical to
-  `volume_properties` on two-manifold input and refuses anything open with
-  `CycleVolumeError` (#416).
-- `select_by_normal` and `extent_along` select the faces of a mesh whose normal
-  lies in a `NormalCone` (the tolerance's angular part is slack on the
-  half-angle) and measure their area and their extent along a direction.
-  Selecting every face reproduces `surface_properties` area bit for bit
-  (#417).
-
-- The package now ships `LICENSE` and `LICENSE-COMMERCIAL` (symlinks to the
-  repository root), so the licence texts travel with the archive (#358).
-
 ### Fixed
 
 - The exact boundary distance and Hausdorff distance carry rounding margins
@@ -52,6 +34,24 @@ caret rule for `0.x` versions.
   cylinder or elliptical cylinder is Lipschitz by its axes rather than
   `1 + |v|` times as steep, which had inflated the bound of patches charted
   in world coordinates (#318).
+
+## [0.3.14] - 2026-11-04
+
+### Added
+
+- `cycle_volume_properties` measures the signed volume and centroid of a mesh
+  that is a closed oriented cycle (every edge used equally often in each
+  direction), such as shells that share an edge. It is bit-identical to
+  `volume_properties` on two-manifold input and refuses anything open with
+  `CycleVolumeError` (#416).
+- `select_by_normal` and `extent_along` select the faces of a mesh whose normal
+  lies in a `NormalCone` (the tolerance's angular part is slack on the
+  half-angle) and measure their area and their extent along a direction.
+  Selecting every face reproduces `surface_properties` area bit for bit
+  (#417).
+
+- The package now ships `LICENSE` and `LICENSE-COMMERCIAL` (symlinks to the
+  repository root), so the licence texts travel with the archive (#358).
 
 ## [0.3.13] - 2026-10-28
 

@@ -95,58 +95,8 @@ Latest release, 0.3.20 (2026-11-03):
   branch end nearby). Each computed end carries a certified root (a sign
   change of `F` in outward-rounded intervals), and an angle graph whose
   height box reaches the `+-pi` cut of `AngleGraph2::angle` is refused.
-- `bound::chord_bound2` bounds `Curve2::Lifted` pcurves (#414): a space
-  curve read in a surface's parameters, `S(p(t)) = c(t)`. The implicit
-  function theorem, with a certified separation of the surface's
-  parameters over a box grown about the evaluated ends, bounds the pcurve's
-  speed and bend per piece of the span (`J p' = c'`, `J p'' = c'' -
-  H[p', p']`, `|J w| >= sigma |D w|`); each evaluated end carries the
-  outward-rounded residual of its image against the space curve over the
-  separation. The space curve's own derivative bounds come from
-  `curve_derivative_bounds3`, or through the carrier for ruled and torus
-  sections and a cell of an implicit section. Analytic carriers (planes,
-  cylinders, cones, spheres, tori) and the sections of two surfaces read on
-  either of them (the same continuation on the four-dimensional system of
-  the section, boxes clamped to a B-spline's knot domain) are covered. A
-  pole, an apex, a fold, a B-spline crease, a guide that could change the
-  turn inside a piece, a space curve without derivative bounds and a
-  B-spline carrier outside a pair section are refused (`None`). Over a
-  curved carrier the bound adds the magnitudes of `c''` and of the
-  carrier's curvature along `p'`, which nearly cancel for a curve that
-  hugs it, so it is sound but not tight there. The mesh compiler samples
-  pcurve edges at uniform spans, ignoring their breaks, and so still
-  reports such trims unbounded until it cuts at them (#436).
-- `bound::chord_bound2` bounds `Curve2::Intrinsic` between the evaluated
-  ends (#414): the law's bound plus the larger distance of an evaluated
-  end from a certified `IntrinsicPositionTable` point, with that point's
-  own error. `chain_chord_bound` does not carry that error for the
-  evaluated ends of the pieces of a chain yet (#438).
-- `bound::SurfaceBoundOracle::for_carrier` (#414): the derivative bounds
-  of the surface a curve lies on (`axiolid_curve::Carrier`, a general ruled
-  carrier included), and `SurfaceBoundOracle::separation` with
-  `ParameterSeparation`: a certified `sigma` with `|S(x) - S(y)| >= sigma
-  |D (x - y)|` over a parameter box, by Weyl's perturbation from the box
-  centre, or `None` at a pole, an apex, a fold, a box too wide or a
-  B-spline crease.
-
-### Changed
-
-- `bound::chord_bound2` bounds the distance to the chord of the
-  *evaluated* ends (#414). That differs from the exact chord only for the
-  families whose evaluation is an estimate, which carry the difference:
-  lifted pcurves and intrinsic curves.
-- `bound::chord_bound2` of a point span (`a == b`) of a lifted or an
-  intrinsic pcurve is the evaluated point's own certified error, no longer
-  zero, and `None` where the curve has no bound (#414).
-- `curve::flatten2` accepts a span of a lifted or an intrinsic pcurve only
-  when its certified chord bound is within the tolerance too (#414), where
-  it relied on the midpoint sagitta alone; `certifies_flattening2` still
-  names neither family, whose bounds are not tight on a curved carrier.
-- `bound::continuity_breaks2` and `continuity_breaks3` name the cell joins
-  of an implicit section and the interior nodes of a pair section (#414),
-  where its parameter rate changes; a lifted pcurve breaks where its space
-  curve does. A span across one is refused by `chord_bound2`, as across a
-  B-spline knot.
+  Lifted pcurves (`Curve2::Lifted`) and `Curve2::Intrinsic` stay unbounded
+  by `chord_bound2`; #414 remains open for them.
 
 ### Fixed
 

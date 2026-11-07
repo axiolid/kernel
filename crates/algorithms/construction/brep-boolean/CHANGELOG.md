@@ -162,6 +162,7 @@ caret rule for `0.x` versions.
   Whether a plane is parallel to such a wall's axis or touches it is
   decided by exact predicates only, never read within tolerance.
 
+
 ## [0.1.8] - 2026-10-09
 
 ### Fixed

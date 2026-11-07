@@ -128,23 +128,5 @@ Latest release, 0.3.22 (2026-11-03):
   hole dilations take longer than before (see the research note).
   `scripts/probe_fast_morphology_mutants.py` lists the faults its tests
   must catch.
-- `MorphologyMode::Fast` fills the walls of a floor with sub-budget teeth
-  in bounded time and memory. On #345's 3 m floor (teeth 0.5 mm deep, 1 mm
-  budget) the chord over the room's corner, too deep for the budget, was
-  split at the corner, and the chord left, from the corner along the wall,
-  ended at a valley instead of a tip: not proved, it was split down to
-  single edges, so thousands of teeth stayed and the sum kept their
-  quadratic cost (an inner erosion by 1.4 m took 13 s and 0.86 GB at
-  10,000 corners, 71 s and 4.8 GB at 20,000, over 20 GB at 50,000). A chord
-  not proved is now tried without its start edge, its end edge, or both,
-  before it is split. The results are unchanged bit for bit, the excess is still
-  within the budget and reported, `Exact` is unchanged. Release, median of
-  5, inner erosion, r = 1.4 m: 0.078 s and 6 MB at 10,000 corners, 0.39 s
-  and 15 MB at 50,000, 0.77 s and 25 MB at 100,000, 1.57 s and 48 MB at
-  200,000, with the same for 1.49 m and 1.6 m
-  (`tools/benchmark/benches/disc_erosion.rs`, walls `floor`;
-  `docs/research/fast-morphology-on-toothed-floors.md`; `src/fill.rs`,
-  #345, ADR 0087). `scripts/probe_fast_morphology_mutants.py` lists the
-  faults its tests must catch.
 
 Full history: [`crates/algorithms/planar/overlay/CHANGELOG.md`](https://github.com/axiolid/kernel/blob/main/crates/algorithms/planar/overlay/CHANGELOG.md)
