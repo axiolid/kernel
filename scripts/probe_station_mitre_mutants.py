@@ -32,10 +32,16 @@ Not probed, because no test can tell them apart:
   the B-spline), below the tolerance their values are pinned to; pinning
   them tighter would pin the quadrature's certified error, not the bound;
 - the straight cell's `eta` (chord and breakpoint terms in place of the slide
-  alone): a straight cell with a constant section has no chord, and a
-  breakpoint only from a frame jump at a non-mitre seam, which no test
-  builds; the turning orientation that once reached it is routed to the
-  general cell;
+  alone) is an equivalent mutant: `straight_mitre_cell` runs only on pieces
+  with `FrameLawBounds::is_straight`, a constant section and no seam inside,
+  where the chord is zero, and a breakpoint needs the mesh's row at the
+  cell's far end to be read from another side than the cell's, that is a
+  frame jump at a non-mitre seam. The only frame jump without a tangent
+  change is a banked curve's cant step, and `FrameLaw::bounds` bounds a
+  banked curve only over a line or a circle (`frame_bound.rs`, "Not
+  bounded"), which have no corner to mitre: over any other plan the cell is
+  refused earlier by `UNCERTIFIED_FRAMES`. At a collinear polyline vertex
+  both sides' frames agree, so the term is rounding;
 - the general cell's wall (`wall`, with its `clamp` and `quad`): the cut
   dominates it on every cell the tests build, their quads being planar and
   the faces' `reach_past` reaching at least the clamp.
