@@ -93,6 +93,7 @@ enum StoredResult {
     Mesh(TriMesh),
     Exact(Box<axiolid::brep::ExactBRep>),
     HiddenLines(axiolid::mesh_hidden_lines::HiddenLineOutcome),
+    VisibleFaces(axiolid::mesh_hidden_lines::VisibleFaceOutcome),
 }
 
 struct ErrorRecord {
@@ -430,6 +431,7 @@ fn c_capabilities(
                     | axiolid::contracts::Operation::Measurement
                     | axiolid::contracts::Operation::MeshBoolean
                     | axiolid::contracts::Operation::MeshHiddenLines
+                    | axiolid::contracts::Operation::MeshVisibleFaces
                     | axiolid::contracts::Operation::Sweep
             )
         })
@@ -560,10 +562,12 @@ impl Default for AxiolidErrorInfo {
 
 mod diagnostics;
 mod drawing;
+mod faces;
 mod mesh;
 mod operations;
 
 pub use diagnostics::*;
 pub use drawing::*;
+pub use faces::*;
 pub use mesh::*;
 pub use operations::*;

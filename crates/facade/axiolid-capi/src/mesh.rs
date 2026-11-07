@@ -451,5 +451,6 @@ pub enum AxiolidGeometryKind {
     TriangleMesh = 1,
     ExactBrep = 2,
     HiddenLines = 3,
+    VisibleFaces = 4,
     Unknown = 255,
 }

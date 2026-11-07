@@ -35,6 +35,12 @@ ASSERT_SIZE(AxiolidHiddenLineSegment, 56);
 ASSERT_SIZE(AxiolidViewMesh, 40);
 ASSERT_SIZE(AxiolidHiddenLineLimits, 40);
 ASSERT_SIZE(AxiolidHiddenLineEvidence, 80);
+ASSERT_SIZE(AxiolidVisibleFaceLimits, 48);
+ASSERT_SIZE(AxiolidFaceSource, 4);
+ASSERT_SIZE(AxiolidVisibleRegion, 48);
+ASSERT_SIZE(AxiolidRegionRing, 16);
+ASSERT_SIZE(AxiolidVisibleFaceCounts, 32);
+ASSERT_SIZE(AxiolidVisibleFaceEvidence, 136);
 ASSERT_SIZE(AxiolidMeshAudit, 24);
 ASSERT_SIZE(AxiolidErrorInfo, 104);
 #endif
@@ -84,7 +90,7 @@ int main(void) {
 
   size_t capability_count = 0;
   CHECK(axiolid_v0_4_capability_count(context, &capability_count));
-  if (capability_count != 5) return 3;
+  if (capability_count != 6) return 3;
 
   AxiolidMeshHandle subject = AxiolidMeshHandle_INVALID;
   CHECK(axiolid_v0_4_mesh_import(context, CUBE_POSITIONS, 8, CUBE_INDICES, 12, &subject));
@@ -169,6 +175,28 @@ int main(void) {
   CHECK(axiolid_v0_4_context_last_error_mesh(context, &has_mesh, &named_mesh));
   if (has_mesh != 0 || named_mesh != 0) return 23;
   CHECK(axiolid_v0_4_result_destroy(context, drawing));
+
+  // The top face of the cube is the only region seen from above.
+  view_mesh.id = 7;
+  view_mesh.mesh = subject;
+  plan.projection = AXIOLID_PROJECTION_ORTHOGRAPHIC;
+  AxiolidVisibleFaceLimits face_limits = {8, 1000, 1000, 100000, 100, 1000};
+  AxiolidResultHandle faces = AxiolidResultHandle_INVALID;
+  CHECK(axiolid_v0_4_visible_faces(context, &view_mesh, 1, &plan, NULL, &face_limits, tolerance, &faces));
+  AxiolidVisibleFaceCounts face_counts = {0};
+  CHECK(axiolid_v0_4_visible_faces_counts(context, faces, &face_counts));
+  if (face_counts.regions != 1 || face_counts.rings != 1 || face_counts.points != 4 || face_counts.triangles != 2) return 24;
+  AxiolidVisibleRegion face_regions[1];
+  AxiolidRegionRing face_rings[1];
+  double face_points[8];
+  uint32_t face_triangles[2];
+  if (axiolid_v0_4_visible_faces_copy(context, faces, face_regions, 1, face_rings, 1, face_points, 3, face_triangles, 2) != AxiolidStatus_BufferTooSmall) return 25;
+  CHECK(axiolid_v0_4_visible_faces_copy(context, faces, face_regions, 1, face_rings, 1, face_points, 4, face_triangles, 2));
+  if (face_regions[0].mesh_id != 7 || face_regions[0].source != AxiolidFaceSource_Group || face_regions[0].triangle_count != 2 || face_rings[0].point_count != 4 || face_triangles[0] != 2) return 26;
+  AxiolidVisibleFaceEvidence face_evidence = {0};
+  CHECK(axiolid_v0_4_visible_faces_evidence(context, faces, &face_evidence));
+  if (face_evidence.regions != 1 || face_evidence.cap_regions != 0) return 27;
+  CHECK(axiolid_v0_4_result_destroy(context, faces));
 
   CHECK(axiolid_v0_4_result_destroy(context, exact));
   if (axiolid_v0_4_result_destroy(context, exact) != AxiolidStatus_InvalidHandle) return 11;

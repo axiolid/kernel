@@ -20,6 +20,15 @@ caret rule for `0.x` versions.
 
 ### Added
 
+- Visible faces through the C ABI (#386): `axiolid_v0_4_visible_faces` with
+  `AxiolidVisibleFaceLimits`; the result is read with
+  `axiolid_v0_4_visible_faces_counts`, `_copy` (regions, rings, points and
+  triangle indices as flat offset-indexed tables, nothing written unless
+  every capacity covers its count) and `_evidence`. `AxiolidFaceSource`
+  distinguishes group regions from near-plane caps, `AxiolidGeometryKind`
+  gains `VisibleFaces`, and the capability table lists `MeshVisibleFaces`.
+  Arguments, refusals and mesh ids behave as for hidden lines. Existing
+  symbols and layouts are unchanged.
 - Hidden lines through the C ABI (#473): `axiolid_v0_4_hidden_lines` with
   `AxiolidView`, `AxiolidViewMesh` (roles, group modes including planar),
   `AxiolidEdgeSelection` (including group boundaries) and

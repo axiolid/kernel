@@ -57,6 +57,15 @@ int main(void) {
   if (segment_count != 3) return 6;
   CHECK(axiolid_v0_4_result_destroy(context, drawing));
 
+  AxiolidVisibleFaceLimits face_limits = {8, 1000, 1000, 100000, 100, 1000};
+  AxiolidResultHandle faces = AxiolidResultHandle_INVALID;
+  CHECK(axiolid_v0_4_visible_faces(context, &view_mesh, 1, &plan, NULL,
+                                   &face_limits, tolerance, &faces));
+  AxiolidVisibleFaceCounts face_counts = {0};
+  CHECK(axiolid_v0_4_visible_faces_counts(context, faces, &face_counts));
+  if (face_counts.regions != 1 || face_counts.points != 3) return 7;
+  CHECK(axiolid_v0_4_result_destroy(context, faces));
+
   CHECK(axiolid_v0_4_result_destroy(context, exact));
   CHECK(axiolid_v0_4_mesh_destroy(context, mesh));
   CHECK(axiolid_v0_4_context_destroy(context));

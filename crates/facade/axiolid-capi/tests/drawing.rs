@@ -703,7 +703,7 @@ fn the_context_lists_the_hidden_line_capability() {
             axiolid_v0_4_capability_count(context, &mut count),
             AxiolidStatus::Ok
         );
-        assert_eq!(count, 5);
+        assert_eq!(count, 6);
         let found = (0..count)
             .map(|index| {
                 let mut descriptor = AxiolidCapabilityDescriptor::default();

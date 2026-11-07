@@ -174,6 +174,7 @@ enum AxiolidGeometryKind
   AxiolidGeometryKind_TriangleMesh = 1,
   AxiolidGeometryKind_ExactBrep = 2,
   AxiolidGeometryKind_HiddenLines = 3,
+  AxiolidGeometryKind_VisibleFaces = 4,
   AxiolidGeometryKind_Unknown = 255,
 };
 #ifndef __cplusplus
@@ -181,6 +182,32 @@ enum AxiolidGeometryKind
 typedef enum AxiolidGeometryKind AxiolidGeometryKind;
 #else
 typedef int32_t AxiolidGeometryKind;
+#endif // __STDC_VERSION__ >= 202311L
+#endif // __cplusplus
+
+/**
+ * What a visible region is a region of.
+ */
+enum AxiolidFaceSource
+#if defined(__cplusplus) || __STDC_VERSION__ >= 202311L
+  : int32_t
+#endif // defined(__cplusplus) || __STDC_VERSION__ >= 202311L
+ {
+  /**
+   * The triangles of one face group; `AxiolidVisibleRegion::group` names it.
+   */
+  AxiolidFaceSource_Group = 1,
+  /**
+   * The cap of a solid cut by the near plane; `group` is 0.
+   */
+  AxiolidFaceSource_Cap = 2,
+  AxiolidFaceSource_Unknown = 255,
+};
+#ifndef __cplusplus
+#if __STDC_VERSION__ >= 202311L
+typedef enum AxiolidFaceSource AxiolidFaceSource;
+#else
+typedef int32_t AxiolidFaceSource;
 #endif // __STDC_VERSION__ >= 202311L
 #endif // __cplusplus
 
@@ -436,6 +463,94 @@ typedef struct {
   uint16_t crate_minor;
   uint16_t crate_patch;
 } AxiolidVersion;
+
+/**
+ * Hard bounds for one visible-face call.
+ */
+typedef struct {
+  size_t max_meshes;
+  size_t max_source_vertices;
+  size_t max_source_triangles;
+  size_t max_candidate_pairs;
+  size_t max_regions;
+  size_t max_region_vertices;
+} AxiolidVisibleFaceLimits;
+
+/**
+ * One visible region: a run of rings and a run of triangle indices.
+ */
+typedef struct {
+  /**
+   * The caller's mesh id.
+   */
+  uint64_t mesh_id;
+  /**
+   * Index of the region's outer ring in the ring table; its holes follow.
+   */
+  size_t first_ring;
+  /**
+   * Rings of the region: the outer ring plus its holes.
+   */
+  size_t ring_count;
+  /**
+   * Index of the region's first triangle in the triangle table.
+   */
+  size_t first_triangle;
+  /**
+   * Frontmost triangles of the region; zero for a cap.
+   */
+  size_t triangle_count;
+  /**
+   * The face group when `source` is `Group`, otherwise 0.
+   */
+  uint32_t group;
+  AxiolidFaceSource source;
+} AxiolidVisibleRegion;
+
+/**
+ * One ring: a run of points in the point table.
+ */
+typedef struct {
+  size_t first_point;
+  size_t point_count;
+} AxiolidRegionRing;
+
+/**
+ * Table sizes of a visible-face result.
+ */
+typedef struct {
+  size_t regions;
+  size_t rings;
+  size_t points;
+  size_t triangles;
+} AxiolidVisibleFaceCounts;
+
+/**
+ * Auditable counts of one visible-face call.
+ */
+typedef struct {
+  size_t source_meshes;
+  size_t source_triangles;
+  size_t edge_on_triangles;
+  size_t removed_triangles;
+  size_t boundary_segments;
+  size_t intersection_segments;
+  size_t crossings;
+  size_t pieces;
+  size_t tied_sides;
+  size_t candidate_pairs;
+  size_t exact_escalations;
+  size_t regions;
+  size_t cap_regions;
+  size_t rerouted_edges;
+  size_t collapsed_regions;
+  size_t collapsed_holes;
+  /**
+   * Bound, in the maximum norm of the image, on how far snap rounding
+   * moved region boundaries.
+   */
+  double snap_displacement;
+} AxiolidVisibleFaceEvidence;
 
 #define AXIOLID_BOOLEAN_DIFFERENCE 3
 
@@ -759,6 +874,65 @@ AxiolidStatus axiolid_v0_4_subtract_many(AxiolidContextHandle context,
  * Every non-null pointer must be aligned and valid for the documented read or write extent.
  */
 AxiolidStatus axiolid_v0_4_version(AxiolidVersion *out_version);
+
+/**
+ * Find the regions where each face group is frontmost and return an owned
+ * result handle (read it with the `visible_faces_*` functions).
+ *
+ * `meshes` and every `groups` array are borrowed for this call. A null
+ * `region` is no crop. The context's `max_meshes` bounds `mesh_count`.
+ * # Safety
+ * Every non-null pointer must be aligned and valid for the documented read or write extent.
+ */
+AxiolidStatus axiolid_v0_4_visible_faces(AxiolidContextHandle context,
+                                         const AxiolidViewMesh *meshes,
+                                         size_t mesh_count,
+                                         const AxiolidView *view,
+                                         const AxiolidImageBox *region,
+                                         const AxiolidVisibleFaceLimits *limits,
+                                         AxiolidTolerance tolerance_value,
+                                         AxiolidResultHandle *out_result);
+
+/**
+ * Copy the regions, rings, points and triangle indices of a visible-face
+ * result into caller-owned storage.
+ *
+ * `points_xy` holds two `f64` per point (x, then y) and `point_cap` counts
+ * points. Regions keep the outcome's order; a region's rings are its outer
+ * ring then its holes, in order; triangle indices are the region's, ascending.
+ * A capacity below its count returns `BufferTooSmall` and writes nothing at
+ * all.
+ * # Safety
+ * Every non-null pointer must be aligned and valid for the documented read or write extent.
+ */
+AxiolidStatus axiolid_v0_4_visible_faces_copy(AxiolidContextHandle context,
+                                              AxiolidResultHandle result,
+                                              AxiolidVisibleRegion *regions,
+                                              size_t region_cap,
+                                              AxiolidRegionRing *rings,
+                                              size_t ring_cap,
+                                              double *points_xy,
+                                              size_t point_cap,
+                                              uint32_t *triangles,
+                                              size_t triangle_cap);
+
+/**
+ * Query the table sizes of a visible-face result.
+ * # Safety
+ * Every non-null pointer must be aligned and valid for the documented read or write extent.
+ */
+AxiolidStatus axiolid_v0_4_visible_faces_counts(AxiolidContextHandle context,
+                                                AxiolidResultHandle result,
+                                                AxiolidVisibleFaceCounts *out_counts);
+
+/**
+ * Copy the evidence of a visible-face result.
+ * # Safety
+ * Every non-null pointer must be aligned and valid for the documented read or write extent.
+ */
+AxiolidStatus axiolid_v0_4_visible_faces_evidence(AxiolidContextHandle context,
+                                                  AxiolidResultHandle result,
+                                                  AxiolidVisibleFaceEvidence *out);
 
 #ifdef __cplusplus
 }  // extern "C"

@@ -261,6 +261,7 @@ pub unsafe extern "C" fn axiolid_v0_4_result_kind(
                 AxiolidGeometryKind::ExactBrep
             }
             StoredResult::HiddenLines(_) => AxiolidGeometryKind::HiddenLines,
+            StoredResult::VisibleFaces(_) => AxiolidGeometryKind::VisibleFaces,
         };
         // SAFETY: null was rejected; caller provides one writable enum value.
         unsafe { out_kind.write(kind) };

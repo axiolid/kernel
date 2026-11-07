@@ -179,14 +179,14 @@ fn visibility(value: Visibility) -> AxiolidVisibility {
 }
 
 /// A boundary refusal: the status, which mesh it names and why.
-struct Refusal {
+pub(crate) struct Refusal {
     status: AxiolidStatus,
     mesh: Option<u64>,
     message: &'static str,
 }
 
 impl Refusal {
-    const fn invalid(message: &'static str) -> Self {
+    pub(crate) const fn invalid(message: &'static str) -> Self {
         Self {
             status: AxiolidStatus::InvalidArgument,
             mesh: None,
@@ -194,7 +194,7 @@ impl Refusal {
         }
     }
 
-    const fn mesh(status: AxiolidStatus, mesh: u64, message: &'static str) -> Self {
+    pub(crate) const fn mesh(status: AxiolidStatus, mesh: u64, message: &'static str) -> Self {
         Self {
             status,
             mesh: Some(mesh),
@@ -203,7 +203,7 @@ impl Refusal {
     }
 }
 
-fn flag(value: u8, message: &'static str) -> Result<bool, Refusal> {
+pub(crate) fn flag(value: u8, message: &'static str) -> Result<bool, Refusal> {
     match value {
         0 => Ok(false),
         1 => Ok(true),
@@ -211,7 +211,7 @@ fn flag(value: u8, message: &'static str) -> Result<bool, Refusal> {
     }
 }
 
-fn finite(values: &[f64], message: &'static str) -> Result<(), Refusal> {
+pub(crate) fn finite(values: &[f64], message: &'static str) -> Result<(), Refusal> {
     if values.iter().all(|value| value.is_finite()) {
         Ok(())
     } else {
@@ -223,7 +223,7 @@ fn vec3(value: [f64; 3]) -> Vec3 {
     Vec3::new(value[0], value[1], value[2])
 }
 
-fn read_view(view: &AxiolidView) -> Result<View, Refusal> {
+pub(crate) fn read_view(view: &AxiolidView) -> Result<View, Refusal> {
     if view.projection != AXIOLID_PROJECTION_ORTHOGRAPHIC {
         return Err(Refusal::invalid("unknown view projection"));
     }
@@ -269,7 +269,7 @@ fn read_edges(edges: &AxiolidEdgeSelection) -> Result<EdgeSelection, Refusal> {
     )
 }
 
-fn read_region(region: &AxiolidImageBox) -> Result<Aabb2, Refusal> {
+pub(crate) fn read_region(region: &AxiolidImageBox) -> Result<Aabb2, Refusal> {
     finite(&[region.min, region.max].concat(), "region must be finite")?;
     Ok(Aabb2 {
         min: Point2::new(region.min[0], region.min[1]),
@@ -278,15 +278,18 @@ fn read_region(region: &AxiolidImageBox) -> Result<Aabb2, Refusal> {
 }
 
 /// One decoded input mesh before it borrows the context's mesh.
-struct DecodedMesh {
-    id: u64,
-    handle: u64,
-    role: MeshRole,
-    mode: AxiolidGroupMode,
-    groups: Vec<FaceGroup>,
+pub(crate) struct DecodedMesh {
+    pub(crate) id: u64,
+    pub(crate) handle: u64,
+    pub(crate) role: MeshRole,
+    pub(crate) mode: AxiolidGroupMode,
+    pub(crate) groups: Vec<FaceGroup>,
 }
 
-fn read_mesh(entry: &AxiolidViewMesh, context: &Context) -> Result<DecodedMesh, Refusal> {
+pub(crate) fn read_mesh(
+    entry: &AxiolidViewMesh,
+    context: &Context,
+) -> Result<DecodedMesh, Refusal> {
     let role = match entry.role {
         AXIOLID_MESH_ROLE_SOLID => MeshRole::Solid,
         AXIOLID_MESH_ROLE_SHEET => MeshRole::Sheet,
@@ -357,14 +360,15 @@ fn read_mesh(entry: &AxiolidViewMesh, context: &Context) -> Result<DecodedMesh, 
     })
 }
 
-fn record_refusal(
+pub(crate) fn record_refusal(
     mut context: MutexGuard<'_, Context>,
+    operation: AxiolidOperation,
     refusal: Refusal,
     tolerance: AxiolidTolerance,
 ) -> AxiolidStatus {
     context.last_error = Some(ErrorRecord {
         status: refusal.status,
-        operation: AxiolidOperation::MeshHiddenLines,
+        operation,
         tolerance,
         provider: "axiolid-capi".into(),
         message: refusal.message.into(),
@@ -379,8 +383,9 @@ fn record_refusal(
 /// `Unsupported` and an exhausted budget
 /// `LimitExceeded`; anything else, including a provider that failed its
 /// conformance suite, is `OperationFailed`.
-fn record_drawing_error(
+pub(crate) fn record_drawing_error(
     mut context: MutexGuard<'_, Context>,
+    operation: AxiolidOperation,
     error: ApplicationError,
 ) -> AxiolidStatus {
     let (geometry, mesh) = match &*error.source {
@@ -401,7 +406,7 @@ fn record_drawing_error(
     };
     context.last_error = Some(ErrorRecord {
         status,
-        operation: AxiolidOperation::MeshHiddenLines,
+        operation,
         tolerance: AxiolidTolerance {
             linear: error.context.tolerance.linear(),
             angular: error.context.tolerance.angular(),
@@ -411,6 +416,51 @@ fn record_drawing_error(
         mesh,
     });
     status
+}
+
+/// The caller's mesh array, after its byte length is checked.
+///
+/// # Safety
+/// A non-null `meshes` must be aligned and readable for `mesh_count` entries for `'a`.
+pub(crate) unsafe fn mesh_entries<'a>(
+    meshes: *const AxiolidViewMesh,
+    mesh_count: usize,
+) -> Result<&'a [AxiolidViewMesh], AxiolidStatus> {
+    if mesh_count == 0 {
+        return Ok(&[]);
+    }
+    let Some(bytes) = mesh_count.checked_mul(std::mem::size_of::<AxiolidViewMesh>()) else {
+        return Err(AxiolidStatus::LimitExceeded);
+    };
+    if bytes > isize::MAX as usize {
+        return Err(AxiolidStatus::LimitExceeded);
+    }
+    // SAFETY: the length was checked above; the caller's contract covers the rest.
+    Ok(unsafe { std::slice::from_raw_parts(meshes, mesh_count) })
+}
+
+/// Borrow each decoded mesh from the context as a contract input.
+pub(crate) fn mesh_inputs<'a>(
+    state: &'a Context,
+    decoded: &'a [DecodedMesh],
+) -> Result<Vec<HiddenLineMesh<'a>>, Refusal> {
+    let mut inputs = Vec::with_capacity(decoded.len());
+    for entry in decoded {
+        let Some(mesh) = state.meshes.get(entry.handle) else {
+            return Err(Refusal::mesh(
+                AxiolidStatus::InvalidHandle,
+                entry.id,
+                "unknown mesh handle",
+            ));
+        };
+        let input = HiddenLineMesh::new(MeshId(entry.id), entry.role, mesh);
+        inputs.push(match entry.mode {
+            AXIOLID_GROUP_MODE_PER_TRIANGLE => input.with_groups(&entry.groups),
+            AXIOLID_GROUP_MODE_PLANAR => input.with_planar_groups(),
+            _ => input,
+        });
+    }
+    Ok(inputs)
 }
 
 /// Draw the edges of borrowed meshes with hidden-line removal and return an
@@ -452,22 +502,16 @@ pub unsafe extern "C" fn axiolid_v0_4_hidden_lines(
         let (view, edges, limits) = unsafe { (view.read(), edges.read(), limits.read()) };
         // SAFETY: a null region is no crop; otherwise the caller promises readable POD storage.
         let region = unsafe { region.as_ref() };
-        let entries: &[AxiolidViewMesh] = if mesh_count == 0 {
-            &[]
-        } else {
-            let Some(bytes) = mesh_count.checked_mul(std::mem::size_of::<AxiolidViewMesh>()) else {
-                return AxiolidStatus::LimitExceeded;
-            };
-            if bytes > isize::MAX as usize {
-                return AxiolidStatus::LimitExceeded;
-            }
-            // SAFETY: non-zero pointer/length was validated; the caller promises a readable
-            // array of `mesh_count` entries for this call.
-            unsafe { std::slice::from_raw_parts(meshes, mesh_count) }
+        // SAFETY: a non-null pointer was validated for a non-zero count; the caller promises a
+        // readable array of `mesh_count` entries for this call.
+        let entries = match unsafe { mesh_entries(meshes, mesh_count) } {
+            Ok(entries) => entries,
+            Err(status) => return status,
         };
         let Ok(tolerance) = tolerance(tolerance_value) else {
             return record_refusal(
                 context,
+                AxiolidOperation::MeshHiddenLines,
                 Refusal::invalid("tolerance must be finite and non-negative"),
                 tolerance_value,
             );
@@ -484,7 +528,14 @@ pub unsafe extern "C" fn axiolid_v0_4_hidden_lines(
         })();
         let (view, edges, region, decoded) = match decoded {
             Ok(decoded) => decoded,
-            Err(refusal) => return record_refusal(context, refusal, tolerance_value),
+            Err(refusal) => {
+                return record_refusal(
+                    context,
+                    AxiolidOperation::MeshHiddenLines,
+                    refusal,
+                    tolerance_value,
+                )
+            }
         };
         let request_limits = HiddenLineLimits::new(
             limits.max_meshes,
@@ -498,26 +549,17 @@ pub unsafe extern "C" fn axiolid_v0_4_hidden_lines(
         // guard can be moved into the error record and the result table afterwards.
         let outcome = {
             let state: &Context = &context;
-            let mut inputs = Vec::with_capacity(decoded.len());
-            for entry in &decoded {
-                let Some(mesh) = state.meshes.get(entry.handle) else {
+            let inputs = match mesh_inputs(state, &decoded) {
+                Ok(inputs) => inputs,
+                Err(refusal) => {
                     return record_refusal(
                         context,
-                        Refusal::mesh(
-                            AxiolidStatus::InvalidHandle,
-                            entry.id,
-                            "unknown mesh handle",
-                        ),
+                        AxiolidOperation::MeshHiddenLines,
+                        refusal,
                         tolerance_value,
-                    );
-                };
-                let input = HiddenLineMesh::new(MeshId(entry.id), entry.role, mesh);
-                inputs.push(match entry.mode {
-                    AXIOLID_GROUP_MODE_PER_TRIANGLE => input.with_groups(&entry.groups),
-                    AXIOLID_GROUP_MODE_PLANAR => input.with_planar_groups(),
-                    _ => input,
-                });
-            }
+                    )
+                }
+            };
             let mut request = HiddenLineRequest::new(&inputs, view, edges, request_limits);
             if let Some(region) = region {
                 request = request.with_region(region);
@@ -526,7 +568,9 @@ pub unsafe extern "C" fn axiolid_v0_4_hidden_lines(
         };
         let outcome = match outcome {
             Ok(outcome) => outcome,
-            Err(error) => return record_drawing_error(context, error),
+            Err(error) => {
+                return record_drawing_error(context, AxiolidOperation::MeshHiddenLines, error)
+            }
         };
         let Ok(handle) = insert_result(&mut context, StoredResult::HiddenLines(outcome)) else {
             return AxiolidStatus::LimitExceeded;
