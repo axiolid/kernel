@@ -58,10 +58,10 @@
       "description": "General exact B-rep booleans over analytic faces (ADR 0075)",
       "layer": "algorithms",
       "path": "crates/algorithms/construction/brep-boolean",
-      "released": "0.1.14",
+      "released": "0.1.15",
       "released_date": "2026-11-07",
       "role": "algorithm.construction",
-      "version": "0.1.14"
+      "version": "0.1.15"
     },
     "axiolid-capi": {
       "description": "Versioned, memory-safe C ABI for the Axiolid application facade.",

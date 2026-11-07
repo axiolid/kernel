@@ -9,6 +9,8 @@ caret rule for `0.x` versions.
 
 ## [Unreleased]
 
+## [0.1.15] - 2026-11-07
+
 ### Added
 
 - `BooleanError::VertexOffCurve` (#445): a result is checked before it is

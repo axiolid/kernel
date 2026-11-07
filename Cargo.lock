@@ -214,7 +214,7 @@ dependencies = [
 
 [[package]]
 name = "axiolid-brep-boolean"
-version = "0.1.14"
+version = "0.1.15"
 dependencies = [
  "axiolid-brep",
  "axiolid-brep-audit",

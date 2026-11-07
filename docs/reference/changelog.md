@@ -279,6 +279,44 @@ Every publishable crate versions and publishes independently ([ADR 0067](/adr/00
 
 ## axiolid-brep-boolean
 
+### 0.1.15 - 2026-11-07
+
+### Added
+
+- `BooleanError::VertexOffCurve` (#445): a result is checked before it is
+  returned, and refused by name when a vertex lies off the curve of an edge
+  it bounds, or off an edge use's pcurve lifted at its end, by more than
+  `min(eps, rounding floor)` for an exact report, the floor alone at
+  `Tolerance::ZERO`, and `eps` otherwise. The check runs inside the cut, so
+  the finer, extending and rounding-end retries apply to it, and again
+  after the result is moved back from a recentred cut.
+
+### Fixed
+
+- A difference or union far from the origin returned a vertex off its
+  curve with an exact report (#445): a window's crossing 1.2e-6 past a face
+  replaced a feature cut within the parameter-relative dedup slack of
+  `pieces` (5.6e-6 at a parameter of 5.6e6), so the column less a corbel at
+  `(6e5, 5.6e6, 200)` had a vertex 1.2e-6 off its edge, the union was
+  refused as not sewing at `Tolerance::METRE`, and at 1e-7 and
+  `Tolerance::ZERO` the union's volume was 1.8e-8 off. A window end never
+  replaces a feature cut now; the corners are the corbel's own vertices bit
+  for bit and every volume is exact.
+
+- Unions far from the origin sew their kept faces and classify points near
+  a face boundary (#418, #419): operands whose common vertex box lies four
+  or more diagonals from the origin on an axis are recentred on that axis
+  exactly before the cut and the result moved back
+  (`ExactBRep::translated_exactly` proves every coordinate moves with no
+  rounding, else the operands are cut where they are; so are operands
+  whose recentred cut is refused, as planar faces charted in world
+  coordinates, #227, keep parameters as far out as before). The #356 column and corbel at `(6e5, 5.6e6, 200)` was refused in 132
+  of 200 turns (117 "do not sew", 15 "too close to a face boundary to
+  classify"); every turn is now one solid. The report refers to the
+  operands as given; operands nearer the origin are cut bit for bit as
+  before. The next release needs `axiolid-brep` with
+  `translated_exactly`.
+
 ### 0.1.14 - 2026-11-07
 
 ### Fixed

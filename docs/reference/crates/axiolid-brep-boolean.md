@@ -8,7 +8,7 @@ General exact B-rep booleans over analytic faces (ADR 0075).
 
 | | |
 | --- | --- |
-| Latest release | 0.1.14 (2026-11-07) |
+| Latest release | 0.1.15 (2026-11-07) |
 | crates.io | [`axiolid-brep-boolean`](https://crates.io/crates/axiolid-brep-boolean) |
 | Layer | algorithms (`algorithm.construction`) |
 | API documentation | [rustdoc](/api/rustdoc/axiolid_brep_boolean/index.html) · [docs.rs](https://docs.rs/axiolid-brep-boolean) |
@@ -51,32 +51,42 @@ results against them.
 
 ## Changes
 
-Latest release, 0.1.14 (2026-11-07):
+Latest release, 0.1.15 (2026-11-07):
+
+### Added
+
+- `BooleanError::VertexOffCurve` (#445): a result is checked before it is
+  returned, and refused by name when a vertex lies off the curve of an edge
+  it bounds, or off an edge use's pcurve lifted at its end, by more than
+  `min(eps, rounding floor)` for an exact report, the floor alone at
+  `Tolerance::ZERO`, and `eps` otherwise. The check runs inside the cut, so
+  the finer, extending and rounding-end retries apply to it, and again
+  after the result is moved back from a recentred cut.
 
 ### Fixed
 
-- `BooleanReport::rounding_floor` adds the move of an angular residue at
-  the rounding floor (`2^-40` rad, read without a decision) over the
-  operands' extent, `2 sqrt(3)` times it (#421): a consumer widening by the
-  floor now covers the unrecorded angular residues too. The floor is that
-  widening, not the threshold for a decision: a residue between
-  `2^-40` times the extent and the floor may be a reported decision, so a
-  check of `linear() <= rounding_floor()` is about 4.5 times looser than
-  before.
-- A floor-standing door `3e-7` to `9e-7` short of a wall's face under a
-  millimetre tolerance is cut, not refused as "the kept faces did not sew
-  into a valid exact B-rep" (#409). The door's end face is read as the
-  wall's, but its floor edge stops short of the wall's floor edge by more
-  than the splitter's fixed relative slack (`1e-7`), so the wall's floor
-  did not split round the door's footprint. A boolean refused at the
-  caller's tolerance and at the finer one is now cut a last time at the
-  caller's tolerance with such a line edge extended to the boundary it
-  falls short of, as the door past the face already meets it; the move is
-  reported (`MergedPoints`, at least the gap). The extension is tested for
-  a difference at `3e-7`, `7e-7` and `9e-7` short and `3e-7` and `7e-7`
-  past a straight wall, for a union and an intersection at `3e-7` either
-  side, and for a curved wall at `9e-7`. A door `1e-6` or more short is
-  past the finer tolerance (`9.8e-7`) and is cut exactly at it, its skin
-  kept.
+- A difference or union far from the origin returned a vertex off its
+  curve with an exact report (#445): a window's crossing 1.2e-6 past a face
+  replaced a feature cut within the parameter-relative dedup slack of
+  `pieces` (5.6e-6 at a parameter of 5.6e6), so the column less a corbel at
+  `(6e5, 5.6e6, 200)` had a vertex 1.2e-6 off its edge, the union was
+  refused as not sewing at `Tolerance::METRE`, and at 1e-7 and
+  `Tolerance::ZERO` the union's volume was 1.8e-8 off. A window end never
+  replaces a feature cut now; the corners are the corbel's own vertices bit
+  for bit and every volume is exact.
+
+- Unions far from the origin sew their kept faces and classify points near
+  a face boundary (#418, #419): operands whose common vertex box lies four
+  or more diagonals from the origin on an axis are recentred on that axis
+  exactly before the cut and the result moved back
+  (`ExactBRep::translated_exactly` proves every coordinate moves with no
+  rounding, else the operands are cut where they are; so are operands
+  whose recentred cut is refused, as planar faces charted in world
+  coordinates, #227, keep parameters as far out as before). The #356 column and corbel at `(6e5, 5.6e6, 200)` was refused in 132
+  of 200 turns (117 "do not sew", 15 "too close to a face boundary to
+  classify"); every turn is now one solid. The report refers to the
+  operands as given; operands nearer the origin are cut bit for bit as
+  before. The next release needs `axiolid-brep` with
+  `translated_exactly`.
 
 Full history: [`crates/algorithms/construction/brep-boolean/CHANGELOG.md`](https://github.com/axiolid/kernel/blob/main/crates/algorithms/construction/brep-boolean/CHANGELOG.md)

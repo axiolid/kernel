@@ -53,7 +53,7 @@ Every page here is generated from the crate itself: its manifest, its crate docu
 | --- | --- | --- | --- |
 | [`axiolid-arrangement`](./crates/axiolid-arrangement) | `algorithm.planar` | 0.3.3 | Editable planar subdivision with persistent half-edge topology |
 | [`axiolid-brep-audit`](./crates/axiolid-brep-audit) | `algorithm.repair` | 0.3.4 | Geometric consistency auditing for exact boundary representations |
-| [`axiolid-brep-boolean`](./crates/axiolid-brep-boolean) | `algorithm.construction` | 0.1.14 | General exact B-rep booleans over analytic faces (ADR 0075) |
+| [`axiolid-brep-boolean`](./crates/axiolid-brep-boolean) | `algorithm.construction` | 0.1.15 | General exact B-rep booleans over analytic faces (ADR 0075) |
 | [`axiolid-collide`](./crates/axiolid-collide) | `algorithm.query` | 0.3.3 | Convex collision queries: separating axis, overlap, and separation distance |
 | [`axiolid-constraint2d`](./crates/axiolid-constraint2d) | `algorithm.planar` | 0.1.3 | Apollonius and tangent-circle constructions: circles tangent to three points, lines or circles in any combination |
 | [`axiolid-construct`](./crates/axiolid-construct) | `algorithm.construction` | 0.3.29 | Solid generation: profiles, lofts, sweeps, revolutions and half-space clipping |
