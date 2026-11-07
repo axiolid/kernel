@@ -102,18 +102,49 @@
 //! [`MITRED_SECTIONS`].
 
 mod fold;
+mod mitre;
 
 use axiolid_contracts::GeomResult;
 use axiolid_core::{Point2, Point3, Scalar, Vec3};
 use axiolid_model::{SeamSide, StationFrame, StationOffsets, StationOrientation};
-use axiolid_reference::station::{FrameLaw, FrameLawBounds, FrameReading};
+use axiolid_reference::station::{FrameLaw, FrameLawBounds, FrameReading, Mitre};
 
+use self::mitre::MitreInputs;
 use super::{interval, lerp, lerp_offsets, oriented, place_turned, seam_slack, Run};
 
 /// Why a run crossing a mitre is not bounded.
 pub(crate) const MITRED_SECTIONS: &str =
     "stationed sections: a cell beside a mitred seam on a curved piece, or with a section that \
      changes across it: the mitre's cut of the surface is not bounded";
+
+/// Why a cell beside a mitre is not bounded yet (#335): a vertex does not
+/// cross the mitre plane transversally over the cell, so the plane's cut
+/// of the surface is not bounded. Refinement splits such a cell.
+pub(crate) const MITRE_NOT_TRANSVERSAL: &str =
+    "stationed sections: a cell beside a mitre does not advance across the mitre plane fast \
+     enough to bound the plane's cut (a corner too sharp for the piece's turning over the \
+     cell, or a section at the cell's far end on the plane)";
+
+/// Why a cell between two mitres is not bounded yet (#335): the two
+/// planes' cuts are not bounded together. Refinement splits such a cell.
+pub(crate) const MITRE_ON_BOTH_ENDS: &str =
+    "stationed sections: a cell between two mitres, on a curved piece or with a changing \
+     section, is too short to split: the two planes' cuts are not bounded together";
+
+/// Whether refinement may split a cell unbounded for `reason`.
+pub(super) fn refinable(reason: &str) -> bool {
+    reason == MITRE_NOT_TRANSVERSAL || reason == MITRE_ON_BOTH_ENDS
+}
+
+/// A cell's certified bound (#335).
+#[derive(Debug, Clone, Copy)]
+pub(super) struct CellBound {
+    pub(super) value: Scalar,
+    /// What no splitting removes: the largest gap between the mesh's mitre
+    /// row and the exact section's projection onto the plane, zero away
+    /// from a mitre.
+    pub(super) floor: Scalar,
+}
 
 /// Why a run along a basis without a certified frame law is not bounded.
 pub(crate) const UNCERTIFIED_FRAMES: &str =
@@ -294,8 +325,12 @@ impl<'r, 'g> SectionLaw<'r, 'g> {
             .any(|seam| (seam - s).abs() <= seam_slack(s))
     }
 
-    fn is_mitre(&self, s: Scalar) -> bool {
-        self.run.mitres.iter().any(|(knot, _)| *knot == s)
+    fn mitre_at(&self, s: Scalar) -> Option<&Mitre> {
+        self.run
+            .mitres
+            .iter()
+            .find(|(knot, _)| *knot == s)
+            .map(|(_, mitre)| mitre)
     }
 
     /// A certified bound on the distance from the exact surface between
@@ -307,7 +342,7 @@ impl<'r, 'g> SectionLaw<'r, 'g> {
         hi: Scalar,
         at_lo: &[Point3],
         at_hi: &[Point3],
-    ) -> GeomResult<Result<Scalar, &'static str>> {
+    ) -> GeomResult<Result<CellBound, &'static str>> {
         let Some(reading) = self.reading else {
             return Ok(Err(UNCERTIFIED_FRAMES));
         };
@@ -318,7 +353,8 @@ impl<'r, 'g> SectionLaw<'r, 'g> {
             ((lo - d0) / delta).clamp(0.0, 1.0),
             ((hi - d0) / delta).clamp(0.0, 1.0),
         );
-        let mitred = self.is_mitre(lo) || self.is_mitre(hi);
+        let (mitre_lo, mitre_hi) = (self.mitre_at(lo), self.mitre_at(hi));
+        let mitred = mitre_lo.is_some() || mitre_hi.is_some();
         // The breakpoints strictly inside the cell.
         let inside: Vec<Scalar> = self
             .seams
@@ -458,6 +494,26 @@ impl<'r, 'g> SectionLaw<'r, 'g> {
                 corner[k] = corner[k].max((exact[k] - on_chord).length());
             }
         }
+        if mitred {
+            // Only a straight piece with a constant section is bounded so
+            // far; the early returns above refuse the rest.
+            let eta: Vec<Scalar> = (0..count)
+                .map(|k| chord[k] + corner[k] + slide[k])
+                .collect();
+            let inputs = MitreInputs {
+                lo,
+                hi,
+                at_lo,
+                at_hi,
+                eta: &eta,
+                slide: &slide,
+                first: &pieces[0].1,
+                last: &pieces[pieces.len() - 1].1,
+                reading,
+                long: [o0.longitudinal, o1.longitudinal],
+            };
+            return self.straight_mitre_cell(&inputs, mitre_lo, mitre_hi);
+        }
         let mut worst: Scalar = 0.0;
         for &(k, l) in self.edges {
             let along = (chord[k] + corner[k]).max(chord[l] + corner[l]);
@@ -467,7 +523,10 @@ impl<'r, 'g> SectionLaw<'r, 'g> {
         }
         let worst = worst * (1.0 + 1e-12);
         Ok(if worst.is_finite() {
-            Ok(worst)
+            Ok(CellBound {
+                value: worst,
+                floor: 0.0,
+            })
         } else {
             Err(UNCERTIFIED_FRAMES)
         })

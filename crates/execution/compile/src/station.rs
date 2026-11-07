@@ -950,6 +950,10 @@ where
 {
     let start = eval(a, Reading::Outgoing)?.ok_or_else(cut_by_mitre)?;
     let end = eval(b, Reading::Incoming)?.ok_or_else(cut_by_mitre)?;
+    // The mesh's rows at the ends, which `accept` bounds the cells by: a
+    // mitre's knot is the mitred row there, not the plain section (#335).
+    let start_row = eval(a, Reading::Placed)?.ok_or_else(cut_by_mitre)?;
+    let end_row = eval(b, Reading::Placed)?.ok_or_else(cut_by_mitre)?;
     // Depth-first, left half first, so distances come out increasing.
     let mut stack = vec![(a, b, start, end, 0u32)];
     while let Some((lo, hi, at_lo, at_hi, depth)) = stack.pop() {
@@ -958,7 +962,9 @@ where
         let straight = match &at_mid {
             None => true,
             Some(at_mid) => {
-                passes(&at_lo, &at_hi, at_mid, edges, chord) && accept(lo, hi, &at_lo, &at_hi)?
+                let row_lo = if lo == a { &start_row } else { &at_lo };
+                let row_hi = if hi == b { &end_row } else { &at_hi };
+                passes(&at_lo, &at_hi, at_mid, edges, chord) && accept(lo, hi, row_lo, row_hi)?
             }
         };
         match at_mid {
@@ -1479,9 +1485,12 @@ fn within(
     if !bounded {
         return Ok(true);
     }
-    Ok(law
-        .cell(lo, hi, at_lo, at_hi)?
-        .map_or(true, |bound| bound <= budget))
+    Ok(match law.cell(lo, hi, at_lo, at_hi)? {
+        // Past the budget only if splitting can help: it cannot remove the
+        // floor.
+        Ok(cell) => cell.value <= budget || cell.floor > budget,
+        Err(reason) => !bound::refinable(reason),
+    })
 }
 
 /// A run's deviation (#247): `fixed` (the profile's share) plus the worst
@@ -1505,7 +1514,7 @@ fn settle(
     let mut cells: Scalar = 0.0;
     for (pair, points) in samples.windows(2).zip(rows.windows(2)) {
         match law.cell(pair[0], pair[1], &points[0], &points[1])? {
-            Ok(value) => cells = cells.max(value),
+            Ok(cell) => cells = cells.max(cell.value),
             Err(reason) => return Ok(DeviationBound::Unbounded(reason)),
         }
     }

@@ -127,7 +127,7 @@ MUTANTS = [
      '                    + 0.0 * (xr * lt[0] + yr * ut[0]);', [BOUND]),
     # --- refinement and the profile's share ----------------------------------
     ('refinement ignores the bound', SC,
-     '                passes(&at_lo, &at_hi, at_mid, edges, chord) && accept(lo, hi, &at_lo, &at_hi)?',
+     '                passes(&at_lo, &at_hi, at_mid, edges, chord) && accept(lo, hi, row_lo, row_hi)?',
      '                passes(&at_lo, &at_hi, at_mid, edges, chord)', [BOUND]),
     ('different curved profiles bounded', SC,
      '    Ok(if worst == 0.0 || one {',
