@@ -4620,6 +4620,10 @@ Every publishable crate versions and publishes independently ([ADR 0067](/adr/00
   with straight edges nor a warped face without a surface`); it was refused
   at tessellation before.
 
+- `deviation::MESH_TO_EXACT`: the detail of the other direction of a measured
+  boolean, how far any point of the mesh lies from the exact compiler's
+  result (#329).
+
 ### Changed
 
 - A flush slab whose openings were round-tripped through world coordinates
@@ -4644,6 +4648,24 @@ Every publishable crate versions and publishes independently ([ADR 0067](/adr/00
   `axiolid-brep-boolean` with `BooleanError::VertexOffCurve`.
 
 ### Fixed
+
+- A measured boolean whose exact result is all planar reports the other
+  direction too (#329), as its own `DeviationPath::Boolean` contribution
+  under `MESH_TO_EXACT`, widened like the boolean's own bound by the
+  flattening, the readings and the rounding floor: the mesh's triangles
+  searched against a welded, outward-oriented triangulation of the exact
+  faces. Material the mesh has and the exact result lacks, connected to the
+  body, now shows: an uncut full-width clip reports 4.76 where it reported
+  0.175, and the strip of #325 at most 1.2 times 238.549 mm where it
+  reported 175 mm. Consumers that read "the" boolean contribution now see
+  one more. A skin authored within the tolerance that the exact compiler
+  read away shows too, and may fail `meets_requested`. Curved results keep
+  the one-sided bound (#348). The coordinates are taken relative to the
+  result's own extent, so a wall far from the origin is bounded as tightly
+  as one at it. The report of the two-door wall takes 1.4 to 1.6 times as
+  long in the release bench (492 ms on main; 644 ms and 783 ms in two runs
+  with the change), and a three-opening wall four million metres from the
+  origin takes 6.8 s in a debug test, forward and reverse.
 
 - A half-space clip is cut in its subject's frame, so a wall turned by a
   placement no longer comes back as a `Solid` with a lid thinner than
