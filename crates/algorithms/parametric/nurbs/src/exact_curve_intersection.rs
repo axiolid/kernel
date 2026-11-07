@@ -60,6 +60,11 @@ pub enum ExactCurveRefusal {
     /// part of it is on the modelled nappe: the overlap is a ray, which
     /// is neither a finite point set nor the whole curve.
     PartialOverlap,
+    /// The roots along a traced section could not all be isolated with
+    /// their multiplicity: a contact of order above eight, one rounding
+    /// hides, or the work budget ran out. Unlike `Degenerate`, this says
+    /// nothing of whether the curve meets the surface there.
+    Undecided,
 }
 
 /// Where on the first curve an intersection lies, exactly.

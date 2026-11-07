@@ -199,7 +199,9 @@ pub fn section_curve_curve_intersection2(
         }
         None => return Err(ExactCurveRefusal::UnsupportedCurve),
     };
-    let roots = crate::implicit_ops::roots_along(&traced, &other);
+    let roots =
+        crate::implicit_ops::roots_along(&traced, &other, traced.closure(false, false).is_some())
+            .map_err(|_| ExactCurveRefusal::Undecided)?;
     let mut hits = Vec::new();
     for (t, multiplicity) in roots {
         let Some(p) = traced.point(t) else { continue };

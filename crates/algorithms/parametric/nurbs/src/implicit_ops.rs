@@ -11,20 +11,21 @@
 //! implementation for all of them.
 
 use axiolid_core::{Interval, Point2, Scalar, Vec2};
-use axiolid_curve::implicit::{bound_simple, partial, Cell, Range};
+use axiolid_curve::implicit::Cell;
 use axiolid_curve::{
-    Axis, Basis, Carrier, Curve3, Field2, ImplicitCell, ImplicitCurve2, ImplicitSection3,
-    SeriesField2, Trig2,
+    Axis, Basis, Carrier, Curve3, Field2, ImplicitCurve2, ImplicitSection3, SeriesField2, Trig2,
 };
 use axiolid_surface::Surface;
 use core::f64::consts::{PI, TAU};
 
+use crate::curve_tower::CurveTower;
 use crate::exact_curve_intersection::{
     ExactCurveHit, ExactCurveIntersection, ExactCurveParameter, ExactCurveRefusal, Isolated,
 };
 use crate::exact_surface_intersection::ExactIntersectionRefusal;
 use crate::field::{carrier_of, section_field};
 use crate::implicit_trace::Periodic;
+use crate::root_chain::{isolate, Budget, End, RootRefusal, Zone, ROOT_BUDGET};
 
 /// Every component of the section of `surface` by `other` in a window of
 /// `surface`'s parameters, as curves in those parameters.
@@ -298,16 +299,20 @@ pub fn implicit_view(curve: &Curve3, span: Interval) -> Option<ImplicitSection3>
 ///
 /// The curve is read as an implicit curve on its carrier (over `span`, or
 /// its whole traced extent for an [`ImplicitSection3`]); the surface's
-/// equation on that carrier is a second field, and its roots along each
-/// cell are isolated with interval bounds over boxes certain to hold the
-/// curve. A root where the second field changes sign is a crossing; one
-/// where it only touches zero is reported with multiplicity 2; a curve on
-/// which the second field vanishes identically is `Contained`.
+/// equation on that carrier is a second field, and its roots along the
+/// curve are isolated with interval bounds by a Rolle chain on the
+/// derivatives along the curve (ADR 0077). A root where the second field
+/// changes sign is a crossing (multiplicity 1); a root of higher
+/// multiplicity, up to eight, is a touch or a flat crossing and reports its
+/// order; a curve on which the second field vanishes identically is
+/// `Contained`.
 ///
 /// # Errors
 ///
 /// `UnsupportedCurve` for a curve that is not a section family or whose
-/// trace was refused, `UnsupportedSurface` for a B-spline surface.
+/// trace was refused, `UnsupportedSurface` for a B-spline surface,
+/// `Undecided` where the roots could not all be isolated with their
+/// multiplicity.
 pub fn section_curve_surface_intersection(
     curve: &Curve3,
     span: Interval,
@@ -329,9 +334,9 @@ pub fn section_curve_surface_intersection(
     if samples.len() == 33 && samples.iter().all(|h| h.abs() <= scale) {
         return Ok(ExactCurveIntersection::Contained);
     }
-    let mut roots = roots_along(own, &other);
-    roots.sort_by(|a, b| a.0.total_cmp(&b.0));
-    roots.dedup_by(|a, b| (a.0 - b.0).abs() <= 1e-9);
+    let (pu, pv) = view.carrier.periodic();
+    let closed = own.closure(pu, pv).is_some();
+    let roots = roots_along(own, &other, closed).map_err(|_| ExactCurveRefusal::Undecided)?;
     let mut hits = Vec::new();
     for (t, multiplicity) in roots {
         let Some(p) = own.point(t) else { continue };
@@ -362,49 +367,148 @@ pub fn section_curve_surface_intersection(
     Ok(ExactCurveIntersection::Points(hits))
 }
 
-/// The roots of `field` along an implicit curve, by the curve's parameter,
-/// with multiplicity 1 where the field changes sign and 2 where it only
-/// touches zero. Each cell's stretch is bounded by a box certain to hold it
-/// (the solved parameter moves at most `max |F_free| / min |F_solved|` per
-/// unit of the free one), and the field's roots are isolated with interval
-/// bounds over those boxes.
-pub(crate) fn roots_along(own: &ImplicitCurve2, other: &Field2) -> Vec<(Scalar, usize)> {
-    let d_u = partial(&own.field, true);
-    let d_v = partial(&own.field, false);
-    let h_u = partial(other, true);
-    let h_v = partial(other, false);
-    let d2 = [
-        partial(&d_u, true),
-        partial(&d_u, false),
-        partial(&d_v, false),
-    ];
-    let h2 = [
-        partial(&h_u, true),
-        partial(&h_u, false),
-        partial(&h_v, false),
-    ];
-    let mut roots: Vec<(Scalar, usize)> = Vec::new();
-    for (index, cell) in own.cells.iter().enumerate() {
-        let job = CellRoots {
-            curve: own,
-            cell,
-            other,
-            d_u: &d_u,
-            d_v: &d_v,
-            h_u: &h_u,
-            h_v: &h_v,
-            d2: &d2,
-            h2: &h2,
-        };
-        let mut found = Vec::new();
-        job.roots(0.0, 1.0, 0, &mut found);
-        for (s, m) in found {
-            roots.push((index as Scalar + s, m));
+/// The roots of `other` along an implicit curve, by the curve's parameter,
+/// each with its multiplicity, ascending: 1 where the field changes sign,
+/// more where it touches zero or crosses it with a flat contact.
+///
+/// The stretches of consecutive cells are isolated by a Rolle chain on the
+/// intrinsic derivatives along the curve ([`crate::root_chain`],
+/// [`crate::curve_tower`]); a bridge cell is scanned for sign changes (its
+/// roots are not certified). A `closed` curve's start and end are one
+/// point, so a root there is reported once.
+///
+/// # Errors
+///
+/// The refusal of the isolation: a contact above order eight, one hidden by
+/// rounding, or an exhausted work budget.
+pub(crate) fn roots_along(
+    own: &ImplicitCurve2,
+    other: &Field2,
+    closed: bool,
+) -> Result<Vec<(Scalar, usize)>, RootRefusal> {
+    roots_along_within(own, other, closed, ROOT_BUDGET)
+}
+
+/// [`roots_along`] within a work budget of `budget` nodes.
+pub(crate) fn roots_along_within(
+    own: &ImplicitCurve2,
+    other: &Field2,
+    closed: bool,
+    budget: usize,
+) -> Result<Vec<(Scalar, usize)>, RootRefusal> {
+    let tower = CurveTower::new(own, other);
+    let mut budget = Budget::new(budget);
+    let cells = own.cells.len();
+    let mut zones: Vec<Zone> = Vec::new();
+    let mut index = 0;
+    while index < cells {
+        if own.cells[index].bridge.is_some() {
+            for (t, m) in scan_bridge(own, other, index) {
+                zones.push(Zone {
+                    lo: t,
+                    hi: t,
+                    at: t,
+                    m,
+                    end: None,
+                });
+            }
+            index += 1;
+            continue;
+        }
+        let start = index;
+        while index < cells && own.cells[index].bridge.is_none() {
+            index += 1;
+        }
+        let ends = [
+            if start == 0 { End::Curve } else { End::Inner },
+            if index == cells {
+                End::Curve
+            } else {
+                End::Inner
+            },
+        ];
+        zones.extend(isolate(
+            &tower,
+            start as Scalar,
+            index as Scalar,
+            ends,
+            &mut budget,
+        )?);
+    }
+    zones.sort_by(|a, b| a.at.total_cmp(&b.at));
+    // A loop's seam is one point, met at both ends of the parameter.
+    if closed && zones.len() > 1 {
+        let (first, last) = (zones[0], zones[zones.len() - 1]);
+        if first.lo == 0.0 && last.hi == cells as Scalar {
+            zones.pop();
+            zones[0].m = first.m.max(last.m);
         }
     }
-    roots.sort_by(|a, b| a.0.total_cmp(&b.0));
+    let roots: Vec<(Scalar, usize)> = zones.iter().map(|z| (z.at, z.m)).collect();
+    debug_assert!(roots.windows(2).all(|w| w[0].0 < w[1].0));
+    Ok(roots)
+}
+
+/// The sign changes of `other` along a bridge cell, by 64 samples. A
+/// bridge into a crossing is too short and too close to the singular point
+/// for bounds, so its roots are scanned and not certified.
+// TODO(#441): certify the roots along bridge cells.
+fn scan_bridge(own: &ImplicitCurve2, other: &Field2, index: usize) -> Vec<(Scalar, usize)> {
+    let cell = &own.cells[index];
+    let h = |s: Scalar| -> Option<Scalar> {
+        let free = cell.from + (cell.to - cell.from) * s;
+        let solved = own.solve_cell(cell, free)?;
+        let p = match cell.axis {
+            Axis::U => Point2::new(free, solved),
+            Axis::V => Point2::new(solved, free),
+        };
+        Some(other.value(p))
+    };
+    let mut out = Vec::new();
+    let n = 64;
+    let at = |k: usize| k as Scalar / n as Scalar;
+    let mut last = h(at(0));
+    for k in 1..=n {
+        let now = h(at(k));
+        if let (Some(a), Some(b)) = (last, now) {
+            if a == 0.0 && k == 1 {
+                out.push((at(0), 1));
+            } else if (a < 0.0) != (b < 0.0) && b != 0.0 {
+                out.push((bisect_bridge(&h, at(k - 1), at(k), a), 1));
+            } else if b == 0.0 {
+                out.push((at(k), 1));
+            }
+        }
+        last = now;
+    }
+    let mut roots: Vec<(Scalar, usize)> = out
+        .into_iter()
+        .map(|(s, m)| (index as Scalar + s, m))
+        .collect();
     roots.dedup_by(|a, b| (a.0 - b.0).abs() <= 1e-9);
     roots
+}
+
+fn bisect_bridge(
+    h: &dyn Fn(Scalar) -> Option<Scalar>,
+    mut s0: Scalar,
+    mut s1: Scalar,
+    a: Scalar,
+) -> Scalar {
+    let negative = a < 0.0;
+    for _ in 0..100 {
+        let m = 0.5 * (s0 + s1);
+        if m <= s0 || m >= s1 {
+            break;
+        }
+        match h(m) {
+            Some(0.0) => return m,
+            Some(v) if (v < 0.0) == negative => s0 = m,
+            Some(_) => s1 = m,
+            None => break,
+        }
+    }
+    0.5 * (s0 + s1)
 }
 
 /// `x` moved by whole turns into `span` when that is possible.
@@ -417,347 +521,6 @@ fn nearest_turn(x: Scalar, span: Interval) -> Scalar {
         }
     }
     x
-}
-
-fn interval_add(a: Range, b: Range) -> Range {
-    Range {
-        lo: a.lo + b.lo,
-        hi: a.hi + b.hi,
-    }
-}
-
-fn interval_mul(a: Range, b: Range) -> Range {
-    let p = [a.lo * b.lo, a.lo * b.hi, a.hi * b.lo, a.hi * b.hi];
-    Range {
-        lo: p.iter().copied().fold(Scalar::INFINITY, Scalar::min),
-        hi: p.iter().copied().fold(Scalar::NEG_INFINITY, Scalar::max),
-    }
-}
-
-fn interval_scale(a: Range, c: Scalar) -> Range {
-    Range::new(a.lo * c, a.hi * c)
-}
-
-/// The roots of a second field along one cell of an implicit curve.
-struct CellRoots<'a> {
-    curve: &'a ImplicitCurve2,
-    cell: &'a ImplicitCell,
-    other: &'a Field2,
-    d_u: &'a Field2,
-    d_v: &'a Field2,
-    h_u: &'a Field2,
-    h_v: &'a Field2,
-    /// Second partials `[uu, uv, vv]` of the curve's field and of the second
-    /// field, for the Rolle certificate.
-    d2: &'a [Field2; 3],
-    h2: &'a [Field2; 3],
-}
-
-impl CellRoots<'_> {
-    fn free(&self, s: Scalar) -> Scalar {
-        self.cell.from + (self.cell.to - self.cell.from) * s
-    }
-
-    fn place(&self, free: Scalar, solved: Scalar) -> Point2 {
-        match self.cell.axis {
-            Axis::U => Point2::new(free, solved),
-            Axis::V => Point2::new(solved, free),
-        }
-    }
-
-    fn solved(&self, free: Scalar) -> Option<Scalar> {
-        if self.cell.bridge.is_some() {
-            return self.curve.solve_cell(self.cell, free);
-        }
-        let one = ImplicitCurve2 {
-            field: self.curve.field.clone(),
-            cells: vec![ImplicitCell {
-                from: free,
-                to: free,
-                ..*self.cell
-            }],
-        };
-        let p = one.point(0.0)?;
-        Some(match self.cell.axis {
-            Axis::U => p.y,
-            Axis::V => p.x,
-        })
-    }
-
-    fn h(&self, s: Scalar) -> Option<Scalar> {
-        let free = self.free(s);
-        Some(self.other.value(self.place(free, self.solved(free)?)))
-    }
-
-    /// A box certain to hold the curve for `s` in `[s0, s1]`, and bounds of
-    /// the solved parameter's slope there.
-    fn hull(&self, s0: Scalar, s1: Scalar) -> Option<(Cell, Range)> {
-        let (f0, f1) = (self.free(s0), self.free(s1));
-        let (f_lo, f_hi) = (f0.min(f1), f0.max(f1));
-        let w0 = self.solved(f0)?;
-        let make = |w_lo: Scalar, w_hi: Scalar| {
-            let (a, b) = (self.place(f_lo, w_lo), self.place(f_hi, w_hi));
-            Cell {
-                lo: a.min(b),
-                hi: a.max(b),
-            }
-        };
-        let (d_free, d_solved) = match self.cell.axis {
-            Axis::U => (self.d_u, self.d_v),
-            Axis::V => (self.d_v, self.d_u),
-        };
-        let whole = make(self.cell.low, self.cell.high);
-        let free = bound_simple(d_free, &whole);
-        let solved = bound_simple(d_solved, &whole);
-        if solved.straddles_zero() {
-            return None;
-        }
-        let floor = solved.lo.abs().min(solved.hi.abs());
-        let big = free.lo.abs().max(free.hi.abs());
-        let reach = big / floor * (f_hi - f_lo);
-        let hull = make(
-            (w0 - reach).max(self.cell.low),
-            (w0 + reach).min(self.cell.high),
-        );
-        // Slope bound of the solved parameter over the hull: -F_free / F_solved.
-        let free = bound_simple(d_free, &hull);
-        let solved = bound_simple(d_solved, &hull);
-        let q = [
-            -free.lo / solved.lo,
-            -free.lo / solved.hi,
-            -free.hi / solved.lo,
-            -free.hi / solved.hi,
-        ];
-        let slope = Range {
-            lo: q.iter().copied().fold(Scalar::INFINITY, Scalar::min),
-            hi: q.iter().copied().fold(Scalar::NEG_INFINITY, Scalar::max),
-        };
-        Some((hull, slope))
-    }
-
-    fn roots(&self, s0: Scalar, s1: Scalar, depth: u32, out: &mut Vec<(Scalar, usize)>) {
-        // A bridge into a crossing is too short and too close to the
-        // singular point for bounds: its sign changes are scanned.
-        if self.cell.bridge.is_some() {
-            let n = 64;
-            let at = |k: usize| s0 + (s1 - s0) * k as Scalar / n as Scalar;
-            let mut last = self.h(at(0));
-            for k in 1..=n {
-                let now = self.h(at(k));
-                if let (Some(a), Some(b)) = (last, now) {
-                    if a == 0.0 && k == 1 {
-                        out.push((at(0), 1));
-                    } else if (a < 0.0) != (b < 0.0) && b != 0.0 {
-                        out.push((self.bisect(at(k - 1), at(k), a), 1));
-                    } else if b == 0.0 {
-                        out.push((at(k), 1));
-                    }
-                }
-                last = now;
-            }
-            return;
-        }
-        let Some((hull, slope)) = self.hull(s0, s1) else {
-            return;
-        };
-        if !bound_simple(self.other, &hull).straddles_zero() {
-            return;
-        }
-        let (Some(a), Some(b)) = (self.h(s0), self.h(s1)) else {
-            return;
-        };
-        // d h / d free = H_free + H_solved * slope.
-        let (h_free, h_solved) = match self.cell.axis {
-            Axis::U => (self.h_u, self.h_v),
-            Axis::V => (self.h_v, self.h_u),
-        };
-        let hf = bound_simple(h_free, &hull);
-        let hs = bound_simple(h_solved, &hull);
-        let p = [
-            hs.lo * slope.lo,
-            hs.lo * slope.hi,
-            hs.hi * slope.lo,
-            hs.hi * slope.hi,
-        ];
-        let lo = hf.lo + p.iter().copied().fold(Scalar::INFINITY, Scalar::min);
-        let hi = hf.hi + p.iter().copied().fold(Scalar::NEG_INFINITY, Scalar::max);
-        let monotone = lo > 0.0 || hi < 0.0;
-        if monotone {
-            if a == 0.0 {
-                out.push((s0, 1));
-            } else if (a < 0.0) != (b < 0.0) {
-                out.push((self.bisect(s0, s1, a), 1));
-            }
-            return;
-        }
-        if self.rolle(s0, s1, &hull, slope, a, b, out) {
-            return;
-        }
-        if depth >= 44 || s1 - s0 <= 1e-13 {
-            if (a < 0.0) != (b < 0.0) {
-                out.push((self.bisect(s0, s1, a), 1));
-            } else {
-                // Touching: the second field reaches zero without crossing.
-                let scale = 1e-9 * self.other.magnitude().max(1.0);
-                if a.abs().min(b.abs()) <= scale {
-                    out.push((0.5 * (s0 + s1), 2));
-                }
-            }
-            return;
-        }
-        let m = 0.5 * (s0 + s1);
-        self.roots(s0, m, depth + 1, out);
-        self.roots(m, s1, depth + 1, out);
-    }
-
-    /// The second derivative of `h` along the free parameter, enclosed over
-    /// `hull`, given the solved parameter's slope bounds there:
-    /// `h'' = H_ff + 2 H_fw w' + H_ww w'^2 + H_w w''` with
-    /// `w'' = -(F_ff + 2 F_fw w' + F_ww w'^2) / F_w`.
-    fn second_derivative(&self, hull: &Cell, slope: Range) -> Range {
-        // Second partials as (free-free, free-solved, solved-solved).
-        let (d_solved, h_solved) = match self.cell.axis {
-            Axis::U => (self.d_v, self.h_v),
-            Axis::V => (self.d_u, self.h_u),
-        };
-        let quad = |t: &[Field2; 3]| {
-            let [ff, fw, ww] = match self.cell.axis {
-                Axis::U => [&t[0], &t[1], &t[2]],
-                Axis::V => [&t[2], &t[1], &t[0]],
-            }
-            .map(|f| bound_simple(f, hull));
-            let w = slope;
-            let terms = [
-                ff,
-                interval_scale(interval_mul(fw, w), 2.0),
-                interval_mul(ww, interval_mul(w, w)),
-            ];
-            terms.into_iter().fold(Range::point(0.0), interval_add)
-        };
-        let f_solved = bound_simple(d_solved, hull);
-        let h_w = bound_simple(h_solved, hull);
-        let numerator = quad(self.d2);
-        // `hull` was built with the solved partial away from zero.
-        let inverse = Range::new(1.0 / f_solved.lo, 1.0 / f_solved.hi);
-        let w2 = interval_scale(interval_mul(numerator, inverse), -1.0);
-        let direct = quad(self.h2);
-        let carried = interval_mul(h_w, w2);
-        let total = interval_add(direct, carried);
-        // The sums above are rounded: widen by the size of the terms.
-        let size = direct.lo.abs().max(direct.hi.abs()) + carried.lo.abs().max(carried.hi.abs());
-        let by = 16.0 * Scalar::EPSILON * size;
-        Range {
-            lo: total.lo - by,
-            hi: total.hi + by,
-        }
-    }
-
-    /// `d h / d free` at `s`, along the curve.
-    fn slope_at(&self, s: Scalar) -> Option<Scalar> {
-        let free = self.free(s);
-        let p = self.place(free, self.solved(free)?);
-        let (d_free, d_solved, h_free, h_solved) = match self.cell.axis {
-            Axis::U => (self.d_u, self.d_v, self.h_u, self.h_v),
-            Axis::V => (self.d_v, self.d_u, self.h_v, self.h_u),
-        };
-        let w = -d_free.value(p) / d_solved.value(p);
-        Some(h_free.value(p) + h_solved.value(p) * w)
-    }
-
-    /// A Rolle certificate for a stretch whose slope of `h` straddles zero.
-    /// When the second derivative of `h` has one sign over the hull, `h`
-    /// has at most one critical point there and so at most two roots
-    /// counting multiplicity: ends of opposite sign hold exactly one simple
-    /// root; ends of one sign hold none, two simple roots on either side of
-    /// the critical point, or a root of multiplicity 2 at it, decided by an
-    /// enclosure of `h` there. Returns whether the stretch is settled; if
-    /// not, the caller bisects.
-    #[allow(clippy::too_many_arguments)]
-    fn rolle(
-        &self,
-        s0: Scalar,
-        s1: Scalar,
-        hull: &Cell,
-        slope: Range,
-        a: Scalar,
-        b: Scalar,
-        out: &mut Vec<(Scalar, usize)>,
-    ) -> bool {
-        let second = self.second_derivative(hull, slope);
-        if !second.lo.is_finite() || !second.hi.is_finite() || second.straddles_zero() {
-            return false;
-        }
-        if a == 0.0 || b == 0.0 {
-            return false;
-        }
-        if (a < 0.0) != (b < 0.0) {
-            out.push((self.bisect(s0, s1, a), 1));
-            return true;
-        }
-        let (Some(da), Some(db)) = (self.slope_at(s0), self.slope_at(s1)) else {
-            return false;
-        };
-        if da != 0.0 && db != 0.0 && (da < 0.0) == (db < 0.0) {
-            // `h` is monotone across the stretch and its ends agree: no root.
-            return true;
-        }
-        // The critical point, by the sign of the slope.
-        let (mut lo, mut hi) = (s0, s1);
-        let rising = da > 0.0 || (da == 0.0 && db < 0.0);
-        for _ in 0..100 {
-            let m = 0.5 * (lo + hi);
-            if m <= lo || m >= hi {
-                break;
-            }
-            let Some(d) = self.slope_at(m) else {
-                return false;
-            };
-            if (d > 0.0) == rising {
-                lo = m;
-            } else {
-                hi = m;
-            }
-        }
-        let sc = 0.5 * (lo + hi);
-        let free = self.free(sc);
-        let Some(solved) = self.solved(free) else {
-            return false;
-        };
-        let at = self.place(free, solved);
-        let enclosure = bound_simple(self.other, &Cell { lo: at, hi: at });
-        let Some(hc) = self.h(sc) else {
-            return false;
-        };
-        if enclosure.straddles_zero() {
-            // Touching, once, doubly: never sign changes from this stretch.
-            out.push((sc, 2));
-            return true;
-        }
-        if (hc < 0.0) == (a < 0.0) {
-            // The extremum keeps the ends' sign: the curve misses.
-            return true;
-        }
-        out.push((self.bisect(s0, sc, a), 1));
-        out.push((self.bisect(sc, s1, hc), 1));
-        true
-    }
-
-    fn bisect(&self, mut s0: Scalar, mut s1: Scalar, a: Scalar) -> Scalar {
-        let negative = a < 0.0;
-        for _ in 0..100 {
-            let m = 0.5 * (s0 + s1);
-            if m <= s0 || m >= s1 {
-                break;
-            }
-            match self.h(m) {
-                Some(0.0) => return m,
-                Some(h) if (h < 0.0) == negative => s0 = m,
-                Some(_) => s1 = m,
-                None => break,
-            }
-        }
-        0.5 * (s0 + s1)
-    }
 }
 
 /// A line, circle or ellipse against a B-spline surface: the curve is the
@@ -868,4 +631,103 @@ pub fn conic_spline_intersection(
     }
     hits.sort_by(|a, b| a.parameter.approx().total_cmp(&b.parameter.approx()));
     Ok(ExactCurveIntersection::Points(hits))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::implicit_trace::trace_within;
+    use axiolid_curve::implicit::Basis;
+
+    fn power(terms: &[(usize, usize, Scalar)]) -> Field2 {
+        let mut c = vec![vec![0.0; 10]; 10];
+        for &(i, j, x) in terms {
+            c[i][j] += x;
+        }
+        Field2::Series(SeriesField2 {
+            u: Basis::Power,
+            v: Basis::Power,
+            coefficients: c,
+        })
+    }
+
+    fn traced(field: &Field2, lo: Point2, hi: Point2) -> ImplicitCurve2 {
+        let mut curves = trace_within(
+            field,
+            Cell { lo, hi },
+            Periodic { u: false, v: false },
+            1 << 20,
+        )
+        .expect("a traced curve");
+        assert_eq!(curves.len(), 1);
+        curves.remove(0)
+    }
+
+    fn window() -> (Point2, Point2) {
+        (Point2::new(-1.0, -1.0), Point2::new(1.0, 1.0))
+    }
+
+    /// `v - 0.3 u^2` and `F + u^k`: on the curve the second field is `u^k`.
+    fn graph(k: usize) -> (ImplicitCurve2, Field2) {
+        let f = [(0, 1, 1.0), (2, 0, -0.3)];
+        let mut h = f.to_vec();
+        h.push((k, 0, 1.0));
+        let (lo, hi) = window();
+        (traced(&power(&f), lo, hi), power(&h))
+    }
+
+    #[test]
+    fn a_contact_of_any_order_up_to_eight_reports_its_multiplicity() {
+        for k in 2..=8 {
+            let (curve, h) = graph(k);
+            let roots = roots_along(&curve, &h, false).expect("decided");
+            assert_eq!(roots.len(), 1, "u^{k}: {roots:?}");
+            assert_eq!(roots[0].1, k, "u^{k}");
+            let p = curve.point(roots[0].0).unwrap();
+            assert!(p.x.abs() < 1e-6 && p.y.abs() < 1e-6, "u^{k}: {p:?}");
+        }
+    }
+
+    #[test]
+    fn a_contact_above_the_cap_is_undecided() {
+        let (curve, h) = graph(9);
+        assert!(roots_along(&curve, &h, false).is_err());
+    }
+
+    #[test]
+    fn a_contact_at_the_end_of_the_curve_is_reported() {
+        let f = power(&[(0, 1, 1.0), (2, 0, -0.3)]);
+        let h = power(&[(0, 1, 1.0), (2, 0, -0.3), (4, 0, 1.0)]);
+        let curve = traced(&f, Point2::new(-1.0, -1.0), Point2::new(0.0, 1.0));
+        let roots = roots_along(&curve, &h, false).expect("decided");
+        assert_eq!(roots.len(), 1, "{roots:?}");
+        assert_eq!(roots[0].1, 4);
+        assert!(curve.point(roots[0].0).unwrap().x.abs() < 1e-6);
+    }
+
+    #[test]
+    fn the_tangent_at_a_loops_seam_touches_it_once() {
+        let f = power(&[(2, 0, 1.0), (0, 2, 1.0), (0, 0, -0.25)]);
+        let (lo, hi) = window();
+        let curve = traced(&f, lo, hi);
+        let p = curve.point(0.0).unwrap();
+        let h = power(&[(1, 0, p.x), (0, 1, p.y), (0, 0, -(p.x * p.x + p.y * p.y))]);
+        let roots = roots_along(&curve, &h, true).expect("decided");
+        assert_eq!(roots.len(), 1, "{roots:?}");
+        assert_eq!(roots[0].1, 2);
+    }
+
+    #[test]
+    fn the_budget_refuses_by_name() {
+        // v = 0 against u (u^2 - 0.04)(u^2 - 0.25): five simple roots.
+        let f = power(&[(0, 1, 1.0)]);
+        let h = power(&[(5, 0, 1.0), (3, 0, -0.29), (1, 0, 0.01)]);
+        let (lo, hi) = window();
+        let curve = traced(&f, lo, hi);
+        assert_eq!(roots_along(&curve, &h, false).expect("decided").len(), 5);
+        assert_eq!(
+            roots_along_within(&curve, &h, false, 2),
+            Err(RootRefusal::Budget)
+        );
+    }
 }

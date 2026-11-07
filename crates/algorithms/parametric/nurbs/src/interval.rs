@@ -6,6 +6,7 @@
 //! along a traced curve are built on it.
 
 use axiolid_core::Scalar;
+use axiolid_curve::implicit::Range;
 
 /// A closed interval, rounded outward.
 #[derive(Debug, Clone, Copy, PartialEq)]
@@ -103,5 +104,15 @@ impl I {
 
     pub(crate) fn is_finite(self) -> bool {
         self.lo.is_finite() && self.hi.is_finite()
+    }
+
+    /// Strictly one sign: no zero inside. A NaN bound gives `false`.
+    pub(crate) fn excludes_zero(self) -> bool {
+        self.lo > 0.0 || self.hi < 0.0
+    }
+
+    /// A `Range` the implicit bounds already widened, copied unchanged.
+    pub(crate) fn from_range(r: Range) -> Self {
+        Self { lo: r.lo, hi: r.hi }
     }
 }
