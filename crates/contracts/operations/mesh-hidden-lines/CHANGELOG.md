@@ -11,7 +11,7 @@ caret rule for `0.x` versions.
 
 ### Added
 
-- `Projection` (`Orthographic`, the default, and `Perspective`), the
+- `ViewProjection` (`Orthographic`, the default, and `Perspective`), the
   `OrthographicView::projection` field, `OrthographicView::perspective(frame,
   near)` (refuses a `near` that is not finite and below zero) and a defaulted
   `supports_projection` on `MeshHiddenLines` and `MeshVisibleFaces` that is

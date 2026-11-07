@@ -19,7 +19,7 @@ use axiolid_mesh::TriMesh;
 use axiolid_mesh_hidden_lines_contract::{
     EdgeKind, EdgeSelection, FaceGroup, HiddenLineError, HiddenLineEvidence, HiddenLineLimits,
     HiddenLineMesh, HiddenLineOutcome, HiddenLineRequest, HiddenLineSegment, MeshHiddenLines,
-    MeshId, MeshRole, Projection, SourceEdge, View, Visibility,
+    MeshId, MeshRole, SourceEdge, View, ViewProjection, Visibility,
 };
 
 fn cube() -> TriMesh {
@@ -150,8 +150,8 @@ fn segment(mesh: MeshId, vertices: [u32; 2]) -> HiddenLineSegment {
 }
 
 impl MeshHiddenLines for Recorder {
-    fn supports_projection(&self, projection: Projection) -> bool {
-        projection == Projection::Orthographic || self.perspective
+    fn supports_projection(&self, projection: ViewProjection) -> bool {
+        projection == ViewProjection::Orthographic || self.perspective
     }
 
     fn scratch_requirement(&self) -> ScratchRequirement {

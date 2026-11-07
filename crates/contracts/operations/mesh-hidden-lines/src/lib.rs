@@ -35,7 +35,7 @@ pub use contract::OrthographicView;
 pub use contract::{
     EdgeKind, EdgeSelection, HiddenLineEvidence, HiddenLineLimits, HiddenLineMesh,
     HiddenLineOutcome, HiddenLineRequest, HiddenLineSegment, HiddenLineSource, MeshHiddenLines,
-    MeshId, MeshRole, Projection, SourceEdge, View, Visibility,
+    MeshId, MeshRole, SourceEdge, View, ViewProjection, Visibility,
 };
 pub use error::{HiddenLineError, RefusedMesh};
 pub use faces::{

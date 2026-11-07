@@ -8,7 +8,7 @@
 use axiolid_contracts::{BackendId, GeomError, Operation};
 use axiolid_core::{Frame3, Point3};
 use axiolid_exact::{Arith, Dyadic, Interval};
-use axiolid_mesh_hidden_lines_contract::{HiddenLineError, Projection, View};
+use axiolid_mesh_hidden_lines_contract::{HiddenLineError, View, ViewProjection};
 
 /// The refusal of a view this crate does not draw, by name. The providers
 /// leave `supports_projection` at its default, so a registry does not reach
@@ -18,7 +18,7 @@ pub(crate) fn require_orthographic(
     backend: BackendId,
     operation: Operation,
 ) -> Result<(), HiddenLineError> {
-    if view.projection == Projection::Orthographic {
+    if view.projection == ViewProjection::Orthographic {
         return Ok(());
     }
     Err(GeomError::UnsupportedInput {

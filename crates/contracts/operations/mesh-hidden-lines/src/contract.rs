@@ -78,7 +78,7 @@ impl<'a> HiddenLineMesh<'a> {
 /// (ADR 0107), and a registry never hands it a view it does not support.
 #[non_exhaustive]
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
-pub enum Projection {
+pub enum ViewProjection {
     /// Parallel projection along the frame's `-z` axis.
     #[default]
     Orthographic,
@@ -89,14 +89,14 @@ pub enum Projection {
     Perspective,
 }
 
-/// A view: orthographic by default, or perspective (see [`Projection`]).
+/// A view: orthographic by default, or perspective (see [`ViewProjection`]).
 ///
 /// For a model point `p` the view coordinates are `((p - o)·x, (p - o)·y)`
 /// and the depth `W = (p - o)·z`, where `o`, `x`, `y`, `z` are the frame's
 /// origin and axes. The viewer sits on the `+z` side and looks along `-z`, so
 /// a larger `W` is nearer. An orthographic view's image is the view
 /// coordinates; a perspective view's is described at
-/// [`Projection::Perspective`]. Geometry is kept where `far <= W <= near`
+/// [`ViewProjection::Perspective`]. Geometry is kept where `far <= W <= near`
 /// (both closed); an absent bound is no bound, except that a perspective view
 /// has a `near` below zero.
 #[non_exhaustive]
@@ -109,7 +109,7 @@ pub struct View {
     /// Farthest kept depth.
     pub far: Option<f64>,
     /// How points are projected to the image.
-    pub projection: Projection,
+    pub projection: ViewProjection,
 }
 
 /// The former name of [`View`], from when every view was orthographic (ADR
@@ -124,7 +124,7 @@ impl View {
             frame,
             near: None,
             far: None,
-            projection: Projection::Orthographic,
+            projection: ViewProjection::Orthographic,
         }
     }
 
@@ -142,7 +142,7 @@ impl View {
             frame,
             near: Some(near),
             far: None,
-            projection: Projection::Perspective,
+            projection: ViewProjection::Perspective,
         })
     }
 
@@ -496,13 +496,13 @@ impl HiddenLineOutcome {
 /// - output storage is outside the scratch budget.
 pub trait MeshHiddenLines: Backend {
     /// Whether the provider draws views of this projection. The default is
-    /// `true` for [`Projection::Orthographic`] only, so a provider written
-    /// before [`Projection`] existed, which ignores the field, is never given
+    /// `true` for [`ViewProjection::Orthographic`] only, so a provider written
+    /// before [`ViewProjection`] existed, which ignores the field, is never given
     /// a perspective view by a registry (ADR 0107). A provider that returns
     /// `true` for a projection must draw it exactly and pass that
     /// projection's conformance suite.
-    fn supports_projection(&self, projection: Projection) -> bool {
-        projection == Projection::Orthographic
+    fn supports_projection(&self, projection: ViewProjection) -> bool {
+        projection == ViewProjection::Orthographic
     }
 
     /// Scratch needed beyond inputs and result.
@@ -532,9 +532,12 @@ mod tests {
     #[test]
     fn a_view_is_orthographic_unless_built_as_perspective() {
         let view = View::new(plan_frame());
-        assert_eq!(view.projection, Projection::Orthographic);
-        assert_eq!(Projection::default(), Projection::Orthographic);
-        assert_eq!(view.with_near(-1.0).projection, Projection::Orthographic);
+        assert_eq!(view.projection, ViewProjection::Orthographic);
+        assert_eq!(ViewProjection::default(), ViewProjection::Orthographic);
+        assert_eq!(
+            view.with_near(-1.0).projection,
+            ViewProjection::Orthographic
+        );
     }
 
     #[test]
@@ -548,7 +551,7 @@ mod tests {
     #[test]
     fn a_perspective_view_needs_a_finite_negative_near() {
         let view = View::perspective(plan_frame(), -1.0).expect("valid");
-        assert_eq!(view.projection, Projection::Perspective);
+        assert_eq!(view.projection, ViewProjection::Perspective);
         assert_eq!(view.near, Some(-1.0));
         assert_eq!(view.far, None);
         for near in [0.0, -0.0, 1.0, f64::NAN, f64::INFINITY, f64::NEG_INFINITY] {

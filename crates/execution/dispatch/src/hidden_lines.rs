@@ -78,7 +78,7 @@ impl MeshHiddenLinesRegistry {
 
     /// Validate a provider with the shared suite and the perspective suite
     /// before registration (ADR 0107). The claim is the provider's
-    /// `supports_projection(Projection::Perspective)`: a provider that does
+    /// `supports_projection(ViewProjection::Perspective)`: a provider that does
     /// not claim it must refuse perspective views by name, one that does must
     /// pass the perspective fixtures. Failures of either suite are in the
     /// report.

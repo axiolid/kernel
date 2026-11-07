@@ -20,7 +20,7 @@ use axiolid_dispatch::MeshVisibleFacesRegistry;
 use axiolid_mesh::TriMesh;
 use axiolid_mesh_hidden_lines_contract::{
     FaceGroup, FaceSource, HiddenLineError, HiddenLineMesh, MeshId, MeshRole, MeshVisibleFaces,
-    Projection, View, VisibleFaceEvidence, VisibleFaceLimits, VisibleFaceOutcome,
+    View, ViewProjection, VisibleFaceEvidence, VisibleFaceLimits, VisibleFaceOutcome,
     VisibleFaceRequest, VisibleRegion,
 };
 
@@ -155,8 +155,8 @@ fn base_outcome(request: &VisibleFaceRequest<'_>) -> VisibleFaceOutcome {
 }
 
 impl MeshVisibleFaces for Recorder {
-    fn supports_projection(&self, projection: Projection) -> bool {
-        projection == Projection::Orthographic || self.perspective
+    fn supports_projection(&self, projection: ViewProjection) -> bool {
+        projection == ViewProjection::Orthographic || self.perspective
     }
 
     fn scratch_requirement(&self) -> ScratchRequirement {

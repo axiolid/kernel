@@ -32,14 +32,14 @@ FIRST_SITE = (
 )
 FIRST_SITE_OFF = '            if matches_device(options.device(), descriptor.id, descriptor.target)\n'
 SECOND_SITE = '                || !entry.provider.supports_projection(request.view.projection)\n'
-DEFAULT_CLAIM = '        projection == Projection::Orthographic\n    }\n'
+DEFAULT_CLAIM = '        projection == ViewProjection::Orthographic\n    }\n'
 CLAIM_LINES = (
     'pub fn run(provider: &dyn MeshHiddenLines) -> PerspectiveConformanceReport {\n'
-    '        let claimed = provider.supports_projection(Projection::Perspective);'
+    '        let claimed = provider.supports_projection(ViewProjection::Perspective);'
 )
 CLAIM_FACES = (
     'pub fn run_faces(provider: &dyn MeshVisibleFaces) -> PerspectiveConformanceReport {\n'
-    '        let claimed = provider.supports_projection(Projection::Perspective);'
+    '        let claimed = provider.supports_projection(ViewProjection::Perspective);'
 )
 
 MUTANTS = [
@@ -56,17 +56,17 @@ MUTANTS = [
     ('the constructor accepts near zero', C, '        if !near.is_finite() || near >= 0.0 {', '        if !near.is_finite() || near > 0.0 {', CONTRACT),
     ('the constructor accepts a positive near', C, '        if !near.is_finite() || near >= 0.0 {', '        if !near.is_finite() || near > 1.0 {', CONTRACT),
     ('the constructor accepts a non-finite near', C, '        if !near.is_finite() || near >= 0.0 {', '        if near >= 0.0 {', CONTRACT),
-    ('the constructor builds an orthographic view', C, '            projection: Projection::Perspective,\n        })', '            projection: Projection::Orthographic,\n        })', CONTRACT),
+    ('the constructor builds an orthographic view', C, '            projection: ViewProjection::Perspective,\n        })', '            projection: ViewProjection::Orthographic,\n        })', CONTRACT),
     # Default claim.
     ('hidden lines: the default claims every projection', C, DEFAULT_CLAIM, '        true\n    }\n', PROVIDERS),
     ('visible faces: the default claims every projection', F, DEFAULT_CLAIM, '        true\n    }\n', PROVIDERS),
     ('hidden lines: the default claims no projection', C, DEFAULT_CLAIM, '        false\n    }\n', PROVIDERS),
     # Providers refuse by name.
-    ('the providers draw a perspective view', VW, '    if view.projection == Projection::Orthographic {\n        return Ok(());', '    if true {\n        return Ok(());', PROVIDERS),
-    ('the providers refuse an orthographic view', VW, '    if view.projection == Projection::Orthographic {\n        return Ok(());', '    if view.projection != Projection::Orthographic {\n        return Ok(());', PROVIDERS),
+    ('the providers draw a perspective view', VW, '    if view.projection == ViewProjection::Orthographic {\n        return Ok(());', '    if true {\n        return Ok(());', PROVIDERS),
+    ('the providers refuse an orthographic view', VW, '    if view.projection == ViewProjection::Orthographic {\n        return Ok(());', '    if view.projection != ViewProjection::Orthographic {\n        return Ok(());', PROVIDERS),
     # The suite.
-    ('the suite never infers a hidden-line claim', S, CLAIM_LINES, CLAIM_LINES.replace('provider.supports_projection(Projection::Perspective)', 'false'), CONTRACT),
-    ('the suite never infers a visible-face claim', S, CLAIM_FACES, CLAIM_FACES.replace('provider.supports_projection(Projection::Perspective)', 'false'), CONTRACT),
+    ('the suite never infers a hidden-line claim', S, CLAIM_LINES, CLAIM_LINES.replace('provider.supports_projection(ViewProjection::Perspective)', 'false'), CONTRACT),
+    ('the suite never infers a visible-face claim', S, CLAIM_FACES, CLAIM_FACES.replace('provider.supports_projection(ViewProjection::Perspective)', 'false'), CONTRACT),
     ('the suite accepts a provider that draws', S, '        Ok(()) => report\n            .failures\n            .push(PerspectiveConformanceFailure::UnclaimedButDrawn { operation }),', '        Ok(()) => {}', CONTRACT),
     ('the suite accepts any refusal', S, '            error: GeomError::Unsupported { .. } | GeomError::UnsupportedInput { .. },', '            error: _,', CONTRACT),
     # Registration.

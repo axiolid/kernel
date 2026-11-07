@@ -26,7 +26,7 @@ One trait per operation serves both projections. The view gains a
 `projection` field, the registries route by it, and perspective is
 implemented in later steps behind the same contract.
 
-- **The view.** `Projection { Orthographic, Perspective }`
+- **The view.** `ViewProjection { Orthographic, Perspective }`
   (`#[non_exhaustive]`, default `Orthographic`) is a field of the view, which
   is already `#[non_exhaustive]`, so adding it is additive. The type is
   renamed `View`, since a type that can be perspective should not be called
@@ -42,7 +42,7 @@ implemented in later steps behind the same contract.
   required and below zero, so every kept point lies strictly in front of the
   eye and the division is defined.
 - **Claim by `supports_projection`.** Both traits get a defaulted
-  `fn supports_projection(&self, Projection) -> bool` that is `true` for
+  `fn supports_projection(&self, ViewProjection) -> bool` that is `true` for
   `Orthographic` only. The registries skip a provider whose answer is `false`
   and answer `Unsupported` when no provider supports the view's projection,
   before the topology audit, as for any request no provider can take. This
@@ -112,7 +112,7 @@ implemented in later steps behind the same contract.
 ## Relation to existing code
 
 - `crates/contracts/operations/mesh-hidden-lines`: `contract.rs`
-  (`Projection`, `OrthographicView::perspective`,
+  (`ViewProjection`, `OrthographicView::perspective`,
   `MeshHiddenLines::supports_projection`), `faces.rs`
   (`MeshVisibleFaces::supports_projection`), `conformance/perspective.rs`.
 - `crates/execution/dispatch`: `hidden_lines.rs`, `visible_faces.rs` (routing,

@@ -11,7 +11,7 @@ use axiolid_contracts::{ExecutionOptions, GeomError, ScratchRequirement};
 use axiolid_core::Aabb2;
 use axiolid_mesh::{audit_mesh_scratch_bytes, try_audit_mesh};
 use axiolid_mesh_hidden_lines_contract::{
-    FaceGroups, HiddenLineError, HiddenLineMesh, MeshRole, Projection, View,
+    FaceGroups, HiddenLineError, HiddenLineMesh, MeshRole, View, ViewProjection,
 };
 
 use crate::frame::validate_frame;
@@ -138,8 +138,8 @@ pub(crate) fn validate_view(
         }
     }
     match view.projection {
-        Projection::Orthographic => {}
-        Projection::Perspective => {
+        ViewProjection::Orthographic => {}
+        ViewProjection::Perspective => {
             if !view.near.is_some_and(|near| near < 0.0) {
                 return Err(invalid(format!(
                     "{label} perspective view needs a near depth below zero"

@@ -12,7 +12,7 @@ use axiolid_hidden_lines::{
 };
 use axiolid_mesh_hidden_lines_contract::conformance::perspective::PerspectiveConformanceSuite;
 use axiolid_mesh_hidden_lines_contract::{
-    EdgeSelection, HiddenLineRequest, MeshHiddenLines, MeshVisibleFaces, Projection, View,
+    EdgeSelection, HiddenLineRequest, MeshHiddenLines, MeshVisibleFaces, View, ViewProjection,
     VisibleFaceRequest,
 };
 use common::{box_mesh, plan_frame, solids, FACE_LIMITS, LIMITS};
@@ -41,14 +41,14 @@ fn no_in_tree_provider_supports_perspective() {
         &UnprunedVisibleFaces,
     ];
     for provider in lines {
-        assert!(provider.supports_projection(Projection::Orthographic));
-        assert!(!provider.supports_projection(Projection::Perspective));
+        assert!(provider.supports_projection(ViewProjection::Orthographic));
+        assert!(!provider.supports_projection(ViewProjection::Perspective));
         let report = PerspectiveConformanceSuite::run(provider);
         assert!(!report.claimed && report.is_success(), "{report}");
     }
     for provider in faces {
-        assert!(provider.supports_projection(Projection::Orthographic));
-        assert!(!provider.supports_projection(Projection::Perspective));
+        assert!(provider.supports_projection(ViewProjection::Orthographic));
+        assert!(!provider.supports_projection(ViewProjection::Perspective));
         let report = PerspectiveConformanceSuite::run_faces(provider);
         assert!(!report.claimed && report.is_success(), "{report}");
     }
@@ -127,7 +127,7 @@ fn an_orthographic_view_is_unchanged_by_the_projection_field() {
     let boxes = [box_mesh([0.0, 0.0, 0.0], [1.0, 1.0, 1.0])];
     let meshes = solids(&boxes);
     let view = View::new(plan_frame());
-    assert_eq!(view.projection, Projection::Orthographic);
+    assert_eq!(view.projection, ViewProjection::Orthographic);
     let request = HiddenLineRequest::new(&meshes, view, EdgeSelection::new(None), LIMITS);
     ScalarHiddenLines
         .hidden_lines(&request, &options())

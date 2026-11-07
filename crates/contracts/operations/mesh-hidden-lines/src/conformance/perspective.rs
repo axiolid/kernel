@@ -4,7 +4,7 @@
 //! is exhaustive), so perspective has a suite of its own, as the region
 //! suite does for section requests (ADR 0091). The claim is inferred from
 //! `supports_projection`, never from probing: a provider that answers `false`
-//! for [`Projection::Perspective`] does not claim it, and must then refuse a
+//! for [`ViewProjection::Perspective`] does not claim it, and must then refuse a
 //! valid perspective request with `Unsupported` or `UnsupportedInput`, so
 //! that a registry can fall back past it. A provider that answers `true`
 //! claims it, and the suite has no perspective fixtures to verify the claim
@@ -21,7 +21,7 @@ use super::ConformanceFailure;
 use crate::fixtures::{box_mesh, limits, plan_frame};
 use crate::{
     EdgeSelection, HiddenLineError, HiddenLineMesh, HiddenLineRequest, MeshHiddenLines, MeshId,
-    MeshRole, MeshVisibleFaces, Projection, View, VisibleFaceRequest,
+    MeshRole, MeshVisibleFaces, View, ViewProjection, VisibleFaceRequest,
 };
 
 /// One failure of the perspective suite.
@@ -63,7 +63,7 @@ pub struct PerspectiveConformanceReport {
     /// Every failure found.
     pub failures: Vec<PerspectiveConformanceFailure>,
     /// Whether the provider claims perspective views, as
-    /// `supports_projection(Projection::Perspective)` says.
+    /// `supports_projection(ViewProjection::Perspective)` says.
     pub claimed: bool,
 }
 
@@ -99,7 +99,7 @@ pub struct PerspectiveConformanceSuite;
 impl PerspectiveConformanceSuite {
     /// Check a hidden-line provider's perspective claim.
     pub fn run(provider: &dyn MeshHiddenLines) -> PerspectiveConformanceReport {
-        let claimed = provider.supports_projection(Projection::Perspective);
+        let claimed = provider.supports_projection(ViewProjection::Perspective);
         let mut report = PerspectiveConformanceReport {
             failures: Vec::new(),
             claimed,
@@ -128,7 +128,7 @@ impl PerspectiveConformanceSuite {
 
     /// Check a visible-face provider's perspective claim.
     pub fn run_faces(provider: &dyn MeshVisibleFaces) -> PerspectiveConformanceReport {
-        let claimed = provider.supports_projection(Projection::Perspective);
+        let claimed = provider.supports_projection(ViewProjection::Perspective);
         let mut report = PerspectiveConformanceReport {
             failures: Vec::new(),
             claimed,
@@ -230,8 +230,8 @@ mod tests {
     }
 
     impl MeshHiddenLines for Probe {
-        fn supports_projection(&self, projection: Projection) -> bool {
-            projection == Projection::Orthographic || self.claims
+        fn supports_projection(&self, projection: ViewProjection) -> bool {
+            projection == ViewProjection::Orthographic || self.claims
         }
 
         fn hidden_lines(
@@ -251,8 +251,8 @@ mod tests {
     }
 
     impl MeshVisibleFaces for Probe {
-        fn supports_projection(&self, projection: Projection) -> bool {
-            projection == Projection::Orthographic || self.claims
+        fn supports_projection(&self, projection: ViewProjection) -> bool {
+            projection == ViewProjection::Orthographic || self.claims
         }
 
         fn visible_faces(
