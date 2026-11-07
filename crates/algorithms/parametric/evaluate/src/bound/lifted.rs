@@ -37,7 +37,6 @@
 use axiolid_core::{Point2, Scalar};
 use axiolid_curve::{Carrier, LiftedCurve2};
 
-use super::carrier::point_enclosure;
 use super::continuation::{split_chord, PieceBound};
 use super::interval::Iv;
 use super::section::space_bounds;
@@ -56,9 +55,15 @@ const TURN_MARGIN: Scalar = 1e-9;
 /// be certified (a B-spline carrier outside a pair section, a pole, a
 /// guide that changes the turn, a space curve without derivative bounds).
 pub(super) fn chord_bound(l: &LiftedCurve2, lo: Scalar, hi: Scalar) -> Option<Scalar> {
+    if !l.is_finite() {
+        return None;
+    }
     // A section of two surfaces read on one of them is evaluated by the
     // section's own solve, not by inverting the carrier.
-    if !l.is_finite() || matches!(l.carrier, Carrier::Spline(_)) || pair_side(l).is_some() {
+    if let Some((section, first)) = pair_side(l) {
+        return super::pair::chord_bound(section, first, lo, hi);
+    }
+    if matches!(l.carrier, Carrier::Spline(_)) {
         return None;
     }
     let oracle = SurfaceBoundOracle::for_carrier(&l.carrier)?;
@@ -72,10 +77,10 @@ struct End {
     residual: Scalar,
 }
 
-fn end(l: &LiftedCurve2, t: Scalar) -> Option<End> {
+fn end(l: &LiftedCurve2, oracle: &SurfaceBoundOracle<'_>, t: Scalar) -> Option<End> {
     let space = evaluate3(&l.curve, t).ok()?;
     let at = l.unwrap_at(t, space)?;
-    let image = point_enclosure(&l.carrier, at.x, at.y)?;
+    let image = oracle.point_enclosure(at.x, at.y)?;
     let c = [space.x, space.y, space.z];
     let squares = image
         .iter()
@@ -133,7 +138,7 @@ fn piece(
     a: Scalar,
     b: Scalar,
 ) -> Option<PieceBound> {
-    let (start, finish) = (end(l, a)?, end(l, b)?);
+    let (start, finish) = (end(l, oracle, a)?, end(l, oracle, b)?);
     let space = space_bounds(&l.curve, a, b)?;
     let h = Iv::point(b).add(Iv::point(-a)).hi;
     let hull = |x: Scalar, y: Scalar| (x.min(y), x.max(y));

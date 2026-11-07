@@ -41,10 +41,21 @@
 //!   implicit `F(t, w) = 0`, `w''` through the implicit function theorem
 //!   with interval enclosures of `F`'s partials over the span by a
 //!   certified height range (`graph`).
+//! - Lifted pcurves (#414): a space curve `c` read in a surface's
+//!   parameters, `S(p(t)) = c(t)`. The implicit function theorem over a box
+//!   grown about the evaluated ends, with the surface's certified parameter
+//!   separation over it (`SurfaceBoundOracle::separation`, Weyl's
+//!   perturbation from the box's centre), the space curve's derivative
+//!   bounds (`section`) and the outward-rounded residual of each end bound
+//!   the pcurve's speed and bend per piece (`lifted`, `continuation`); the
+//!   section of two B-splines on the same terms in its four unknowns
+//!   (`pair`).
 //! - Intrinsic curves (#317): at unit speed `|c''| = |k|`, so the
 //!   curvature law's closed-form supremum, times the start frame's
 //!   stretch, bounds the chords ([`intrinsic_chord_bound2`]); their
-//!   points are read with a certified error by [`IntrinsicPositions`].
+//!   points are read with a certified error by [`IntrinsicPositions`], and
+//!   [`chord_bound2`] adds the distance of the evaluated ends from the
+//!   exact points (#414).
 //! - Constant offsets `B + d u` (#317): `|P''|` from the basis's suprema
 //!   through the unit-vector rule of the certified station lengths
 //!   ([`offset_chord_bound2`]).
@@ -69,12 +80,14 @@ use crate::nurbs::SplineAxis;
 
 mod carrier;
 mod continuation;
+mod enclosure;
 mod graph;
 mod implicit;
 mod interval;
 mod intrinsic;
 mod lifted;
 mod offset;
+mod pair;
 mod position_table;
 mod positions;
 mod section;

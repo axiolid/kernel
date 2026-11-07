@@ -24,7 +24,7 @@ use axiolid_curve::Carrier;
 use axiolid_surface::Surface;
 
 use super::interval::Iv;
-use super::{ordered, SurfaceBoundOracle};
+use super::{ordered, SurfaceBoundOracle, SurfaceBounds};
 
 /// Relative rounding allowance of the computed jet at a box's centre, per
 /// scaled column.
@@ -42,6 +42,20 @@ pub struct ParameterSeparation {
     pub scale: [Scalar; 2],
     /// The separation, positive.
     pub sigma: Scalar,
+}
+
+/// A box's jet at its centre, and how far the columns move over it.
+#[derive(Debug, Clone, Copy)]
+pub(crate) struct BoxJet {
+    /// `S_u` and `S_v` at the centre.
+    pub columns: [Vec3; 2],
+    /// Their norms, the scaling `D = diag(scale)`.
+    pub scale: [Scalar; 2],
+    /// The Frobenius norm of the scaled columns' movement over the box,
+    /// the padded jet included.
+    pub spread: Scalar,
+    /// The surface's bounds over the box.
+    pub bounds: SurfaceBounds,
 }
 
 impl SurfaceBoundOracle<'_> {
@@ -74,15 +88,12 @@ impl SurfaceBoundOracle<'_> {
         }
     }
 
-    /// The certified separation over the box `[u.0, u.1] x [v.0, v.1]`, or
-    /// `None` where it cannot be shown positive: a pole, an apex, a fold, a
-    /// box too wide, or a B-spline crease or edge inside it (`!smooth`).
-    #[must_use]
-    pub fn separation(
-        &self,
-        u: (Scalar, Scalar),
-        v: (Scalar, Scalar),
-    ) -> Option<ParameterSeparation> {
+    /// The surface's columns at the centre of the box `[u.0, u.1] x [v.0,
+    /// v.1]`, their norms, and the Frobenius norm of how far the columns
+    /// can move over the box in parameters scaled by those norms (the
+    /// padded jet included); `None` for a box that is not smooth or has no
+    /// finite jet or a vanishing column at its centre.
+    pub(crate) fn box_jet(&self, u: (Scalar, Scalar), v: (Scalar, Scalar)) -> Option<BoxJet> {
         let (u0, u1) = ordered(u.0, u.1);
         let (v0, v1) = ordered(v.0, v.1);
         let bounds = self.bounds((u0, u1), (v0, v1))?;
@@ -91,25 +102,10 @@ impl SurfaceBoundOracle<'_> {
         }
         let (um, vm) = (0.5 * (u0 + u1), 0.5 * (v0 + v1));
         let (_, su, sv) = self.jet(um, vm)?;
-        let comp = |a: Vec3, b: Vec3| {
-            Iv::point(a.x)
-                .mul(Iv::point(b.x))
-                .add(Iv::point(a.y).mul(Iv::point(b.y)))
-                .add(Iv::point(a.z).mul(Iv::point(b.z)))
-        };
-        let (a, b) = (su.length(), sv.length());
-        if !(a.is_finite() && b.is_finite() && a > 0.0 && b > 0.0) {
+        let scale = [su.length(), sv.length()];
+        if !(scale.iter().all(|x| x.is_finite() && *x > 0.0)) {
             return None;
         }
-        // The Gram matrix of the scaled columns.
-        let (sa, sb) = (Iv::point(a), Iv::point(b));
-        let (guu, gvv) = (comp(su, su).div(sa.mul(sa)), comp(sv, sv).div(sb.mul(sb)));
-        let guv = comp(su, sv).div(sa.mul(sb));
-        if !(guu.finite() && gvv.finite() && guv.finite()) {
-            return None;
-        }
-        let lambda = Iv::point(guu.lo.min(gvv.lo)).add(Iv::point(-guv.mag()));
-        let centre = lambda.sqrt().lo;
         // The columns' spread over the box, in scaled parameters.
         let half = |lo: Scalar, hi: Scalar, m: Scalar| {
             Iv::point(hi)
@@ -125,16 +121,47 @@ impl SurfaceBoundOracle<'_> {
                 .div(Iv::point(scale))
         };
         let (cu, cv) = (
-            column(bounds.duu, bounds.duv, a),
-            column(bounds.duv, bounds.dvv, b),
+            column(bounds.duu, bounds.duv, scale[0]),
+            column(bounds.duv, bounds.dvv, scale[1]),
         );
-        let spread = cu.sq().add(cv.sq()).sqrt().hi;
-        let sigma = Iv::point(centre)
-            .add(Iv::point(-spread))
-            .add(Iv::point(-2.0 * JET_PAD))
-            .lo;
+        let moved = cu.sq().add(cv.sq()).sqrt();
+        let spread = Iv::point(moved.hi).add(Iv::point(2.0 * JET_PAD)).hi;
+        spread.is_finite().then_some(BoxJet {
+            columns: [su, sv],
+            scale,
+            spread,
+            bounds,
+        })
+    }
+
+    /// The certified separation over the box `[u.0, u.1] x [v.0, v.1]`, or
+    /// `None` where it cannot be shown positive: a pole, an apex, a fold, a
+    /// box too wide, or a B-spline crease or edge inside it (`!smooth`).
+    #[must_use]
+    pub fn separation(
+        &self,
+        u: (Scalar, Scalar),
+        v: (Scalar, Scalar),
+    ) -> Option<ParameterSeparation> {
+        let jet = self.box_jet(u, v)?;
+        let [su, sv] = jet.columns;
+        let comp = |a: Vec3, b: Vec3| {
+            Iv::point(a.x)
+                .mul(Iv::point(b.x))
+                .add(Iv::point(a.y).mul(Iv::point(b.y)))
+                .add(Iv::point(a.z).mul(Iv::point(b.z)))
+        };
+        // The Gram matrix of the scaled columns.
+        let (sa, sb) = (Iv::point(jet.scale[0]), Iv::point(jet.scale[1]));
+        let (guu, gvv) = (comp(su, su).div(sa.mul(sa)), comp(sv, sv).div(sb.mul(sb)));
+        let guv = comp(su, sv).div(sa.mul(sb));
+        if !(guu.finite() && gvv.finite() && guv.finite()) {
+            return None;
+        }
+        let lambda = Iv::point(guu.lo.min(gvv.lo)).add(Iv::point(-guv.mag()));
+        let sigma = Iv::point(lambda.sqrt().lo).add(Iv::point(-jet.spread)).lo;
         (sigma.is_finite() && sigma > 0.0).then_some(ParameterSeparation {
-            scale: [a, b],
+            scale: jet.scale,
             sigma,
         })
     }
