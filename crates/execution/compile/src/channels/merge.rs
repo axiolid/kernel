@@ -53,6 +53,7 @@ pub(crate) fn merge(members: &[&Built]) -> Built {
         closure: super::combined_closure(members.iter().copied()),
         deviation,
         local: None,
+        pending_skin: None,
     }
 }
 

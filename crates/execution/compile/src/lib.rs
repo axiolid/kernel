@@ -16,6 +16,7 @@ mod planar;
 mod polyline;
 mod referee;
 mod ruled;
+mod skin;
 mod snap;
 pub mod station;
 mod trimmed;
@@ -30,6 +31,7 @@ mod compiler;
 pub use compiler::ReferenceMeshCompiler;
 pub use contact::UNMERGED_UNION_CONTACT;
 pub use deviation::{DeviationBound, DeviationContribution, DeviationPath, DeviationReport};
+pub use skin::SKIN_WITHIN_ROUNDING;
 
 mod exact;
 /// What a boolean read within tolerance, as

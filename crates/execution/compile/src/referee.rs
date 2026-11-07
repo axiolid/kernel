@@ -69,8 +69,9 @@ pub(crate) fn boolean(
     id: NodeId,
     operator: BooleanOperator,
     options: &ExecutionOptions,
-    (subject, tool): (&Built, &Built),
+    (subject, tool): (&Built, Option<&Built>),
     against: Option<Against<'_>>,
+    rounding: Option<Scalar>,
 ) -> Result<Built, String> {
     let (exact, report) = ReferenceExactCompiler::new()
         .compile_exact_with_report(graph, id, options)
@@ -87,6 +88,19 @@ pub(crate) fn boolean(
             );
         }
     }
+    let name = format!("{operator:?}").to_lowercase();
+    // A skin the guard refused (#400, ADR 0102) is decided only where the
+    // exact compiler read nothing above the rounding reach as one: a skin
+    // above the reach but below the tolerance is authored (ADR 0096, D7).
+    if let Some(reach) = rounding {
+        if !within_reach(report.linear(), reach) {
+            return Err(format!(
+                "the exact {name} reads features {:e} apart as one, above the rounding \
+                 reach {reach:e}: a skin thinner than the tolerance is authored (ADR 0096, D7)",
+                report.linear()
+            ));
+        }
+    }
     let eps = options.tolerance().linear();
     let (mesh, closure, tessellation) = crate::brep::tessellate_exact(
         &exact,
@@ -96,7 +110,6 @@ pub(crate) fn boolean(
         report.linear().min(eps),
     )
     .map_err(|error| error.to_string())?;
-    let name = format!("{operator:?}").to_lowercase();
     if closure != MeshClosure::Solid && !mesh.indices.is_empty() {
         return Err(format!(
             "the exact {name} does not tessellate to a closed solid"
@@ -110,6 +123,13 @@ pub(crate) fn boolean(
             "the tessellated exact {name} holds two bodies within the tolerance"
         ));
     }
+    if let Some(reach) = rounding {
+        if axiolid_inspect::thin_sheet(&mesh, reach).is_some() {
+            return Err(format!(
+                "the tessellated exact {name} holds a skin within rounding"
+            ));
+        }
+    }
     let dropped = |built: &Built| {
         built
             .fates
@@ -118,8 +138,11 @@ pub(crate) fn boolean(
             .into_iter()
             .map(|(name, _)| (name, AttributeFate::Dropped(DropReason::ProviderLimitation)))
     };
-    let provider = dropped(subject).chain(dropped(tool)).collect();
-    let mut built = channels::after_boolean(mesh, &subject.fates, Some(&tool.fates), provider);
+    let provider = dropped(subject)
+        .chain(tool.into_iter().flat_map(dropped))
+        .collect();
+    let mut built =
+        channels::after_boolean(mesh, &subject.fates, tool.map(|tool| &tool.fates), provider);
     let (within, exact_detail) = match operator {
         BooleanOperator::Union => (REFEREED_UNION, REFEREED_UNION_EXACT),
         BooleanOperator::Difference => (REFEREED_DIFFERENCE, REFEREED_DIFFERENCE_EXACT),
@@ -133,7 +156,9 @@ pub(crate) fn boolean(
     };
     let mut deviation = with_readings(detail, tessellation.worst_bound(), &report);
     deviation.carry_perturbations(&subject.deviation);
-    deviation.carry_perturbations(&tool.deviation);
+    if let Some(tool) = tool {
+        deviation.carry_perturbations(&tool.deviation);
+    }
     built.deviation = deviation;
     Ok(built)
 }
@@ -213,7 +238,8 @@ mod tests {
             root,
             BooleanOperator::Union,
             &options,
-            (&subject, &tool),
+            (&subject, Some(&tool)),
+            None,
             None,
         )
         .expect("fused");
@@ -269,7 +295,7 @@ mod tests {
         let options = ExecutionOptions::new(Tolerance::METRE);
         let operands = (
             &Built::leaf(TriMesh::new(Vec::new(), Vec::new())),
-            &Built::leaf(TriMesh::new(Vec::new(), Vec::new())),
+            Some(&Built::leaf(TriMesh::new(Vec::new(), Vec::new()))),
         );
         let tetra = textured();
         // One shell, as the exact intersection has: the mesh stands.
@@ -283,6 +309,7 @@ mod tests {
                 mesh: &tetra,
                 reach: 1e-9,
             }),
+            None,
         )
         .expect_err("no more shells than the exact result");
         assert!(refused.contains("no more shells"), "{refused}");
@@ -307,6 +334,7 @@ mod tests {
                 mesh: &two,
                 reach: 1e-9,
             }),
+            None,
         )
         .expect("decided");
         let report = format!("{:?}", built.deviation);

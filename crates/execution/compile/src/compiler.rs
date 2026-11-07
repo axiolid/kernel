@@ -80,6 +80,18 @@ impl CutRefusal {
 struct MeshCut {
     built: Built,
     unsettled: bool,
+    /// The result holds a skin thinner than the rounding reach (#400, ADR
+    /// 0102): the faces a clip left a residue apart, which the snap could
+    /// not close.
+    skin: Option<PendingSkin>,
+}
+
+/// A skin within rounding a cut's result holds: the refusal that names it
+/// and the rounding reach it was read at.
+#[derive(Debug, Clone)]
+pub(crate) struct PendingSkin {
+    pub error: GeomError,
+    pub reach: Scalar,
 }
 
 /// Who decided a boolean's result.
@@ -628,8 +640,13 @@ impl<B: MeshBoolean> ReferenceMeshCompiler<B> {
                                 budget.chord
                             ))
                         })?;
-                    let built =
-                        self.build(graph, (key, room, accuracy), &local_options, cache, measure)?;
+                    let built = self.build(
+                        graph,
+                        (key, room, accuracy),
+                        &local_options,
+                        cache,
+                        (measure, root),
+                    )?;
                     cache.insert(key, built);
                 }
             }
@@ -696,7 +713,7 @@ impl<B: MeshBoolean> ReferenceMeshCompiler<B> {
         (key, room, accuracy): (EvalKey, Scalar, Option<PlacementAccuracy>),
         options: &ExecutionOptions,
         cache: &Cache,
-        measure: Measure<'_>,
+        (measure, root): (Measure<'_>, NodeId),
     ) -> GeomResult<Built> {
         let id = key.id;
         // The key's budget, placed scale included: what the dependencies
@@ -789,6 +806,7 @@ impl<B: MeshBoolean> ReferenceMeshCompiler<B> {
                     options,
                     budget,
                     cache,
+                    root,
                 )?;
                 Ok(match measure {
                     // The exact compiler's own result states its bound
@@ -958,9 +976,18 @@ impl<B: MeshBoolean> ReferenceMeshCompiler<B> {
         options: &ExecutionOptions,
         budget: Budget,
         cache: &Cache,
+        root: NodeId,
     ) -> GeomResult<(Built, Decided)> {
         if let Ok(Some(built)) =
             self.boolean_in_shared_frame(graph, (left, right), operator, options, budget, cache)
+        {
+            return Ok((built, Decided::Mesh));
+        }
+        // A clip is a constructed stand-in with no coordinates of its own:
+        // cut in its subject's frame, never worse than the world cut below
+        // (#400, ADR 0102).
+        if let Ok(Some(built)) =
+            self.clip_in_subject_frame(graph, (left, right), operator, options, budget, cache)
         {
             return Ok((built, Decided::Mesh));
         }
@@ -999,16 +1026,31 @@ impl<B: MeshBoolean> ReferenceMeshCompiler<B> {
         // returned as before, and a contact refusal keeps its message and
         // names the referee's reason.
         let referee = |reason: &mut Option<String>,
-                       against: Option<crate::referee::Against<'_>>| {
+                       against: Option<crate::referee::Against<'_>>,
+                       rounding: Option<Scalar>| {
             // A half-space is clipped to the subject here and never built as
-            // a node of its own: there is nothing to compile exactly beside
-            // it, so the mesh result stands.
-            if bounded_tool.is_some() {
+            // a node of its own, so it has no built operand to hand the
+            // referee. The extra-shell trigger of #423 leaves it to the mesh
+            // result; a skin within rounding is decided for it too (#400,
+            // ADR 0102).
+            if bounded_tool.is_some() && rounding.is_none() {
                 *reason = Some("the tool is a half-space clipped to the subject".to_owned());
                 return Ok(None);
             }
-            let tool = self.cached(cache, right, budget)?;
-            match crate::referee::boolean(graph, id, operator, options, (subject, tool), against) {
+            let tool = if bounded_tool.is_some() {
+                None
+            } else {
+                Some(self.cached(cache, right, budget)?)
+            };
+            match crate::referee::boolean(
+                graph,
+                id,
+                operator,
+                options,
+                (subject, tool),
+                against,
+                rounding,
+            ) {
                 Ok(built) => Ok::<_, GeomError>(Some(built)),
                 Err(why) => {
                     *reason = Some(why);
@@ -1018,6 +1060,24 @@ impl<B: MeshBoolean> ReferenceMeshCompiler<B> {
         };
         let mut reason = None;
         match cut {
+            // A skin within rounding is decided by the exact referee, once,
+            // at the root of the chain of clips it sits in: a chain defers
+            // it, and one exact compile of the whole chain decides it
+            // (#400, ADR 0102).
+            Ok(MeshCut {
+                mut built,
+                skin: Some(skin),
+                ..
+            }) => {
+                if clip_chain_continues(graph, id, root) {
+                    built.pending_skin = Some(skin);
+                    return Ok((built, Decided::Mesh));
+                }
+                match referee(&mut reason, None, Some(skin.reach))? {
+                    Some(decided) => Ok((decided, Decided::Referee)),
+                    None => Err(refused_by_referee(skin.error, reason)),
+                }
+            }
             Ok(cut) if !cut.unsettled => Ok((cut.built, Decided::Mesh)),
             Ok(cut) => Ok(
                 match referee(
@@ -1033,25 +1093,33 @@ impl<B: MeshBoolean> ReferenceMeshCompiler<B> {
                             ),
                         }
                     }),
+                    None,
                 )? {
                     Some(built) => (built, Decided::Referee),
                     None => (cut.built, Decided::Mesh),
                 },
             ),
+            // A pinch against the mesh a deferred skin left (#400) is decided
+            // by the referee, at the rounding reach.
+            Err(CutRefusal::Contact(error))
+                if operator != axiolid_core::BooleanOperator::Union
+                    && subject.pending_skin.is_some() =>
+            {
+                let reach =
+                    crate::snap::reach(&subject.mesh, tool, options.tolerance(), budget.placed);
+                match referee(&mut reason, None, Some(reach))? {
+                    Some(decided) => Ok((decided, Decided::Referee)),
+                    None => Err(refused_by_referee(error, reason)),
+                }
+            }
             // A pinched difference or an intersection has no mesh result to
             // hold a void: its refusal stands (ADR 0096, D7).
             Err(CutRefusal::Contact(error)) if operator != axiolid_core::BooleanOperator::Union => {
                 Err(error)
             }
-            Err(CutRefusal::Contact(error)) => match referee(&mut reason, None)? {
+            Err(CutRefusal::Contact(error)) => match referee(&mut reason, None, None)? {
                 Some(built) => Ok((built, Decided::Referee)),
-                None => Err(match error {
-                    GeomError::Degenerate(text) => GeomError::Degenerate(format!(
-                        "{text}; the exact referee refused: {}",
-                        reason.unwrap_or_default()
-                    )),
-                    other => other,
-                }),
+                None => Err(refused_by_referee(error, reason)),
             },
             Err(CutRefusal::Other(error)) => Err(error),
         }
@@ -1156,16 +1224,7 @@ impl<B: MeshBoolean> ReferenceMeshCompiler<B> {
         };
         let local_budget = instance_local_budget(subject_frame, budget, 0.0)?;
         let tool_budget = instance_local_budget(tool_frame, budget, 0.0)?;
-        let local_options = options
-            .clone()
-            .with_tolerance(local_budget.tolerance)
-            .with_chord_error(local_budget.chord)
-            .ok_or_else(|| {
-                GeomError::InvalidInput(format!(
-                    "chord budget {} is not positive and finite",
-                    local_budget.chord
-                ))
-            })?;
+        let local_options = local_options(options, local_budget)?;
         let local = self
             .boolean_of(
                 subject,
@@ -1174,8 +1233,12 @@ impl<B: MeshBoolean> ReferenceMeshCompiler<B> {
                 &local_options,
                 local_budget.placed.max(tool_budget.placed),
             )
-            .map_err(CutRefusal::into_error)?
-            .built;
+            .map_err(CutRefusal::into_error)?;
+        // A skin within rounding is the world cut's to decide (#400).
+        if let Some(skin) = local.skin {
+            return Err(skin.error);
+        }
+        let local = local.built;
         let rounding = placed_rounding(&local.mesh, subject_frame, budget.chord)?;
         let mut placed = channels::transform(&local, subject_frame, rounding);
         // Defence in depth: the local tolerance is the world one over the
@@ -1190,6 +1253,69 @@ impl<B: MeshBoolean> ReferenceMeshCompiler<B> {
         }
         placed.local = Some(Box::new(channels::LocalBoolean {
             transform: subject_frame,
+            built: local,
+        }));
+        Ok(Some(placed))
+    }
+
+    /// A difference or intersection with a half-space clip, cut in the frame
+    /// its subject is placed by (#400): `None` when the operator does not
+    /// clip, the tool is no clip, the subject is not framed
+    /// ([`Self::frame_of`]) or not a similarity, or the tool's placement has
+    /// no finite form in that frame ([`crate::frame::relative`]).
+    ///
+    /// Unlike [`Self::boolean_in_shared_frame`] the linear parts need not be
+    /// bit-equal (ADR 0096, D3): a clip has no coordinates of its own to
+    /// keep. The tool is rebuilt against the subject's local mesh, where the
+    /// subject's faces are exactly axis-aligned; where the linear parts
+    /// differ, its faces lie a residue off them and the snap lands them. The
+    /// result is placed by the frame and keeps its unplaced form in
+    /// [`Built::local`].
+    fn clip_in_subject_frame(
+        &self,
+        graph: &GeometryGraph,
+        (left, right): (NodeId, NodeId),
+        operator: axiolid_core::BooleanOperator,
+        options: &ExecutionOptions,
+        budget: Budget,
+        cache: &Cache,
+    ) -> GeomResult<Option<Built>> {
+        if !matches!(
+            operator,
+            axiolid_core::BooleanOperator::Difference | axiolid_core::BooleanOperator::Intersection
+        ) {
+            return Ok(None);
+        }
+        let Some((tool, chain)) = clip_tool(graph, right) else {
+            return Ok(None);
+        };
+        let Some((frame, subject)) = self.frame_of(graph, left, budget, cache)? else {
+            return Ok(None);
+        };
+        let Some(relative) = crate::frame::relative(frame, chain) else {
+            return Ok(None);
+        };
+        refuse_surface_operand(subject, "subject")?;
+        let local_budget = instance_local_budget(frame, budget, 0.0)?;
+        let local_options = local_options(options, local_budget)?;
+        let tool = self.clip_tool_mesh(graph, tool, relative, &subject.mesh, &local_options)?;
+        let local = self
+            .boolean_of(
+                subject,
+                (&tool, None, None),
+                operator,
+                &local_options,
+                local_budget.placed,
+            )
+            .map_err(CutRefusal::into_error)?;
+        if let Some(skin) = local.skin {
+            return Err(skin.error);
+        }
+        let local = local.built;
+        let rounding = placed_rounding(&local.mesh, frame, budget.chord)?;
+        let mut placed = channels::transform(&local, frame, rounding);
+        placed.local = Some(Box::new(channels::LocalBoolean {
+            transform: frame,
             built: local,
         }));
         Ok(Some(placed))
@@ -1231,20 +1357,26 @@ impl<B: MeshBoolean> ReferenceMeshCompiler<B> {
         let snapped = if settled.moved > 0.0 {
             // A snap never turns a working boolean into a refusal (#291):
             // where the snapped operands are refused, or their result touches
-            // itself, they are cut as given below, and no snap is reported.
+            // itself or holds a skin, they are cut as given below, and no
+            // snap is reported.
             self.cut(
                 settled.subject.as_ref().unwrap_or(&subject.mesh),
                 settled.tool.as_ref().unwrap_or(tool),
                 operator,
                 options,
+                reach,
             )
             .ok()
+            .filter(|(_, skin)| skin.is_none())
         } else {
             None
         };
-        let (outcome, moved) = match snapped {
-            Some(outcome) => (outcome, settled.moved),
-            None => (self.cut(&subject.mesh, tool, operator, options)?, 0.0),
+        let ((outcome, skin), moved) = match snapped {
+            Some(cut) => (cut, settled.moved),
+            None => (
+                self.cut(&subject.mesh, tool, operator, options, reach)?,
+                0.0,
+            ),
         };
         // Faces of the pair actually cut that nearly share a plane, a
         // residue off exact contact, are not decided by a boolean without a
@@ -1289,21 +1421,35 @@ impl<B: MeshBoolean> ReferenceMeshCompiler<B> {
                 crate::deviation::DeviationBound::Certified(moved),
             );
         }
-        Ok(MeshCut { built, unsettled })
+        Ok(MeshCut {
+            built,
+            unsettled,
+            skin,
+        })
     }
 
     /// The mesh boolean of `subject` and `tool`, refused where its result
     /// touches itself (#194), and, for a union, where it holds two bodies
     /// within the linear tolerance of each other (#356, #357): the operands
     /// meet there and the boolean, which has no tolerance, left them apart.
-    /// That union is refused by name, [`crate::UNMERGED_UNION_CONTACT`].
+    /// That union is refused by name, [`crate::UNMERGED_UNION_CONTACT`]. A
+    /// difference or an intersection is refused where its result holds a
+    /// skin thinner than the rounding `reach`, [`crate::SKIN_WITHIN_ROUNDING`]
+    /// (#400).
     fn cut(
         &self,
         subject: &TriMesh,
         tool: &TriMesh,
         operator: axiolid_core::BooleanOperator,
         options: &ExecutionOptions,
-    ) -> Result<axiolid_mesh_boolean_contract::BooleanOutcome, CutRefusal> {
+        reach: Scalar,
+    ) -> Result<
+        (
+            axiolid_mesh_boolean_contract::BooleanOutcome,
+            Option<PendingSkin>,
+        ),
+        CutRefusal,
+    > {
         let outcome = self
             .boolean
             .boolean(subject, tool, operator, options)
@@ -1327,7 +1473,21 @@ impl<B: MeshBoolean> ReferenceMeshCompiler<B> {
                 return Err(CutRefusal::Contact(crate::contact::refusal(&found, eps)));
             }
         }
-        Ok(outcome)
+        // A difference or an intersection leaves no skin its coordinates
+        // cannot carry (#400): two faces facing each other within the
+        // rounding are residue, and a Solid with them is not decided here.
+        let skin = if matches!(
+            operator,
+            axiolid_core::BooleanOperator::Difference | axiolid_core::BooleanOperator::Intersection
+        ) {
+            axiolid_inspect::thin_sheet(&outcome.mesh, reach).map(|found| PendingSkin {
+                error: crate::skin::refusal(&found, &outcome.mesh, reach, operator),
+                reach,
+            })
+        } else {
+            None
+        };
+        Ok((outcome, skin))
     }
 
     /// A non-boolean solid and its deviation. A swept disk along a smooth
@@ -1675,6 +1835,60 @@ impl<B: MeshBoolean> ReferenceMeshCompiler<B> {
             }),
         }
     }
+}
+
+/// `error` with the reason the exact referee refused to decide it.
+fn refused_by_referee(error: GeomError, reason: Option<String>) -> GeomError {
+    match error {
+        GeomError::Degenerate(text) => GeomError::Degenerate(format!(
+            "{text}; the exact referee refused: {}",
+            reason.unwrap_or_default()
+        )),
+        other => other,
+    }
+}
+
+/// Whether the difference or intersection `id` is only the subject of
+/// further differences and intersections, and no root asked for: a chain of
+/// clips goes on past it, so a skin within rounding in its result waits for
+/// the root of the chain (#400, ADR 0102). A node any other node reads, as a
+/// tool, in a union or an instance, ends its chain.
+fn clip_chain_continues(graph: &GeometryGraph, id: NodeId, root: NodeId) -> bool {
+    if id == root || graph.roots().contains(&id) {
+        return false;
+    }
+    let mut continues = false;
+    for (_, node) in graph.iter() {
+        if !node.references().contains(&id) {
+            continue;
+        }
+        match node {
+            GeometryNode::SolidOperation(SolidOperation::Boolean {
+                left,
+                right,
+                operator:
+                    axiolid_core::BooleanOperator::Difference
+                    | axiolid_core::BooleanOperator::Intersection,
+            }) if *left == id && *right != id => continues = true,
+            _ => return false,
+        }
+    }
+    continues
+}
+
+/// `options` read in the frame a boolean is cut in (#356, #400): its
+/// tolerance and chord budget are the frame's `local_budget`.
+fn local_options(options: &ExecutionOptions, local_budget: Budget) -> GeomResult<ExecutionOptions> {
+    options
+        .clone()
+        .with_tolerance(local_budget.tolerance)
+        .with_chord_error(local_budget.chord)
+        .ok_or_else(|| {
+            GeomError::InvalidInput(format!(
+                "chord budget {} is not positive and finite",
+                local_budget.chord
+            ))
+        })
 }
 
 /// Convert world-space budgets into conservative instance-local space.

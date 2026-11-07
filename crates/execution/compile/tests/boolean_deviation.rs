@@ -531,9 +531,11 @@ fn an_i_beam_with_a_hole_touching_its_flange_is_certified_against_its_exact_resu
     let budget = 1e-3;
     let options = options(budget);
     let case = compile(beam_with_a_hole_touching_its_flange, &options);
-    // A hole within the tolerance of the flange leaves one shell: the mesh
-    // stands and is measured, not refereed (ADR 0096, D7).
-    let (bound, _) = assert_measured("I-beam, hole touching the flange", case, &options, 2.0);
+    // A hole within the tolerance of the flange leaves one shell, but under
+    // the building placement the mesh cut keeps a skin within rounding where
+    // the hole meets the flange (#400, ADR 0102): the exact compiler decides
+    // it, read at the rounding, and the mesh is its tessellation.
+    let bound = assert_refereed("I-beam, hole touching the flange", &case.3, "difference");
     assert!(bound <= 2.0 * budget, "{bound}");
 }
 
@@ -1079,14 +1081,15 @@ fn the_detail_says_when_the_bound_holds_for_the_given_operands() {
     }
     // Turned from sines and cosines under a building placement, the caps
     // meet the faces only up to rounding: read within tolerance. The mesh
-    // keeps one shell, so it stands and is measured.
+    // cut keeps a skin within rounding there (#400, ADR 0102), so the exact
+    // compiler decides it and the bound is its tessellation's.
     assert_eq!(
         flush_window_detail(
             building(),
             Transform3::from_rotation_x(FRAC_PI_2),
             Tolerance::METRE
         ),
-        "measured against the exact compiler's result, operands within tolerance"
+        "tessellated from the exact compiler's difference, operands within tolerance"
     );
 }
 

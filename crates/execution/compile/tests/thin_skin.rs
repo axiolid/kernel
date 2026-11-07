@@ -539,24 +539,29 @@ fn a_snapped_boolean_that_is_refused_falls_back_to_the_operands_as_given() {
     let (outcome, report) = compiler
         .compile_mesh_with_deviation(&graph, root, &options)
         .expect("the doors as given are cut");
-    // No snap reported: the doors were cut where they are given, exactly
-    // the mesh nothing is snapped for (at zero tolerance).
+    // No snap reported: the doors as given hold a skin `4.5e-15` thick,
+    // within the rounding of their coordinates (#400, ADR 0102). Such a skin
+    // is residue, not authored geometry, so the mesh cut of the operands as
+    // given is not returned: the exact compiler decides the wall, reading
+    // the doors flush, and its tessellation is the result, certified.
     assert_eq!(snapped(&report), None, "{report:?}");
-    let (given, _) = mesh(4.5e-15, None, Tolerance::ZERO);
-    assert_eq!(outcome.mesh.positions, given.positions);
-    assert_eq!(outcome.mesh.indices, given.indices);
-    assert!(outcome
-        .mesh
-        .positions
-        .iter()
-        .all(|p| p.y != -THICKNESS / 2.0 || p.x.abs() > 1.5));
-    let volume = enclosed_volume(&outcome.mesh).expect("a valid solid");
-    assert_volume(
-        volume,
-        net() + skin(4.5e-15),
-        AREA * ulp(HEIGHT),
-        "fallback",
+    assert_eq!(outcome.closure, MeshClosure::Solid);
+    assert!(
+        report.contributions.iter().any(|c| c
+            .detail
+            .starts_with("tessellated from the exact compiler's difference")),
+        "{report:?}"
     );
+    assert!(
+        report
+            .contributions
+            .iter()
+            .all(|c| matches!(c.bound, DeviationBound::Certified(_))),
+        "{report:?}"
+    );
+    assert_eq!(axiolid_inspect::thin_sheet(&outcome.mesh, 1e-9), None);
+    let volume = enclosed_volume(&outcome.mesh).expect("a valid solid");
+    assert_volume(volume, net(), AREA * ulp(HEIGHT), "referee");
 }
 
 #[test]

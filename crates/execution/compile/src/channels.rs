@@ -56,6 +56,10 @@ pub(crate) struct Built {
     /// transform and the unplaced result, so an enclosing boolean in the
     /// same frame cuts against it. `None` for every other node.
     pub local: Option<Box<LocalBoolean>>,
+    /// A difference or intersection cut whose result holds a skin within
+    /// rounding (#400), left for the exact referee to decide at the root of
+    /// its chain of clips (ADR 0102). `None` for every other node.
+    pub pending_skin: Option<crate::compiler::PendingSkin>,
 }
 
 /// A boolean's result in the frame its operands share, before the frame's
@@ -87,6 +91,7 @@ impl Built {
             closure,
             deviation: crate::deviation::Deviation::default(),
             local: None,
+            pending_skin: None,
         }
     }
 

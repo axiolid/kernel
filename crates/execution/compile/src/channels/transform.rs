@@ -91,6 +91,7 @@ fn moved(built: &Built, transform: Transform3, deviation: Deviation) -> Built {
         closure: built.closure,
         deviation,
         local: None,
+        pending_skin: None,
     }
 }
 

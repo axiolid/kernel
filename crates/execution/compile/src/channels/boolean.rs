@@ -55,5 +55,6 @@ pub(crate) fn after_boolean(
             ),
         ),
         local: None,
+        pending_skin: None,
     }
 }

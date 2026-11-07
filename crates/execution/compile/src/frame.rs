@@ -18,6 +18,10 @@
 //! ([`crate::referee`], #391). So is a union whose operands'
 //! instance chains compose to linear parts that differ in a bit beneath
 //! equal outer frames: the frame yields to the world path.
+//!
+//! A half-space clip is the exception (#400): it is a constructed stand-in
+//! with no coordinates of its own, so [`relative`] places it in its subject's
+//! frame whether or not the linear parts agree, and it is cut there.
 
 use axiolid_core::{Transform3, Vec3};
 
@@ -28,13 +32,18 @@ use axiolid_core::{Transform3, Vec3};
 /// too small along the others, so such a frame is left to the world cut; a
 /// doubtful part is read as no similarity.
 pub(crate) fn shared_linear(a: Transform3, b: Transform3) -> bool {
-    let columns = a.matrix3.to_cols_array();
-    let determinant = a.matrix3.determinant();
+    similarity(a) && a.matrix3.to_cols_array() == b.matrix3.to_cols_array()
+}
+
+/// Whether `t` is finite, invertible and a similarity ([`shared_linear`]
+/// states the tolerance); a doubtful part is read as no similarity.
+pub(crate) fn similarity(t: Transform3) -> bool {
+    let columns = t.matrix3.to_cols_array();
+    let determinant = t.matrix3.determinant();
     columns.iter().all(|v| v.is_finite())
-        && columns == b.matrix3.to_cols_array()
         && determinant.is_finite()
         && determinant != 0.0
-        && is_similarity(a)
+        && is_similarity(t)
 }
 
 fn is_similarity(transform: Transform3) -> bool {
@@ -68,6 +77,28 @@ pub(crate) fn relative_offset(subject: Transform3, tool: Transform3) -> Option<V
     }
     let offset = subject.matrix3.inverse() * (tool.translation - subject.translation);
     offset.is_finite().then_some(offset)
+}
+
+/// Where `tool` lies in the frame of `subject` (#400): the exact
+/// translation [`relative_offset`] when the linear parts are bit-equal
+/// ([`shared_linear`]), else `subject^-1 * tool`, rounded. `None` when
+/// the subject is no similarity or the result is not finite.
+pub(crate) fn relative(subject: Transform3, tool: Transform3) -> Option<Transform3> {
+    if !similarity(subject) {
+        return None;
+    }
+    if shared_linear(subject, tool) {
+        let offset = relative_offset(subject, tool)?;
+        return Some(Transform3::from_translation(offset));
+    }
+    let relative = subject.inverse() * tool;
+    (relative
+        .matrix3
+        .to_cols_array()
+        .iter()
+        .all(|v| v.is_finite())
+        && relative.translation.is_finite())
+    .then_some(relative)
 }
 
 #[cfg(test)]
@@ -149,5 +180,50 @@ mod tests {
             (by_subject - by_tool).abs().max_element() < 1e-15 * site.abs().max_element(),
             "{by_subject:?} {by_tool:?}"
         );
+    }
+
+    #[test]
+    fn a_shared_linear_part_gives_the_exact_translation() {
+        let site = Vec3::new(6.0e5, 5.6e6, 204.3);
+        let subject = turn(0.7, site);
+        assert_eq!(
+            relative(subject, subject),
+            Some(Transform3::from_translation(Vec3::ZERO))
+        );
+        let tool = Transform3 {
+            matrix3: subject.matrix3,
+            translation: subject.translation + subject.matrix3 * Vec3::new(0.5, 0.0, 0.0),
+        };
+        let by = relative(subject, tool).expect("finite");
+        assert_eq!(by.matrix3, Transform3::IDENTITY.matrix3);
+        assert_eq!(by.translation, relative_offset(subject, tool).unwrap());
+        assert!(
+            (by.translation - Vec3::new(0.5, 0.0, 0.0))
+                .abs()
+                .max_element()
+                < 1e-9
+        );
+    }
+
+    #[test]
+    fn a_different_linear_part_is_the_inverse_composed() {
+        let subject = turn(0.7, Vec3::new(3.0, -2.0, 1.0));
+        let tool = Transform3::from_translation(Vec3::new(1.0, 2.0, 3.0));
+        let by = relative(subject, tool).expect("finite");
+        let p = Vec3::new(0.25, -0.5, 1.0);
+        let in_world = tool.transform_point3(p);
+        let through = subject.transform_point3(by.transform_point3(p));
+        assert!((in_world - through).abs().max_element() < 1e-14);
+    }
+
+    #[test]
+    fn a_subject_that_is_no_similarity_has_no_relative_placement() {
+        let flat = Transform3::from_scale(Vec3::new(1.0, 1.0, 0.0));
+        assert_eq!(relative(flat, Transform3::IDENTITY), None);
+        let stretched = Transform3::from_scale(Vec3::new(1.0, 1.0, 1000.0));
+        assert_eq!(relative(stretched, Transform3::IDENTITY), None);
+        let mut nan = Transform3::IDENTITY;
+        nan.translation.x = f64::NAN;
+        assert_eq!(relative(Transform3::IDENTITY, nan), None);
     }
 }
