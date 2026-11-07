@@ -12,14 +12,15 @@
 //!   that stops once the bound is within the request.
 //!
 //! Each case is validated before it is timed: the report must be one
-//! certified boolean bound within the request, and the planar one within
+//! certified boolean bound within the request, the all-planar one also
+//! with its mesh-to-exact bound (#329), and the planar one within
 //! `1e-10`.
 
 use axiolid_contracts::ExecutionOptions;
 use axiolid_core::{BooleanOperator, Tolerance, Transform2, Transform3, Vec2, Vec3};
 use axiolid_mesh_boolean_boolmesh::BoolmeshBoolean;
 use axiolid_mesh_compile::deviation::{
-    BOOLEAN_ROUNDING_FLOOR, COINCIDENT_OPERANDS, TOLERANCE_READINGS,
+    BOOLEAN_ROUNDING_FLOOR, COINCIDENT_OPERANDS, MESH_TO_EXACT, TOLERANCE_READINGS,
 };
 use axiolid_mesh_compile::{DeviationBound, DeviationPath, ReferenceMeshCompiler};
 use axiolid_mesh_compile_contract::MeshCompiler;
@@ -149,6 +150,7 @@ fn deviation_report(c: &mut Criterion) {
                     COINCIDENT_OPERANDS,
                     TOLERANCE_READINGS,
                     BOOLEAN_ROUNDING_FLOOR,
+                    MESH_TO_EXACT,
                 ]
                 .contains(&c.detail)
             })
@@ -164,6 +166,20 @@ fn deviation_report(c: &mut Criterion) {
             bound <= ceiling,
             "{name}: bound {bound:e} above {ceiling:e}"
         );
+        // An all-planar result is also measured from the mesh to it (#329).
+        let reverse: Vec<_> = report
+            .contributions
+            .iter()
+            .filter(|c| c.detail == MESH_TO_EXACT)
+            .collect();
+        match (name, reverse.as_slice()) {
+            ("planar", [c]) => assert!(
+                matches!(c.bound, DeviationBound::Certified(r) if r <= ceiling),
+                "{name}: {report:?}"
+            ),
+            ("curved", []) => {}
+            _ => panic!("{name}: mesh to exact contributions {reverse:?}"),
+        }
         eprintln!("{name}: bound {bound:e}");
         group.bench_with_input(BenchmarkId::new("mesh", name), &root, |b, &root| {
             b.iter(|| {
