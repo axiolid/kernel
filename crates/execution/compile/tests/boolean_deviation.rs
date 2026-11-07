@@ -28,10 +28,10 @@ use axiolid_brep::ExactBRep;
 use axiolid_brep_boolean::ToleranceDecisionKind;
 use axiolid_contracts::ExecutionOptions;
 use axiolid_core::{
-    BooleanOperator, Frame3, Interval, Plane3, Point2, Point3, Scalar, Tolerance, Transform2,
-    Transform3, Vec2, Vec3,
+    BooleanOperator, Frame2, Frame3, Interval, Plane3, Point2, Point3, Scalar, Tolerance,
+    Transform2, Transform3, Vec2, Vec3,
 };
-use axiolid_curve::{Circle3, Curve2, Curve3, Line2};
+use axiolid_curve::{Circle2, Circle3, Curve2, Curve3, Line2};
 use axiolid_exact_compile_contract::ExactCompiler;
 use axiolid_measure::FaceDomain;
 use axiolid_mesh::TriMesh;
@@ -1329,6 +1329,57 @@ fn a_box_minus_a_partial_cone_keeping_its_apex_is_certified() {
     assert!(bound <= 1e-3, "{bound:e}");
 }
 
+/// A circular arc of the profile plane, over the parameters `from..to`.
+fn arc_segment(centre: Point2, radius: Scalar, from: Scalar, to: Scalar) -> ProfileSegment {
+    ProfileSegment {
+        curve: Curve2::Circle(Circle2 {
+            frame: Frame2 {
+                origin: centre,
+                x: Vec2::X,
+                y: Vec2::Y,
+            },
+            radius,
+        }),
+        domain: Interval::new(from, to),
+        same_sense: true,
+    }
+}
+
+fn straight_segment(from: Point2, to: Point2) -> ProfileSegment {
+    ProfileSegment {
+        curve: Curve2::Line(Line2 {
+            origin: from,
+            direction: to - from,
+        }),
+        domain: Interval::UNIT,
+        same_sense: true,
+    }
+}
+
+/// A ball of radius 0.4: a half disc, its poles on the axis.
+fn ball_tool() -> Profile {
+    Profile::Contour(ContourProfile {
+        outer: Contour::new(vec![
+            arc_segment(Point2::ZERO, 0.4, -FRAC_PI_2, FRAC_PI_2),
+            straight_segment(Point2::new(0.0, 0.4), Point2::new(0.0, -0.4)),
+        ]),
+        holes: Vec::new(),
+    })
+}
+
+/// A column of radius 0.3 and height 2 with a hemispherical cap.
+fn column_tool() -> Profile {
+    Profile::Contour(ContourProfile {
+        outer: Contour::new(vec![
+            straight_segment(Point2::new(0.0, 0.0), Point2::new(0.3, 0.0)),
+            straight_segment(Point2::new(0.3, 0.0), Point2::new(0.3, 2.0)),
+            arc_segment(Point2::new(0.0, 2.0), 0.3, 0.0, FRAC_PI_2),
+            straight_segment(Point2::new(0.0, 2.3), Point2::new(0.0, 0.0)),
+        ]),
+        holes: Vec::new(),
+    })
+}
+
 fn cone_tool() -> Profile {
     polygon(&[(0.0, 0.0), (0.5, 0.0), (0.0, 1.0)])
 }
@@ -1416,5 +1467,63 @@ fn a_bolt_minus_a_box_is_certified() {
         Vec3::new(0.0, -2.5, 1.0),
         BooleanOperator::Difference,
         true,
+    );
+}
+
+/// A ball's poles, inside the box, outside it and cut by it, and a domed
+/// column's: the sphere wall's loop leaves each pole along the pole line
+/// (#379).
+#[test]
+fn a_box_minus_a_ball_with_both_poles_inside_is_certified() {
+    pole_case(
+        "box minus ball, poles inside",
+        ball_tool(),
+        Vec3::new(0.9, 0.0, 1.0),
+        BooleanOperator::Difference,
+        false,
+    );
+}
+
+#[test]
+fn a_box_minus_a_ball_with_a_pole_outside_is_certified() {
+    pole_case(
+        "box minus ball, pole outside",
+        ball_tool(),
+        Vec3::new(0.0, 0.9, 1.0),
+        BooleanOperator::Difference,
+        false,
+    );
+}
+
+#[test]
+fn a_ball_minus_a_box_is_certified() {
+    pole_case(
+        "ball minus box",
+        ball_tool(),
+        Vec3::new(0.0, 0.9, 1.0),
+        BooleanOperator::Difference,
+        true,
+    );
+}
+
+#[test]
+fn a_domed_column_minus_a_box_is_certified() {
+    pole_case(
+        "column minus box",
+        column_tool(),
+        Vec3::new(0.9, -0.5, 1.0),
+        BooleanOperator::Difference,
+        true,
+    );
+}
+
+#[test]
+fn a_box_joined_to_a_ball_is_certified() {
+    pole_case(
+        "box joined to ball",
+        ball_tool(),
+        Vec3::new(0.9, 0.0, 1.0),
+        BooleanOperator::Union,
+        false,
     );
 }

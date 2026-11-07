@@ -4,10 +4,14 @@
 //! perpendicularly sweeps a disc cap, and any other straight edge ending on
 //! it sweeps a cone up to its apex: a solid cylinder, a stepped shaft, a
 //! cone, a bolt, a spinning top. Volumes are closed forms from the inputs
-//! (`pi r^2 h`, a sum of those); every solid must audit clean. A profile
+//! (`pi r^2 h`, a sum of those); every solid must audit clean. An arc ending
+//! on the axis with its circle centred on it sweeps a sphere up to its pole
+//! (a ball, a domed column); its centre is the sphere's to rounding, which
+//! the quarter turns of an arc's parameter must not disturb. A profile
 //! crossing the axis or touching it at an isolated vertex stays refused by
 //! name, as does an edge ending on the axis within the tolerance of
-//! perpendicular to it.
+//! perpendicular to it, and an arc whose circle is not centred on the axis (a
+//! spindle or horn torus).
 
 use axiolid_brep::ExactBRep;
 use axiolid_brep_audit::geometric_audit;
@@ -356,10 +360,11 @@ fn an_edge_a_hair_off_perpendicular_ending_on_the_axis_is_refused() {
 }
 
 #[test]
-fn an_arc_ending_on_the_axis_is_refused_as_a_pole() {
+fn an_arc_tangent_to_the_axis_is_refused_as_a_horn_torus() {
     // A quarter arc of the circle about (1, 0) starting at (0, 0) at angle pi,
     // where its x is exactly 0, then a straight run back along the top and
-    // the axis: the arc's start is on the axis (step 3).
+    // the axis: the arc's start is on the axis, but its circle touches the
+    // axis there instead of being centred on it.
     let line = |from: Point2, to: Point2| ProfileSegment {
         curve: Curve2::Line(Line2 {
             origin: from,
@@ -398,14 +403,14 @@ fn an_arc_ending_on_the_axis_is_refused_as_a_pole() {
             }),
             0.0,
         ),
-        "arc ending on the axis",
+        "spindle or horn torus",
     );
 }
 
 #[test]
 fn an_arc_across_the_top_of_a_cylinder_is_not_a_disc() {
     // The top edge runs from (1, 1) to the axis at (0, 1), at the same
-    // height, yet it is an arc, not a perpendicular line (step 3).
+    // height, yet it is an arc, not a perpendicular line.
     let vertex = |x: f64, y: f64, bulge: f64| ArcVertex {
         point: Point2::new(x, y),
         bulge,
@@ -418,7 +423,7 @@ fn an_arc_across_the_top_of_a_cylinder_is_not_a_disc() {
     ]);
     named(
         revolve_arc_ring(&ring, Point3::ZERO, Tolerance::METRE),
-        "arc ending on the axis",
+        "spindle or horn torus",
     );
 }
 
@@ -553,38 +558,215 @@ fn a_circle_tangent_to_the_axis_is_refused_as_a_horn_torus() {
     );
 }
 
-#[test]
-fn a_half_disc_whose_arc_ends_are_trigonometric_says_so() {
-    let arc = ProfileSegment {
-        curve: Curve2::Circle(Circle2 {
-            frame: Frame2 {
-                origin: Point2::ZERO,
-                x: Vec2::X,
-                y: Vec2::Y,
-            },
-            radius: 1.0,
-        }),
-        domain: Interval::new(-PI / 2.0, PI / 2.0),
-        same_sense: true,
-    };
-    let (from, to) = (Point2::new(0.0, 1.0), Point2::new(0.0, -1.0));
-    let close = ProfileSegment {
+fn line_segment(from: Point2, to: Point2) -> ProfileSegment {
+    ProfileSegment {
         curve: Curve2::Line(Line2 {
             origin: from,
             direction: to - from,
         }),
         domain: Interval::UNIT,
         same_sense: true,
-    };
+    }
+}
+
+fn arc_segment(centre: Point2, radius: f64, from: f64, to: f64) -> ProfileSegment {
+    ProfileSegment {
+        curve: Curve2::Circle(Circle2 {
+            frame: Frame2 {
+                origin: centre,
+                x: Vec2::X,
+                y: Vec2::Y,
+            },
+            radius,
+        }),
+        domain: Interval::new(from, to),
+        same_sense: true,
+    }
+}
+
+fn contour_of(segments: Vec<ProfileSegment>) -> Profile {
+    Profile::Contour(ContourProfile {
+        outer: Contour::new(segments),
+        holes: Vec::new(),
+    })
+}
+
+/// The half disc of radius `r` about the axis at `axis_x`: a quarter turn
+/// of the arc's parameter either side of its centre, closed along the axis.
+fn half_disc(radius: f64, axis_x: f64) -> Profile {
+    contour_of(vec![
+        arc_segment(Point2::new(axis_x, 0.0), radius, -PI / 2.0, PI / 2.0),
+        line_segment(Point2::new(axis_x, radius), Point2::new(axis_x, -radius)),
+    ])
+}
+
+#[test]
+fn a_half_disc_revolves_to_a_ball_at_any_radius_and_offset() {
+    // The arc's ends are `cos` and `sin` of a quarter turn: exactly on the
+    // axis only because the lowering evaluates a quadrant exactly.
+    for (radius, axis_x) in [
+        (1.0, 0.0),
+        (0.37, 0.0),
+        (1000.0, 0.0),
+        (0.37, 12.5),
+        (2.0, -3.0),
+    ] {
+        let ball = revolve(&half_disc(radius, axis_x), axis_x);
+        let want = 4.0 / 3.0 * PI * radius.powi(3);
+        let got = volume(&ball);
+        assert!(
+            (got - want).abs() <= 1e-10 * want,
+            "radius {radius} at {axis_x}: volume {got}, want {want}"
+        );
+        let want = 4.0 * PI * radius * radius;
+        let got = area(&ball);
+        assert!(
+            (got - want).abs() <= 1e-10 * want,
+            "radius {radius} at {axis_x}: area {got}, want {want}"
+        );
+        assert!(ball
+            .surfaces()
+            .iter()
+            .all(|s| matches!(s, Surface::Sphere(_))));
+    }
+}
+
+#[test]
+fn a_hemisphere_on_a_cylinder_is_a_domed_column() {
+    let (r, h) = (0.3, 1.2);
+    let column = contour_of(vec![
+        line_segment(Point2::new(0.0, 0.0), Point2::new(r, 0.0)),
+        line_segment(Point2::new(r, 0.0), Point2::new(r, h)),
+        arc_segment(Point2::new(0.0, h), r, 0.0, PI / 2.0),
+        line_segment(Point2::new(0.0, h + r), Point2::new(0.0, 0.0)),
+    ]);
+    let solid = revolve(&column, 0.0);
+    close(volume(&solid), 0.3958406743523139);
+    close(area(&solid), 3.1101767270538954);
+    assert_eq!(count(&solid, |s| matches!(s, Surface::Sphere(_))), 1);
+    assert_eq!(count(&solid, |s| matches!(s, Surface::Cylinder(_))), 1);
+    assert_eq!(count(&solid, |s| matches!(s, Surface::Plane(_))), 1);
+}
+
+#[test]
+fn a_ball_with_a_cavity_along_the_axis_has_one_void() {
+    let ball = contour_of(vec![
+        arc_segment(Point2::ZERO, 2.0, -PI / 2.0, PI / 2.0),
+        line_segment(Point2::new(0.0, 2.0), Point2::new(0.0, 0.5)),
+        line_segment(Point2::new(0.0, 0.5), Point2::new(0.5, 0.5)),
+        line_segment(Point2::new(0.5, 0.5), Point2::new(0.5, -0.5)),
+        line_segment(Point2::new(0.5, -0.5), Point2::new(0.0, -0.5)),
+        line_segment(Point2::new(0.0, -0.5), Point2::new(0.0, -2.0)),
+    ]);
+    let solid = revolve(&ball, 0.0);
+    close(volume(&solid), 32.72492347489368);
+    assert_eq!(solid.topology().solids().len(), 1);
+    assert_eq!(solid.topology().solids()[0].voids.len(), 1);
+}
+
+/// `(0, 0) -> (1, 1)` by an arc of the given bulge, then back along the top
+/// and the axis.
+fn arc_from_the_axis(bulge: f64) -> ArcRing {
+    ArcRing::new(vec![
+        ArcVertex {
+            point: Point2::new(0.0, 0.0),
+            bulge,
+        },
+        ArcVertex {
+            point: Point2::new(1.0, 1.0),
+            bulge: 0.0,
+        },
+        ArcVertex {
+            point: Point2::new(0.0, 1.0),
+            bulge: 0.0,
+        },
+    ])
+}
+
+#[test]
+fn a_ring_with_a_bulge_that_is_a_quarter_circle_is_a_lower_hemisphere() {
+    // `tan(pi / 8)` is the bulge of a quarter arc, from (0, 0) to (1, 1)
+    // about (0, 1): a bulge cannot encode it exactly, so its computed centre
+    // is off the axis by rounding, which the gate absorbs.
+    let solid = revolve_arc_ring(
+        &arc_from_the_axis((PI / 8.0).tan()),
+        Point3::ZERO,
+        Tolerance::METRE,
+    )
+    .expect("a lower hemisphere");
+    let health = geometric_audit(&solid, Tolerance::METRE);
+    assert!(health.is_consistent(), "{:?}", health.defects());
+    close(volume(&solid), 2.0943951023931953);
+    close(area(&solid), 9.42477796076938);
+}
+
+#[test]
+fn an_arc_whose_circle_is_not_centred_on_the_axis_is_a_spindle_or_horn_torus() {
     named(
-        try_revolve(
-            &Profile::Contour(ContourProfile {
-                outer: Contour::new(vec![arc, close]),
-                holes: Vec::new(),
-            }),
-            0.0,
+        revolve_arc_ring(&arc_from_the_axis(0.2), Point3::ZERO, Tolerance::METRE),
+        "spindle or horn torus",
+    );
+}
+
+#[test]
+fn an_arc_running_across_the_axis_is_refused() {
+    named(
+        revolve_arc_ring(
+            &arc_from_the_axis(-(1.0 + 2.0_f64.sqrt())),
+            Point3::ZERO,
+            Tolerance::METRE,
         ),
-        "an arc end computed onto the axis is needed",
+        "crossing the axis",
+    );
+}
+
+#[test]
+fn an_arc_with_both_ends_on_the_axis_is_refused() {
+    let ring = ArcRing::new(vec![
+        ArcVertex {
+            point: Point2::new(0.0, -1.0),
+            bulge: 0.3,
+        },
+        ArcVertex {
+            point: Point2::new(0.0, 1.0),
+            bulge: 0.0,
+        },
+        ArcVertex {
+            point: Point2::new(0.0, 0.0),
+            bulge: 0.0,
+        },
+    ]);
+    named(
+        revolve_arc_ring(&ring, Point3::ZERO, Tolerance::METRE),
+        "both ends on the axis",
+    );
+}
+
+#[test]
+fn an_arc_ending_on_the_axis_with_no_axis_edge_is_a_pinch_point() {
+    // The arc's pole has no edge along the axis: two cones' worth of
+    // surface meeting at a point.
+    let ring = ArcRing::new(vec![
+        ArcVertex {
+            point: Point2::new(0.0, 0.0),
+            bulge: (PI / 8.0).tan(),
+        },
+        ArcVertex {
+            point: Point2::new(1.0, 1.0),
+            bulge: 0.0,
+        },
+        ArcVertex {
+            point: Point2::new(2.0, 0.0),
+            bulge: 0.0,
+        },
+        ArcVertex {
+            point: Point2::new(1.0, -1.0),
+            bulge: 0.0,
+        },
+    ]);
+    named(
+        revolve_arc_ring(&ring, Point3::ZERO, Tolerance::METRE),
+        "isolated vertex where an arc ends",
     );
 }
 

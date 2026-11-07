@@ -21,26 +21,47 @@ caret rule for `0.x` versions.
 - `revolve_profile_exact` and `revolve_arc_ring` revolve a full turn of a
   profile that touches the axis (#379): along edges lying on it, at straight
   edges ending on it exactly perpendicularly (a disc cap: a solid cylinder, a
-  stepped shaft) and at any other straight edge ending on it (a cone up to
-  its apex: a cone, a bolt, a spinning top, a top with a cavity). An axis
-  edge sweeps no face. A vertex on the axis is admitted when one of its two
-  edges lies on the axis; the contact is classified with the exact
-  `side_of_axis` sign, no tolerance. The apex is a vertex of the B-rep, not
-  a degenerate edge: the cone is framed at it with radius zero, and its wall
-  loop leaves a gap along the pole line in its parameters, which the
-  boolean and the deviation oracle close. A section crossing the axis,
-  touching it at a vertex with no edge along it (a pinch point), or ending
-  on it at an arc (`TODO(#379)` step 3) stays `UnsupportedInput`, as does a
-  vertex within the tolerance of the axis but not on it to the bit and an
-  edge ending on the axis within the tolerance of perpendicular to it but
-  not exactly (a cone of rise below the tolerance fails the geometric audit,
-  so it is refused by name). A touching section needs the axis exactly along
-  the profile's y with its origin exactly in the plane: a tilt or a z offset
-  within the tolerance would move the real axis off a vertex judged on it,
-  so it is refused. A section with several contacts (a cavity along the
-  axis) gives one solid per outermost piece with the nested pieces as void
-  shells, nested by the heights of every face's stations, apexes included; a
-  solid inside a cavity is refused.
+  stepped shaft), at any other straight edge ending on it (a cone up to its
+  apex: a cone, a bolt, a spinning top, a top with a cavity) and at an arc
+  ending on it with its circle centred on it (a sphere up to its pole: a
+  ball, a domed column, a hemisphere cap). An axis edge sweeps no face. A
+  vertex on the axis is admitted when one of its two edges lies on the axis;
+  the contact is classified with the exact `side_of_axis` sign, no
+  tolerance. An apex or pole is a vertex of the B-rep, not a degenerate edge:
+  the cone is framed at its apex with radius zero, the sphere on the axis at
+  the height equidistant from both arc ends, and the wall's loop leaves a gap
+  along the pole line in its parameters, which the boolean and the
+  deviation oracle close. Whether an arc is a sphere's meridian is decided
+  within `64 * EPSILON` of the largest coordinate it is computed from (a
+  bulge cannot encode a quarter arc exactly); the sphere is placed exactly on
+  the axis, and the gate is not reported, as it only chooses between that
+  sphere and a refusal. A section crossing the axis, touching it at a vertex
+  with no edge along it (a pinch point), ending on it at an arc whose circle
+  is not centred on it (a lemon, an apple, an ogive nose: a spindle or horn
+  torus), at an arc with both ends on it or at an arc running across it stays
+  `UnsupportedInput` by name, as does a vertex within the tolerance of the
+  axis but not on it to the bit and an edge ending on the axis within the
+  tolerance of perpendicular to it but not exactly (a cone of rise below the
+  tolerance fails the geometric audit). A touching section needs the axis
+  exactly along the profile's y with its origin exactly in the plane: a tilt
+  or a z offset within the tolerance would move the real axis off a vertex
+  judged on it, so it is refused. A section with several contacts (a cavity
+  along the axis) gives one solid per outermost piece with the nested pieces
+  as void shells, nested by the heights of every face's stations, poles
+  included; a solid inside a cavity is refused.
+
+### Changed
+
+- An arc of a lowered contour evaluates `sin` and `cos` exactly at a quarter
+  turn (#379): a parameter within `2 * EPSILON * max(1, |t|)` of one (every
+  form a producer writes, `FRAC_PI_2`, `-PI / 2`, `1.5 * PI`,
+  `PI + FRAC_PI_2`, ...) puts the end of the arc at exactly `0` and `+-1`
+  in that coordinate, where it used to be `0.18 * t * EPSILON` off. A ring
+  that lowered before is unchanged except at those ends, by less than the
+  error of the point itself; a parameter 1e-12 from a quarter turn keeps its
+  angle. This makes an arc end on a revolution axis through its centre
+  exactly on it, which the exact revolution needs. A rounding gate like the
+  joint rule (#250), not reported.
 
 ### Fixed
 

@@ -13,8 +13,8 @@ use axiolid_brep_audit::geometric_audit;
 use axiolid_brep_boolean::boolean;
 use axiolid_construct::boolean_exact::{boolean_arc_prisms_exact, ArcPrism};
 use axiolid_construct::revolve_exact::revolve_profile_exact;
-use axiolid_core::{BooleanOperator, Interval, Point2, Point3, Tolerance, Vec3};
-use axiolid_curve::{Curve2, Line2};
+use axiolid_core::{BooleanOperator, Frame2, Interval, Point2, Point3, Tolerance, Vec2, Vec3};
+use axiolid_curve::{Circle2, Curve2, Line2};
 use axiolid_measure::exact_properties;
 use axiolid_overlay::ArcRing;
 use axiolid_profile::{Contour, ContourProfile, Profile, ProfileSegment};
@@ -67,6 +67,39 @@ fn polygon(points: &[(f64, f64)]) -> Profile {
             }
         })
         .collect();
+    Profile::Contour(ContourProfile {
+        outer: Contour::new(segments),
+        holes: Vec::new(),
+    })
+}
+
+fn line_segment(from: Point2, to: Point2) -> ProfileSegment {
+    ProfileSegment {
+        curve: Curve2::Line(Line2 {
+            origin: from,
+            direction: to - from,
+        }),
+        domain: Interval::UNIT,
+        same_sense: true,
+    }
+}
+
+fn arc_segment(centre: Point2, radius: f64, from: f64, to: f64) -> ProfileSegment {
+    ProfileSegment {
+        curve: Curve2::Circle(Circle2 {
+            frame: Frame2 {
+                origin: centre,
+                x: Vec2::X,
+                y: Vec2::Y,
+            },
+            radius,
+        }),
+        domain: Interval::new(from, to),
+        same_sense: true,
+    }
+}
+
+fn contour_of(segments: Vec<ProfileSegment>) -> Profile {
     Profile::Contour(ContourProfile {
         outer: Contour::new(segments),
         holes: Vec::new(),
@@ -150,5 +183,54 @@ fn a_bolt_loses_a_slot() {
         &block((-0.1, 0.1), (2.5, 3.5), (-1.0, 1.0)),
         2.3615849702587584,
         "slot",
+    );
+}
+
+/// A ball of radius 1 (a half disc revolved) loses a half, a cap and a cube
+/// round its centre: its two poles meet the cut or stay clear of it.
+#[test]
+fn a_ball_loses_a_half_a_cap_and_a_cube() {
+    let half_disc = contour_of(vec![
+        arc_segment(Point2::ZERO, 1.0, -PI / 2.0, PI / 2.0),
+        line_segment(Point2::new(0.0, 1.0), Point2::new(0.0, -1.0)),
+    ]);
+    let ball = revolved(&half_disc, 2.0 * PI);
+    close("operand", volume(&ball), 4.0 / 3.0 * PI);
+    cut(
+        &ball,
+        &block((0.0, 6.0), (-6.0, 6.0), (-6.0, 6.0)),
+        2.0943951023931953,
+        "half",
+    );
+    cut(
+        &ball,
+        &block((-6.0, 6.0), (0.5, 6.0), (-6.0, 6.0)),
+        3.5342917352885173,
+        "cap",
+    );
+    cut(
+        &ball,
+        &block((-0.3, 0.3), (-0.3, 0.3), (-0.3, 0.3)),
+        3.9727902047863903,
+        "cube",
+    );
+}
+
+/// A hemisphere on a cylinder: the pole is the column's top.
+#[test]
+fn a_domed_column_loses_a_half() {
+    let (r, h) = (0.3, 1.2);
+    let column = contour_of(vec![
+        line_segment(Point2::new(0.0, 0.0), Point2::new(r, 0.0)),
+        line_segment(Point2::new(r, 0.0), Point2::new(r, h)),
+        arc_segment(Point2::new(0.0, h), r, 0.0, PI / 2.0),
+        line_segment(Point2::new(0.0, h + r), Point2::new(0.0, 0.0)),
+    ]);
+    let column = revolved(&column, 2.0 * PI);
+    cut(
+        &column,
+        &block((0.0, 6.0), (-6.0, 6.0), (-6.0, 6.0)),
+        0.19792033717615695,
+        "half",
     );
 }

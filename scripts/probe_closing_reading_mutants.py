@@ -39,8 +39,8 @@ MUTANTS = [
      "let closing = (1e-9 * scale.max(1.0)).max(reading / g);",
      "let closing = (1e-9 * scale.max(1.0)).max(1e4 * reading / g);"),
     ("the slack holds the gap admitted, not the gap measured", B,
-     "        Ok(Self::from_rings(&rings, delta, gap, scale, affine))",
-     "        Ok(Self::from_rings(&rings, delta, closing, scale, affine))",
+     "        let mut domain = Self::from_rings(&rings, delta, gap, scale, affine);",
+     "        let mut domain = Self::from_rings(&rings, delta, closing, scale, affine);",
      [UNIT, WALL, PLANAR]),
 ]
 

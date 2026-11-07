@@ -17,11 +17,11 @@ TESTS = [
 
 MUTANTS = [
     ("joint pole not recognised", S,
-     "        let u = if at_pole(surface, end) { 0.0 } else { snap(d.x, pu) };\n        uses[k].shift",
-     "        let u = if false { 0.0 } else { snap(d.x, pu) };\n        uses[k].shift"),
+     "        let u = if at_pole(surface, end) {\n            0.0",
+     "        let u = if false {\n            0.0"),
     ("closing pole not recognised", S,
-     "    let u = if at_pole(surface, last) { 0.0 } else { snap(d.x, pu) };\n    Ok(",
-     "    let u = if false { 0.0 } else { snap(d.x, pu) };\n    Ok("),
+     "    let u = if at_pole(surface, last) {\n        0.0",
+     "    let u = if false {\n        0.0"),
     ("pole test too loose", S,
      "su.length() <= 1e-9 * (1.0 + sv.length())",
      "su.length() <= 1e9 * (1.0 + sv.length())"),

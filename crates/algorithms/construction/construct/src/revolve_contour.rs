@@ -16,6 +16,7 @@
 //! | perpendicular to the axis | plane (annulus) |
 //! | oblique | cone |
 //! | circular arc | torus |
+//! | circular arc ending on the axis, centred on it | sphere (#379) |
 //!
 //! The cone check fitted `r` as an affine function of `z` to a residual of
 //! `2e-13`; the torus check evaluated the implicit form to `1.1e-15`.
@@ -31,7 +32,7 @@ use axiolid_brep::{ExactBRep, ExactBRepBuilder};
 use axiolid_contracts::{GeomError, GeomResult, Operation};
 use axiolid_core::{Frame2, Frame3, Interval, Point2, Point3, Scalar, Tolerance, Vec2, Vec3};
 use axiolid_curve::{Circle2, Circle3, Curve2, Curve3, Line2, Line3};
-use axiolid_surface::{Cone, Cylinder, Plane, Surface, Torus};
+use axiolid_surface::{Cone, Cylinder, Plane, Sphere, Surface, Torus};
 use axiolid_topology::{
     Edge, EdgeId, EdgeUse, Face, FaceBound, FaceId, Loop, LoopId, Orientation, Shell, Solid,
     Vertex, VertexId,
@@ -74,8 +75,8 @@ enum Contact {
     Axis,
     /// One end on the axis, straight and exactly perpendicular to it: a disc.
     Cap,
-    /// An arc with an end on the axis: a pole, or a horn torus's tangent
-    /// point.
+    /// An arc with one end on the axis: a sphere's pole, or a spindle or
+    /// horn torus's.
     Arc,
     /// A straight edge with an end on the axis that is not perpendicular to
     /// it: a cone's slant up to its apex.
@@ -90,15 +91,18 @@ enum Contact {
 /// heights) sweeps a disc cap, so a solid cylinder and a stepped shaft
 /// revolve. A section with vertices on both sides of the axis is refused as
 /// crossing it. A vertex on the axis is admitted when one of its two edges
-/// lies on the axis and the other is another axis edge, a disc cap or a
-/// straight edge to a cone's apex (an arc is refused until `TODO(#379)`
-/// step 3). The apex is a vertex of the B-rep, not a degenerate edge: the
-/// cone's wall loop runs `[rim circle], seam, [rim circle], seam reversed`
-/// and leaves a gap along the pole line in its parameters, which consumers
-/// close (ADR 0059). A vertex on the axis with no axis edge (a pinch point)
-/// is refused by name, and so is a vertex off the axis by no more than the
-/// tolerance, as neither on it nor clear of it, or a straight edge ending on
-/// the axis within the tolerance of perpendicular to it but not exactly.
+/// lies on the axis and the other is another axis edge, a disc cap, a
+/// straight edge to a cone's apex or an arc to a sphere's pole. The apex or
+/// pole is a vertex of the B-rep, not a degenerate edge: the wall's loop runs
+/// `[rim circle], seam, [rim circle], seam reversed` and leaves a gap along
+/// the pole line in its parameters, which consumers close (ADR 0059). An arc
+/// with exactly one end on the axis is a sphere when its circle is centred on
+/// the axis to rounding ([`CENTRE_ROUNDING`]); otherwise it is a spindle or
+/// horn torus and is refused by name, as is an arc with both ends on the
+/// axis. A vertex on the axis with no axis edge (a pinch point) is refused by
+/// name, and so is a vertex off the axis by no more than the tolerance, as
+/// neither on it nor clear of it, or a straight edge ending on the axis
+/// within the tolerance of perpendicular to it but not exactly.
 /// Several separate contacts (a cavity along the axis) give one solid per
 /// outermost shell with the nested shells as its voids.
 pub fn revolve_arc_ring(
@@ -178,7 +182,7 @@ pub(crate) fn revolve_ring_about(
         .any(|station| !station.on_axis && station.radius.abs() <= epsilon)
     {
         return Err(unsupported(
-            "exact revolution of a section within tolerance of the axis but not on it to the bit (an arc end computed onto the axis is needed, TODO(#379) step 3)",
+            "exact revolution of a section within tolerance of the axis but not on it to the bit",
         ));
     }
     check_axis_contact(&stations, epsilon)?;
@@ -231,24 +235,30 @@ fn contact(stations: &[Station], index: usize) -> Option<Contact> {
 }
 
 /// Refuse every vertex on the axis that is not the end of an edge along the
-/// axis (a pinch point, a non-manifold vertex), an arc ending on it (until
-/// step 3), and a cone's edge so near perpendicular to the axis that it is
-/// neither a disc nor a cone to the tolerance.
+/// axis (a pinch point, a non-manifold vertex), an arc with both ends on the
+/// axis (a spindle torus), and a cone's edge so near perpendicular to the
+/// axis that it is neither a disc nor a cone to the tolerance. Whether an arc
+/// with one end on the axis is a sphere is decided when its wall is built.
 fn check_axis_contact(stations: &[Station], epsilon: Scalar) -> GeomResult<()> {
     let count = stations.len();
     for (index, station) in stations.iter().enumerate() {
         if !station.on_axis {
             continue;
         }
+        if station.bulge != 0.0 && stations[(index + 1) % count].on_axis {
+            return Err(unsupported(
+                "exact revolution of a section with an arc with both ends on the axis (a spindle torus)",
+            ));
+        }
         let incoming = contact(stations, (index + count - 1) % count);
         let outgoing = contact(stations, index);
         match (incoming, outgoing) {
+            (Some(Contact::Axis), Some(_)) | (Some(_), Some(Contact::Axis)) => {}
             (Some(Contact::Arc), _) | (_, Some(Contact::Arc)) => {
                 return Err(unsupported(
-                    "exact revolution of a section with an arc ending on the axis (pole or horn torus, TODO(#379) step 3)",
+                    "exact revolution of a section touching the axis at an isolated vertex where an arc ends (a pinch point or a horn torus)",
                 ));
             }
-            (Some(Contact::Axis), Some(_)) | (Some(_), Some(Contact::Axis)) => {}
             _ => {
                 return Err(unsupported(
                     "exact revolution of a section touching the axis at an isolated vertex (a pinch point)",
@@ -298,11 +308,11 @@ fn build(stations: &[Station], axis_origin: Point3, epsilon: Scalar) -> GeomResu
         points.push(position);
         if station.on_axis {
             circles.push(None);
-            // A cone's apex is a vertex its seam ends at; a station that only
-            // ends axis edges and discs has none.
+            // A cone's apex or a sphere's pole is a vertex its seam ends at; a
+            // station that only ends axis edges and discs has none.
             let apex = [(index + count - 1) % count, index]
                 .into_iter()
-                .any(|edge| contact(stations, edge) == Some(Contact::Cone));
+                .any(|edge| matches!(contact(stations, edge), Some(Contact::Cone | Contact::Arc)));
             vertices.push(apex.then(|| builder.topology_mut().add_vertex(Vertex { position })));
             continue;
         }
@@ -328,12 +338,21 @@ fn build(stations: &[Station], axis_origin: Point3, epsilon: Scalar) -> GeomResu
         let here = stations[index];
         let there = stations[next];
         let face = if here.on_axis || there.on_axis {
-            // `check_axis_contact` admitted only an axis edge, a disc and a
-            // cone's slant.
+            // `check_axis_contact` admitted only an axis edge, a disc, a
+            // cone's slant and an arc.
             if here.on_axis && there.on_axis {
                 continue;
             }
-            if here.height == there.height {
+            if here.bulge != 0.0 {
+                sphere_wall(
+                    &mut builder,
+                    axis_origin.x,
+                    &circles,
+                    &vertices,
+                    stations,
+                    index,
+                )?
+            } else if here.height == there.height {
                 cap_wall(&mut builder, axis_origin.x, &circles, stations, index)?
             } else {
                 straight_wall(
@@ -463,6 +482,118 @@ fn straight_wall(
         here.height - basis.height,
         there.height - basis.height,
     );
+    Ok(add_face(builder, surface, loop_id, Orientation::Forward))
+}
+
+/// How far an arc's centre may lie from the axis, in machine epsilons of the
+/// largest coordinate it is computed from, for the arc to be a sphere's
+/// meridian (#379).
+///
+/// No bulge encodes a quarter arc exactly (`tan(pi / 8)` is irrational), so
+/// the centre computed from an arc that is a sphere's is a few ulps of its
+/// coordinates off the axis: measured at most a sixteenth of this gate in the
+/// worst case tried (radius 0.37 about an axis at 12.5). It is a rounding
+/// gate, not a tolerance: it only chooses between a sphere and a refusal, and
+/// the sphere is placed exactly on the axis. It is not reported.
+const CENTRE_ROUNDING: Scalar = 64.0 * Scalar::EPSILON;
+
+/// A sphere wall: an arc with one end on the axis, centred on it, swept a
+/// full turn.
+///
+/// The sphere is framed on the axis at the height equidistant from both arc
+/// ends, `c = h_pole + (r^2 + d^2) / (2 d)` for the other end at radius `r`
+/// and height difference `d` from the pole, so its pole is on the axis
+/// exactly. Its `v` is the latitude, `+-pi/2` at the poles, and the seam is
+/// the meridian circle between the arc's two latitudes. The loop omits the
+/// pole's circle, as a cone's does at its apex.
+///
+/// An arc whose circle is not centred on the axis is a spindle or horn torus
+/// (a lemon, an apple, an ogive nose): refused by name, since it bounds no
+/// two-manifold solid here.
+fn sphere_wall(
+    builder: &mut ExactBRepBuilder,
+    axis_x: Scalar,
+    circles: &[Option<EdgeId>],
+    vertices: &[Option<VertexId>],
+    stations: &[Station],
+    index: usize,
+) -> GeomResult<FaceId> {
+    let next = (index + 1) % stations.len();
+    let (here, there) = (stations[index], stations[next]);
+    let arc = crate::extrude_arc::arc_geometry(
+        Point2::new(here.radius, here.height),
+        Point2::new(there.radius, there.height),
+        here.bulge,
+    )?;
+    let (pole, other) = if here.on_axis {
+        (here, there)
+    } else {
+        (there, here)
+    };
+    let rise = other.height - pole.height;
+    let not_centred = || {
+        unsupported(
+            "exact revolution of an arc ending on the axis whose circle is not centred on it (spindle or horn torus)",
+        )
+    };
+    if rise == 0.0 {
+        return Err(not_centred());
+    }
+    let centre = pole.height + (other.radius * other.radius + rise * rise) / (2.0 * rise);
+    let radius = (centre - pole.height).abs();
+    let scale = here
+        .radius
+        .abs()
+        .max(here.height.abs())
+        .max(there.radius.abs())
+        .max(there.height.abs())
+        + arc.radius;
+    let offset = (arc.centre - Point2::new(0.0, centre)).length();
+    if offset.is_nan() || offset > CENTRE_ROUNDING * scale {
+        return Err(not_centred());
+    }
+    let latitude = |station: Station| {
+        if station.on_axis {
+            if station.height > centre {
+                core::f64::consts::FRAC_PI_2
+            } else {
+                -core::f64::consts::FRAC_PI_2
+            }
+        } else {
+            (station.height - centre).atan2(station.radius)
+        }
+    };
+    let (start, end) = (latitude(here), latitude(there));
+    // The arc's own sweep and the latitudes agree on a meridian that stays
+    // on one side of the axis; a whole turn apart, the arc runs across it.
+    if (arc.sweep - (end - start)).abs() >= core::f64::consts::PI {
+        return Err(unsupported(
+            "exact revolution of a section crossing the axis",
+        ));
+    }
+
+    let surface = builder.add_surface(Surface::Sphere(Sphere {
+        frame: frame_at(axis_x, centre),
+        radius,
+    }));
+    // The seam is the meridian in the profile plane: a circle about the
+    // sphere's centre, from the first latitude to the second.
+    let seam_curve = builder.add_curve3(Curve3::Circle(Circle3 {
+        frame: Frame3 {
+            origin: Point3::new(axis_x, centre, 0.0),
+            x: Vec3::X,
+            y: Vec3::Y,
+            z: Vec3::Z,
+        },
+        radius,
+    }));
+    let seam = builder.topology_mut().add_edge(Edge {
+        start: slot(vertices, index)?,
+        end: slot(vertices, next)?,
+        curve: Some(seam_curve),
+    });
+    builder.set_edge_interval(seam, Interval::new(start, end));
+    let loop_id = seam_loop_between(builder, circles[index], circles[next], seam, start, end);
     Ok(add_face(builder, surface, loop_id, Orientation::Forward))
 }
 

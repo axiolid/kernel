@@ -2,8 +2,10 @@
 
 Each mutant misreads the exact on-axis classification, the perpendicularity
 of an edge ending on the axis, the admitted contacts, the disc cap and the
-cone's apex (its vertex, its frame, the nesting of a cavity inside it), or
-the mirroring of a section on the other side, and must turn a test red. The tests
+cone's apex (its vertex, its frame, the nesting of a cavity inside it), the
+sphere's pole (the centre gate, the latitudes, the sweep check) and the
+quadrant snap of the arc lowering, or the mirroring of a section on the other
+side, and must turn a test red. The tests
 are `tests/revolve_axis_exact.rs` and `tests/revolve_exact.rs`; the
 compile-level case in `boolean_deviation.rs` covers a solid cylinder
 reaching a boolean as a certified bound.
@@ -14,8 +16,12 @@ import probe_lib
 
 ROOT = pathlib.Path(__file__).resolve().parents[1]
 C = "crates/algorithms/construction/construct/src/revolve_contour.rs"
+L = "crates/algorithms/construction/construct/src/contour_lower.rs"
 E = "crates/algorithms/construction/construct/src/revolve_exact.rs"
-TESTS = ["-p", "axiolid-construct", "--test", "revolve_axis_exact", "--test", "revolve_exact"]
+TESTS = [
+    ["-p", "axiolid-construct", "--test", "revolve_axis_exact", "--test", "revolve_exact"],
+    ["-p", "axiolid-construct", "--lib", "contour_lower"],
+]
 
 # Not mutated: `side_of_axis` itself, probed with the mesh revolve in
 # `probe_revolve_axis_mutants.py`.
@@ -44,13 +50,22 @@ MUTANTS = [
     ('pieces not split', C, '        if stations[index].on_axis || stations[next].on_axis {\n            continue;\n        }\n        let (a, b)', '        let (a, b)', TESTS),
     ('cavity not nested in the solid', C, '    let contains = |outer: &Piece, inner: &Piece| outer.low < inner.low && inner.high < outer.high;', '    let contains = |_: &Piece, _: &Piece| false;', TESTS),
     ('solid nested in a cavity accepted', C, '    if depth.iter().any(|&d| d > 1) {', '    if false {', TESTS),
-    ('arc end named an oblique edge', C, '            (Some(Contact::Arc), _) | (_, Some(Contact::Arc)) => {', '            (Some(Contact::Arc), _) | (_, Some(Contact::Arc)) if false => {', TESTS),
+    ('arc without an axis edge accepted', C, '            (Some(Contact::Arc), _) | (_, Some(Contact::Arc)) => {', '            (Some(Contact::Arc), _) | (_, Some(Contact::Arc)) => {\n                continue;\n                #[allow(unreachable_code)]', TESTS),
     ('near-flat cone edge accepted', C, '                && (station.height - stations[other].height).abs() <= epsilon\n', '                && false\n', TESTS),
-    ('apex without a vertex', C, '.any(|edge| contact(stations, edge) == Some(Contact::Cone));', '.any(|_| false);', TESTS),
+    ('apex without a vertex', C, '.any(|edge| matches!(contact(stations, edge), Some(Contact::Cone | Contact::Arc)));', '.any(|edge| matches!(contact(stations, edge), Some(Contact::Cone | Contact::Arc)) && false);', TESTS),
     ('cone framed at its start, not its apex', C, 'let basis = if there.on_axis { there } else { here };', 'let basis = here;', TESTS),
     ("piece range without the faces' heights", C, '            for station in [index, next] {', '            for station in [index, next].into_iter().take(0) {', TESTS),
     ('two faces refused', C, '    if faces.len() < 2 {', '    if faces.len() < 3 {', TESTS),
     ('lower circle omitted', C, '    if let Some(lower) = lower {', '    if let Some(lower) = lower.filter(|_| false) {', TESTS),
+    ('pole without a vertex', C, 'Some(Contact::Cone | Contact::Arc)));', 'Some(Contact::Cone)));', TESTS),
+    ('arc with both ends on the axis accepted', C, '        if station.bulge != 0.0 && stations[(index + 1) % count].on_axis {', '        if false {', TESTS),
+    ('centre of the arc not gated', C, '    if offset.is_nan() || offset > CENTRE_ROUNDING * scale {', '    if false {', TESTS),
+    ('centre gate has no rounding', C, 'const CENTRE_ROUNDING: Scalar = 64.0 * Scalar::EPSILON;', 'const CENTRE_ROUNDING: Scalar = 0.0;', TESTS),
+    ('arc across the axis accepted', C, '    if (arc.sweep - (end - start)).abs() >= core::f64::consts::PI {', '    if false {', TESTS),
+    ('pole latitude sign flipped', C, '                core::f64::consts::FRAC_PI_2\n            } else {\n                -core::f64::consts::FRAC_PI_2', '                -core::f64::consts::FRAC_PI_2\n            } else {\n                core::f64::consts::FRAC_PI_2', TESTS),
+    ('no quadrant snap', L, [('    if cos.abs() <= slack {', '    if false {'), ('    } else if sin.abs() <= slack {', '    } else if false {')], TESTS),
+    ('quadrant snap at a loose band', L, 'pub(crate) const QUADRANT_ROUNDING: Scalar = 2.0 * Scalar::EPSILON;', 'pub(crate) const QUADRANT_ROUNDING: Scalar = 1e-6;', TESTS),
+    ('quadrant snap not scaled by the parameter', L, '    let slack = QUADRANT_ROUNDING * t.abs().max(1.0);', '    let slack = QUADRANT_ROUNDING;', TESTS),
     ('rectangle edge on the axis refused', E, '    if left == 0.0 || right == 0.0 {', '    if false {', TESTS),
 ]
 

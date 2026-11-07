@@ -39,7 +39,23 @@
 //! section with non-dyadic sizes (IPE 300 left 2.6e-18 at the flange tip)
 //! lower at `Tolerance::ZERO`, while a contour open by more than its own
 //! rounding is still refused there. The check only decides WHETHER a ring
-//! is built, never what it is: a ring that lowered before is bit-identical.
+//! is built, never what it is: a ring that lowered before is bit-identical,
+//! except at a quarter turn (#379), below.
+//!
+//! # Quarter turns evaluate exactly (#379)
+//!
+//! At a quadrant parameter an arc's `cos` or `sin` is the rounding of the
+//! parameter, not zero: for every form a producer writes (`FRAC_PI_2`,
+//! `-PI / 2`, `1.5 * PI`, `PI + FRAC_PI_2`, `TAU - FRAC_PI_2`, ...)
+//! `|cos t|` is about `0.18 * t * EPSILON`. That is the evaluation's own
+//! error, but it decides whether an arc's end lies on a revolution axis
+//! through its circle's centre, which the exact revolution tests with an
+//! exact sign. A parameter within `QUADRANT_ROUNDING * max(1, |t|)` of a
+//! quarter turn therefore evaluates `sin` and `cos` as exactly 0 and +-1.
+//! This moves a point by less than the error of the point itself, and
+//! names no tolerance: a parameter further from the quadrant, by 1e-12
+//! say, is its own angle. It is a rounding gate like the joint rule above,
+//! never reported.
 
 use axiolid_contracts::{GeomError, GeomResult, Operation};
 use axiolid_core::{Point2, Scalar, Tolerance};
@@ -408,7 +424,7 @@ fn lower_arc(
     index: usize,
 ) -> Result<(Vec<ArcVertex>, Point2), ContourFault> {
     let evaluate = |t: Scalar| {
-        let (sin, cos) = t.sin_cos();
+        let (sin, cos) = quadrant_sin_cos(t);
         circle.frame.origin
             + circle.frame.x * (circle.radius * cos)
             + circle.frame.y * (circle.radius * sin)
@@ -450,6 +466,25 @@ fn lower_arc(
         })
         .collect();
     Ok((vertices, end))
+}
+
+/// The rounding of an arc parameter's `sin` and `cos` at a quarter turn, in
+/// machine epsilons of `max(1, |t|)`: measured `0.18` for every form a
+/// producer writes, so `2` leaves a margin of ten.
+pub(crate) const QUADRANT_ROUNDING: Scalar = 2.0 * Scalar::EPSILON;
+
+/// `(sin t, cos t)`, with the one that rounds to zero at a quarter turn
+/// taken as exactly zero and the other as exactly `+-1` (#379).
+pub(crate) fn quadrant_sin_cos(t: Scalar) -> (Scalar, Scalar) {
+    let (sin, cos) = t.sin_cos();
+    let slack = QUADRANT_ROUNDING * t.abs().max(1.0);
+    if cos.abs() <= slack {
+        (sin.signum(), 0.0)
+    } else if sin.abs() <= slack {
+        (0.0, cos.signum())
+    } else {
+        (sin, cos)
+    }
 }
 
 fn unsupported_curve_name(curve: &Curve2) -> &'static str {
@@ -561,5 +596,54 @@ mod tests {
         let lowered = lower_contour(&contour, Tolerance::METRE).expect("lowers");
         assert_eq!(lowered.segment_of_edge, vec![0, 0, 1]);
         assert_eq!(lowered.ring.vertices.len(), 3);
+    }
+
+    #[test]
+    fn a_half_turn_between_quadrants_lowers_with_exact_ends() {
+        use core::f64::consts::FRAC_PI_2;
+        let axis = ProfileSegment {
+            curve: Curve2::Line(Line2 {
+                origin: Point2::new(0.0, 1.0),
+                direction: Point2::new(0.0, -2.0),
+            }),
+            domain: Interval::UNIT,
+            same_sense: true,
+        };
+        let contour = Contour::new(vec![arc(-FRAC_PI_2, FRAC_PI_2), axis]);
+        let lowered = lower_contour(&contour, Tolerance::ZERO).expect("lowers");
+        let points: Vec<_> = lowered.ring.vertices.iter().map(|v| v.point).collect();
+        assert_eq!(points[0], Point2::new(0.0, -1.0));
+        assert_eq!(points[points.len() - 1], Point2::new(0.0, 1.0));
+    }
+
+    #[test]
+    fn every_form_of_a_quarter_turn_snaps() {
+        use core::f64::consts::{FRAC_PI_2, PI, TAU};
+        let quarters = [
+            (FRAC_PI_2, (1.0, 0.0)),
+            (-FRAC_PI_2, (-1.0, 0.0)),
+            (-PI / 2.0, (-1.0, 0.0)),
+            (1.5 * PI, (-1.0, 0.0)),
+            (3.0 * FRAC_PI_2, (-1.0, 0.0)),
+            (PI + FRAC_PI_2, (-1.0, 0.0)),
+            (TAU - FRAC_PI_2, (-1.0, 0.0)),
+            (2.5 * PI, (1.0, 0.0)),
+            (-1.5 * PI, (1.0, 0.0)),
+            (20.5 * PI, (1.0, 0.0)),
+            (PI, (0.0, -1.0)),
+            (TAU, (0.0, 1.0)),
+            (0.0, (0.0, 1.0)),
+        ];
+        for (t, exact) in quarters {
+            assert_eq!(quadrant_sin_cos(t), exact, "{t}");
+        }
+    }
+
+    #[test]
+    fn a_parameter_a_hair_off_a_quarter_turn_keeps_its_angle() {
+        use core::f64::consts::FRAC_PI_2;
+        let t = FRAC_PI_2 + 1e-12;
+        assert_eq!(quadrant_sin_cos(t), t.sin_cos());
+        assert_ne!(quadrant_sin_cos(t).1, 0.0);
     }
 }

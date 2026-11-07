@@ -124,3 +124,34 @@ A cone between two circles keeps its frame at its start, bit for bit.
 void of which, takes the heights of both stations of each of its faces, not
 only the stations off the axis: a cavity inside a spinning top lies inside
 the range of its two apexes, which no station off the axis spans.
+
+**Poles of a sphere, and the quadrant snap.** An arc with exactly one end on
+the axis is a sphere's meridian when the centre of its bulge circle lies
+within `CENTRE_ROUNDING = 64 * EPSILON` times the scale of its coordinates
+of the axis; otherwise it is a spindle or horn torus and is refused by name, as
+are an arc with both ends on the axis and an arc whose sweep disagrees with
+its latitude span by a half turn or more (it runs across the axis). The sphere
+is placed exactly on the axis at the height equidistant from both arc ends,
+`c = h_pole + (r^2 + d^2) / (2 d)`, with its frame like the cone's and `v` the
+latitude, `+-pi/2` at the poles. The gate is a rounding gate, not a
+tolerance: no bulge encodes a quarter arc exactly (`tan(pi / 8)` is
+irrational), so the centre computed from a true sphere's arc is about
+`1e-16 R` off the axis; measured at most a sixteenth of the gate in the worst
+case tried (R 0.37, axis at 12.5). The only alternative to the gate is a
+refusal, never a different solid.
+
+`lower_arc` evaluates a quarter-turn parameter exactly (within
+`QUADRANT_ROUNDING = 2 * EPSILON * max(1, |t|)`, `sin` and `cos` of 0 and
+`+-1`): at a quadrant `|cos t|` is `0.18 * t * EPSILON` for every form a
+producer writes, and it decides whether the arc's end is on an axis through
+its circle's centre. This moves a point by less than the error of the point
+itself, the same doctrine as the joint rule of #250. Neither gate is
+reported: each chooses between a sphere and a refusal, and moves points below
+their own evaluation error.
+
+Rejected: carrying the source circles through `ArcRing` (a cross-crate type
+change; composites lose their sources anyway; and it still could not make an
+f64 pole exact), and a rounding band on the on-axis test itself (it breaks
+the rule that on-axis tests are exact). Spindle and horn tori and pinch
+points stay refused: supporting them needs a new torus patch domain or
+non-manifold vertices.
