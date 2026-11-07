@@ -6,8 +6,10 @@
 //! of each face's parameter box kept where `axiolid_measure::FaceDomain`
 //! certifies the point inside, plus every trim curve, where the cut lies),
 //! and asserts that no sample is further from the mesh than the report's
-//! bound: the report's one-sided quantity, exact surface to mesh, relative
-//! to the exact compiler's result. It also asserts the bound is useful:
+//! bound: the report's quantity exact surface to mesh, relative to the
+//! exact compiler's result. An all-planar result also has the other
+//! direction, mesh to exact result, under `MESH_TO_EXACT` (#329); a curved
+//! one has none. It also asserts the bound is useful:
 //! within the requested budget, or not absurdly above the measured maximum
 //! (the search stops once it is within the budget).
 //!
@@ -35,7 +37,8 @@ use axiolid_measure::FaceDomain;
 use axiolid_mesh::TriMesh;
 use axiolid_mesh_boolean_boolmesh::BoolmeshBoolean;
 use axiolid_mesh_compile::deviation::{
-    BOOLEAN_ROUNDING_FLOOR, COINCIDENT_OPERANDS, SNAPPED_OPERANDS, TOLERANCE_READINGS,
+    BOOLEAN_ROUNDING_FLOOR, COINCIDENT_OPERANDS, MESH_TO_EXACT, SNAPPED_OPERANDS,
+    TOLERANCE_READINGS,
 };
 use axiolid_mesh_compile::{
     DeviationBound, DeviationContribution, DeviationPath, DeviationReport, ReferenceExactCompiler,
@@ -274,6 +277,16 @@ fn exact_samples(exact: &ExactBRep, n: usize) -> Vec<Point3> {
 /// `6e-11` at these walls' extent.
 const NEAR_ROUNDING: Scalar = 1e-10;
 
+/// The certified bound of `report`'s `MESH_TO_EXACT` contribution (#329),
+/// if it has one.
+fn mesh_to_exact(report: &DeviationReport) -> Option<Scalar> {
+    report
+        .contributions
+        .iter()
+        .find(|c| c.detail == MESH_TO_EXACT)
+        .and_then(|c| c.bound.value())
+}
+
 /// Assert the report is certified, measured against the exact result, and
 /// that no exact sample lies further from the mesh than it says. Returns
 /// `(reported, measured)`.
@@ -288,8 +301,20 @@ fn assert_measured(
     // an operand (#324), within the tolerance; a union's operands snapped
     // onto each other within it name the move of a vertex, at most
     // `sqrt 3` times that (#357); the rest is the boolean's own measurement.
+    let (reverse, contributions): (Vec<&DeviationContribution>, Vec<_>) = report
+        .contributions
+        .iter()
+        .partition(|c| c.detail == MESH_TO_EXACT);
+    let reverse = match reverse.as_slice() {
+        [] => None,
+        [c] => match c.bound {
+            DeviationBound::Certified(v) => Some(v),
+            other => panic!("{name}: {other:?}"),
+        },
+        _ => panic!("{name}: {report:?}"),
+    };
     let (named, measured): (Vec<&DeviationContribution>, Vec<_>) =
-        report.contributions.iter().partition(|c| {
+        contributions.into_iter().partition(|c| {
             [
                 COINCIDENT_OPERANDS,
                 SNAPPED_OPERANDS,
@@ -331,10 +356,24 @@ fn assert_measured(
         .filter_map(|c| c.bound.value())
         .sum();
     assert!(bound >= readings, "{name}: {bound:e} below {readings:e}");
-    assert_eq!(report.bound, Some(bound));
+    // The other direction is widened by them too (#329).
+    if let Some(reverse) = reverse {
+        assert!(
+            reverse >= readings,
+            "{name}: {reverse:e} below {readings:e}"
+        );
+    }
+    assert_eq!(report.bound, Some(reverse.map_or(bound, |r| r.max(bound))));
     let exact = ReferenceExactCompiler::new()
         .compile_exact(&graph, root, options)
         .expect("the exact result");
+    // Only an all-planar result is measured both ways (#329).
+    let planar = exact.topology().faces().iter().all(|face| {
+        face.surface
+            .and_then(|id| exact.surfaces().get(id.index()))
+            .is_some_and(|surface| matches!(surface, axiolid_surface::Surface::Plane(_)))
+    });
+    assert_eq!(reverse.is_some(), planar, "{name}: {report:?}");
     let samples = exact_samples(&exact, 400);
     let grid = TriangleGrid::new(&mesh, 2.0 * bound);
     let worst = samples
@@ -463,8 +502,11 @@ fn an_all_planar_boolean_is_bounded_near_rounding() {
             assert_eq!(axiolid_mesh::component_count(&case.2), 1, "{name}");
             continue;
         }
+        let report = case.3.clone();
         let (bound, _) = assert_measured(name, case, &options, Scalar::INFINITY);
         assert!(bound <= NEAR_ROUNDING, "{name}: {bound:e}");
+        let reverse = mesh_to_exact(&report).expect("the other direction");
+        assert!(reverse <= NEAR_ROUNDING, "{name}: {reverse:e}");
     }
 }
 
@@ -780,8 +822,11 @@ fn two_overlapping_walls_united_are_certified_against_their_exact_result() {
         |g| two_walls(g, Vec3::new(1.5, 1.8, 0.0), BooleanOperator::Union),
         &options,
     );
+    let report = case.3.clone();
     let (bound, _) = assert_measured("walls union", case, &options, Scalar::INFINITY);
     assert!(bound <= NEAR_ROUNDING, "{bound:e}");
+    let reverse = mesh_to_exact(&report).expect("the other direction");
+    assert!(reverse <= NEAR_ROUNDING, "{reverse:e}");
 }
 
 #[test]
@@ -791,8 +836,11 @@ fn two_overlapping_walls_intersected_are_certified_against_their_exact_result() 
         |g| two_walls(g, Vec3::new(1.5, 1.8, 0.0), BooleanOperator::Intersection),
         &options,
     );
+    let report = case.3.clone();
     let (bound, _) = assert_measured("walls intersection", case, &options, Scalar::INFINITY);
     assert!(bound <= NEAR_ROUNDING, "{bound:e}");
+    let reverse = mesh_to_exact(&report).expect("the other direction");
+    assert!(reverse <= NEAR_ROUNDING, "{reverse:e}");
 }
 
 #[test]
@@ -802,8 +850,11 @@ fn two_disjoint_walls_united_are_certified_against_their_exact_result() {
         |g| two_walls(g, Vec3::new(1.5, 9.0, 0.0), BooleanOperator::Union),
         &options,
     );
+    let report = case.3.clone();
     let (bound, _) = assert_measured("walls disjoint union", case, &options, Scalar::INFINITY);
     assert!(bound <= NEAR_ROUNDING, "{bound:e}");
+    let reverse = mesh_to_exact(&report).expect("the other direction");
+    assert!(reverse <= NEAR_ROUNDING, "{reverse:e}");
 }
 
 #[test]
@@ -1218,6 +1269,9 @@ fn a_difference_that_severs_the_subject_stays_certified() {
         &options,
     );
     assert_eq!(axiolid_mesh::component_count(&case.2), 2);
+    let report = case.3.clone();
     let (bound, _) = assert_measured("severed wall", case, &options, Scalar::INFINITY);
     assert!(bound <= 1e-3, "{bound:e}");
+    let reverse = mesh_to_exact(&report).expect("the other direction");
+    assert!(reverse <= NEAR_ROUNDING, "{reverse:e}");
 }

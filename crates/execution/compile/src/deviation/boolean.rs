@@ -170,6 +170,29 @@
 //! vertex may be one mesh component. The `COINCIDENT_OPERANDS` reading is
 //! still added.
 //!
+//! # Both directions (#329)
+//!
+//! The measured distance is one-sided (exact surface to mesh): material the
+//! mesh has and the exact result lacks, connected to the body, is invisible
+//! to it. An uncut clip strip or an uncut opening leaves every exact point
+//! near the mesh, so the forward bound stays small however much the mesh
+//! overshoots.
+//!
+//! When the exact result is all planar, the other direction is a separate
+//! [`DeviationPath::Boolean`] contribution under [`MESH_TO_EXACT`]: a
+//! certified bound on how far any point of the mesh lies from the exact
+//! result, measured by the `reverse` module against a witness built on the
+//! exact faces. It is a separate contribution so a reader can tell the two
+//! apart. It is widened like the first by the flattening, the readings and
+//! the rounding floor. Its search settles once within what the budget
+//! leaves after them and the witness's error. A curved result has no such
+//! direction yet (#348) and keeps the one-sided bound.
+//!
+//! A skin authored within the tolerance, which the exact compiler read away
+//! (ADR 0096 D7), is material the mesh has and the exact result lacks: it
+//! now shows, and may fail `meets_requested`, as a void skin does under
+//! [`EXTRA_SHELLS`].
+//!
 //! # Unbounded, by name
 //!
 //! A boolean the exact compiler refuses (an operand it does not compile
@@ -194,15 +217,19 @@ use std::collections::{BTreeMap, HashSet};
 use axiolid_model::{GeometryGraph, GeometryNode, NodeId, SolidOperation};
 use axiolid_reference::bound::{chord_bound2, continuity_breaks2, SurfaceBoundOracle};
 use axiolid_surface::Surface;
+use axiolid_topology::Orientation;
 
 use axiolid_brep_boolean::{BooleanReport, ToleranceDecisionKind};
 
 use super::{
     Deviation, DeviationBound, DeviationPath, BOOLEAN_ROUNDING_FLOOR, COINCIDENT_OPERANDS,
-    TOLERANCE_READINGS,
+    MESH_TO_EXACT, TOLERANCE_READINGS,
 };
+
 use crate::certify::{certify_affine, certify_within, Cell, Coverage, Patch};
 use crate::ReferenceExactCompiler;
+
+mod reverse;
 
 /// The detail of a boolean measured against the exact compiler's result:
 /// the exact boolean of the operands moved by at most the tolerance (#228).
@@ -274,17 +301,42 @@ pub(crate) fn of_boolean(
     } else {
         budget
     };
+    // What the other direction is widened by whatever it measures (#329).
+    let added = widened(
+        widened(flattened, report.rounding_floor()),
+        reading_distance(&report),
+    );
+    let mut reverse = None;
     let measured = if extra_shells(&exact, mesh) {
         Err(EXTRA_SHELLS)
     } else {
-        exact_faces(&exact, left, reading)
-            .and_then(|faces| measure_faces(&faces, mesh, left, left, flattened))
+        exact_faces(&exact, left, reading).and_then(|faces| {
+            let measured = measure_faces(&faces, mesh, left, left, flattened)?;
+            if faces.iter().all(|f| f.domain.affine) {
+                reverse = Some(reverse::mesh_to_exact(
+                    &faces, mesh, budget, flattened, added,
+                ));
+            }
+            Ok(measured)
+        })
     };
     let bound = match measured {
         Ok(value) => DeviationBound::Certified(widened(value, flattened)),
         Err(reason) => DeviationBound::Unbounded(reason),
     };
-    with_readings(detail, bound, &report)
+    let mut deviation = with_readings(detail, bound, &report);
+    if let Some(reverse) = reverse {
+        let bound = match reverse {
+            Ok(distance) => DeviationBound::Certified(widened(distance, flattened)),
+            Err(reason) => DeviationBound::Unbounded(reason),
+        };
+        deviation.add(
+            DeviationPath::Boolean,
+            MESH_TO_EXACT,
+            covered(bound, report.rounding_floor(), reading_distance(&report)),
+        );
+    }
+    deviation
 }
 
 /// The deviation of a boolean whose mesh lies `bound` from the exact
@@ -490,18 +542,29 @@ fn exact_faces(
 ) -> Result<Vec<ExactFace<'_>>, &'static str> {
     let topology = exact.topology();
     let mut faces = Vec::with_capacity(topology.faces().len());
-    for face in topology.faces() {
+    let mut shell_of = vec![Orientation::Forward; topology.faces().len()];
+    for shell in topology.shells() {
+        for &(id, orientation) in &shell.faces {
+            if let Some(slot) = shell_of.get_mut(id.index()) {
+                *slot = orientation;
+            }
+        }
+    }
+    for (index, face) in topology.faces().iter().enumerate() {
         let surface = face
             .surface
             .and_then(|id| exact.surfaces().get(id.index()))
             .ok_or("boolean: an exact face has no surface")?;
         let oracle = SurfaceBoundOracle::new(surface)
             .ok_or("boolean: an exact face's surface family has no derivative bounds")?;
-        let domain = Domain::new(exact, face, surface, target, reading)?;
+        let mut domain = Domain::new(exact, face, surface, target, reading)?;
+        domain.outer = face.bounds.iter().position(|bound| bound.outer);
         faces.push(ExactFace {
             surface,
             oracle,
             domain,
+            outward: (face.orientation == Orientation::Forward)
+                == (shell_of[index] == Orientation::Forward),
         });
     }
     Ok(faces)
@@ -534,6 +597,8 @@ struct ExactFace<'a> {
     surface: &'a Surface,
     oracle: SurfaceBoundOracle<'a>,
     domain: Domain,
+    /// The face's outward normal is its surface's (#329).
+    outward: bool,
 }
 
 impl ExactFace<'_> {
@@ -608,6 +673,10 @@ struct Domain {
     /// unit normal into the domain in `inward`.
     affine: bool,
     inward: Vec<Vec2>,
+    /// A plane's rings as its segments run them (#329), empty otherwise.
+    rings: Vec<Vec<Point2>>,
+    /// The index in `rings` of the face's outer bound (#329), if it marks one.
+    outer: Option<usize>,
     /// Rounding of the parameters' coordinates.
     rounding: Scalar,
 }
@@ -725,6 +794,7 @@ impl Domain {
         affine: bool,
     ) -> Self {
         let mut segments = Vec::new();
+        let mut polygon = Vec::new();
         for ring in rings {
             // A plane's boundary cells are clipped, which needs each corner
             // as one vertex (#314): the repeats of consecutive spans'
@@ -746,6 +816,9 @@ impl Domain {
             }
             if let (Some(&first), Some(&last)) = (kept.first(), kept.last()) {
                 segments.push([last, first]);
+            }
+            if affine {
+                polygon.push(kept);
             }
         }
         let slack = (delta + gap) * (1.0 + 1e-9) + 4.0 * Scalar::EPSILON * scale;
@@ -773,6 +846,8 @@ impl Domain {
             hi: hi + Point2::splat(slack),
             affine,
             inward,
+            rings: polygon,
+            outer: None,
             rounding: 16.0 * Scalar::EPSILON * scale,
         }
     }

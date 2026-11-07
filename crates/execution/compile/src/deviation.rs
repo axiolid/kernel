@@ -16,8 +16,12 @@
 //! ([`DeviationBound::Certified`]). Where neither exists the path is named
 //! [`DeviationBound::Unbounded`] with its reason, and the report's overall
 //! bound is `None`; nothing is filled in with a sampled or heuristic value.
-//! The bounds are one-sided, exact surface to mesh: a mesh may carry extra
-//! area (a cap the exact solid does not have) without changing them.
+//! The bounds are one-sided, exact surface to mesh: the bound limits how far
+//! the exact surface lies from the mesh; it does not detect extra material
+//! in the mesh (a cap the exact solid does not have) and does not change
+//! with it. A measured all-planar boolean is the exception (#329): it also
+//! reports how far its mesh lies from the exact result, under
+//! [`MESH_TO_EXACT`].
 //!
 //! # How each path is bounded
 //!
@@ -156,7 +160,14 @@
 //!   not to the boolean of the unperturbed operands. It runs only for a
 //!   report, and only for the booleans whose result is emitted, not for
 //!   the inner booleans of a chain; the search stops once within the
-//!   requested budget.
+//!   requested budget. When the exact result is all planar the other
+//!   direction is measured too (#329): how far any point of the mesh lies
+//!   from the exact result, against a witness mesh built on the exact
+//!   faces, a separate [`DeviationPath::Boolean`] contribution under the
+//!   detail [`MESH_TO_EXACT`], so material the mesh has and the exact
+//!   result lacks (a strip of a clipped wall the mesh kept) shows in the
+//!   report's bound. Both directions are carried through instances like
+//!   any other contribution.
 //! - Operands snapped together (#276, #291): before the mesh boolean,
 //!   operand coordinates a rounding residue (16 `f64::EPSILON` of the
 //!   operands' largest coordinate) from the other operand's axis-aligned
@@ -327,6 +338,14 @@ pub const TOLERANCE_READINGS: &str = "operands moved by readings within toleranc
 /// bound is widened by it.
 pub const BOOLEAN_ROUNDING_FLOOR: &str = "constructed points read as one within the rounding floor";
 
+/// The [`DeviationContribution::detail`] of a measured boolean's other
+/// direction (#329): a certified bound on how far any point of the mesh
+/// lies from the exact compiler's result (the same result as the boolean's
+/// own contribution), widened like it by the flattening, the readings and
+/// the rounding floor. Only for an all-planar exact result.
+pub const MESH_TO_EXACT: &str =
+    "mesh to the exact compiler's result: how far any point of the mesh lies from it";
+
 /// The [`DeviationContribution::detail`] of a union the mesh cut could not
 /// settle and the exact compiler decided (#391, ADR 0098): the mesh is
 /// the exact compiler's union tessellated, and the exact union is that of
@@ -417,6 +436,11 @@ pub enum DeviationPath {
     /// of the operands flattened to their triangles, each within its slab
     /// width `w` of every reading, and the contribution is the measured
     /// distance plus the largest `w` (see the module's "Warped operands").
+    ///
+    /// A measured boolean whose exact result is all planar has two
+    /// contributions under this path (#329): the exact result to the mesh,
+    /// and the mesh to the exact result ([`MESH_TO_EXACT`]), so extra
+    /// material in the mesh is reported.
     Boolean,
     /// A path that does not report its deviation.
     Unreported,
@@ -507,6 +531,11 @@ pub struct DeviationContribution {
 
 /// A certified bound on the distance from the exact surface to a compiled
 /// mesh (#232).
+///
+/// The bound is one-sided: it limits how far the exact surface lies from
+/// the mesh, and does not detect extra material in the mesh. Only a
+/// measured all-planar boolean also bounds the mesh's distance to the exact
+/// result ([`MESH_TO_EXACT`], #329).
 #[non_exhaustive]
 #[derive(Debug, Clone, PartialEq)]
 pub struct DeviationReport {
@@ -515,7 +544,9 @@ pub struct DeviationReport {
     pub requested: Scalar,
     /// An upper bound on the distance from every point of the exact
     /// surface to the mesh's triangles, in world units; `None` when any
-    /// contribution is unbounded.
+    /// contribution is unbounded. It does not bound material the mesh has
+    /// beyond the exact surface, except for a measured all-planar
+    /// boolean's ([`MESH_TO_EXACT`]).
     pub bound: Option<Scalar>,
     /// Each path that contributed, with the worst bound it reached, in
     /// first-seen order.
@@ -527,6 +558,9 @@ impl DeviationReport {
     ///
     /// `false` means "not certified", not "missed": an unbounded path, or a
     /// bound above the budget whose true deviation may still be below it.
+    /// `true` is about the exact surface's distance to the mesh: a mesh
+    /// with extra material can still meet the request, except where a
+    /// measured all-planar boolean bounds that too ([`MESH_TO_EXACT`]).
     #[must_use]
     pub fn meets_requested(&self) -> bool {
         self.bound.is_some_and(|bound| bound <= self.requested)

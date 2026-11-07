@@ -60,6 +60,10 @@
 //! the mesh (edge-connected coplanar triangles, [`flat`]): without that,
 //! every edge inside a planar face or a cylinder facet would have to be
 //! resolved down to the bound's own size.
+//!
+//! The patches need not be a surface: they may be a mesh's triangles and the
+//! target a witness mesh built on an exact result, which bounds the mesh's
+//! distance to that result ([`certify_affine_capped`], #329).
 
 use std::cmp::Ordering;
 use std::collections::BinaryHeap;
@@ -220,6 +224,25 @@ pub(crate) fn certify_affine(
     certify_with(patches, cells, mesh, 0.0, enough, search)
 }
 
+/// [`certify_affine`] that stops after `max_cells` cell evaluations rather
+/// than [`MAX_CELLS`], reporting the worst bound it has then (#329).
+pub(crate) fn certify_affine_capped(
+    patches: &[&dyn Patch],
+    cells: Vec<Cell>,
+    mesh: &TriMesh,
+    enough: Scalar,
+    shown: Scalar,
+    max_cells: usize,
+) -> Option<Scalar> {
+    let search = Search {
+        affine: true,
+        shown,
+        max_cells: Some(max_cells),
+        ..Search::default()
+    };
+    certify_with(patches, cells, mesh, 0.0, enough, search)
+}
+
 /// How many times the rounding an affine search's sampled lower bound must
 /// exceed before the budget may settle it ([`certify_affine`]). A sample is
 /// a point-to-triangle distance from a point evaluated on the exact
@@ -280,7 +303,7 @@ fn certify_with(
         let extent_x = du.length() * (cell.x.1 - cell.x.0);
         let extent_y = dv.length() * (cell.y.1 - cell.y.0);
         let tiny = extent_x.max(extent_y) <= smallest;
-        if settled || tiny || work >= MAX_CELLS {
+        if settled || tiny || work >= search.max_cells.unwrap_or(MAX_CELLS) {
             return Some(top.upper * (1.0 + 1e-9));
         }
         let along_x = split(&cell, true);
@@ -349,6 +372,8 @@ struct Search {
     /// A deviation the caller adds to the bound anyway: shown, like a
     /// sampled one.
     shown: Scalar,
+    /// Cell evaluations before the search stops; [`MAX_CELLS`] when `None`.
+    max_cells: Option<usize>,
 }
 
 /// The two halves of `cell`, cut across `x` or across `y`.
