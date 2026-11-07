@@ -431,3 +431,41 @@ fn a_floor_of_100000_corners_with_200_holes_is_checked() {
         Err(OverlayError::HoleOutsideOuter)
     );
 }
+
+/// A translate rounds each vertex on its own, which can turn a contact into
+/// a crossing; it refuses the result by name, as `Region::new` would.
+#[test]
+fn a_translate_that_makes_a_hole_cross_its_outer_ring_is_refused() {
+    let outer = [
+        (-0.9, 3.8000000000000003),
+        (-0.5, 3.5),
+        (0.1, 4.3),
+        (-0.30000000000000004, 4.6000000000000005),
+    ];
+    let hole = [
+        (-0.9, 3.8000000000000003),
+        (-0.6000000000000001, 4.2),
+        (-0.2, 3.9000000000000004),
+        (-0.5, 3.5),
+    ];
+    let region = Region::new(vec![polygon(&outer, &[&hole])], t()).expect("valid before");
+    let moved = region.translate(axiolid_core::Vec2::new(0.0223, 0.1729));
+    assert_eq!(moved.map(|_| ()), Err(OverlayError::HoleOutsideOuter));
+}
+
+/// Both rings lie on one line and are left out, so the region is accepted;
+/// the rounded translate leaves the hole's ring a sliver outside the outer
+/// ring's line.
+#[test]
+fn a_translate_of_a_hole_in_a_line_outer_ring_is_refused() {
+    let region = Region::new(
+        vec![polygon(
+            &[(2.0, 0.0), (4.0, 2.0), (3.0, 1.0)],
+            &[&[(0.0, 0.0), (1.0, 1.0), (2.0, 2.0)]],
+        )],
+        t(),
+    )
+    .expect("accepted before translating");
+    let moved = region.translate(axiolid_core::Vec2::new(0.8123, 0.2929));
+    assert_eq!(moved.map(|_| ()), Err(OverlayError::HoleOutsideOuter));
+}

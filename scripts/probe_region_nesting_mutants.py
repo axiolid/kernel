@@ -1,7 +1,7 @@
 """Mutation probe for the nesting of a region's rings (#448,
 `crates/algorithms/planar/overlay/src/nesting.rs` and `src/region.rs`).
 
-Each mutant weakens one step -- the check `Region::new` runs, the regions
+Each mutant weakens one step -- the check `Region::new` and `Region::translate` run, the regions
 it skips, the rings it turns or leaves out, the crossings it refuses
 before the arrangement and the names it gives them, and how each side of a
 piece is read -- and must turn a test red.
@@ -24,8 +24,11 @@ TESTS = [
 
 MUTANTS = [
     ("Region::new runs no check", G,
-     "        crate::nesting::check(&polygons)?;",
-     "        let _ = crate::nesting::check(&polygons);", TESTS),
+     "tolerance)?;\n        crate::nesting::check(&polygons)?;\n        let mut region",
+     "tolerance)?;\n        let _ = crate::nesting::check(&polygons);\n        let mut region", TESTS),
+    ("translate skips the check", G,
+     "        crate::nesting::check(&polygons)?;\n        Ok(Self::from_valid(polygons, !self.is_empty()))",
+     "        Ok(Self::from_valid(polygons, !self.is_empty()))", TESTS),
     ("a region of two rings not checked", N,
      ".sum::<usize>() < 2 {",
      ".sum::<usize>() < 3 {", TESTS),

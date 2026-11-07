@@ -14,7 +14,9 @@ caret rule for `0.x` versions.
 - **Breaking:** `OverlayError` is `#[non_exhaustive]` and gains
   `HolesOverlap` and `PolygonsOverlap`, which `Region::new` returns; a
   `match` on it needs a wildcard arm. `HoleOutsideOuter` now also names a
-  hole that crosses its outer ring (#448, ADR 0104).
+  hole that crosses its outer ring. `Region::translate` checks its result as
+  `Region::new` does, since rounding each vertex can turn a contact into a
+  crossing, and `Region::sweep` with it (#448, ADR 0104).
 
 ### Fixed
 

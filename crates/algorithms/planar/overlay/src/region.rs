@@ -55,7 +55,10 @@ pub struct RegionEvidence {
 /// whose holes lie apart inside their outer rings and whose polygons do
 /// not overlap (#448).
 ///
-/// Construction validates; operations preserve validity. Ring ordering is
+/// Construction validates; operations preserve validity: a boolean or a
+/// morphology returns the faces of an exact arrangement, apart and nested
+/// by construction, and [`Region::translate`], which rounds each vertex on
+/// its own, checks its result. Ring ordering is
 /// canonical (outer counter-clockwise, holes clockwise, each rotated to its
 /// lexicographically smallest vertex) and polygons are sorted, so equal
 /// regions compare equal regardless of how they were built.
@@ -399,6 +402,13 @@ impl Region {
     }
 
     /// Translate by `offset`. Rigid: area and component count are preserved.
+    ///
+    /// # Errors
+    ///
+    /// [`OverlayError::NonFinitePoint`] for a non-finite offset. Each vertex
+    /// moves by its own rounding, which can turn a contact into a crossing,
+    /// so the result is checked as [`Region::new`] checks its rings: the
+    /// refusals of `Region::new` for rings crossing into each other (#448).
     pub fn translate(&self, offset: Vec2) -> Result<Self, OverlayError> {
         if !offset.is_finite() {
             return Err(OverlayError::NonFinitePoint);
@@ -417,7 +427,8 @@ impl Region {
                 outer: shift(&polygon.outer),
                 holes: polygon.holes.iter().map(shift).collect(),
             })
-            .collect();
+            .collect::<Vec<_>>();
+        crate::nesting::check(&polygons)?;
         Ok(Self::from_valid(polygons, !self.is_empty()))
     }
 

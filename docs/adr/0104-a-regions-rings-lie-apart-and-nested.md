@@ -53,13 +53,21 @@ decided exactly on one arrangement of all its rings (`src/nesting.rs`).**
   rings holding it, by the morphology's membership rule. This finds what a
   per-ring probe cannot: a crossing at a vertex, a hole leaving through two
   vertices on its outer ring's edge, a stretch two rings run the same way.
-- **Only the public constructor checks.** Booleans and the morphology return
+- **The constructor and `translate` check.** Booleans and the morphology return
   the faces of an exact arrangement, settled, which are apart and nested by
   construction; they are not checked again. Evidence: with the check run on
   every internal region of the crate's test suite, none failed, nor did
   3,480 outputs of the exact and fast morphology on 478 valid regions of
-  #345's fuzz family. `Region::translate` moves every vertex by one rounding
-  and is not checked again either.
+  #345's fuzz family. `Region::translate` is the exception: it moves every
+  vertex by its own rounding, which can turn a contact into a crossing, so
+  it checks its result and refuses by name. A hole sharing a vertex with its
+  outer ring, outer `[(-0.9, 3.8000000000000003), (-0.5, 3.5), (0.1, 4.3),
+  (-0.30000000000000004, 4.6000000000000005)]`, translated by
+  `(0.0223, 0.1729)`, ends with the hole crossing the outer ring; a hole
+  and an outer ring that both lie on one line (left out, so accepted)
+  translate to rings that no longer do. Both are tests in
+  `tests/region_nesting.rs`. `Region::sweep` translates, so it can refuse
+  the same way.
 - **Operands of `overlay` and `union_soup` are unchanged**: their rings may
   overlap, read by the fill rule.
 - **Errors.** `OverlayError` becomes `#[non_exhaustive]` and gains
