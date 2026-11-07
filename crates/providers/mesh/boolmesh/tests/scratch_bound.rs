@@ -50,6 +50,16 @@ use axiolid_mesh_boolean_boolmesh::BoolmeshBoolean;
 use axiolid_mesh_boolean_contract::MeshBoolean;
 
 fn main() {
+    // The listing half of libtest's protocol, so cargo-nextest can run this
+    // one-test binary (#444): `--list` names the test (nothing for
+    // `--ignored`), any other invocation runs it.
+    let args: Vec<String> = std::env::args().skip(1).collect();
+    if args.iter().any(|arg| arg == "--list") {
+        if !args.iter().any(|arg| arg == "--ignored") {
+            println!("scratch_bound: test");
+        }
+        return;
+    }
     let requirement = BoolmeshBoolean::new().scratch_requirement();
     let mut measured = 0;
     let mut smallest_peak = Vec::new();

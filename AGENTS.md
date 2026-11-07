@@ -94,9 +94,11 @@ log path is the first line. Each gets `nproc / GATE_SLOTS` build and test
 threads (unless `CARGO_BUILD_JOBS`/`RUST_TEST_THREADS` are set) and runs
 niced (`GATE_NICE=0` disables). `docs/guide/contributing.md` has the details.
 
-It needs `cargo-semver-checks`, pinned so the gate is reproducible and
-built by the pinned rustc:
-`cargo install cargo-semver-checks --version 0.51.0 --locked`.
+It needs `cargo-semver-checks` and `cargo-nextest`, pinned so the gate is
+reproducible and built by the pinned rustc:
+`cargo install cargo-semver-checks --version 0.51.0 --locked` and
+`cargo install cargo-nextest --version 0.9.148 --locked`. Tests run under
+nextest, doctests under `cargo test --doc`.
 The main steps can run alone:
 
 ```bash
@@ -106,7 +108,7 @@ cargo xtask context check
 cargo xtask docs --check            # after README, CHANGELOG or metadata changes: cargo xtask docs
 cargo xtask gaps check
 cargo clippy --workspace --all-targets --all-features -- -D warnings
-cargo test --workspace --all-features
+cargo nextest run --workspace --all-features && cargo test --workspace --all-features --doc
 scripts/geometry-feature-matrix.sh
 scripts/check-capi.sh
 ```

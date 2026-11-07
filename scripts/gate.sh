@@ -66,7 +66,17 @@ if [ "$tier" = branch ]; then
   echo "gate crates: $(echo ${affected:-none})"
 fi
 
+# Tests run under cargo-nextest (#444): it runs the test binaries in parallel
+# where `cargo test` runs them one after another (axiolid-mesh-compile: 229 s
+# against 598 s). Doctests stay on `cargo test --doc`, which nextest does not run.
+if [ -z "${GATE_DRY:-}" ] && ! cargo nextest --version >/dev/null 2>&1; then
+  echo "cargo-nextest is missing: cargo install cargo-nextest --version 0.9.148 --locked"
+  exit 1
+fi
+
 gate_acquire_slot || exit 1
+# After the slot: it sets this gate's share of test threads.
+nextest_flags=(--no-fail-fast --test-threads "${RUST_TEST_THREADS:-$(nproc)}" --status-level fail --final-status-level fail)
 
 gate_out="$(mktemp "${TMPDIR:-/tmp}/axiolid-gate.XXXXXX")" || exit 1
 trap 'rm -f "$gate_out"' EXIT
@@ -104,8 +114,9 @@ if [ "$tier" = branch ]; then
     printf '%-46s%s\n' "build/test/clippy/doc" "skip (no workspace crate changed)"
   else
     step "build (affected crates)" cargo build "${pflags[@]}"
-    step "test (affected crates)" cargo test "${pflags[@]}"
-    step "test --all-features (affected)" cargo test "${pflags[@]}" --all-features
+    step "test (affected crates)" cargo nextest run "${pflags[@]}" "${nextest_flags[@]}"
+    step "test --all-features (affected)" cargo nextest run "${pflags[@]}" --all-features "${nextest_flags[@]}"
+    step "doctests (affected)" cargo test "${pflags[@]}" --all-features --doc
     step "clippy (affected)" cargo clippy "${pflags[@]}" --all-targets -- -D warnings
     step "clippy --all-features (affected)" cargo clippy "${pflags[@]}" --all-targets --all-features -- -D warnings
     step "doc (affected)" env RUSTDOCFLAGS="-D warnings" cargo doc "${pflags[@]}" --no-deps
@@ -116,8 +127,9 @@ else
   step "downstream probe unit tests" python3 -m unittest tests/downstream/test_downstream_consumers.py
   step "black-box downstream consumers" python3 scripts/test-downstream-consumers.py
   step "build --workspace" cargo build --workspace
-  step "test --workspace" cargo test --workspace
-  step "test --all-features" cargo test --workspace --all-features
+  step "test --workspace" cargo nextest run --workspace "${nextest_flags[@]}"
+  step "test --all-features" cargo nextest run --workspace --all-features "${nextest_flags[@]}"
+  step "doctests" cargo test --workspace --all-features --doc
   step "clippy" cargo clippy --workspace --all-targets -- -D warnings
   step "clippy --all-features" cargo clippy --workspace --all-targets --all-features -- -D warnings
   step "doc" env RUSTDOCFLAGS="-D warnings" cargo doc --workspace --no-deps

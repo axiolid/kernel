@@ -17,7 +17,8 @@ Axiolid is `MPL-2.0 OR LicenseRef-Commercial`. Submitting a contribution means y
 ```bash
 cargo fmt --all -- --check
 cargo build --workspace
-cargo test --workspace
+cargo nextest run --workspace        # cargo install cargo-nextest --version 0.9.148 --locked
+cargo test --workspace --doc
 cargo clippy --workspace --all-targets --all-features -- -D warnings
 RUSTDOCFLAGS='-D warnings' cargo doc --workspace --no-deps
 scripts/geometry-feature-matrix.sh
