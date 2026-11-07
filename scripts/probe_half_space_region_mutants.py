@@ -33,6 +33,42 @@ TESTS = [
     ["-p", "axiolid-mesh-compile", "--lib"],
 ]
 TURNED = [["-p", "axiolid-mesh-compile", "--test", "turned_clip"]]
+DEEP = [["-p", "axiolid-mesh-compile", "--test", "compiler", "a_deep_region"]]
+
+# A walk of a nest of intersections written recursively, as a helper the
+# arm calls: a nest 100000 deep aborts the process on the test's stack.
+MESH_WALK = (
+    "                }) => {\n"
+    "                    fn walk(graph: &GeometryGraph, id: NodeId) -> bool {\n"
+    "                        match graph.get(id) {\n"
+    "                            Some(GeometryNode::SolidOperation(SolidOperation::Boolean {\n"
+    "                                left,\n"
+    "                                right,\n"
+    "                                operator: axiolid_core::BooleanOperator::Intersection,\n"
+    "                            })) => walk(graph, *left) && walk(graph, *right),\n"
+    "                            Some(GeometryNode::Instance(i)) => walk(graph, i.source),\n"
+    "                            _ => clip_tool(graph, id).is_some(),\n"
+    "                        }\n"
+    "                    }\n"
+    "                    walk(graph, id)\n"
+    "                }\n"
+)
+EXACT_WALK = (
+    "                }) => {\n"
+    "                    fn walk(c: &ExactCompilation<'_>, id: NodeId) -> bool {\n"
+    "                        match c.graph.get(id) {\n"
+    "                            Some(GeometryNode::SolidOperation(SolidOperation::Boolean {\n"
+    "                                left,\n"
+    "                                right,\n"
+    "                                operator: BooleanOperator::Intersection,\n"
+    "                            })) => walk(c, *left) && walk(c, *right),\n"
+    "                            Some(GeometryNode::Instance(i)) => walk(c, i.source),\n"
+    "                            _ => !matches!(c.clip_tool(id), Ok(None)),\n"
+    "                        }\n"
+    "                    }\n"
+    "                    walk(self, id)\n"
+    "                }\n"
+)
 
 MUTANTS = [
     # The exact stand-in.
@@ -56,26 +92,34 @@ MUTANTS = [
      "                Cover::Misses => return Ok(Cover::Misses),\n"
      "                Cover::Holds => return Ok(Cover::Misses),"),
     ("E5 stand-ins with nothing in common hold", CLIP,
-     "                                Err(BooleanError::EmptyResult) => return Ok(Cover::Misses),\n"
-     "                                Err(error) => return Err(remap_boolean_error(error)),",
-     "                                Err(BooleanError::EmptyResult) => (stand_in, BooleanReport::default()),\n"
-     "                                Err(error) => return Err(remap_boolean_error(error)),"),
+     "                                Err(BooleanError::EmptyResult) => {\n"
+     "                                    return if emptiness_is_exact(\n"
+     "                                        &stand_in,\n"
+     "                                        &side,\n"
+     "                                        BooleanOperator::Intersection,\n"
+     "                                    ) {\n"
+     "                                        Ok(Cover::Misses)\n"
+     "                                    } else {\n"
+     "                                        Err(GeomError::Degenerate(CLIP_EMPTIED.to_owned()))\n"
+     "                                    };\n"
+     "                                }\n",
+     "                                Err(BooleanError::EmptyResult) => (stand_in, BooleanReport::default()),\n"),
     ("E6 the exact swap is not a clip", CLIP,
-     "            (Some(region), None) if operator == BooleanOperator::Intersection => {",
-     "            (Some(region), None) if false && operator == BooleanOperator::Intersection => {"),
+     "            (true, false) if operator == BooleanOperator::Intersection => (right, left),",
+     "            (true, false) if false && operator == BooleanOperator::Intersection => (right, left),"),
     ("E7 the exact clip is not dispatched", BOOLEAN,
      "        if let Some((subject, region)) = self.clip_of(left, right, operator)? {",
      "        if let Some((subject, region)) = self.clip_of(left, right, operator)?.filter(|_| false) {"),
     ("E10 a clip that leaves nothing is a refusal", CLIP,
-     "            Err(BooleanError::EmptyResult) => return Ok(Body::Empty(CLIP_EMPTIED)),",
-     "            Err(BooleanError::EmptyResult) => {\n"
-     "                return Err(GeomError::Degenerate(CLIP_EMPTIED.to_owned()))\n"
-     "            }"),
+     "return if emptiness_is_exact(&subject, &solid, operator) {\n"
+     "                    Ok(Body::Empty(CLIP_EMPTIED))",
+     "return if false {\n"
+     "                    Ok(Body::Empty(CLIP_EMPTIED))"),
     ("E11 a boolean that leaves nothing is a refusal", BOOLEAN,
-     "                Err(BooleanError::EmptyResult) => return Ok(Body::Empty(emptied(operator))),",
-     "                Err(BooleanError::EmptyResult) => {\n"
-     "                    return Err(GeomError::Degenerate(emptied(operator).to_owned()))\n"
-     "                }"),
+     "return if emptiness_is_exact(&subject, &tool, operator) {\n"
+     "                        Ok(Body::Empty(emptied(operator)))",
+     "return if false {\n"
+     "                        Ok(Body::Empty(emptied(operator)))"),
     ("E12 an instance of nothing is refused", EXACT,
      "                // Nothing placed is still nothing.\n"
      "                let Body::Solid(source) = source else {\n"
@@ -103,10 +147,8 @@ MUTANTS = [
      "            built_tool.is_some_and("),
     # The deviation of an empty result.
     ("D1 an empty result against an empty mesh is unbounded", DEVIATION,
-     "            EMPTY_RESULT,\n"
-     "            DeviationBound::Certified(0.0),",
-     "            EMPTY_RESULT,\n"
-     "            DeviationBound::Unbounded(\"mutant\"),"),
+     "    with_readings(EMPTY_RESULT, DeviationBound::Certified(0.0), report)",
+     "    with_readings(EMPTY_RESULT, DeviationBound::Unbounded(\"mutant\"), report)"),
     ("D2 an empty mesh is never read", DEVIATION,
      "    if mesh.indices.is_empty() {\n"
      "        return with_readings(",
@@ -138,9 +180,40 @@ MUTANTS = [
      "                None\n"
      "            };",
      TURNED),
+    ("F1 the mesh reads a nest of intersections recursively", COMPILER,
+     "                }) => is(left) && is(right),\n",
+     MESH_WALK, DEEP),
+    ("F1e the exact compiler reads a nest of intersections recursively", CLIP,
+     "                }) => is(left) && is(right),\n",
+     EXACT_WALK.replace("    ", "", 0), DEEP),
+    ("F2a a boolean emptied within the tolerance is an identity", BOOLEAN,
+     "return if emptiness_is_exact(&subject, &tool, operator) {",
+     "return if true {"),
+    ("F2b stand-ins meeting within the tolerance share nothing", CLIP,
+     "                                    return if emptiness_is_exact(\n"
+     "                                        &stand_in,\n"
+     "                                        &side,\n"
+     "                                        BooleanOperator::Intersection,\n"
+     "                                    ) {",
+     "                                    return if true {"),
+    ("F2c a clip emptied within the tolerance is an identity", CLIP,
+     "return if emptiness_is_exact(&subject, &solid, operator) {",
+     "return if true {"),
+    ("F3a an empty result ignores its readings", DEVIATION,
+     "    with_readings(EMPTY_RESULT, DeviationBound::Certified(0.0), report)",
+     "    Deviation::one(\n"
+     "        DeviationPath::Boolean,\n"
+     "        EMPTY_RESULT,\n"
+     "        DeviationBound::Certified(0.0),\n"
+     "    )"),
+    ("F3b an empty result of flattened operands is certified", DEVIATION,
+     "    if flattened > 0.0 {\n"
+     "        return Deviation::one(",
+     "    if false && flattened > 0.0 {\n"
+     "        return Deviation::one("),
     ("M7 the mesh swap is not a clip", COMPILER,
-     "        (Some(leaves), None) if operator == Intersection => Some(Clip {",
-     "        (Some(leaves), None) if false && operator == Intersection => Some(Clip {"),
+     "        (true, false) if operator == Intersection => (right, left),",
+     "        (true, false) if false && operator == Intersection => (right, left),"),
 ]
 
 probe_lib.main(MUTANTS, tests=TESTS, timeout=1800, reject_uncompiled=True)

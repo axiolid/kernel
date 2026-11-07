@@ -51,8 +51,8 @@ MUTANTS = [
      "        if false && operator == BooleanOperator::SymmetricDifference {",
      [PLACED]),
     ("an emptied result named for a difference whatever the operator", C,
-     "Err(BooleanError::EmptyResult) => return Ok(Body::Empty(emptied(operator))),",
-     "Err(BooleanError::EmptyResult) => return Ok(Body::Empty(emptied(BooleanOperator::Difference))),",
+     "Ok(Body::Empty(emptied(operator)))",
+     "Ok(Body::Empty(emptied(BooleanOperator::Difference)))",
      [PLACED]),
 ]
 

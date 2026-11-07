@@ -507,3 +507,91 @@ fn a_difference_by_an_empty_tool_is_certified_within_the_request() {
     assert!(report.bound.is_some(), "{report:?}");
     assert!(report.meets_requested(), "{report:?}");
 }
+
+/// `wall - (A & B)`, `A` and `B` blocks inside the wall that overlap by
+/// `gap`: their intersection is a cavity `gap` wide.
+fn wall_less_overlapping_blocks(gap: f64) -> (Graph, NodeId) {
+    let mut g = Graph::new();
+    let wall = g.wall(Transform3::IDENTITY);
+    let a = g.extrusion(rect(1.0, T), 1.0);
+    let a = g.instance(a, Transform3::from_translation(Vec3::new(0.0, 0.0, 1.0)));
+    let b = g.extrusion(rect(1.0, T), 1.0);
+    let b = g.instance(
+        b,
+        Transform3::from_translation(Vec3::new(1.0 - gap, 0.0, 1.0)),
+    );
+    let cavity = g.meet(a, b);
+    let root = g.minus(wall, cavity);
+    (g, root)
+}
+
+/// `wall - ({z >= 2 + 0.2 x} & {z <= 2 + 0.2 x + gap})`: a slab `gap` thick.
+fn wall_less_a_slab(gap: f64) -> (Graph, NodeId) {
+    let placement = building();
+    let mut g = Graph::new();
+    let wall = g.wall(placement);
+    let above = g.world_half_space(
+        Point3::new(0.0, 0.0, 2.0),
+        Vec3::new(-0.2, 0.0, 1.0),
+        placement,
+    );
+    let below = g.world_half_space(
+        Point3::new(0.0, 0.0, 2.0 + gap),
+        Vec3::new(0.2, 0.0, -1.0),
+        placement,
+    );
+    let slab = g.meet(above, below);
+    let root = g.minus(wall, slab);
+    (g, root)
+}
+
+/// `wall - (wall & {z <= gap})`: the clip leaves a sliver `gap` thick.
+fn wall_less_a_sliver_clip(gap: f64) -> (Graph, NodeId) {
+    let placement = building();
+    let mut g = Graph::new();
+    let wall = g.wall(placement);
+    let low = g.world_half_space(Point3::new(0.0, 0.0, gap), -Vec3::Z, placement);
+    let sliver = g.meet(wall, low);
+    let root = g.minus(wall, sliver);
+    (g, root)
+}
+
+/// An emptiness the general boolean reads within the tolerance (operands
+/// that overlap by less than it) is no identity: passing the wall through
+/// would drop the cavity and call the result exact. It is refused as
+/// `Degenerate`, as it was before empty bodies; above the tolerance the
+/// cavity is cut.
+#[test]
+fn an_emptiness_read_within_the_tolerance_is_refused_not_absorbed() {
+    // The tolerance is 1e-6.
+    for (name, build) in [
+        (
+            "overlapping blocks",
+            wall_less_overlapping_blocks as fn(f64) -> (Graph, NodeId),
+        ),
+        ("a slab between planes", wall_less_a_slab),
+        ("a sliver clip", wall_less_a_sliver_clip),
+    ] {
+        let (g, root) = build(1e-7);
+        let graph = g.finish(vec![root]);
+        match exact(&graph, root) {
+            Err(GeomError::Degenerate(_)) => {}
+            other => panic!("{name}: a feature read away must be refused, got {other:?}"),
+        }
+
+        let (g, root) = build(1e-3);
+        let graph = g.finish(vec![root]);
+        let solid = exact(&graph, root).unwrap_or_else(|error| panic!("{name}: {error:?}"));
+        let cavity = if name == "overlapping blocks" {
+            T * 1e-3
+        } else {
+            L * T * 1e-3
+        };
+        assert!(
+            (volume(&solid) - (WALL - cavity)).abs() <= 1e-7,
+            "{name}: volume {}, expected {}",
+            volume(&solid),
+            WALL - cavity
+        );
+    }
+}

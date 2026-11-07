@@ -51,8 +51,8 @@ def edits(*changes):
 SIMILAR = (FRAME, "        && is_similarity(t)\n", "        && true\n")
 FALLBACK = (
     COMPILER,
-    "            if let Ok(Some(built)) =\n                self.boolean_in_shared_frame(graph, (left, right), operator, options, budget, cache)\n            {",
-    "            if let Some(built) =\n                self.boolean_in_shared_frame(graph, (left, right), operator, options, budget, cache)?\n            {",
+    "            if let Ok(Some(built)) = self.boolean_in_shared_frame(\n                graph,\n                (left, right),\n                operator,\n                options,\n                budget,\n                (cache, regions),\n            ) {",
+    "            if let Some(built) = self.boolean_in_shared_frame(\n                graph,\n                (left, right),\n                operator,\n                options,\n                budget,\n                (cache, regions),\n            )? {",
 )
 GUARD = (
     COMPILER,
@@ -86,8 +86,8 @@ MUTANTS = [
      "    if eps > 0.0 && eps.is_finite() {\n        eps / 3.0_f64.sqrt()\n",
      [U]),
     ("shared frame off", COMPILER,
-     "        if clip_of(graph, left, right, operator)?.is_some() {\n            return Ok(None);",
-     "        if true || clip_of(graph, left, right, operator)?.is_some() {\n            return Ok(None);",
+     "        if clip_of(graph, regions, (left, right), operator)?.is_some() {\n            return Ok(None);",
+     "        if true || clip_of(graph, regions, (left, right), operator)?.is_some() {\n            return Ok(None);",
      [R]),
     ("linear parts compared loosely", FRAME,
      "    similarity(a) && a.matrix3.to_cols_array() == b.matrix3.to_cols_array()\n",

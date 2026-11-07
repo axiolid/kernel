@@ -125,9 +125,14 @@
 //! sheared placement above the half-space, an envelope with an edge family
 //! it cannot bound, and every refusal of the general boolean. An emptied
 //! subject is an empty body (#326), which the booleans above it absorb
-//! (`crate::empty`); as the root it is `GeomError::Degenerate`. The model's
+//! (`crate::empty`); as the root it is `GeomError::Degenerate`. A clip
+//! that leaves nothing only within the tolerance is refused as
+//! `Degenerate` too ([`super::boolean::emptiness_is_exact`]), as are the
+//! stand-ins of two leaves that meet in nothing only within it. The model's
 //! half-space carries a plane, so a curved base surface cannot reach this
 //! path.
+
+use std::collections::HashMap;
 
 use axiolid_brep::{ExactBRep, TransformError};
 use axiolid_brep_boolean::{boolean_with_report, BooleanError, BooleanReport};
@@ -142,7 +147,7 @@ use axiolid_model::{GeometryNode, NodeId, SolidOperation};
 use axiolid_primitive::HalfSpace;
 use axiolid_profile::{Contour, ContourProfile, Profile, ProfileSegment, RectangleProfile};
 
-use super::boolean::remap_boolean_error;
+use super::boolean::{emptiness_is_exact, remap_boolean_error};
 use super::{remap_construction_error, unsupported, Body, ExactCompilation};
 use crate::half_space_boundary::PrismAxis;
 
@@ -293,66 +298,78 @@ impl ExactCompilation<'_> {
         ))
     }
 
-    /// The region `id` is, through its instances, or `None` when it is not
-    /// one: a half-space, or an intersection of regions (#326), each leaf
-    /// placed by the instances above it.
-    pub(super) fn region(&self, id: NodeId) -> GeomResult<Option<Region>> {
-        let mut leaves = Vec::new();
-        let is_region = self.collect_leaves(id, Transform3::IDENTITY, &mut leaves)?;
-        Ok(is_region.then_some(Region { leaves }))
-    }
-
-    /// Append the half-spaces `id` intersects, under `placement`, when it is
-    /// a region; nothing is left appended when it is not.
-    fn collect_leaves(
-        &self,
-        mut id: NodeId,
-        mut placement: Transform3,
-        leaves: &mut Vec<ClipTool>,
-    ) -> GeomResult<bool> {
-        for _ in 0..=self.graph.len() {
-            let node = self.graph.get(id).ok_or_else(|| {
-                GeomError::InvalidInput(format!("operand {id:?} does not belong to this graph"))
-            })?;
-            match node {
-                GeometryNode::Instance(instance) => {
-                    placement *= instance.transform;
-                    id = instance.source;
-                }
+    /// Which nodes are regions (#326): a half-space, an instance of a
+    /// region, or an intersection of regions. The graph lists operands
+    /// before the nodes that read them, so one pass decides every node, and
+    /// a long chain of intersections is not walked again at each link. A
+    /// node whose half-space cannot be read counts as one, so that the walk
+    /// of [`Self::region`] reports why.
+    pub(super) fn region_map(&self) -> HashMap<NodeId, bool> {
+        let mut known = HashMap::with_capacity(self.graph.len());
+        for (id, node) in self.graph.iter() {
+            let is = |operand: &NodeId| known.get(operand).copied().unwrap_or(false);
+            let region = match node {
+                GeometryNode::Instance(instance) => is(&instance.source),
                 GeometryNode::SolidOperation(SolidOperation::Boolean {
                     left,
                     right,
                     operator: BooleanOperator::Intersection,
-                }) => {
-                    let (left, right) = (*left, *right);
-                    let mark = leaves.len();
-                    let both = self.collect_leaves(left, placement, leaves)?
-                        && self.collect_leaves(right, placement, leaves)?;
-                    if !both {
-                        leaves.truncate(mark);
+                }) => is(left) && is(right),
+                _ => !matches!(self.clip_tool(id), Ok(None)),
+            };
+            known.insert(id, region);
+        }
+        known
+    }
+
+    /// Whether `id` is a region.
+    pub(super) fn is_region(&self, id: NodeId) -> bool {
+        self.regions.get(&id).copied().unwrap_or(false)
+    }
+
+    /// The leaves of the region `id`, through its instances, each placed by
+    /// the instances above it (#326), left operand first. `id` must be a
+    /// region ([`Self::is_region`]). Iterative, and bounded by the graph's
+    /// size: a graph that shares a sub-region is read through many paths.
+    fn region(&self, id: NodeId) -> GeomResult<Region> {
+        let mut leaves = Vec::new();
+        let mut work = vec![(id, Transform3::IDENTITY)];
+        while let Some((mut id, mut placement)) = work.pop() {
+            loop {
+                let node = self.graph.get(id).ok_or_else(|| {
+                    GeomError::InvalidInput(format!("operand {id:?} does not belong to this graph"))
+                })?;
+                match node {
+                    GeometryNode::Instance(instance) => {
+                        placement *= instance.transform;
+                        id = instance.source;
                     }
-                    return Ok(both);
-                }
-                _ => {
-                    let Some(mut leaf) = self.clip_tool(id)? else {
-                        return Ok(false);
-                    };
-                    leaf.placement = placement * leaf.placement;
-                    // A shared sub-region can be read through many paths: the
-                    // leaves are bounded by the graph, not by its size alone.
-                    if leaves.len() >= self.graph.len() {
-                        return Err(unsupported(
-                            "exact half-space intersection with more half-spaces than its graph has nodes",
-                        ));
+                    GeometryNode::SolidOperation(SolidOperation::Boolean {
+                        left,
+                        right,
+                        operator: BooleanOperator::Intersection,
+                    }) => {
+                        work.push((*right, placement));
+                        work.push((*left, placement));
+                        break;
                     }
-                    leaves.push(leaf);
-                    return Ok(true);
+                    _ => {
+                        let mut leaf = self.clip_tool(id)?.ok_or_else(|| {
+                            GeomError::InvalidInput(format!("operand {id:?} is not a half-space"))
+                        })?;
+                        leaf.placement = placement * leaf.placement;
+                        if leaves.len() >= self.graph.len() {
+                            return Err(unsupported(
+                                "exact half-space intersection with more half-spaces than its graph has nodes",
+                            ));
+                        }
+                        leaves.push(leaf);
+                        break;
+                    }
                 }
             }
         }
-        Err(GeomError::InvalidInput(
-            "exact boolean operand placements form a cycle".to_owned(),
-        ))
+        Ok(Region { leaves })
     }
 
     /// The subject and the region of a clip: a difference or an
@@ -370,13 +387,12 @@ impl ExactCompilation<'_> {
         ) {
             return Ok(None);
         }
-        Ok(match (self.region(left)?, self.region(right)?) {
-            (None, Some(region)) => Some((left, region)),
-            (Some(region), None) if operator == BooleanOperator::Intersection => {
-                Some((right, region))
-            }
-            _ => None,
-        })
+        let (subject, tool) = match (self.is_region(left), self.is_region(right)) {
+            (false, true) => (left, right),
+            (true, false) if operator == BooleanOperator::Intersection => (right, left),
+            _ => return Ok(None),
+        };
+        Ok(Some((subject, self.region(tool)?)))
     }
 
     /// `left` clipped by the region `region`.
@@ -403,7 +419,15 @@ impl ExactCompilation<'_> {
         };
         let (body, report) = match boolean_with_report(&subject, &solid, operator, tolerance) {
             Ok(done) => done,
-            Err(BooleanError::EmptyResult) => return Ok(Body::Empty(CLIP_EMPTIED)),
+            Err(BooleanError::EmptyResult) => {
+                // Nothing left of the operands as given, or only within the
+                // tolerance, which is no identity to rest on.
+                return if emptiness_is_exact(&subject, &solid, operator) {
+                    Ok(Body::Empty(CLIP_EMPTIED))
+                } else {
+                    Err(GeomError::Degenerate(CLIP_EMPTIED.to_owned()))
+                };
+            }
             Err(error) => return Err(remap_boolean_error(error)),
         };
         // What it read within tolerance, for the compiler's report (#236),
@@ -448,8 +472,19 @@ impl ExactCompilation<'_> {
                                 tolerance,
                             ) {
                                 Ok(done) => done,
-                                // The two stand-ins share nothing.
-                                Err(BooleanError::EmptyResult) => return Ok(Cover::Misses),
+                                // The two stand-ins share nothing, exactly: a
+                                // reading within the tolerance is no emptiness.
+                                Err(BooleanError::EmptyResult) => {
+                                    return if emptiness_is_exact(
+                                        &stand_in,
+                                        &side,
+                                        BooleanOperator::Intersection,
+                                    ) {
+                                        Ok(Cover::Misses)
+                                    } else {
+                                        Err(GeomError::Degenerate(CLIP_EMPTIED.to_owned()))
+                                    };
+                                }
                                 Err(error) => return Err(remap_boolean_error(error)),
                             };
                             let merged = [report, side_report, Some(both_report)]
@@ -765,8 +800,15 @@ impl ExactCompilation<'_> {
         let (tool, report) =
             match boolean_with_report(&long, &side, BooleanOperator::Intersection, tolerance) {
                 Ok(tool) => tool,
-                // The prism misses the plane's side over the envelope.
-                Err(BooleanError::EmptyResult) => return Ok(Cover::Misses),
+                // The prism misses the plane's side over the envelope, or
+                // only within the tolerance, which decides nothing (#326).
+                Err(BooleanError::EmptyResult) => {
+                    return if emptiness_is_exact(&long, &side, BooleanOperator::Intersection) {
+                        Ok(Cover::Misses)
+                    } else {
+                        Err(GeomError::Degenerate(CLIP_EMPTIED.to_owned()))
+                    };
+                }
                 Err(error) => return Err(remap_boolean_error(error)),
             };
         tool.transformed(placement)

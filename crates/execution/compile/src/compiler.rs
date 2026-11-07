@@ -574,6 +574,7 @@ impl<B: MeshBoolean> ReferenceMeshCompiler<B> {
     fn mesh_dependencies(
         &self,
         graph: &GeometryGraph,
+        regions: &Regions,
         node: &GeometryNode,
         key: EvalKey,
     ) -> GeomResult<Vec<EvalKey>> {
@@ -596,10 +597,10 @@ impl<B: MeshBoolean> ReferenceMeshCompiler<B> {
                 right,
                 operator,
             }) => {
-                if let Some(clip) = clip_of(graph, *left, *right, *operator)? {
+                if let Some(clip) = clip_of(graph, regions, (*left, *right), *operator)? {
                     // The region is built from its subject in `build_boolean`.
                     vec![same(clip.subject)]
-                } else if region(graph, *left)?.is_some() || region(graph, *right)?.is_some() {
+                } else if regions.has(*left) || regions.has(*right) {
                     // A region has no mesh of its own: `build_boolean` refuses
                     // the boolean by name (#326).
                     Vec::new()
@@ -621,6 +622,7 @@ impl<B: MeshBoolean> ReferenceMeshCompiler<B> {
         measure: Measure<'_>,
     ) -> GeomResult<Built> {
         let root_key = EvalKey::new(root, Budget::of(options));
+        let regions = Regions::of(graph);
         let mut stack = vec![Step::Enter(root_key)];
         // The room an instance's source was re-meshed with for its
         // placement's rounding (#295), once its first mesh rounded by more
@@ -638,7 +640,7 @@ impl<B: MeshBoolean> ReferenceMeshCompiler<B> {
                         continue;
                     }
                     let node = self.node(graph, key.id)?;
-                    let deps = self.mesh_dependencies(graph, node, key)?;
+                    let deps = self.mesh_dependencies(graph, &regions, node, key)?;
                     // Exit runs after every dependency, so push it first.
                     stack.push(Step::Exit(key));
                     for dep in deps {
@@ -693,7 +695,7 @@ impl<B: MeshBoolean> ReferenceMeshCompiler<B> {
                         graph,
                         (key, room, accuracy),
                         &local_options,
-                        cache,
+                        (cache, &regions),
                         (measure, root),
                     )?;
                     cache.insert(key, built);
@@ -761,7 +763,7 @@ impl<B: MeshBoolean> ReferenceMeshCompiler<B> {
         graph: &GeometryGraph,
         (key, room, accuracy): (EvalKey, Scalar, Option<PlacementAccuracy>),
         options: &ExecutionOptions,
-        cache: &Cache,
+        (cache, regions): (&Cache, &Regions),
         (measure, root): (Measure<'_>, NodeId),
     ) -> GeomResult<Built> {
         let id = key.id;
@@ -854,7 +856,7 @@ impl<B: MeshBoolean> ReferenceMeshCompiler<B> {
                     *operator,
                     options,
                     budget,
-                    (cache, root),
+                    (cache, regions, root),
                 )?;
                 Ok(match measure {
                     // The exact compiler's own result states its bound
@@ -1039,13 +1041,13 @@ impl<B: MeshBoolean> ReferenceMeshCompiler<B> {
         operator: axiolid_core::BooleanOperator,
         options: &ExecutionOptions,
         budget: Budget,
-        (cache, root): (&Cache, NodeId),
+        (cache, regions, root): (&Cache, &Regions, NodeId),
     ) -> GeomResult<(Built, Decided)> {
         // A region is the tool of a clip, or the left operand of an
         // intersection with a solid, whose operands are then read the other
         // way round; any other boolean with one is unbounded (#326).
-        let clip = clip_of(graph, left, right, operator)?;
-        if clip.is_none() && (region(graph, left)?.is_some() || region(graph, right)?.is_some()) {
+        let clip = clip_of(graph, regions, (left, right), operator)?;
+        if clip.is_none() && (regions.has(left) || regions.has(right)) {
             return Err(unsupported_input(UNCLIPPED_HALF_SPACE));
         }
         let (left, right) = clip
@@ -1070,17 +1072,27 @@ impl<B: MeshBoolean> ReferenceMeshCompiler<B> {
             built_tool.is_some_and(|built| built.mesh.indices.is_empty()),
         );
         if identity.is_none() {
-            if let Ok(Some(built)) =
-                self.boolean_in_shared_frame(graph, (left, right), operator, options, budget, cache)
-            {
+            if let Ok(Some(built)) = self.boolean_in_shared_frame(
+                graph,
+                (left, right),
+                operator,
+                options,
+                budget,
+                (cache, regions),
+            ) {
                 return Ok((built, Decided::Mesh));
             }
             // A clip is a constructed stand-in with no coordinates of its
             // own: cut in its subject's frame, never worse than the world cut
             // below (#400, ADR 0102).
-            if let Ok(Some(built)) =
-                self.clip_in_subject_frame(graph, (left, right), operator, options, budget, cache)
-            {
+            if let Ok(Some(built)) = self.clip_in_subject_frame(
+                graph,
+                (left, right),
+                operator,
+                options,
+                budget,
+                (cache, regions),
+            ) {
                 return Ok((built, Decided::Mesh));
             }
         }
@@ -1166,7 +1178,7 @@ impl<B: MeshBoolean> ReferenceMeshCompiler<B> {
                 skin: Some(skin),
                 ..
             }) => {
-                if clip_chain_continues(graph, id, root) {
+                if clip_chain_continues(graph, regions, id, root) {
                     built.pending_skin = Some(skin);
                     return Ok((built, Decided::Mesh));
                 }
@@ -1279,9 +1291,9 @@ impl<B: MeshBoolean> ReferenceMeshCompiler<B> {
         operator: axiolid_core::BooleanOperator,
         options: &ExecutionOptions,
         budget: Budget,
-        cache: &Cache,
+        (cache, regions): (&Cache, &Regions),
     ) -> GeomResult<Option<Built>> {
-        if clip_of(graph, left, right, operator)?.is_some() {
+        if clip_of(graph, regions, (left, right), operator)?.is_some() {
             return Ok(None);
         }
         let Some((subject_frame, subject)) = self.frame_of(graph, left, budget, cache)? else {
@@ -1376,9 +1388,9 @@ impl<B: MeshBoolean> ReferenceMeshCompiler<B> {
         operator: axiolid_core::BooleanOperator,
         options: &ExecutionOptions,
         budget: Budget,
-        cache: &Cache,
+        (cache, regions): (&Cache, &Regions),
     ) -> GeomResult<Option<Built>> {
-        let Some(clip) = clip_of(graph, left, right, operator)? else {
+        let Some(clip) = clip_of(graph, regions, (left, right), operator)? else {
             return Ok(None);
         };
         let Some((frame, subject)) = self.frame_of(graph, left, budget, cache)? else {
@@ -2004,7 +2016,12 @@ fn refused_by_referee(error: GeomError, reason: Option<String>) -> GeomError {
 /// clips goes on past it, so a skin within rounding in its result waits for
 /// the root of the chain (#400, ADR 0102). A node any other node reads, as a
 /// tool, in a union or an instance, ends its chain.
-fn clip_chain_continues(graph: &GeometryGraph, id: NodeId, root: NodeId) -> bool {
+fn clip_chain_continues(
+    graph: &GeometryGraph,
+    regions: &Regions,
+    id: NodeId,
+    root: NodeId,
+) -> bool {
     if id == root || graph.roots().contains(&id) {
         return false;
     }
@@ -2026,7 +2043,7 @@ fn clip_chain_continues(graph: &GeometryGraph, id: NodeId, root: NodeId) -> bool
                 left,
                 right,
                 operator: axiolid_core::BooleanOperator::Intersection,
-            }) if *right == id && matches!(region(graph, *left), Ok(Some(_))) => {
+            }) if *right == id && regions.has(*left) => {
                 continues = true;
             }
             _ => return false,
@@ -2249,6 +2266,36 @@ struct Clip {
     leaves: Vec<(ClipTool, Transform3)>,
 }
 
+/// Which nodes are regions (#326), read once per evaluation: a half-space,
+/// an instance of a region, or an intersection of regions. The graph lists
+/// operands before the nodes that read them, so one pass decides every node,
+/// and a long chain of intersections is not walked again at each link.
+struct Regions(std::collections::HashMap<NodeId, bool>);
+
+impl Regions {
+    fn of(graph: &GeometryGraph) -> Self {
+        let mut known = std::collections::HashMap::with_capacity(graph.len());
+        for (id, node) in graph.iter() {
+            let is = |operand: &NodeId| known.get(operand).copied().unwrap_or(false);
+            let region = match node {
+                GeometryNode::Instance(instance) => is(&instance.source),
+                GeometryNode::SolidOperation(SolidOperation::Boolean {
+                    left,
+                    right,
+                    operator: axiolid_core::BooleanOperator::Intersection,
+                }) => is(left) && is(right),
+                _ => clip_tool(graph, id).is_some(),
+            };
+            known.insert(id, region);
+        }
+        Self(known)
+    }
+
+    fn has(&self, id: NodeId) -> bool {
+        self.0.get(&id).copied().unwrap_or(false)
+    }
+}
+
 /// The clip a boolean is, or `None`. These operators stay within the
 /// finite subject, so a slab covering its bounds is an exact finite
 /// stand-in for the region (#325). Union and XOR are unbounded and remain
@@ -2256,85 +2303,69 @@ struct Clip {
 /// solid on its right.
 fn clip_of(
     graph: &GeometryGraph,
-    left: NodeId,
-    right: NodeId,
+    regions: &Regions,
+    (left, right): (NodeId, NodeId),
     operator: axiolid_core::BooleanOperator,
 ) -> GeomResult<Option<Clip>> {
     use axiolid_core::BooleanOperator::{Difference, Intersection};
     if !matches!(operator, Difference | Intersection) {
         return Ok(None);
     }
-    Ok(match (region(graph, left)?, region(graph, right)?) {
-        (None, Some(leaves)) => Some(Clip {
-            subject: left,
-            tool: right,
-            leaves,
-        }),
-        (Some(leaves), None) if operator == Intersection => Some(Clip {
-            subject: right,
-            tool: left,
-            leaves,
-        }),
-        _ => None,
-    })
+    let (subject, tool) = match (regions.has(left), regions.has(right)) {
+        (false, true) => (left, right),
+        (true, false) if operator == Intersection => (right, left),
+        _ => return Ok(None),
+    };
+    let leaves = region(graph, tool)?;
+    Ok(Some(Clip {
+        subject,
+        tool,
+        leaves,
+    }))
 }
 
-/// The half-spaces of the region `id` is (#326): a half-space, or an
-/// intersection of regions, read through instances, each leaf with the
-/// placement above it; `None` when it is not one.
-fn region(graph: &GeometryGraph, id: NodeId) -> GeomResult<Option<Vec<(ClipTool, Transform3)>>> {
+/// The half-spaces of the region `id` (#326), each with the placement above
+/// it, left operand first. `id` must be a region ([`Regions`]). Iterative,
+/// with the leaves bounded by the graph's size: a graph that shares a
+/// sub-region is read through many paths.
+fn region(graph: &GeometryGraph, id: NodeId) -> GeomResult<Vec<(ClipTool, Transform3)>> {
     let mut leaves = Vec::new();
-    Ok(collect_leaves(graph, id, Transform3::IDENTITY, &mut leaves)?.then_some(leaves))
-}
-
-/// Append the leaves of `id` under `outer` when it is a region.
-fn collect_leaves(
-    graph: &GeometryGraph,
-    mut id: NodeId,
-    mut outer: Transform3,
-    leaves: &mut Vec<(ClipTool, Transform3)>,
-) -> GeomResult<bool> {
-    for _ in 0..=graph.len() {
-        let node = graph.get(id).ok_or_else(|| {
-            GeomError::InvalidInput(format!("operand {id:?} does not belong to this graph"))
-        })?;
-        match node {
-            GeometryNode::Instance(instance) => {
-                outer *= instance.transform;
-                id = instance.source;
-            }
-            GeometryNode::SolidOperation(SolidOperation::Boolean {
-                left,
-                right,
-                operator: axiolid_core::BooleanOperator::Intersection,
-            }) => {
-                let mark = leaves.len();
-                let both = collect_leaves(graph, *left, outer, leaves)?
-                    && collect_leaves(graph, *right, outer, leaves)?;
-                if !both {
-                    leaves.truncate(mark);
+    let mut work = vec![(id, Transform3::IDENTITY)];
+    while let Some((mut id, mut outer)) = work.pop() {
+        loop {
+            let node = graph.get(id).ok_or_else(|| {
+                GeomError::InvalidInput(format!("operand {id:?} does not belong to this graph"))
+            })?;
+            match node {
+                GeometryNode::Instance(instance) => {
+                    outer *= instance.transform;
+                    id = instance.source;
                 }
-                return Ok(both);
-            }
-            _ => {
-                let Some(tool) = clip_tool(graph, id) else {
-                    return Ok(false);
-                };
-                // A shared sub-region is read through many paths: the
-                // leaves are bounded by the graph's size.
-                if leaves.len() >= graph.len() {
-                    return Err(unsupported_input(
-                        "half-space intersection with more half-spaces than its graph has nodes",
-                    ));
+                GeometryNode::SolidOperation(SolidOperation::Boolean {
+                    left,
+                    right,
+                    operator: axiolid_core::BooleanOperator::Intersection,
+                }) => {
+                    work.push((*right, outer));
+                    work.push((*left, outer));
+                    break;
                 }
-                leaves.push((tool, outer));
-                return Ok(true);
+                _ => {
+                    let tool = clip_tool(graph, id).ok_or_else(|| {
+                        GeomError::InvalidInput(format!("operand {id:?} is not a half-space"))
+                    })?;
+                    if leaves.len() >= graph.len() {
+                        return Err(unsupported_input(
+                            "half-space intersection with more half-spaces than its graph has nodes",
+                        ));
+                    }
+                    leaves.push((tool, outer));
+                    break;
+                }
             }
         }
     }
-    Err(GeomError::InvalidInput(
-        "boolean operand placements form a cycle".to_owned(),
-    ))
+    Ok(leaves)
 }
 
 /// A boolean tool that is a half-space, bounded or not.

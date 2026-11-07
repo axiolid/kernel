@@ -45,7 +45,12 @@
 //! other operand by the identities of `crate::empty` (`S - 0 = S`,
 //! `0 - T = 0`, `S & 0 = 0`, `S | 0 = S`; the symmetric difference's
 //! refusal comes after them); as the root it is `GeomError::Degenerate`.
-//! Nothing is meshed.
+//! Only an emptiness of the operands as given is an identity: the general
+//! boolean reports "nothing left" without a report, so a result emptied by a
+//! reading within the tolerance (operands overlapping by less than it) is
+//! told from an exact one by the same boolean at zero tolerance
+//! ([`emptiness_is_exact`]), and refused as `Degenerate` where that reads a
+//! feature. Nothing is meshed.
 //!
 //! # Mesh operands, for a boolean's report only (#266)
 //!
@@ -56,10 +61,11 @@
 //! tool. The rest of the dispatch, and every refusal above, is
 //! unchanged; the public compiler still refuses a mesh operand by name.
 
+use axiolid_brep::ExactBRep;
 use axiolid_brep_boolean::{boolean_with_report, BooleanError};
 use axiolid_construct::boolean_exact::{boolean_prisms_exact, Prism};
 use axiolid_contracts::{GeomError, GeomResult};
-use axiolid_core::{BooleanOperator, Point2, Vec3};
+use axiolid_core::{BooleanOperator, Point2, Tolerance, Vec3};
 use axiolid_model::{GeometryNode, NodeId, SolidOperation};
 use axiolid_profile::Profile;
 
@@ -79,7 +85,7 @@ impl ExactCompilation<'_> {
             return self.compile_clip(subject, region, operator);
         }
         // Any other boolean with a region is unbounded on the side it keeps.
-        if self.region(left)?.is_some() || self.region(right)?.is_some() {
+        if self.is_region(left) || self.is_region(right) {
             return Err(unsupported(match operator {
                 BooleanOperator::Union => "exact union with a half-space, which is unbounded",
                 BooleanOperator::SymmetricDifference => {
@@ -123,7 +129,13 @@ impl ExactCompilation<'_> {
         let (body, report) =
             match boolean_with_report(&subject, &tool, operator, self.options.tolerance()) {
                 Ok(done) => done,
-                Err(BooleanError::EmptyResult) => return Ok(Body::Empty(emptied(operator))),
+                Err(BooleanError::EmptyResult) => {
+                    return if emptiness_is_exact(&subject, &tool, operator) {
+                        Ok(Body::Empty(emptied(operator)))
+                    } else {
+                        Err(GeomError::Degenerate(emptied(operator).to_owned()))
+                    }
+                }
                 Err(error) => return Err(remap_boolean_error(error)),
             };
         self.boolean_report = Some(report);
@@ -173,6 +185,22 @@ impl ExactCompilation<'_> {
             top: depth,
         }))
     }
+}
+
+/// Whether the general boolean `operator` of `a` and `b`, which reported
+/// nothing left at the caller's tolerance, leaves nothing of the operands as
+/// given (#326). `EmptyResult` carries no report, so a decision within the
+/// tolerance (operands that only touch, overlapping by less than it) is
+/// indistinguishable from an exact one; the same boolean at zero tolerance
+/// reads nothing, so it is empty only if the operands are. An empty body
+/// lets an identity pass the other operand through with an exact report, so
+/// it must not hide a feature the caller's tolerance read away: such a
+/// result is refused as `Degenerate`, as it was before empty bodies.
+pub(super) fn emptiness_is_exact(a: &ExactBRep, b: &ExactBRep, operator: BooleanOperator) -> bool {
+    matches!(
+        boolean_with_report(a, b, operator, Tolerance::ZERO),
+        Err(BooleanError::EmptyResult)
+    )
 }
 
 /// A union, intersection or difference that leaves nothing: only the

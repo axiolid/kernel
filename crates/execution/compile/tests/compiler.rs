@@ -6,6 +6,7 @@
 use axiolid_contracts::{ExecutionOptions, GeomError, Operation};
 use axiolid_core::{BooleanOperator, Plane3, Point3, Tolerance, Transform3, Vec3};
 use axiolid_curve::{Curve3, Polyline3};
+use axiolid_exact_compile_contract::ExactCompiler;
 use axiolid_mesh::{PolygonFace, PolygonMesh, TriMesh};
 use axiolid_mesh_boolean_boolmesh::BoolmeshBoolean;
 use axiolid_mesh_compile::ReferenceMeshCompiler;
@@ -361,6 +362,97 @@ fn a_deep_instance_chain_does_not_overflow_the_stack() {
     let mesh = compiler()
         .compile_mesh(&graph, current, &options())
         .expect("deep chain must compile");
+    assert!((volume(&mesh) - 1.0).abs() < 1e-9);
+}
+
+/// A block, and a left-leaning intersection of `n` half-spaces that each
+/// hold it (#326).
+fn block_and_deep_region(
+    n: usize,
+) -> (
+    GeometryGraphBuilder,
+    axiolid_model::NodeId,
+    axiolid_model::NodeId,
+) {
+    let mut b = GeometryGraphBuilder::new();
+    let profile = b.push(GeometryNode::Profile(rect(1.0, 1.0))).unwrap();
+    let block = b
+        .push(GeometryNode::SolidOperation(SolidOperation::Extrusion {
+            profile,
+            direction: Vec3::Z,
+            depth: 1.0,
+        }))
+        .unwrap();
+    let mut region = None;
+    for k in 0..n {
+        let side = b
+            .push(GeometryNode::HalfSpace(HalfSpace {
+                boundary: Plane3 {
+                    origin: Point3::new(0.0, 0.0, -1.0 - k as f64),
+                    normal: Vec3::Z,
+                },
+                agreement: true,
+            }))
+            .unwrap();
+        region = Some(match region {
+            None => side,
+            Some(so_far) => b
+                .push(GeometryNode::SolidOperation(SolidOperation::Boolean {
+                    left: so_far,
+                    right: side,
+                    operator: BooleanOperator::Intersection,
+                }))
+                .unwrap(),
+        });
+    }
+    (b, block, region.unwrap())
+}
+
+/// A region is a nest of intersections as deep as the file makes it, so
+/// reading one is iterative, in both compilers (#326): a recursive walk
+/// aborts the process on the thread's stack instead of returning an error.
+#[test]
+fn a_deep_region_does_not_overflow_the_stack() {
+    let n = 100_000;
+    // A union with it is refused by name, in both compilers.
+    let (mut b, block, region) = block_and_deep_region(n);
+    let union = b
+        .push(GeometryNode::SolidOperation(SolidOperation::Boolean {
+            left: block,
+            right: region,
+            operator: BooleanOperator::Union,
+        }))
+        .unwrap();
+    let graph = b.finish(vec![union]).unwrap();
+    let error = compiler()
+        .compile_mesh(&graph, union, &options())
+        .expect_err("a union with a region is unbounded");
+    assert!(
+        matches!(error, GeomError::UnsupportedInput { .. }),
+        "{error:?}"
+    );
+    let error = axiolid_mesh_compile::ReferenceExactCompiler::new()
+        .compile_exact(&graph, union, &options())
+        .expect_err("a union with a region is unbounded");
+    assert!(
+        matches!(error, GeomError::UnsupportedInput { .. }),
+        "{error:?}"
+    );
+
+    // As the left operand of an intersection it clips the block: every
+    // half-space holds it, and the result is the block.
+    let (mut b, block, region) = block_and_deep_region(20_000);
+    let clip = b
+        .push(GeometryNode::SolidOperation(SolidOperation::Boolean {
+            left: region,
+            right: block,
+            operator: BooleanOperator::Intersection,
+        }))
+        .unwrap();
+    let graph = b.finish(vec![clip]).unwrap();
+    let mesh = compiler()
+        .compile_mesh(&graph, clip, &options())
+        .expect("a deep region clips");
     assert!((volume(&mesh) - 1.0).abs() < 1e-9);
 }
 
