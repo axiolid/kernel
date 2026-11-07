@@ -547,6 +547,57 @@ fn an_authored_mesh_operand_returns_the_mesh_result() {
     assert!(found > 0, "no turn fused as one body from the mesh cut");
 }
 
+/// The arm of a refused referee that keeps a valid mesh result: an authored
+/// cube sunk `1e-7` into a slab tilted by `1e-8` (within the tolerance, and
+/// no axis-aligned face for the snap to land on) leaves faces that nearly
+/// share a plane, so the cut is unsettled; the exact compiler refuses the
+/// mesh operand, and the mesh union, one valid body, stands. Pinned by
+/// search: after #418 the exact compiler decides the far turns that once
+/// reached this arm.
+#[test]
+fn a_refused_referee_keeps_a_valid_mesh_result() {
+    let corners = [
+        [0.0, 0.0, 0.0],
+        [1.0, 0.0, 0.0],
+        [1.0, 1.0, 0.0],
+        [0.0, 1.0, 0.0],
+        [0.0, 0.0, 1.0],
+        [1.0, 0.0, 1.0],
+        [1.0, 1.0, 1.0],
+        [0.0, 1.0, 1.0],
+    ];
+    let triangles: [u32; 36] = [
+        0, 2, 1, 0, 3, 2, 4, 5, 6, 4, 6, 7, 0, 1, 5, 0, 5, 4, 1, 2, 6, 1, 6, 5, 2, 3, 7, 2, 7, 6,
+        3, 0, 4, 3, 4, 7,
+    ];
+    let cube = TriMesh::new(
+        corners
+            .iter()
+            .map(|c| axiolid_core::Point3::new(c[0], c[1], c[2]))
+            .collect(),
+        triangles.to_vec(),
+    );
+    let mut g = Graph::new();
+    let slab = g.prism([4.0, 4.0], 1.0);
+    let slab = g.placed(slab, Transform3::from_rotation_x(1e-8));
+    let authored = g.push(GeometryNode::TriMesh(cube));
+    let authored = g.placed(
+        authored,
+        Transform3::from_translation(Vec3::new(-0.5, -0.5, 1.0 - 1e-7)),
+    );
+    let root = g.union(slab, authored, BooleanOperator::Union);
+    let (graph, root) = g.finish(root);
+    let (mesh, closure) = compile(&graph, root).expect("the mesh union stands");
+    assert_eq!(closure, MeshClosure::Solid);
+    assert_eq!(component_count(&mesh), 1);
+    let report = report(&graph, root);
+    assert!(
+        detail_bound(&report, REFEREED_UNION).is_none()
+            && detail_bound(&report, REFEREED_UNION_EXACT).is_none(),
+        "a mesh operand was refereed"
+    );
+}
+
 /// Operands the snap lands on each other are settled, whatever the given
 /// pair looks like: the pair actually cut decides. The two linear parts
 /// differ (an exact quarter turn and none) and are exactly axis-aligned, so
