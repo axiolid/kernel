@@ -978,10 +978,16 @@ exactly since #378; the gaps were the region as a tool and the empty operand.
   within the tolerance there can be a touch at the margin, which a block
   clipped by a strip starting `d = 1e-7` short of the margin has, and is no
   cavity. For them the zero-tolerance result is taken as it is (empty is
-  `Misses`, a solid is the tool), exact and still under the margin argument;
-  only a refusal of that boolean is refused, by name, "only within the
-  tolerance". The envelope decisions (`far < 0`, `near > 0`) are exact and
-  kept.
+  `Misses`, a solid is the tool): it is the exact boolean of the stand-ins
+  as built, so a touch at the margin is read as the touch it is. A refusal of
+  that boolean is refused, by name, "only within the tolerance". A tool
+  whose box lies wholly apart from the subject's envelope is `Misses`,
+  decided exactly without the cut: a stand-in sliver thinner than the
+  tolerance there is no solid to sew. One thinner than the tolerance that
+  does meet the subject's envelope can still be refused by the cut (the
+  split face pieces do not close), and is then refused by name as the
+  clip's boolean refuses it. The envelope decisions (`far < 0`, `near > 0`)
+  are exact and kept.
   Carrying the session report on the error would be the alternative; it is
   a change to `axiolid-brep-boolean`'s public error and was not made here.
 - **Rejected.** Rewriting `S - R` to `S - (S & R)`: it works, but costs one

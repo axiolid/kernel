@@ -326,7 +326,9 @@ Latest release, 0.3.45 (2026-11-07):
   before, since the other operand would pass through with an exact report
   and the cavity dropped. The stand-ins a region builds are the exception:
   a meeting read within the tolerance there can be a touch at their margin,
-  so the result at zero tolerance is taken. A boolean whose exact result and mesh are both
+  so the result at zero tolerance is taken, and a tool whose box lies
+  wholly apart from the subject's envelope leaves nothing of the region
+  there, decided exactly before the cut. A boolean whose exact result and mesh are both
   empty reports `EMPTY_RESULT` at `0`, widened by the report's readings and
   rounding floor, and unbounded when the empty result is that of flattened
   operands; an empty exact result against a mesh with triangles, or the
