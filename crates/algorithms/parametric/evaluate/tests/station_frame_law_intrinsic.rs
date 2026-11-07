@@ -13,7 +13,7 @@
 use axiolid_core::{Frame2, Frame3, Point2, Point3, Scalar, Vec2, Vec3};
 use axiolid_curve::{
     BankConvention, Banked3, CantLaw, CantPiece, Chain2, ChainPiece2, CurvatureLaw, Curve2, Curve3,
-    Elevated3, ElevationLaw, Intrinsic2, Intrinsic3,
+    Elevated3, ElevationLaw, Intrinsic2, Intrinsic3, RailSide,
 };
 use axiolid_evaluate::station::{
     piece_frame_bounds, station_section2, station_section3, FrameLaw, FrameLawBounds, FrameReading,
@@ -302,7 +302,7 @@ fn check(
             };
             let exact = wanted(s);
             let off = (frame.point - Point3::ZERO - exact.point).length();
-            assert!(off <= bounds.point_error, "{off} > {}", bounds.point_error);
+            assert!(off <= bounds.point_error, "{off} > {} at {s}", bounds.point_error);
             for (got, want) in [
                 (frame.tangent, exact.tangent),
                 (frame.lateral, exact.lateral),
@@ -579,6 +579,83 @@ fn a_canted_curve_over_the_alignment_is_bounded() {
         for (lo, hi) in [(30.0, 50.0), (110.0, 130.0), (230.0, 250.0)] {
             assert!(law.bounds(lo, hi, FrameReading::Section).is_none());
         }
+    }
+}
+
+/// A Viennese bend of the bank angle (0 to 0.1 rad over 40..140) with the
+/// pivot held about the right rail, in closed form: `psi`, `D = b sin(psi)`
+/// and the pivot `e = D / 2`, `e' = D' / 2`.
+fn viennese_cant(d: Scalar) -> (Scalar, Scalar) {
+    let (psi, rate) = if d <= 40.0 {
+        (0.0, 0.0)
+    } else if d >= 140.0 {
+        (0.1, 0.0)
+    } else {
+        let xi: Scalar = (d - 40.0) / 100.0;
+        let shape = xi.powi(4) * (35.0 - 84.0 * xi + 70.0 * xi * xi - 20.0 * xi.powi(3));
+        (0.1 * shape, 0.1 * 140.0 * (xi * (1.0 - xi)).powi(3) / 100.0)
+    };
+    (CANT_B * psi.sin(), CANT_B * psi.cos() * rate)
+}
+
+fn viennese_curve() -> Curve3 {
+    Curve3::Banked(Banked3::new(
+        Elevated3::new(Curve2::Intrinsic(alignment().curve), profile()),
+        CantLaw::new(vec![
+            // Angle pieces throughout: a constant piece is a height.
+            CantPiece::viennese_bend(40.0, 0.0, 0.0),
+            CantPiece::viennese_bend(100.0, 0.0, 0.1),
+            CantPiece::viennese_bend(140.0, 0.1, 0.1),
+        ]),
+        CantLaw::new(vec![CantPiece::about_rail(280.0, RailSide::Right, 0.0)]),
+        CANT_B,
+        BankConvention::VerticalRise,
+    ))
+}
+
+fn viennese_at(a: &Alignment, d: Scalar) -> Reference {
+    let (p, t) = a.world(d);
+    let (z, g) = profile_at(d);
+    let (cant, rate) = viennese_cant(d);
+    let slope = g + 0.5 * rate;
+    let tangent = Vec3::new(t.x, t.y, slope) / (1.0 + slope * slope).sqrt();
+    let normal = Vec3::new(-t.y, t.x, 0.0);
+    let square_up = tangent.cross(normal);
+    let sine = cant * (1.0 + slope * slope).sqrt() / CANT_B;
+    let (sin, cos) = sine.asin().sin_cos();
+    Reference {
+        point: Vec3::new(p.x, p.y, z + 0.5 * cant),
+        tangent,
+        lateral: cos * normal + sin * square_up,
+        up: -sin * normal + cos * square_up,
+    }
+}
+
+/// A Viennese bend (an angle piece) and a held-rail pivot derived from it,
+/// under the vertical-rise convention, over the alignment (#396).
+#[test]
+fn a_viennese_bend_with_a_held_rail_pivot_over_the_alignment_is_bounded() {
+    let a = alignment();
+    let curve = viennese_curve();
+    let law = FrameLaw::atomic(StationCurve::Three(&curve), None, TOLERANCE).unwrap();
+    // Inside the plan's, the profile's and the cant's pieces (seams 40, 100,
+    // 120, 140, 180, 240).
+    for (lo, hi) in [
+        (5.0, 35.0),
+        (45.0, 95.0),
+        (105.0, 118.0),
+        (122.0, 138.0),
+        (145.0, 175.0),
+        (185.0, 235.0),
+        (245.0, 275.0),
+    ] {
+        check(
+            &law,
+            |d| viennese_at(&a, d),
+            |d| station_section3(&curve, d).unwrap(),
+            lo,
+            hi,
+        );
     }
 }
 
