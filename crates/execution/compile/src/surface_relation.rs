@@ -1029,6 +1029,10 @@ mod tests {
                 Spec::Apex(Point3::new(0.0, 0.0, 1.0)),
             ],
             [
+                Spec::Apex(Point3::new(0.0, 0.0, 1.0)),
+                Spec::curve(unit_circle(0.0, 1.0), 0.0, PI),
+            ],
+            [
                 Spec::curve(unit_circle(0.0, 1.0), 0.0, core::f64::consts::FRAC_PI_2),
                 Spec::curve(unit_circle(1.0, 0.5), 0.0, core::f64::consts::FRAC_PI_3),
             ],
