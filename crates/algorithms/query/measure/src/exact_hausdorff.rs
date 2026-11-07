@@ -101,6 +101,7 @@ use crate::exact_distance::witness;
 use crate::exact_distance::Key as DistanceKey;
 use crate::exact_distance::{
     closed, critical_toward, floor, point_lower_bound, surface_of, Element, Metric, Shape, Side,
+    POINT_EPSILONS, RATIO_EPSILONS,
 };
 use crate::mesh_hausdorff::HausdorffBounds;
 
@@ -641,7 +642,11 @@ fn matched_bound(a: &Surface, b: &Surface, lo: Point2, hi: Point2) -> Option<Sca
                 scale = scale.max(pa.length()).max(pb.length());
             }
         }
-        return Some(reach + 1e-12 * scale + Scalar::MIN_POSITIVE);
+        return Some(
+            reach * (1.0 + RATIO_EPSILONS * Scalar::EPSILON)
+                + POINT_EPSILONS * Scalar::EPSILON * scale
+                + Scalar::MIN_POSITIVE,
+        );
     }
     let (oa, ka) = terms(a)?;
     let (ob, kb) = terms(b)?;
@@ -655,7 +660,9 @@ fn matched_bound(a: &Surface, b: &Surface, lo: Point2, hi: Point2) -> Option<Sca
         spread += wobble[k] * delta.length();
         scale += reach[k] * (ka[k].length() + kb[k].length());
     }
-    let bound = centre.length() + spread + 1e-12 * scale + Scalar::MIN_POSITIVE;
+    let bound = (centre.length() + spread) * (1.0 + RATIO_EPSILONS * Scalar::EPSILON)
+        + POINT_EPSILONS * Scalar::EPSILON * scale
+        + Scalar::MIN_POSITIVE;
     bound.is_finite().then_some(bound)
 }
 
@@ -665,9 +672,12 @@ fn matched_bound(a: &Surface, b: &Surface, lo: Point2, hi: Point2) -> Option<Sca
 /// the translation; a turned face gives none.
 fn displacements(
     source: &Side<'_>,
-    target: &ExactBRep,
+    target: &Side<'_>,
     matched: &[Vec<Match>],
 ) -> Result<Vec<Vec3>, ExactMeasureError> {
+    // The displacements are differences of computed points: each carries the
+    // rounding of its side's scale, four times over (two points, two sides).
+    let rounding = 4.0 * POINT_EPSILONS * Scalar::EPSILON * (source.scale + target.scale);
     let mut found: Vec<Vec3> = Vec::new();
     for element in &source.elements {
         let Shape::Face { face, lo, hi, .. } = element.shape else {
@@ -677,7 +687,10 @@ fn displacements(
         for other in &matched[face] {
             let theirs = match &other.shifted {
                 Some(shifted) => &shifted.surface,
-                None => surface_of(target, target.topology().faces()[other.face].surface)?,
+                None => surface_of(
+                    target.brep,
+                    target.brep.topology().faces()[other.face].surface,
+                )?,
             };
             // The displacement at the centre and two corners of the box:
             // only a translation, the same at all three, is a seed.
@@ -692,13 +705,14 @@ fn displacements(
             let [t, a, b] = moves[..] else {
                 continue;
             };
-            let rigid = (a - t).length().max((b - t).length()) <= 1e-9 * (1.0 + t.length());
+            let rigid =
+                (a - t).length().max((b - t).length()) <= 1e-9 * (1.0 + t.length()) + rounding;
             let fresh = rigid
                 && t.is_finite()
                 && t.length() > 0.0
                 && found
                     .iter()
-                    .all(|seen| (*seen - t).length() > 1e-9 * (1.0 + t.length()));
+                    .all(|seen| (*seen - t).length() > 1e-9 * (1.0 + t.length()) + rounding);
             if fresh && found.len() < MAX_DISPLACEMENTS {
                 found.push(t);
             }
@@ -724,6 +738,9 @@ fn search(
 ) -> Result<Witnessed, ExactMeasureError> {
     let matched = matches(source.brep, target.side.brep);
     let point_accuracy = 0.25 * accuracy;
+    // The width the outer loop settles at: the point queries' floor and the
+    // matched bounds' pads, each below 128 eps of a side's scale.
+    let outer_scale = 2.0 * (source.scale + target.side.scale);
     let mut state = State {
         lower: 0.0,
         witness: None,
@@ -735,7 +752,7 @@ fn search(
 
     // A matched face moved by `t` puts the farthest point of a translate at
     // `A`'s support point against `t` (see `translate::support_point`).
-    let seeds = displacements(source, target.side.brep, &matched)?
+    let seeds = displacements(source, &target.side, &matched)?
         .into_iter()
         .flat_map(|t| items.iter().map(move |edges| (t, edges.clone())));
     for (t, edges) in seeds {
@@ -832,7 +849,8 @@ fn search(
         // one already bounded below `lower`.
         let face_top = faces.peek().map_or(Scalar::NEG_INFINITY, |(key, _)| key.0);
         let upper = face_top.max(state.lower);
-        if upper - state.lower <= accuracy || splits >= max_splits {
+        let settled = floor(outer_scale, upper);
+        if upper - state.lower <= accuracy.max(settled) || splits >= max_splits {
             break;
         }
         splits += 1;

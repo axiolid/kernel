@@ -69,7 +69,7 @@ use axiolid_evaluate::evaluate3;
 use axiolid_surface::{Cone, Cylinder, EllipticalCylinder, Plane, Surface};
 use axiolid_topology::Face;
 
-use crate::exact_distance::surface_of;
+use crate::exact_distance::{surface_of, POINT_EPSILONS, RATIO_EPSILONS};
 
 /// The largest axis, shape or trim difference, relative to the larger of
 /// one and the quantity, that is still read as a translate. Rounding in a
@@ -98,14 +98,19 @@ impl Shifted {
     }
 }
 
-/// A Lipschitz constant of `surface` over `[lo, hi]` grown by `grow`: each
-/// basis function of the planar, cylindrical and conical families has a
-/// gradient of length at most `1 + |v|`.
+/// A Lipschitz constant of `surface` over `[lo, hi]` grown by `grow`: the
+/// basis functions of planes (`u`, `v`), cylinders and elliptical cylinders
+/// (`cos u`, `sin u`, `v`) have gradients of length at most 1, so the sum of
+/// the coefficients is one; only a cone's `v cos u` and `v sin u` grow, to
+/// at most `1 + |v|` (#318: a plane charted in world coordinates is not
+/// `1 + |v|` times as steep as its axes).
 fn lipschitz(surface: &Surface, lo: Point2, hi: Point2, grow: Scalar) -> Option<Scalar> {
     let (_, coefficients) = super::terms(surface)?;
-    let reach_v = lo.y.abs().max(hi.y.abs()) + grow;
     let sum: Scalar = coefficients.iter().map(|a| a.length()).sum();
-    Some(sum * (1.0 + reach_v))
+    Some(match surface {
+        Surface::Plane(_) | Surface::Cylinder(_) | Surface::EllipticalCylinder(_) => sum,
+        _ => sum * (1.0 + lo.y.abs().max(hi.y.abs()) + grow),
+    })
 }
 
 /// Whether two quantities agree to within [`GATE`] relative to the larger
@@ -155,7 +160,7 @@ fn recharted(b: &Surface, s: Vec2) -> Option<(Surface, Scalar)> {
         let reach = f.origin.length()
             + (s.x.abs() + s.y.abs()) * (f.x.length() + f.y.length() + f.z.length())
             + extra;
-        1e-12 * reach
+        POINT_EPSILONS * Scalar::EPSILON * reach
     };
     Some(match b {
         Surface::Plane(p) => (
@@ -242,7 +247,8 @@ fn deviation(a: &Curve2, b: &Curve2, s: Vec2, t0: Scalar, t1: Scalar) -> Option<
         _ => return None,
     };
     // The difference itself is rounded, relative to what it is made of.
-    let gap = gap + 1e-12 * (size + s.length());
+    let gap = gap * (1.0 + RATIO_EPSILONS * Scalar::EPSILON)
+        + POINT_EPSILONS * Scalar::EPSILON * (size + s.length());
     gap.is_finite().then_some((gap, size))
 }
 
@@ -373,7 +379,9 @@ pub(super) fn translate(
         let (pa, pb) = (p.semi_angle.tan(), q.semi_angle.tan());
         if pa != 0.0 || pb != 0.0 {
             let pole = (-p.radius / pa - -q.radius / pb).abs();
-            delta = delta.max(pole + 1e-12 * (p.radius / pa).abs());
+            let rounding =
+                POINT_EPSILONS * Scalar::EPSILON * ((p.radius / pa).abs() + (q.radius / pb).abs());
+            delta = delta.max(pole + rounding);
         }
     }
     (delta.is_finite() && delta <= GATE * (1.0 + size + s.length())).then_some(Shifted {
@@ -736,5 +744,48 @@ mod tests {
         let a = disc(Point2::new(1.0, 1.0), 0.5);
         assert!(matched(&a, &disc(Point2::new(1.5, 0.75), 0.5)).is_some());
         assert!(matched(&a, &disc(Point2::new(1.5, 0.75), 0.5 + 1e-6)).is_none());
+    }
+
+    /// A plane charted in world coordinates, far from its origin, is as
+    /// steep as its axes, not `1 + |v|` times as steep; a cone keeps its
+    /// larger bound (#318).
+    #[test]
+    fn a_world_charted_plane_is_lipschitz_by_its_axes() {
+        let plane = Surface::Plane(Plane {
+            frame: Frame3 {
+                origin: Point3::ZERO,
+                x: Vec3::X,
+                y: Vec3::Y,
+                z: Vec3::Z,
+            },
+        });
+        let (lo, hi) = (
+            Point2::new(450_000.0, 5_600_000.0),
+            Point2::new(450_001.0, 5_600_001.0),
+        );
+        let l = super::lipschitz(&plane, lo, hi, 0.0).expect("a plane");
+        assert!(l <= 2.0 * (1.0 + 8.0 * f64::EPSILON), "{l}");
+        let at = |t: f64, w: f64| {
+            let q = Point2::new(lo.x + t, lo.y + w);
+            (q, evaluate(&plane, q.x, q.y).expect("point"))
+        };
+        for (t, w, t2, w2) in [
+            (0.0, 0.0, 1.0, 1.0),
+            (0.2, 0.9, 0.7, 0.1),
+            (0.5, 0.5, 0.5, 1.0),
+        ] {
+            let ((q, s), (q2, s2)) = (at(t, w), at(t2, w2));
+            assert!((s - s2).length() <= l * (q - q2).length() + 1e-9);
+        }
+        let cone = Surface::Cone(Cone {
+            frame: upright(Point3::ZERO),
+            radius: 0.75,
+            semi_angle: 0.3,
+        });
+        let (clo, chi) = (Point2::new(0.0, 4.0), Point2::new(1.0, 5.0));
+        let c = super::lipschitz(&cone, clo, chi, 0.0).expect("a cone");
+        let (_, coefficients) = super::super::terms(&cone).expect("a cone");
+        let sum: f64 = coefficients.iter().map(|a| a.length()).sum();
+        assert!(c >= 5.0 * sum, "{c} vs {sum}");
     }
 }

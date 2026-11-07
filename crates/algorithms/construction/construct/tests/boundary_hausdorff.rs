@@ -426,6 +426,54 @@ fn prisms_trimmed_in_world_coordinates_match_as_translates() {
 }
 
 #[test]
+fn square_translates_far_from_the_origin_close() {
+    // Georeferenced coordinates: the rounding margins are ulps of the
+    // coordinates, so a translate still closes to the asked accuracy (#318).
+    // `prism_solid` charts its caps in world coordinates, which the shifted
+    // path of the matched bound measures.
+    let at = Vec3::new(450_000.0, 5_600_000.0, 0.4);
+    let accuracy = 1e-6;
+    for (name, section) in [
+        ("square", square_section(0.5)),
+        ("round", round_section(0.3)),
+    ] {
+        for t in [
+            Vec3::new(0.25, 0.0, 0.0),
+            Vec3::new(0.0, 0.0, 0.25),
+            Vec3::new(0.25, 0.5, 0.5),
+        ] {
+            let a = prism_solid(&section, at, 1.2);
+            let b = prism_solid(&section, at + t, 1.2);
+            for (from, to) in [(&a, &b), (&b, &a)] {
+                let bounds = one_sided_boundary_hausdorff_with_budget(
+                    from,
+                    to,
+                    accuracy,
+                    tol(),
+                    TRANSLATE_BUDGET,
+                )
+                .expect("bounded");
+                let slack =
+                    32.0 * f64::EPSILON * (bounds.point_from.length() + bounds.point_to.length());
+                assert!(
+                    bounds.lower <= t.length() && t.length() <= bounds.upper + slack,
+                    "{name} by {t:?}: [{}, {}] must contain {}",
+                    bounds.lower,
+                    bounds.upper,
+                    t.length()
+                );
+                assert!(
+                    bounds.width() <= accuracy,
+                    "{name} by {t:?}: [{}, {}] did not close to {accuracy}",
+                    bounds.lower,
+                    bounds.upper
+                );
+            }
+        }
+    }
+}
+
+#[test]
 fn a_translate_closes_before_any_split() {
     // The support point against an oblique `t` lies inside a rim arc, not
     // at its ends: found there, the interval closes without refinement.
