@@ -731,6 +731,129 @@ fn a_run_along_an_ellipse_and_along_its_offset_is_certified() {
     assert_certified(&graph, offset, &exact);
 }
 
+/// A quadratic plan B-spline whose curvature jumps at its interior knot.
+fn quadratic_spline() -> Curve2 {
+    Curve2::BSpline(BSplineCurve2 {
+        degree: 2,
+        control_points: vec![
+            Point2::new(0.0, 0.0),
+            Point2::new(12.0, 0.0),
+            Point2::new(12.0, 12.0),
+            Point2::new(24.0, 14.0),
+        ],
+        knots: vec![0.0, 0.5, 1.0],
+        multiplicities: vec![3, 1, 3],
+        weights: None,
+        closed: false,
+        self_intersect: None,
+        knot_spec: KnotSpec::Unspecified,
+    })
+}
+
+/// A run of a 1 by 1 rectangle between the distances `at`, `lateral` to the
+/// side of `curve` or of its offset by `beside`; the run and its sections.
+fn broken_run(
+    curve: Curve2,
+    beside: Option<Scalar>,
+    lateral: Scalar,
+    at: [Scalar; 2],
+) -> (GeometryGraph, NodeId, Vec<SectionAtStation>) {
+    let mut b = GeometryGraphBuilder::new();
+    let mut basis = b.push_value(curve).unwrap();
+    if let Some(distance) = beside {
+        basis = b
+            .push(GeometryNode::CurveRelation(CurveRelation::Offset {
+                basis,
+                distance,
+                reference_direction: None,
+            }))
+            .unwrap();
+    }
+    let profile = rectangle(&mut b, 1.0, 1.0);
+    let offsets = StationOffsets::new(0.0, lateral, 0.0);
+    let sections = vec![
+        SectionAtStation::new(profile, Station::new(at[0], offsets)),
+        SectionAtStation::new(profile, Station::new(at[1], offsets)),
+    ];
+    let root = spine(&mut b, basis, sections.clone());
+    (b.finish(vec![root]).unwrap(), root, sections)
+}
+
+/// Runs far to the side of a curve across a point where its frame's
+/// curvature jumps stay within their certified deviation: the bound is
+/// not split there, yet a dense sampling of the exact solid never strays
+/// past it (checked before #406 decided folds by these frames' rates).
+fn assert_across_a_break(curve: fn() -> Curve2, laterals: [Scalar; 2], exact: fn() -> Plane) {
+    for lateral in laterals {
+        for chord in [1.0, 0.05] {
+            for at in [[1.0, 22.0], [8.0, 18.0]] {
+                let (graph, root, sections) = broken_run(curve(), None, lateral, at);
+                let (mesh, bound, _) = run_bound_with(&graph, root, &options_at(chord));
+                let DeviationBound::Certified(bound) = bound else {
+                    panic!("not certified (lateral {lateral}, chord {chord}, stations {at:?}): {bound:?}")
+                };
+                let exact = Exact::new(exact(), (0.0, 1.0), &graph, &sections);
+                let far = measured(&mesh, &exact.points(400, 4));
+                assert!(
+                    far <= bound,
+                    "lateral {lateral}, chord {chord}, stations {at:?}: the exact solid \
+                     strays {far}, past {bound}"
+                );
+            }
+        }
+    }
+}
+
+#[test]
+fn a_run_across_a_knot_of_a_quadratic_b_spline_is_certified() {
+    assert_across_a_break(quadratic_spline, [5.0, -9.0], || {
+        Plane::of(quadratic_spline())
+    });
+}
+
+/// The cubic spline's offset by 1 along its normal, in closed form: the
+/// velocity is a central difference of the point. The base's third
+/// derivative enters the offset's curvature, which jumps at the base's knot.
+fn cubic_offset() -> Plane {
+    fn point(t: Scalar) -> Point2 {
+        let base = evaluate2(&spline(), t).unwrap();
+        let v = derivative2(&spline(), t).unwrap();
+        base + Vec2::new(-v.y, v.x) / v.length()
+    }
+    Plane {
+        point: Box::new(point),
+        velocity: Box::new(|t| {
+            let h = 1e-6;
+            (point(t + h) - point(t - h)) / (2.0 * h)
+        }),
+    }
+}
+
+#[test]
+fn a_run_across_a_knot_beside_a_cubic_offset_is_certified_or_unbounded_by_name() {
+    for chord in [1.0, 0.05] {
+        let (graph, root, sections) = broken_run(spline(), Some(1.0), 1.0, [1.0, 22.0]);
+        let (mesh, bound, _) = run_bound_with(&graph, root, &options_at(chord));
+        match bound {
+            DeviationBound::Certified(bound) => {
+                let exact = Exact::new(cubic_offset(), (0.0, 1.0), &graph, &sections);
+                let far = measured(&mesh, &exact.points(400, 4));
+                assert!(
+                    far <= bound,
+                    "chord {chord}: the exact solid strays {far}, past {bound}"
+                );
+            }
+            DeviationBound::Unbounded(reason) => {
+                assert!(
+                    reason.contains("no certified derivative bounds"),
+                    "{reason}"
+                );
+            }
+            other => panic!("{other:?}"),
+        }
+    }
+}
+
 /// A quadratic Bezier arc as a plane curve in closed form.
 fn bezier(p: [Point2; 3]) -> Plane {
     Plane {
