@@ -30,7 +30,7 @@ MUTANTS = [
     ('first segment scale never recorded', C, '            first_scale = lowered.start_scale;', '', TESTS),
     ('rounding bound far past rounding', C, 'const JOINT_ROUNDING: Scalar = 8.0 * Scalar::EPSILON;', 'const JOINT_ROUNDING: Scalar = 1e5 * Scalar::EPSILON;', TESTS),
     ('line end scale ignores its run', C, '                end_scale: origin + direction * to.abs(),', '                end_scale: 0.0,', TESTS),
-    ('arc scale ignores its centre', C, '            let scale = circle.frame.origin.length() + circle.radius.abs();', '            let scale = circle.radius.abs();', TESTS),
+    ('arc scale ignores its centre', C, '                |t: Scalar| circle.frame.origin.length() + circle.radius.abs() * t.abs().max(1.0);', '                |t: Scalar| circle.radius.abs() * t.abs().max(1.0);', TESTS),
     ('ring vertex taken from the entering end', C, '        let start = lowered.vertices[0].point;', '        let start = previous_end.map_or(lowered.vertices[0].point, |(p, _)| p);\n        let mut lowered = lowered;\n        lowered.vertices[0].point = start;', TESTS),
     ('line runs to the corner, not the shared tangent point', S, '            Some((_, start, _, _)) => start,', '            Some(_) => corners[next].point,', TESTS),
 ]
