@@ -154,12 +154,32 @@ fn hidden_line_box(min: [f64; 3], max: [f64; 3]) -> TriMesh {
     )
 }
 
+/// A perspective view of an `n` x `n` grid from an eye off its corner.
+fn perspective_view(n: f64) -> View {
+    let eye = Point3::new(-0.3 * n, -0.3 * n, 0.6 * n);
+    let target = Point3::new(0.5 * n, 0.5 * n, 1.0);
+    let z = (eye - target).normalize();
+    let x = Vec3::Z.cross(z).normalize();
+    let y = z.cross(x);
+    View::perspective(
+        Frame3 {
+            origin: eye,
+            x,
+            y,
+            z,
+        },
+        -1.0,
+    )
+    .expect("a negative near depth")
+}
+
 /// Hidden-line drawing of a 20 x 20 and a 50 x 50 grid of boxes (#138).
 ///
 /// A building-like layout: every cell holds a column of height 1 to 3 with a
 /// gap to its neighbours. In the isometric view every box overlaps its
 /// neighbours in the image; the cut plan sets the near plane at mid-height
-/// (2.0), so the taller columns are capped and the lower ones drawn whole.
+/// (2.0), so the taller columns are capped and the lower ones drawn whole;
+/// the perspective case looks at the grid from an eye off its corner.
 /// Each case runs with the BVH broad phase and with the linear scan
 /// (`ScanHiddenLines`, identical output), so the broad phase's gain is read
 /// off the same group; the provider CHANGELOG records a run.
@@ -203,7 +223,14 @@ fn hidden_lines(criterion: &mut Criterion) {
             .collect();
         let limits =
             HiddenLineLimits::new(n * n, 8 * n * n, 12 * n * n, 4_000_000_000, 100_000_000);
-        for (name, view) in [("isometric", isometric), ("cut-plan", plan)] {
+        // The eye stands off the corner of the grid, above the columns, and
+        // looks at its middle (ADR 0107): a pinhole view of the same scene.
+        let perspective = perspective_view(n as f64);
+        for (name, view) in [
+            ("isometric", isometric),
+            ("cut-plan", plan),
+            ("perspective", perspective),
+        ] {
             let request =
                 HiddenLineRequest::new(&entries, view, EdgeSelection::new(Some(0.5)), limits);
             // A drawing with nothing visible, or nothing hidden, would time
