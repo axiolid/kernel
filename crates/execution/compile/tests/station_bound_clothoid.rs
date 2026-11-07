@@ -16,8 +16,8 @@ use axiolid_construct::profile::profile_rings;
 use axiolid_contracts::ExecutionOptions;
 use axiolid_core::{Frame2, Point2, Point3, Scalar, Tolerance, Vec2, Vec3};
 use axiolid_curve::{
-    BankConvention, Banked3, CantLaw, CantPiece, CurvatureLaw, Curve2, Curve3, Elevated3,
-    ElevationLaw, Intrinsic2,
+    BankConvention, Banked3, CantLaw, CantPiece, Chain2, ChainPiece2, CurvatureLaw, Curve2, Curve3,
+    Elevated3, ElevationLaw, Intrinsic2,
 };
 use axiolid_mesh::TriMesh;
 use axiolid_mesh_boolean_boolmesh::BoolmeshBoolean;
@@ -513,15 +513,114 @@ fn a_run_along_a_bare_clothoid_is_certified() {
     }
 }
 
+/// The cant over the alignment, in closed form: a ramp on the first line, a
+/// second across the first clothoid, a plateau on the arc and the way back.
+const CANT_B: Scalar = 1.5;
+
+fn cant_law() -> CantLaw {
+    CantLaw::new(vec![
+        CantPiece::linear(40.0, 0.0, 0.05),
+        CantPiece::linear(60.0, 0.05, 0.1),
+        CantPiece::constant(80.0, 0.1),
+        CantPiece::linear(60.0, 0.1, 0.0),
+        CantPiece::constant(40.0, 0.0),
+    ])
+}
+
+fn cant_value(d: Scalar) -> Scalar {
+    match d {
+        d if d < 40.0 => 0.05 * d / 40.0,
+        d if d < 100.0 => 0.05 + 0.05 * (d - 40.0) / 60.0,
+        d if d < 180.0 => 0.1,
+        d if d < 240.0 => 0.1 * (240.0 - d) / 60.0,
+        _ => 0.0,
+    }
+}
+
+/// The rolled section frame of the canted alignment at `d`: the horizontal
+/// left normal and `u = t x n` turned by the roll the convention takes from
+/// the cant.
+fn canted_at(a: &Alignment, d: Scalar, convention: BankConvention) -> Reference {
+    let (p, t) = a.world(d);
+    let (z, g) = profile_at(d);
+    let tangent = Vec3::new(t.x, t.y, g) / (1.0 + g * g).sqrt();
+    let normal = Vec3::new(-t.y, t.x, 0.0);
+    let square_up = tangent.cross(normal);
+    let sine = match convention {
+        BankConvention::TangentRotation => cant_value(d) / CANT_B,
+        _ => cant_value(d) * (1.0 + g * g).sqrt() / CANT_B,
+    };
+    let (sin, cos) = sine.asin().sin_cos();
+    Reference {
+        point: Vec3::new(p.x, p.y, z),
+        tangent,
+        lateral: cos * normal + sin * square_up,
+        up: -sin * normal + cos * square_up,
+    }
+}
+
 #[test]
-fn a_banked_curve_over_the_clothoid_stays_unbounded_by_name() {
-    let a = alignment();
+fn a_canted_deck_along_the_alignment_is_certified() {
+    for convention in [
+        BankConvention::TangentRotation,
+        BankConvention::VerticalRise,
+    ] {
+        let a = alignment();
+        let mut b = GeometryGraphBuilder::new();
+        let banked = Curve3::Banked(Banked3::new(
+            Elevated3::new(Curve2::Intrinsic(a.curve.clone()), profile()),
+            cant_law(),
+            CantLaw::zero(280.0),
+            CANT_B,
+            convention,
+        ));
+        let basis = b.push_value(banked).unwrap();
+        let narrow = rectangle(&mut b, 10.0, 0.4);
+        let wide = rectangle(&mut b, 12.0, 0.4);
+        // Across the cant's ramps and the plan's and profile's seams.
+        let sections: Vec<SectionAtStation> = [10.0, 75.0, 130.0, 205.0, 270.0]
+            .iter()
+            .enumerate()
+            .map(|(i, &d)| {
+                let (profile, drift) = if i % 2 == 0 {
+                    (narrow, 0.0)
+                } else {
+                    (wide, 1.5)
+                };
+                SectionAtStation::new(
+                    profile,
+                    Station::new(d, StationOffsets::new(drift, 0.2, 0.0)),
+                )
+            })
+            .collect();
+        let root = spine(&mut b, basis, sections.clone(), StationFrame::Section);
+        let graph = b.finish(vec![root]).unwrap();
+        let exact = oracle(
+            &graph,
+            &sections,
+            Box::new(move |d| canted_at(&a, d, convention)),
+            BUDGET,
+        );
+        let bound = assert_certified(&graph, root, BUDGET, &exact);
+        eprintln!("{convention:?}: certified {bound:e}");
+    }
+}
+
+#[test]
+fn a_canted_run_over_a_chain_plan_stays_unbounded_by_name() {
     let mut b = GeometryGraphBuilder::new();
+    let chain = Curve2::Chain(Chain2::new(
+        frame(),
+        vec![ChainPiece2::Intrinsic {
+            curvature: CurvatureLaw::clothoid(0.0, 1.0 / 300.0, 280.0),
+            length: 280.0,
+        }],
+    ));
     let banked = Curve3::Banked(Banked3::new(
-        Elevated3::new(Curve2::Intrinsic(a.curve.clone()), ElevationLaw::level(0.0)),
+        Elevated3::new(chain, ElevationLaw::level(0.0)),
         CantLaw::new(vec![CantPiece::constant(280.0, 0.1)]),
         CantLaw::zero(280.0),
-        1.5,
+        CANT_B,
         BankConvention::TangentRotation,
     ));
     let basis = b.push_value(banked).unwrap();
@@ -535,10 +634,7 @@ fn a_banked_curve_over_the_clothoid_stays_unbounded_by_name() {
     match run_bound(&graph, root, BUDGET).1 {
         DeviationBound::Unbounded(reason) => {
             assert!(reason.contains("certified derivative bounds"), "{reason}");
-            assert!(
-                reason.contains("banked curve over an intrinsic"),
-                "{reason}"
-            );
+            assert!(reason.contains("a banked curve over one"), "{reason}");
         }
         other => panic!("bounded: {other:?}"),
     }

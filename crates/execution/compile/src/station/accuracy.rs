@@ -57,7 +57,7 @@ use super::resolve_parts;
 /// Why a placement whose frame has no certified error is unbounded.
 pub(crate) const UNCERTIFIED_STATION_FRAME: &str =
     "a node placed at a station whose frame has no certified error (a frame read by quadrature \
-     on an ellipse, a B-spline or an offset, a chain, a banked curve over an intrinsic or chain \
+     on an ellipse, a B-spline or an offset, a chain, a banked curve over a chain \
      plan, an intrinsic space curve with torsion or tilted, an elevated curve with an intrinsic \
      profile or another plan, a skewed circle, a steep tangent, a basis placed at a station \
      whose frame is not exact, or a station within its distance's resolution of a seam it is \

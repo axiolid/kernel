@@ -1901,3 +1901,48 @@ harmonic against compensated Simpson), `tests/intrinsic_position_table.rs`
 `crates/execution/compile/tests/elevated_directrix.rs` (exact centres, the
 chain plan and the intrinsic profile unbounded by name) and
 `scripts/probe_elevated_positions_mutants.py`.
+
+## Amendment 2026-11-07: canted curves over intrinsic plans (#396)
+
+Context: the amendment on intrinsic plans (#361) read a gradient curve over
+a clothoid but left a banked curve over one unbounded by name: the frame law
+had no tangent law for it, its stations were not charged, its placements
+were unbounded and its section folds were only checked conservatively
+(never refused). The roll is closed form in the cant law; only the point
+needed the position table.
+
+- **One reader.** `IntrinsicReader` gains a banked arm rather than a second
+  reader. The point is the plan table's point raised by the profile's height
+  and the pivot, read from the laws the kernel reads (the pieces ending at
+  the station on an incoming read, `banked_ending_at`, the truncation the
+  seam code already used). The tangent is the plan heading lifted by the
+  grade and the pivot's rate, and the axes are the rolled section the kernel
+  frames, factored out of `banked_section` as `rolled_axes` so reader and
+  kernel share one formula (bitwise unchanged).
+- **The tangent law** is the elevated one with `Kind::Banked`: the roll's
+  derivative bounds from the cant law (`roll_bounds`), as over a line or a
+  circle. The jet is `banked_derivative` and `banked_second_derivative`, so
+  a fold is an exact decision, as for banked curves over a line or circle.
+- **The charge.** The horizontal normal carries the heading's error
+  (`2 r / flat`), the square up that and the tangent's, and each rolled
+  axis the sum of the two and the roll's rounding through `asin`
+  (`16 eps / cos(roll)`). A held-rail cant (derived pivot) is not read.
+- **The soundness rule stays.** `piece_frame_bounds` returns `None` for
+  these curves: its point error is zero, and the position is a quadrature.
+
+| Option | Why not |
+| --- | --- |
+| Certify banked frames inside `piece_frame_bounds` | Its `point_error = 0` would be unsound for a point read by quadrature. |
+| A separate banked reader | It would duplicate the table, the seams and the charges. |
+
+A canted run over a chain plan stays unbounded by name (`TODO(#394)`).
+
+Evidence: `crates/algorithms/parametric/evaluate/src/station/certify/intrinsic.rs`,
+`crates/algorithms/parametric/evaluate/src/banked.rs` (`rolled_axes`),
+`crates/algorithms/parametric/evaluate/tests/station_frame_law_intrinsic.rs`
+(both conventions and a pivot), `tests/station_frame_error.rs` (on and off
+the seams, the pivot's rate jumping),
+`crates/execution/compile/tests/station_bound_clothoid.rs`,
+`tests/station_placement_bound.rs`, `tests/station_fold.rs` (a fold inside a
+canted transition found and refused) and
+`scripts/probe_clothoid_frames_mutants.py`.

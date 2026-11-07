@@ -14,7 +14,7 @@
 //! forms, its headings and the profiles' heights and grades in closed
 //! form, and the frames built here as the section frames are defined.
 //! Frames whose error is not certified (an ellipse, a B-spline, an offset,
-//! a chain, a banked curve over an intrinsic plan, a vertical clothoid, a
+//! a chain, a banked curve over a chain, a vertical clothoid, a
 //! basis itself placed inexactly) report their placement unbounded by name.
 
 use axiolid_contracts::ExecutionOptions;
@@ -309,6 +309,44 @@ fn on_circle(d: Scalar) -> (Vec3, Vec3) {
     )
 }
 
+const CANT_B: Scalar = 1.5;
+
+fn cant_law() -> CantLaw {
+    CantLaw::new(vec![
+        CantPiece::linear(40.0, 0.0, 0.05),
+        CantPiece::linear(60.0, 0.05, 0.1),
+        CantPiece::constant(80.0, 0.1),
+        CantPiece::linear(60.0, 0.1, 0.0),
+        CantPiece::constant(40.0, 0.0),
+    ])
+}
+
+fn cant_value(d: Scalar) -> Scalar {
+    match d {
+        d if d < 40.0 => 0.05 * d / 40.0,
+        d if d < 100.0 => 0.05 + 0.05 * (d - 40.0) / 60.0,
+        d if d < 180.0 => 0.1,
+        d if d < 240.0 => 0.1 * (240.0 - d) / 60.0,
+        _ => 0.0,
+    }
+}
+
+/// The rolled section frame of the canted alignment at `d`: the horizontal
+/// left normal and `u = t x n` turned by `asin(cant / b)`.
+fn canted_at(a: &Alignment, d: Scalar) -> Reference {
+    let base = a.elevated_at(d);
+    let t = Vec3::new(base.tangent.x, base.tangent.y, 0.0).normalize();
+    let normal = Vec3::new(-t.y, t.x, 0.0);
+    let square_up = base.tangent.cross(normal);
+    let (sin, cos) = (cant_value(d) / CANT_B).asin().sin_cos();
+    Reference {
+        point: base.point,
+        tangent: base.tangent,
+        lateral: cos * normal + sin * square_up,
+        up: -sin * normal + cos * square_up,
+    }
+}
+
 fn cases() -> Vec<Case> {
     let mut out = Vec::new();
     let (point, tangent) = on_circle(250.0);
@@ -419,6 +457,38 @@ fn cases() -> Vec<Case> {
             side: SeamSide::Outgoing,
             frame,
             exact,
+        });
+    }
+
+    // The canted alignment: the roll from the cant law, on a ramp, across
+    // the plan's seam from both sides, and on a plateau.
+    let canted = Curve3::Banked(Banked3::new(
+        Elevated3::new(Curve2::Intrinsic(a.curve.clone()), profile()),
+        cant_law(),
+        CantLaw::zero(280.0),
+        CANT_B,
+        BankConvention::TangentRotation,
+    ));
+    for (name, d, side) in [
+        ("canted over the alignment, ramp", 75.0, SeamSide::Outgoing),
+        (
+            "canted over the alignment, seam, incoming",
+            100.0,
+            SeamSide::Incoming,
+        ),
+        (
+            "canted over the alignment, plateau",
+            150.0,
+            SeamSide::Outgoing,
+        ),
+    ] {
+        out.push(Case {
+            name,
+            base: Base::Three(canted.clone()),
+            distance: d,
+            side,
+            frame: StationFrame::Section,
+            exact: canted_at(&a, d),
         });
     }
     out
@@ -733,11 +803,6 @@ fn the_block_reaches_the_lever_the_bound_assumes() {
 // --- unbounded by name ---------------------------------------------------------------
 
 fn unbounded_cases() -> Vec<(&'static str, Base, Scalar)> {
-    let plan = Curve2::Intrinsic(Intrinsic2::new(
-        frame(),
-        CurvatureLaw::clothoid(0.0, 1.0 / 30.0, 60.0),
-        60.0,
-    ));
     let ellipse = Curve2::Ellipse(Ellipse2 {
         frame: Frame2 {
             origin: Point2::new(30.0, 0.0),
@@ -763,19 +828,19 @@ fn unbounded_cases() -> Vec<(&'static str, Base, Scalar)> {
         self_intersect: None,
         knot_spec: KnotSpec::Unspecified,
     });
-    let banked = Curve3::Banked(Banked3::new(
-        Elevated3::new(plan.clone(), ElevationLaw::level(0.0)),
-        CantLaw::new(vec![CantPiece::constant(60.0, 0.15)]),
-        CantLaw::zero(60.0),
-        1.5,
-        BankConvention::TangentRotation,
-    ));
     let chain = Curve2::Chain(Chain2::new(
         frame(),
         vec![ChainPiece2::Intrinsic {
             curvature: CurvatureLaw::clothoid(0.0, 1.0 / 30.0, 60.0),
             length: 60.0,
         }],
+    ));
+    let banked = Curve3::Banked(Banked3::new(
+        Elevated3::new(chain.clone(), ElevationLaw::level(0.0)),
+        CantLaw::new(vec![CantPiece::constant(60.0, 0.15)]),
+        CantLaw::zero(60.0),
+        1.5,
+        BankConvention::TangentRotation,
     ));
     let vertical = Curve3::Elevated(Elevated3::new(
         Curve2::Line(Line2 {
@@ -787,7 +852,7 @@ fn unbounded_cases() -> Vec<(&'static str, Base, Scalar)> {
     vec![
         ("ellipse", Base::Two(ellipse), 10.0),
         ("b-spline", Base::Three(spline), 10.0),
-        ("banked over a clothoid", Base::Three(banked), 10.0),
+        ("banked over a chain", Base::Three(banked), 10.0),
         ("chain", Base::Two(chain), 10.0),
         ("vertical clothoid", Base::Three(vertical), 20.0),
     ]

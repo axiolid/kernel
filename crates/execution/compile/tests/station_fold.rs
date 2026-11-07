@@ -11,7 +11,8 @@
 use axiolid_contracts::{ExecutionOptions, GeomError};
 use axiolid_core::{Frame2, Point2, Scalar, Tolerance, Vec2, Vec3};
 use axiolid_curve::{
-    Circle2, CurvatureLaw, Curve2, Curve3, Elevated3, ElevationLaw, Ellipse2, Intrinsic2, Line2,
+    BankConvention, Banked3, CantLaw, CantPiece, Circle2, CurvatureLaw, Curve2, Curve3, Elevated3,
+    ElevationLaw, Ellipse2, Intrinsic2, Line2,
 };
 use axiolid_exact_compile_contract::ExactCompiler;
 use axiolid_mesh_boolean_boolmesh::BoolmeshBoolean;
@@ -326,6 +327,45 @@ fn a_fold_inside_a_transition_is_found_between_the_stations() {
     let (graph, root) = along(clothoid(), StationFrame::Section, falling(30.0), 100.0);
     assert!(matches!(mesh(&graph, root), Outcome::Certified));
     let (graph, root) = along(clothoid(), StationFrame::Section, falling(50.0), 100.0);
+    refused(&mesh(&graph, root));
+}
+
+/// The same transition under a cant (#396): the bend is decided exactly
+/// on the rolled frame, where it was only checked conservatively and never
+/// refused. The plan's curvature `s / 1000` meets the offset falling from
+/// `a`, `(a (1 - s / 100) + 0.5) k cos(rho)` reaching 0.78 for `a = 30` and
+/// 1.27 for `a = 50` (`rho = asin(0.15 / 1.5)`).
+#[test]
+fn a_fold_inside_a_canted_transition_is_found_between_the_stations() {
+    let canted = || {
+        Curve3::Banked(Banked3::new(
+            Elevated3::new(
+                Curve2::Intrinsic(Intrinsic2::new(
+                    Frame2 {
+                        origin: Point2::ZERO,
+                        x: Vec2::X,
+                        y: Vec2::Y,
+                    },
+                    CurvatureLaw::clothoid(0.0, 0.1, 100.0),
+                    100.0,
+                )),
+                ElevationLaw::level(0.0),
+            ),
+            CantLaw::new(vec![CantPiece::constant(100.0, 0.15)]),
+            CantLaw::zero(100.0),
+            1.5,
+            BankConvention::TangentRotation,
+        ))
+    };
+    let falling = |from: Scalar| {
+        (
+            StationOffsets::new(from, 0.0, 0.0),
+            StationOffsets::new(0.0, 0.0, 0.0),
+        )
+    };
+    let (graph, root) = along(canted(), StationFrame::Section, falling(30.0), 100.0);
+    assert!(matches!(mesh(&graph, root), Outcome::Certified));
+    let (graph, root) = along(canted(), StationFrame::Section, falling(50.0), 100.0);
     refused(&mesh(&graph, root));
 }
 

@@ -117,7 +117,9 @@
 //! sup |k'| + sup k^2` in arc length, from the law's own suprema
 //! (`crate::bound::intrinsic_derivative_bounds2`), and the axes follow by
 //! the rules above. An elevated curve over an intrinsic plan composes them
-//! with the profile in plan distance, as over a line or a circle. Only the
+//! with the profile in plan distance, as over a line or a circle, and a
+//! banked curve over one adds the roll bounded from its cant law (#396,
+//! `Kind::Banked`). Only the
 //! POINT is a quadrature, with no error bound of its own, so
 //! [`piece_frame_bounds`] leaves these curves unbounded and [`FrameLaw`]
 //! compares every frame it reads with the exact one, as for the curves
@@ -125,8 +127,9 @@
 //! [`IntrinsicPositionTable`](crate::bound::IntrinsicPositionTable), the
 //! exact axes from the closed-form heading. The measure is exact. The
 //! families are a 2D intrinsic curve, a level planar intrinsic space curve
-//! and an elevated curve over an intrinsic plan with a closed-form
-//! profile, each with an orthonormal start frame and any curvature law
+//! and an elevated or banked curve over an intrinsic plan with a
+//! closed-form profile (a banked curve's cant without a held-rail piece),
+//! each with an orthonormal start frame and any curvature law
 //! with closed-form bounds of `k` to `k'''`.
 //!
 //! # One station (#405)
@@ -143,7 +146,7 @@
 //!   polyline, an elevated or banked curve over a line or a circle) has no
 //!   error of its own but the rounding of the read: [`POINT_ROUNDING`](super::POINT_ROUNDING)
 //!   of the point's largest coordinate (one at least), and `1e-14` per axis. An intrinsic curve's slot (a 2D curve, a level planar space
-//!   curve, an elevated curve over an intrinsic plan) compares the read
+//!   curve, an elevated or banked curve over an intrinsic plan) compares the read
 //!   frame with the exact one, as [`FrameLaw::bounds`] does for a run: both
 //!   sides of a seam of its law are compared, which covers the one named.
 //! - **The distance's resolution** (`delta`, the bounds' `measure`). Where
@@ -166,11 +169,12 @@
 //! # Not bounded
 //!
 //! `None`, never a guess: a chain, and an offset beside one of them, beside
-//! an intrinsic, an elevated or a banked curve; a banked curve over an
-//! intrinsic or chain plan; an intrinsic space curve with torsion or out of
+//! an intrinsic, an elevated or a banked curve; a banked curve over a
+//! chain plan; an intrinsic space curve with torsion or out of
 //! a level plane; an intrinsic curve with a stretched or skewed start
 //! frame; a circle with a skewed frame; an elevated or banked curve with
-//! another plan or an intrinsic profile; a span that crosses a seam, a vertex of a polyline
+//! another plan, an intrinsic profile or a held-rail cant over an intrinsic plan;
+//! a span that crosses a seam, a vertex of a polyline
 //! or a piece of a law; a tangent too steep for a horizontal lower bound;
 //! a cant whose roll reaches a quarter turn; a curve read by quadrature
 //! placed in a frame that tilts `+Z`, and a placed offset piece.
@@ -646,7 +650,8 @@ fn finish(
 /// measure (#361): the curvature law's closed-form suprema, `|T'| <= sup
 /// |k|` and `|T''| <= sup |k'| + sup k^2` in arc length, composed with the
 /// profile in plan distance on an elevated curve (the line and circle
-/// plans' path). `None` across a seam of the law, where `k'` may jump: the
+/// plans' path), and a banked curve's roll bounded from its cant law (#396).
+/// `None` across a seam of the law, where `k'` may jump: the
 /// caller splits.
 fn intrinsic_tangent_law(
     reader: &IntrinsicReader<'_>,
@@ -654,8 +659,13 @@ fn intrinsic_tangent_law(
     hi: Scalar,
 ) -> Option<TangentLaw> {
     let (bounds, middle) = reader.derivatives(lo, hi)?;
-    if reader.is_elevated() {
-        return plan_measured(bounds, middle, lo, hi, Kind::ReferenceUp);
+    if reader.is_plan_measured() {
+        let kind = match reader.banked() {
+            // The roll from the cant law, as over a line or a circle (#396).
+            Some(banked) => Kind::Banked(crate::banked::roll_bounds(banked, lo, hi)?),
+            None => Kind::ReferenceUp,
+        };
+        return plan_measured(bounds, middle, lo, hi, kind);
     }
     if !(bounds.third.is_finite() && bounds.second.is_finite()) {
         return None;
@@ -741,13 +751,13 @@ enum LawBasis<'b, 'c> {
 /// from the true joint is added to the measure.
 ///
 /// A 2D intrinsic curve, a level planar intrinsic space curve and an
-/// elevated curve over an intrinsic plan are bounded by their curvature
+/// elevated or banked curve over an intrinsic plan are bounded by their curvature
 /// law's closed-form suprema, each frame read compared with the exact one
 /// (see [the module documentation](self#intrinsic-curves-361)).
 ///
 /// Not bounded (`None`): every family [`piece_frame_bounds`] leaves
 /// unbounded other than those above (a chain, an intrinsic space curve
-/// with torsion or tilted, a banked curve over an intrinsic or chain plan,
+/// with torsion or tilted, a banked curve over a chain plan,
 /// an offset beside a curve parameterised by its plan length or beside a
 /// banked curve, a skewed circle, a steep tangent), a curve read by
 /// quadrature placed in a frame that tilts `+Z`, a placed offset piece,

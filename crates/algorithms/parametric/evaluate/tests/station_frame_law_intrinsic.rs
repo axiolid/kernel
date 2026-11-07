@@ -483,6 +483,105 @@ fn a_gradient_curve_over_the_alignment_is_bounded() {
     }
 }
 
+/// The cant over the alignment, in closed form: a ramp on the first line
+/// (so a roll forgotten there is seen), a second ramp across the first
+/// clothoid, a plateau on the arc, and the way back.
+const CANT_B: Scalar = 1.5;
+
+fn cant_pieces(scale: Scalar) -> Vec<CantPiece> {
+    vec![
+        CantPiece::linear(40.0, 0.0, 0.05 * scale),
+        CantPiece::linear(60.0, 0.05 * scale, 0.1 * scale),
+        CantPiece::constant(80.0, 0.1 * scale),
+        CantPiece::linear(60.0, 0.1 * scale, 0.0),
+        CantPiece::constant(40.0, 0.0),
+    ]
+}
+
+/// The cant's value and rate at `d`, from the pieces above.
+fn cant_at(d: Scalar) -> (Scalar, Scalar) {
+    match d {
+        d if d < 40.0 => (0.05 * d / 40.0, 0.05 / 40.0),
+        d if d < 100.0 => (0.05 + 0.05 * (d - 40.0) / 60.0, 0.05 / 60.0),
+        d if d < 180.0 => (0.1, 0.0),
+        d if d < 240.0 => (0.1 * (240.0 - d) / 60.0, -0.1 / 60.0),
+        _ => (0.0, 0.0),
+    }
+}
+
+fn canted(convention: BankConvention, pivot: bool) -> Curve3 {
+    Curve3::Banked(Banked3::new(
+        Elevated3::new(Curve2::Intrinsic(alignment().curve), profile()),
+        CantLaw::new(cant_pieces(1.0)),
+        if pivot {
+            // Rotation about the low rail: the point rises with half the cant.
+            CantLaw::new(cant_pieces(0.5))
+        } else {
+            CantLaw::zero(280.0)
+        },
+        CANT_B,
+        convention,
+    ))
+}
+
+/// The rolled section frame at `d`, built as the section frames are
+/// defined: the point path's tangent `(p, G)`, the horizontal left normal
+/// `n`, `u = t x n`, rolled by `rho` from the cant.
+fn canted_at(a: &Alignment, d: Scalar, convention: BankConvention, pivot: bool) -> Reference {
+    let (p, t) = a.world(d);
+    let (z, g) = profile_at(d);
+    let (cant, rate) = cant_at(d);
+    let (e, e_rate) = if pivot {
+        (0.5 * cant, 0.5 * rate)
+    } else {
+        (0.0, 0.0)
+    };
+    let slope = g + e_rate;
+    let derivative = Vec3::new(t.x, t.y, slope);
+    let tangent = derivative / derivative.length();
+    let normal = Vec3::new(-t.y, t.x, 0.0);
+    let square_up = tangent.cross(normal);
+    let sine = match convention {
+        BankConvention::TangentRotation => cant / CANT_B,
+        _ => cant * (1.0 + slope * slope).sqrt() / CANT_B,
+    };
+    let roll = sine.asin();
+    let (sin, cos) = roll.sin_cos();
+    Reference {
+        point: Vec3::new(p.x, p.y, z + e),
+        tangent,
+        lateral: cos * normal + sin * square_up,
+        up: -sin * normal + cos * square_up,
+    }
+}
+
+#[test]
+fn a_canted_curve_over_the_alignment_is_bounded() {
+    let a = alignment();
+    for (convention, pivot) in [
+        (BankConvention::TangentRotation, false),
+        (BankConvention::VerticalRise, false),
+        (BankConvention::TangentRotation, true),
+    ] {
+        let curve = canted(convention, pivot);
+        let law = FrameLaw::atomic(StationCurve::Three(&curve), None, TOLERANCE).unwrap();
+        for (lo, hi) in SPANS {
+            check(
+                &law,
+                |d| canted_at(&a, d, convention, pivot),
+                |d| station_section3(&curve, d).unwrap(),
+                lo,
+                hi,
+            );
+        }
+        // A plan seam, the profile's and the cant's inside: split by the
+        // caller.
+        for (lo, hi) in [(30.0, 50.0), (110.0, 130.0), (230.0, 250.0)] {
+            assert!(law.bounds(lo, hi, FrameReading::Section).is_none());
+        }
+    }
+}
+
 fn clothoid_plan() -> Curve2 {
     Curve2::Intrinsic(Intrinsic2::new(
         frame(),
@@ -499,6 +598,20 @@ fn what_is_not_certified_stays_unbounded() {
     let plan = clothoid_plan();
     let banked = Curve3::Banked(Banked3::new(
         Elevated3::new(plan.clone(), ElevationLaw::level(0.0)),
+        CantLaw::new(vec![CantPiece::constant(60.0, 0.15)]),
+        CantLaw::zero(60.0),
+        1.5,
+        BankConvention::TangentRotation,
+    ));
+    let chain_plan = Curve2::Chain(Chain2::new(
+        frame(),
+        vec![ChainPiece2::Intrinsic {
+            curvature: CurvatureLaw::clothoid(0.0, 1.0 / 30.0, 60.0),
+            length: 60.0,
+        }],
+    ));
+    let banked_chain = Curve3::Banked(Banked3::new(
+        Elevated3::new(chain_plan, ElevationLaw::level(0.0)),
         CantLaw::new(vec![CantPiece::constant(60.0, 0.15)]),
         CantLaw::zero(60.0),
         1.5,
@@ -558,7 +671,7 @@ fn what_is_not_certified_stays_unbounded() {
     };
     let barely = Curve3::Intrinsic(Intrinsic3::new(hair, law.clone(), flat.clone(), 60.0));
     let cases: [(&str, StationCurve<'_>); 7] = [
-        ("banked over a clothoid", StationCurve::Three(&banked)),
+        ("banked over a chain", StationCurve::Three(&banked_chain)),
         ("chain", StationCurve::Two(&chain)),
         ("stretched", StationCurve::Two(&stretched)),
         ("stretched, elevated", StationCurve::Three(&stretched_plan)),

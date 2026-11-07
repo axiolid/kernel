@@ -52,6 +52,13 @@ caret rule for `0.x` versions.
   past the plan.
 - `bound::IntrinsicPositionTable::max_error` (#393): one certified bound on
   the error of every point the table returns.
+- `station::FrameLaw` bounds and charges a banked curve over an intrinsic
+  plan (#396): the roll bounded from its cant law, each frame read compared
+  with the exact rolled section (point from the position table plus the
+  height and the pivot, axes from the heading and the roll), so the
+  station, placement and fold paths decide it where they reported it
+  unbounded. A held-rail cant and a banked curve over a chain plan stay
+  unbounded by name (`TODO(#394)`).
 
 ### Changed
 

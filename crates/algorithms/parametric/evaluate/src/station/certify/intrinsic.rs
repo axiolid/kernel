@@ -19,15 +19,19 @@
 //!
 //! The measure is exact: arc length (plan distance on an elevated curve)
 //! is the curve's parameter. The families: a 2D intrinsic curve, a level
-//! planar intrinsic space curve, and an elevated curve over an intrinsic
-//! plan with a profile of closed-form pieces, each with an orthonormal
-//! start frame. A banked curve, a chain, a stretched or skewed start
-//! frame, a tilted or twisted space curve and a placement that tilts `+Z`
-//! are not read here.
+//! planar intrinsic space curve, an elevated curve over an intrinsic
+//! plan with a profile of closed-form pieces, and a banked curve over one
+//! (#396), each with an orthonormal start frame. A banked curve's point is
+//! the plan's table point raised by the profile's height and the pivot, its
+//! tangent the plan heading lifted by the grade and the pivot's rate, and
+//! its axes the rolled section the kernel frames
+//! ([`crate::banked::rolled_axes`]), the roll from the cant law; a held-rail
+//! cant is not read. A chain, a stretched or skewed start frame, a tilted or
+//! twisted space curve and a placement that tilts `+Z` are not read here.
 
 use axiolid_contracts::GeomResult;
 use axiolid_core::{Frame2, Scalar, Vec2, Vec3};
-use axiolid_curve::{Curve2, Curve3, Elevated3, Intrinsic2, Intrinsic3, SeamSide};
+use axiolid_curve::{Banked3, Curve2, Curve3, Elevated3, Intrinsic2, Intrinsic3, SeamSide};
 
 use super::reading::{framed, AXIS_ROUNDING};
 use super::POINT_ROUNDING;
@@ -49,6 +53,8 @@ enum Base<'c> {
     Level(&'c Intrinsic3),
     /// An elevated curve over an intrinsic plan.
     Elevated(&'c Elevated3, &'c Intrinsic2),
+    /// A banked curve over an intrinsic plan.
+    Banked(&'c Banked3, &'c Intrinsic2),
 }
 
 fn orthonormal(frame: &Frame2) -> bool {
@@ -71,6 +77,17 @@ impl<'c> Base<'c> {
                 };
                 (orthonormal(&plan.start) && crate::elevated::certifies_elevated(elevated))
                     .then_some(Self::Elevated(elevated, plan))
+            }
+            StationCurve::Three(Curve3::Banked(banked)) => {
+                let Curve2::Intrinsic(plan) = banked.base.plan.as_ref() else {
+                    return None;
+                };
+                (orthonormal(&plan.start)
+                    && crate::elevated::certifies_elevated(&banked.base)
+                    && banked.cant.is_well_formed()
+                    && banked.pivot.is_well_formed()
+                    && !banked.cant.has_rail_pieces())
+                .then_some(Self::Banked(banked, plan))
             }
             StationCurve::Three(Curve3::Intrinsic(space)) => {
                 let start = &space.start;
@@ -123,7 +140,7 @@ impl<'c> IntrinsicReader<'c> {
             }
         }
         let (local, table) = match base {
-            Base::Plan(plan) | Base::Elevated(_, plan) => (
+            Base::Plan(plan) | Base::Elevated(_, plan) | Base::Banked(_, plan) => (
                 plan.clone(),
                 IntrinsicPositionTable::new2(plan, tolerance, piece.end),
             ),
@@ -140,15 +157,24 @@ impl<'c> IntrinsicReader<'c> {
         }))
     }
 
-    /// Whether the curve is an elevated one, measured in plan distance.
-    pub(crate) fn is_elevated(&self) -> bool {
-        matches!(self.base, Base::Elevated(..))
+    /// Whether the curve is an elevated or a banked one, measured in plan
+    /// distance.
+    pub(crate) fn is_plan_measured(&self) -> bool {
+        matches!(self.base, Base::Elevated(..) | Base::Banked(..))
+    }
+
+    /// The banked curve, if it is one.
+    pub(crate) fn banked(&self) -> Option<&'c Banked3> {
+        match self.base {
+            Base::Banked(banked, _) => Some(banked),
+            _ => None,
+        }
     }
 
     /// Certified suprema of the curve's derivatives in its own measure over
     /// `[lo, hi]` (`third` infinite across a seam of its law), and its
     /// derivative at the middle: the unit tangent of a plan or level curve,
-    /// an elevated curve's `(p', z')` in plan distance.
+    /// an elevated or banked curve's `(p', z')` in plan distance.
     pub(crate) fn derivatives(
         &self,
         lo: Scalar,
@@ -159,6 +185,11 @@ impl<'c> IntrinsicReader<'c> {
             Base::Elevated(elevated, _) => {
                 let bounds = crate::elevated::elevated_derivative_bounds(elevated, lo, hi)?;
                 let middle = crate::elevated::elevated_derivative(elevated, mid).ok()?;
+                Some((bounds, middle))
+            }
+            Base::Banked(banked, _) => {
+                let bounds = crate::elevated::banked_derivative_bounds(banked, lo, hi)?;
+                let middle = crate::banked::banked_derivative(banked, mid).ok()?;
                 Some((bounds, middle))
             }
             Base::Plan(_) | Base::Level(_) => {
@@ -173,13 +204,18 @@ impl<'c> IntrinsicReader<'c> {
     /// The curve's closed-form jet `(O', O'')` at its measure `m`, per unit
     /// of that measure (#361): the unit tangent of a plan or level curve
     /// and `k` times its normal, or an elevated curve's `(p', z')` and
-    /// `(k n, z'')` in plan distance. `None` where the law has no value at
+    /// `(k n, z'')` in plan distance, a banked curve's with the pivot's rate
+    /// and bend added to the profile's. `None` where the law has no value at
     /// `m`.
     pub(crate) fn jet(&self, m: Scalar) -> Option<(Vec3, Vec3)> {
         match self.base {
             Base::Elevated(elevated, _) => Some((
                 crate::elevated::elevated_derivative(elevated, m).ok()?,
                 crate::elevated::elevated_second_derivative(elevated, m).ok()?,
+            )),
+            Base::Banked(banked, _) => Some((
+                crate::banked::banked_derivative(banked, m).ok()?,
+                crate::banked::banked_second_derivative(banked, m).ok()?,
             )),
             Base::Plan(_) | Base::Level(_) => {
                 let (sin, cos) = self.local.heading_at(m)?.sin_cos();
@@ -195,9 +231,14 @@ impl<'c> IntrinsicReader<'c> {
         }
     }
 
-    /// The exact frame at the curve's measure `m` read from `side`, and the
-    /// certified error of its point.
-    fn exact(&self, m: Scalar, side: SeamSide) -> GeomResult<Option<(SectionFrame, Scalar)>> {
+    /// The exact frame at the curve's measure `m` read from `side`, the
+    /// certified error of its point and the roll of its axes (zero off a
+    /// banked curve).
+    fn exact(
+        &self,
+        m: Scalar,
+        side: SeamSide,
+    ) -> GeomResult<Option<(SectionFrame, Scalar, Scalar)>> {
         let slack = 1e-9 * self.end.max(1.0);
         if !m.is_finite() || m < -slack || m > self.end + slack {
             return Ok(None);
@@ -210,6 +251,34 @@ impl<'c> IntrinsicReader<'c> {
         let plane = self.local.start.x * cos + self.local.start.y * sin;
         let plane = plane / plane.length();
         let (point, error, tangent) = match self.base {
+            Base::Banked(banked, _) => {
+                let Some((p, e)) = self.table.point2(m) else {
+                    return Ok(None);
+                };
+                // The laws the kernel reads at `m` from `side`: the pieces
+                // ending there on the incoming side.
+                let truncated;
+                let read = if side == SeamSide::Incoming {
+                    truncated = crate::station::seam::banked_ending_at(banked, m);
+                    &truncated
+                } else {
+                    banked
+                };
+                let Ok((pivot, rate)) = read.pivot_at(m) else {
+                    return Ok(None);
+                };
+                let height = crate::elevation::elevation_height(&read.base.elevation, m)?;
+                let grade = crate::elevation::elevation_grade(&read.base.elevation, m)?;
+                let derivative = Vec3::new(plane.x, plane.y, grade + rate);
+                let axes = crate::banked::rolled_axes(read, m, derivative)?;
+                let frame = SectionFrame {
+                    point: axiolid_core::Point3::new(p.x, p.y, height + pivot),
+                    tangent: axes.tangent,
+                    lateral: axes.lateral,
+                    up: axes.up,
+                };
+                return Ok(Some((frame, e, axes.roll)));
+            }
             Base::Plan(_) => {
                 let Some((p, e)) = self.table.point2(m) else {
                     return Ok(None);
@@ -245,7 +314,7 @@ impl<'c> IntrinsicReader<'c> {
                 )
             }
         };
-        Ok(Some((framed(point, tangent)?, error)))
+        Ok(Some((framed(point, tangent)?, error, 0.0)))
     }
 
     /// The charge of the read `frame` at the distance `u` into `piece`
@@ -262,19 +331,33 @@ impl<'c> IntrinsicReader<'c> {
         side: SeamSide,
     ) -> GeomResult<Option<[Scalar; 2]>> {
         let (m, curve_side) = piece.read_at(u, side);
-        let Some((exact, table)) = self.exact(m, curve_side)? else {
+        let Some((exact, table, roll)) = self.exact(m, curve_side)? else {
             return Ok(None);
         };
         let scale = exact.point.abs().max_element().max(1.0);
         let point_error = (frame.point - exact.point).length() + table + POINT_ROUNDING * scale;
         let r_t = self.table.heading_rounding() * (1.0 + 4.0 * NEAR) + AXIS_ROUNDING;
-        let (r_l, r_u) = if self.is_elevated() {
+        let (r_l, r_u) = if self.is_plan_measured() {
             let flat = exact.tangent.x.hypot(exact.tangent.y) - r_t;
             if flat.is_nan() || flat <= 0.0 {
                 return Ok(None);
             }
-            let r_l = 2.0 * r_t / flat;
-            (r_l, r_l + r_t)
+            let r_n = 2.0 * r_t / flat;
+            let r_u = r_n + r_t;
+            if self.banked().is_some() {
+                // The horizontal normal and the square up carry the heading's
+                // error; the roll, from the cant law at the same distance,
+                // only its rounding, through `asin`. Each rolled axis mixes
+                // the two.
+                let cosine = roll.cos();
+                if cosine.is_nan() || cosine <= 0.0 {
+                    return Ok(None);
+                }
+                let r_roll = 16.0 * Scalar::EPSILON / cosine + r_n + r_u;
+                (r_roll, r_roll)
+            } else {
+                (r_n, r_u)
+            }
         } else {
             (r_t, 0.0)
         };
@@ -357,5 +440,47 @@ mod tests {
         assert!(turned(|f| &mut f.tangent) >= off);
         assert!(turned(|f| &mut f.lateral) >= off);
         assert!(turned(|f| &mut f.up) >= off);
+    }
+
+    /// A banked read off the exact frame by a known amount is charged at
+    /// least that much, its rolled axes included, and a read on the exact
+    /// frame only its rounding.
+    #[test]
+    fn a_banked_read_off_the_exact_frame_is_charged_its_distance() {
+        use axiolid_curve::{BankConvention, CantLaw, CantPiece, ElevationLaw};
+        let curve = Curve3::Banked(Banked3::new(
+            Elevated3::new(clothoid(), ElevationLaw::constant_grade(5.0, 0.03)),
+            CantLaw::new(vec![CantPiece::linear(60.0, 0.0, 0.12)]),
+            CantLaw::new(vec![CantPiece::linear(60.0, 0.0, 0.06)]),
+            1.5,
+            BankConvention::TangentRotation,
+        ));
+        let piece = StationPiece::between(StationCurve::Three(&curve), 0.0, 60.0).unwrap();
+        let reader = IntrinsicReader::new(&piece, 1e-7).unwrap().unwrap();
+        assert!(reader.banked().is_some() && reader.is_plan_measured());
+        let u = 41.0;
+        let side = SeamSide::Outgoing;
+        let (_, frame) = piece.raw_section(u, side, None).unwrap();
+        let off = 1e-6;
+        let charge =
+            |frame: SectionFrame| reader.compare(&piece, &frame, u, side).unwrap().unwrap();
+        let [point, axis] = charge(frame);
+        assert!(point <= 1e-7 && axis <= 1e-12, "{point} {axis}");
+        let moved = SectionFrame {
+            point: frame.point + off * Vec3::Z,
+            ..frame
+        };
+        assert!(charge(moved)[0] >= off);
+        let turned = |axis: fn(&mut SectionFrame) -> &mut Vec3| {
+            let mut out = frame;
+            *axis(&mut out) += off * Vec3::Z;
+            charge(out)[1]
+        };
+        assert!(turned(|f| &mut f.tangent) >= off);
+        assert!(turned(|f| &mut f.lateral) >= off);
+        assert!(turned(|f| &mut f.up) >= off);
+        // The exact point is raised by the height and the pivot, as read.
+        let (exact, _, roll) = reader.exact(u, side).unwrap().unwrap();
+        assert!((exact.point.z - frame.point.z).abs() <= 1e-9 && roll > 0.0);
     }
 }

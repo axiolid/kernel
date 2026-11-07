@@ -131,6 +131,14 @@ Latest release, 0.3.45 (2026-11-07):
   boolean, how far any point of the mesh lies from the exact compiler's
   result (#329).
 
+- Stationed runs, placements and section folds along a banked curve over an
+  intrinsic plan (a canted alignment, #396) are certified where they were
+  unbounded by name: the frame law bounds the roll from the cant law and
+  compares every frame read with the exact rolled section. A fold inside a
+  canted transition is found between the stations and refused ("sections
+  fold"); it was checked conservatively and never refused. A canted run over
+  a chain plan stays unbounded by name (`TODO(#394)`).
+
 ### Changed
 
 - A swept disk along an elevated or banked curve over a chain plan, or under

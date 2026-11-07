@@ -359,6 +359,58 @@ impl Alignment {
             Vec3::new(t.x / size, t.y / size, g / size),
         )
     }
+
+    /// The rolled section frame of the canted alignment at `d`, read from
+    /// `side`: the cant's rate, and so the pivot's, jumps at its seams.
+    fn canted_at(&self, d: Scalar, side: SeamSide, pivot: bool) -> Reference {
+        let (p, t) = self.world(d);
+        let (z, g) = profile_at(d);
+        let (cant, rate) = cant_at(d, side == SeamSide::Incoming);
+        let (e, e_rate) = if pivot {
+            (0.5 * cant, 0.5 * rate)
+        } else {
+            (0.0, 0.0)
+        };
+        let derivative = Vec3::new(t.x, t.y, g + e_rate);
+        let tangent = derivative / derivative.length();
+        let normal = Vec3::new(-t.y, t.x, 0.0);
+        let square_up = tangent.cross(normal);
+        let (sin, cos) = (cant / CANT_B).asin().sin_cos();
+        Reference {
+            point: Vec3::new(p.x, p.y, z + e),
+            tangent,
+            lateral: cos * normal + sin * square_up,
+            up: -sin * normal + cos * square_up,
+        }
+    }
+}
+
+const CANT_B: Scalar = 1.5;
+
+fn cant_pieces(scale: Scalar) -> Vec<CantPiece> {
+    vec![
+        CantPiece::linear(40.0, 0.0, 0.05 * scale),
+        CantPiece::linear(60.0, 0.05 * scale, 0.1 * scale),
+        CantPiece::constant(80.0, 0.1 * scale),
+        CantPiece::linear(60.0, 0.1 * scale, 0.0),
+        CantPiece::constant(40.0, 0.0),
+    ]
+}
+
+/// The cant's value and rate at `d`, from the piece starting there or, with
+/// `incoming`, the one ending there.
+fn cant_at(d: Scalar, incoming: bool) -> (Scalar, Scalar) {
+    let ends = [40.0, 100.0, 180.0, 240.0, 280.0];
+    let values = [(0.0, 0.05), (0.05, 0.1), (0.1, 0.1), (0.1, 0.0), (0.0, 0.0)];
+    let mut start = 0.0;
+    for (end, (v0, v1)) in ends.into_iter().zip(values) {
+        if (incoming && d <= end) || (!incoming && d < end) || end == 280.0 {
+            let rate = (v1 - v0) / (end - start);
+            return (v0 + rate * (d - start), rate);
+        }
+        start = end;
+    }
+    unreachable!()
 }
 
 /// Seams of the plan at 40, 100, 180 and 240.
@@ -456,6 +508,49 @@ fn an_alignment_station_is_charged_on_and_off_its_seams() {
             .unwrap();
         let read = basis.section_on(d, SeamSide::Outgoing).unwrap();
         covers(error, &read, a.elevated_at(d), "composite alignment");
+    }
+}
+
+#[test]
+fn a_canted_alignment_station_is_charged_on_and_off_its_seams() {
+    let a = alignment();
+    let plan = Curve2::Intrinsic(a.curve.clone());
+    for pivot in [false, true] {
+        let canted = Curve3::Banked(Banked3::new(
+            Elevated3::new(plan.clone(), profile()),
+            CantLaw::new(cant_pieces(1.0)),
+            if pivot {
+                CantLaw::new(cant_pieces(0.5))
+            } else {
+                CantLaw::zero(280.0)
+            },
+            CANT_B,
+            BankConvention::TangentRotation,
+        ));
+        let law = FrameLaw::atomic(StationCurve::Three(&canted), None, TOLERANCE).unwrap();
+        // Inside a piece, on the plan's seams (40, 100, 180, 240) and on the
+        // profile's (120); the cant's rate jumps on the plan's.
+        for d in [
+            10.0, 70.0, 40.0, 100.0, 120.0, 150.0, 180.0, 200.0, 240.0, 270.0,
+        ] {
+            for side in SIDES {
+                for reading in READINGS {
+                    let what = format!("canted at {d} {side:?} {reading:?} pivot {pivot}");
+                    let error = law.error_at(d, side, reading).expect(&what);
+                    let read = read_as(station_section3_on(&canted, d, side).unwrap(), reading);
+                    covers(
+                        error,
+                        &read,
+                        exact_as(a.canted_at(d, side, pivot), reading),
+                        &what,
+                    );
+                    assert!(
+                        error.point <= 2.0 * TOLERANCE && error.axis <= 1e-11,
+                        "{what}: {error:?}"
+                    );
+                }
+            }
+        }
     }
 }
 
@@ -746,32 +841,23 @@ fn spline3() -> Curve3 {
     })
 }
 
-fn clothoid_plan() -> Curve2 {
-    Curve2::Intrinsic(Intrinsic2::new(
-        frame(),
-        CurvatureLaw::clothoid(0.0, 1.0 / 30.0, 60.0),
-        60.0,
-    ))
-}
-
 #[test]
 fn what_is_not_certified_is_not_charged() {
     let ellipse = ellipse();
     let spline = spline3();
-    let plan = clothoid_plan();
-    let banked = Curve3::Banked(Banked3::new(
-        Elevated3::new(plan.clone(), ElevationLaw::level(0.0)),
-        CantLaw::new(vec![CantPiece::constant(60.0, 0.15)]),
-        CantLaw::zero(60.0),
-        1.5,
-        BankConvention::TangentRotation,
-    ));
     let chain = Curve2::Chain(Chain2::new(
         frame(),
         vec![ChainPiece2::Intrinsic {
             curvature: CurvatureLaw::clothoid(0.0, 1.0 / 30.0, 60.0),
             length: 60.0,
         }],
+    ));
+    let banked = Curve3::Banked(Banked3::new(
+        Elevated3::new(chain.clone(), ElevationLaw::level(0.0)),
+        CantLaw::new(vec![CantPiece::constant(60.0, 0.15)]),
+        CantLaw::zero(60.0),
+        1.5,
+        BankConvention::TangentRotation,
     ));
     let vertical = Curve3::Elevated(Elevated3::new(
         Curve2::Line(Line2 {
@@ -783,10 +869,7 @@ fn what_is_not_certified_is_not_charged() {
     let cases: [(&str, StationCurve<'_>); 5] = [
         ("ellipse", StationCurve::Two(&ellipse)),
         ("b-spline", StationCurve::Three(&spline)),
-        (
-            "banked over an intrinsic plan",
-            StationCurve::Three(&banked),
-        ),
+        ("banked over a chain", StationCurve::Three(&banked)),
         ("chain", StationCurve::Two(&chain)),
         ("an intrinsic profile", StationCurve::Three(&vertical)),
     ];

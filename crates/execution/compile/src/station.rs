@@ -30,8 +30,9 @@
 //! by quadrature, on an ellipse, a B-spline or an offset beside a curve in
 //! closed form, and since #361 on an intrinsic plan (a clothoid, or lines,
 //! arcs and transitions in one piecewise law), alone or under an elevation
-//! -- and [`DeviationBound::Unbounded`] by name elsewhere (a frame on a
-//! chain, on a banked curve over an intrinsic plan or on an intrinsic space
+//! -- and, since #396, a banked curve over it with the roll bounded from the
+//! cant law -- and [`DeviationBound::Unbounded`] by name elsewhere (a frame on a
+//! chain, on a banked curve over one or on an intrinsic space
 //! curve with torsion or tilted, an offset beside an intrinsic curve or a
 //! chain, a cell beside a mitre on a curved piece or with a changing
 //! section, different curved profiles that do not pair).

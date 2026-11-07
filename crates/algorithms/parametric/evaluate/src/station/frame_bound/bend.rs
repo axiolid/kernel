@@ -31,9 +31,9 @@
 //!
 //! The jet `(v, w)` is closed form where the point is: a line, a circle
 //! with an orthonormal frame, a polyline's segment, an elevated or a banked
-//! curve over a line or a circle, and a piece of an intrinsic curve, whose
-//! heading and curvature are closed form
-//! (`IntrinsicReader::jet`).
+//! curve over a line or a circle, and a piece of an intrinsic curve (a
+//! banked curve over an intrinsic plan included, #396), whose heading and
+//! curvature are closed form (`IntrinsicReader::jet`).
 //! A reversed piece negates `v` and keeps `w`; a placement maps both.
 //!
 //! # Bounds over a span
