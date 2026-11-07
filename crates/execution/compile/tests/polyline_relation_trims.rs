@@ -884,10 +884,10 @@ fn a_window_may_pass_the_inner_span_by_the_linear_tolerance_along_the_curve() {
     let outcome = polyline(&graph, root).unwrap();
     close(outcome.points[0], on(0.0), "first");
     close(*outcome.points.last().unwrap(), on(1.0), "last");
-    // 1e-3 rad (5e-3 m) past is not noise.
-    let (graph, root) = nested(-1e-3, 0.5);
+    // 5e-4 rad (2.5e-3 m, over the tolerance) past is not noise.
+    let (graph, root) = nested(-5e-4, 0.5);
     invalid(polyline(&graph, root));
-    let (graph, root) = nested(0.2, 1.0 + 1e-3);
+    let (graph, root) = nested(0.2, 1.0 + 5e-4);
     invalid(polyline(&graph, root));
 }
 

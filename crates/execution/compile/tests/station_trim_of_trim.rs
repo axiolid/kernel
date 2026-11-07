@@ -299,3 +299,27 @@ fn a_window_just_past_a_long_composite_is_read_as_the_stations_read_it() {
     let direct = resolve(&graph, c).unwrap().point;
     close(nested, direct, "station");
 }
+
+#[test]
+fn a_sweep_range_may_pass_a_trimmed_circle_by_the_tolerance_along_it() {
+    // A circle of radius 2 trimmed to `[0, 1]` rad: the linear tolerance
+    // of 1e-3 m is 5e-4 rad along it.
+    let swept = |from: Scalar| {
+        let mut b = GeometryGraphBuilder::new();
+        let basis = b.push_value(circle()).unwrap();
+        let directrix = trimmed(&mut b, basis, (p(0.0), p(1.0)), true);
+        let sweep = b
+            .push(GeometryNode::SolidOperation(SolidOperation::SweptDisk {
+                directrix,
+                radius: TUBE,
+                inner_radius: None,
+                parameter_range: Some((from, 0.5)),
+                fillet_radius: None,
+            }))
+            .unwrap();
+        let graph = b.finish(vec![sweep]).unwrap();
+        compiler().compile_mesh(&graph, sweep, &ExecutionOptions::new(Tolerance::MILLIMETRE))
+    };
+    swept(-1e-4).unwrap();
+    assert!(matches!(swept(-7e-4), Err(GeomError::InvalidInput(_))));
+}

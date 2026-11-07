@@ -30,6 +30,7 @@ MUTANTS = [
     ('a trim of a closed conic loses its period', T, '            let period = inner.period();', '            let period: Option<Scalar> = None;', TESTS),
     ('window outside the trimmed curve accepted', T, '    if x < lo - slack || y > hi + slack {', '    if false && (x < lo - slack || y > hi + slack) {', TESTS),
     ('a full turn read at its seam keeps the near arc', D, '    if hi - lo >= period * (1.0 - PERIOD_SLACK) && !(s_lo && e_lo) {', '    if false && hi - lo >= period * (1.0 - PERIOD_SLACK) && !(s_lo && e_lo) {', TESTS),
+    ('window slack as a length', T, '            Some(tolerance / speed)', '            Some(tolerance)', TESTS),
     ('parameter slack as a length', D, '        (Some(tolerance), Some(speed)) if speed.is_finite() && speed > 0.0 => tolerance / speed,', '        (Some(tolerance), Some(speed)) if speed.is_finite() && speed > 0.0 => tolerance + 0.0 * speed,', TESTS),
     # Trims of composites.
     ('piece sense ignored', P, '    if piece.reversed {\n        points.reverse();\n    }', '    if false && piece.reversed {\n        points.reverse();\n    }', TESTS),
