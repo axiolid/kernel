@@ -1,6 +1,10 @@
 use std::ptr::null;
 
+use axiolid::mesh_hidden_lines::VisibleFaceEvidence;
 use axiolid_capi::*;
+
+#[path = "faces/seed9.rs"]
+mod seed9;
 
 fn context_with(config: AxiolidContextConfig) -> AxiolidContextHandle {
     unsafe {
@@ -428,78 +432,309 @@ fn groups_name_the_group_of_a_region() {
     );
 }
 
+/// One scene run through the C ABI and through `Application` directly.
+struct Scene {
+    /// Positions, indices and role of each mesh; ids are 1, 2, ...
+    meshes: Vec<(Vec<f64>, Vec<u32>, i32)>,
+    view: AxiolidView,
+    tolerance: AxiolidTolerance,
+}
+
+impl Scene {
+    fn new(view: AxiolidView) -> Self {
+        Self {
+            meshes: Vec::new(),
+            view,
+            tolerance: TOLERANCE,
+        }
+    }
+
+    fn with(mut self, positions: &[f64], indices: &[u32], role: i32) -> Self {
+        self.meshes
+            .push((positions.to_vec(), indices.to_vec(), role));
+        self
+    }
+
+    /// The evidence from the C ABI and from the Rust application, and the
+    /// number of regions the C ABI returned.
+    fn run(&self) -> (AxiolidVisibleFaceEvidence, VisibleFaceEvidence, usize) {
+        use axiolid::application::Application;
+        use axiolid::contracts::ExecutionOptions;
+        use axiolid::core::{Frame3, Point3, Tolerance, Vec3};
+        use axiolid::mesh::TriMesh;
+        use axiolid::mesh_hidden_lines::{
+            HiddenLineMesh, MeshId, MeshRole, OrthographicView, VisibleFaceLimits,
+            VisibleFaceRequest,
+        };
+
+        let context = context();
+        let entries = self
+            .meshes
+            .iter()
+            .zip(1_u64..)
+            .map(|((positions, indices, role), id)| {
+                entry(import(context, positions, indices), id, *role)
+            })
+            .collect();
+        let mut call = Call::new(entries);
+        call.view = self.view;
+        call.tolerance = self.tolerance;
+        call.limits.max_meshes = 64;
+        let (status, result) = call.run(context);
+        assert_eq!(status, AxiolidStatus::Ok);
+        let from_c = evidence(context, result);
+        let regions = counts(context, result).regions;
+
+        let meshes: Vec<TriMesh> = self
+            .meshes
+            .iter()
+            .map(|(positions, indices, _)| {
+                let points = positions
+                    .chunks(3)
+                    .map(|p| Point3::new(p[0], p[1], p[2]))
+                    .collect();
+                TriMesh::new(points, indices.clone())
+            })
+            .collect();
+        let inputs: Vec<HiddenLineMesh<'_>> = meshes
+            .iter()
+            .zip(&self.meshes)
+            .zip(1_u64..)
+            .map(|((mesh, (_, _, role)), id)| {
+                let role = if *role == SOLID {
+                    MeshRole::Solid
+                } else {
+                    MeshRole::Sheet
+                };
+                HiddenLineMesh::new(MeshId(id), role, mesh)
+            })
+            .collect();
+        let vec = |v: [f64; 3]| Vec3::new(v[0], v[1], v[2]);
+        let frame = &self.view.frame;
+        let mut view = OrthographicView::new(Frame3 {
+            origin: vec(frame.origin),
+            x: vec(frame.x),
+            y: vec(frame.y),
+            z: vec(frame.z),
+        });
+        if self.view.has_near == 1 {
+            view = view.with_near(self.view.near);
+        }
+        let limits = VisibleFaceLimits::new(
+            call.limits.max_meshes,
+            call.limits.max_source_vertices,
+            call.limits.max_source_triangles,
+            call.limits.max_candidate_pairs,
+            call.limits.max_regions,
+            call.limits.max_region_vertices,
+        );
+        let request = VisibleFaceRequest::new(&inputs, view, limits);
+        let options = ExecutionOptions::new(
+            Tolerance::new(self.tolerance.linear, self.tolerance.angular).expect("tolerance"),
+        );
+        let outcome = Application::portable()
+            .expect("application")
+            .visible_faces(&request, &options)
+            .expect("visible faces");
+        (from_c, outcome.evidence, regions)
+    }
+}
+
+/// Every C field equals its Rust counterpart. `exact_escalations` is the one
+/// count that may differ between identical requests, so it is only required
+/// to be non-zero when the Rust count is.
+fn assert_matches_rust(from_c: &AxiolidVisibleFaceEvidence, rust: &VisibleFaceEvidence) {
+    assert_eq!(from_c.source_meshes, rust.source_meshes);
+    assert_eq!(from_c.source_triangles, rust.source_triangles);
+    assert_eq!(from_c.edge_on_triangles, rust.edge_on_triangles);
+    assert_eq!(from_c.removed_triangles, rust.removed_triangles);
+    assert_eq!(from_c.boundary_segments, rust.boundary_segments);
+    assert_eq!(from_c.intersection_segments, rust.intersection_segments);
+    assert_eq!(from_c.crossings, rust.crossings);
+    assert_eq!(from_c.pieces, rust.pieces);
+    assert_eq!(from_c.tied_sides, rust.tied_sides);
+    assert_eq!(from_c.candidate_pairs, rust.candidate_pairs);
+    assert_eq!(from_c.exact_escalations > 0, rust.exact_escalations > 0);
+    assert_eq!(from_c.regions, rust.regions);
+    assert_eq!(from_c.cap_regions, rust.cap_regions);
+    assert_eq!(from_c.rerouted_edges, rust.rerouted_edges);
+    assert_eq!(from_c.collapsed_regions, rust.collapsed_regions);
+    assert_eq!(from_c.collapsed_holes, rust.collapsed_holes);
+    assert_eq!(from_c.snap_displacement, rust.snap_displacement.get());
+}
+
+const CUBE_POSITIONS: [f64; 24] = [
+    0.0, 0.0, 0.0, 2.0, 0.0, 0.0, 2.0, 2.0, 0.0, 0.0, 2.0, 0.0, 0.0, 0.0, 2.0, 2.0, 0.0, 2.0, 2.0,
+    2.0, 2.0, 0.0, 2.0, 2.0,
+];
+const CUBE_INDICES: [u32; 36] = [
+    0, 2, 1, 0, 3, 2, 4, 5, 6, 4, 6, 7, 0, 1, 5, 0, 5, 4, 1, 2, 6, 1, 6, 5, 2, 3, 7, 2, 7, 6, 3, 0,
+    4, 3, 4, 7,
+];
+
+fn sheet_positions(min: f64, max: f64, z: f64) -> [f64; 12] {
+    [min, min, z, max, min, z, max, max, z, min, max, z]
+}
+
+/// A cube cut by a near plane over two nested sheets.
+fn cube_over_sheets() -> Scene {
+    let mut view = plan();
+    view.has_near = 1;
+    view.near = 1.0;
+    Scene::new(view)
+        .with(&CUBE_POSITIONS, &CUBE_INDICES, SOLID)
+        .with(&sheet_positions(0.0, 4.0, 0.0), &[0, 1, 2, 0, 2, 3], SHEET)
+        .with(&sheet_positions(1.0, 3.0, 1.0), &[0, 1, 2, 0, 2, 3], SHEET)
+}
+
 #[test]
-fn the_evidence_fields_are_not_confused() {
-    let context = context();
-    let cube = cube(context);
-    let low = sheet(context, 0.0, 4.0, 0.0);
-    let high = sheet(context, 1.0, 3.0, 1.0);
-    let cut = import(
-        context,
+fn the_evidence_matches_the_application_on_a_scene_with_caps_and_edge_on_faces() {
+    let (from_c, rust, regions) = cube_over_sheets().run();
+    assert_matches_rust(&from_c, &rust);
+    // Properties of the scene, not of the provider's internals.
+    assert_eq!(
+        (
+            from_c.source_meshes,
+            from_c.source_triangles,
+            from_c.edge_on_triangles,
+            from_c.removed_triangles,
+            from_c.regions,
+            from_c.cap_regions
+        ),
+        (3, 16, 8, 2, 3, 1)
+    );
+    assert_eq!(regions, 3);
+    assert_eq!(from_c.intersection_segments, 0);
+    // Cap, boundaries and ties make these distinct from one another.
+    assert!(from_c.boundary_segments > 0 && from_c.pieces > 0 && from_c.tied_sides > 0);
+    assert!(from_c.candidate_pairs > 0 && from_c.exact_escalations > 0);
+}
+
+#[test]
+fn the_evidence_matches_the_application_where_surfaces_intersect() {
+    let mut scene = cube_over_sheets();
+    // A tilted triangle through both sheets adds intersection curves.
+    scene = scene.with(
         &[1.0, 1.0, -1.0, 3.0, 1.0, 1.0, 2.0, 3.0, 1.0],
         &[0, 1, 2],
+        SHEET,
     );
-    let mut call = Call::new(vec![
-        entry(cube, 7, SOLID),
-        entry(low, 1, SHEET),
-        entry(high, 2, SHEET),
-    ]);
-    call.view.has_near = 1;
-    call.view.near = 1.0;
-    let (status, result) = call.run(context);
-    assert_eq!(status, AxiolidStatus::Ok);
-    let first = evidence(context, result);
-    // `exact_escalations` varies between identical requests and is not
-    // pinned; `candidate_pairs` is, so that a swap of the two is seen.
+    let (from_c, rust, _) = scene.run();
+    assert_matches_rust(&from_c, &rust);
     assert_eq!(
         (
-            first.source_meshes,
-            first.source_triangles,
-            first.edge_on_triangles,
-            first.removed_triangles,
-            first.boundary_segments,
-            first.intersection_segments,
-            first.crossings,
-            first.pieces,
-            first.tied_sides,
-            first.candidate_pairs,
-            first.regions,
-            first.cap_regions,
+            from_c.source_meshes,
+            from_c.source_triangles,
+            from_c.edge_on_triangles,
+            from_c.removed_triangles,
+            from_c.regions,
+            from_c.cap_regions
         ),
-        (3, 16, 8, 2, 18, 0, 0, 21, 6, 467, 3, 1)
+        (4, 17, 8, 2, 3, 1)
     );
-    assert!(first.exact_escalations > 0);
+    assert!(from_c.intersection_segments > 0 && from_c.crossings > 0);
+}
 
-    // A tilted triangle through the sheets adds intersection curves.
-    call.meshes.push(entry(cut, 5, SHEET));
-    let (status, result) = call.run(context);
-    assert_eq!(status, AxiolidStatus::Ok);
-    let second = evidence(context, result);
+/// The sheet `[-1, 1]^2` behind a triangle a few binary64 steps wide, in an
+/// oblique view under a tolerance so small that the audit lets the triangle
+/// be one. Its corners round to one cell: the hole it leaves in the sheet and
+/// its own region collapse.
+fn thin_occluder(second: bool) -> Scene {
+    use axiolid::core::{Point3, Vec3};
+    let direction = Vec3::new(0.3, -0.5, 0.8).normalize();
+    let x = Vec3::Z.cross(direction).normalize();
+    let y = direction.cross(x);
+    let origin = Point3::new(-0.4, 0.7, 0.1);
+    let axis = |v: Vec3| [v.x, v.y, v.z];
+    let mut view = plan();
+    view.frame = AxiolidViewFrame {
+        origin: [origin.x, origin.y, origin.z],
+        x: axis(x),
+        y: axis(y),
+        z: axis(direction),
+    };
+    let step = |x: f64| f64::from_bits(x.to_bits() + 1);
+    let tiny = |x: f64, y: f64| [x, y, 1.0, step(x), y, 1.0, x, step(y), 1.0];
+    let mut positions = tiny(0.3, 0.2).to_vec();
+    let mut indices = vec![0, 1, 2];
+    if second {
+        // A second one outside the sheet's outline.
+        positions.extend(tiny(-1.7, 0.2));
+        indices.extend([3, 4, 5]);
+    }
+    let mut scene = Scene::new(view)
+        .with(&sheet_positions(-1.0, 1.0, 0.0), &[0, 1, 2, 0, 2, 3], SHEET)
+        .with(&positions, &indices, SHEET);
+    scene.tolerance = AxiolidTolerance {
+        linear: 1e-40,
+        angular: 1e-40,
+    };
+    scene
+}
+
+#[test]
+fn snap_evidence_is_reported_for_a_hole_and_an_occluder_that_collapse() {
+    let (from_c, rust, regions) = thin_occluder(false).run();
+    assert_matches_rust(&from_c, &rust);
     assert_eq!(
         (
-            second.source_meshes,
-            second.source_triangles,
-            second.edge_on_triangles,
-            second.removed_triangles,
-            second.boundary_segments,
-            second.intersection_segments,
-            second.crossings,
-            second.pieces,
-            second.tied_sides,
-            second.regions,
-            second.cap_regions,
+            from_c.rerouted_edges,
+            from_c.collapsed_regions,
+            from_c.collapsed_holes,
+            regions
         ),
-        (4, 17, 8, 2, 20, 4, 1, 29, 13, 3, 1)
+        (1, 1, 1, 1)
     );
-    // The provider reroutes and collapses nothing in these scenes.
+    assert_eq!(from_c.snap_displacement, 2f64.powi(-53));
+
+    // Two occluders, one outside the sheet: the counts differ from one another.
+    let (from_c, rust, _) = thin_occluder(true).run();
+    assert_matches_rust(&from_c, &rust);
     assert_eq!(
         (
-            second.rerouted_edges,
-            second.collapsed_regions,
-            second.collapsed_holes
+            from_c.rerouted_edges,
+            from_c.collapsed_regions,
+            from_c.collapsed_holes
         ),
-        (0, 0, 0)
+        (2, 2, 1)
     );
+    assert!(from_c.snap_displacement > 0.0);
+}
+
+/// The oracle's seeded scene 9 in its isometric view with a near plane at the
+/// middle of the depth range: two edges are rerouted and one sliver region
+/// collapses, with no collapsed hole.
+#[test]
+fn snap_evidence_is_reported_for_a_seeded_isometric_scene() {
+    use seed9::{BOXES, FRAME, INDICES, NEAR};
+    let bits = |bits: &[u64]| bits.iter().map(|b| f64::from_bits(*b)).collect::<Vec<_>>();
+    let f = bits(&FRAME);
+    let mut view = plan();
+    view.frame = AxiolidViewFrame {
+        origin: [f[0], f[1], f[2]],
+        x: [f[3], f[4], f[5]],
+        y: [f[6], f[7], f[8]],
+        z: [f[9], f[10], f[11]],
+    };
+    view.has_near = 1;
+    view.near = f64::from_bits(NEAR);
+    let mut scene = Scene::new(view);
+    for corners in &BOXES {
+        let positions: Vec<f64> = corners.iter().flat_map(|p| bits(p)).collect();
+        scene = scene.with(&positions, &INDICES, SOLID);
+    }
+    let (from_c, rust, regions) = scene.run();
+    assert_matches_rust(&from_c, &rust);
+    assert_eq!(
+        (
+            from_c.rerouted_edges,
+            from_c.collapsed_regions,
+            from_c.collapsed_holes,
+            regions
+        ),
+        (2, 1, 0, 23)
+    );
+    assert_eq!(from_c.snap_displacement, 2f64.powi(-53));
 }
 
 #[test]

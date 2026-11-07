@@ -5,14 +5,13 @@ crosses a mapping, relaxes a capacity check or drops recorded context in
 `axiolid-capi`'s `faces.rs` (or the entry points it shares) and must turn
 `tests/faces.rs` red.
 
-Not mutants:
-- `rerouted_edges`, `collapsed_regions`, `collapsed_holes` and
-  `snap_displacement` are zero in every scene the portable provider returns
-  for a test mesh, so a swap among the first three or a hard-wired zero
-  cannot be seen from outside; the provider's own probes cover how they are
-  produced.
-- The `Unsupported` mapping of a refusal for a capability the provider lacks:
-  the portable provider never refuses that way.
+Not a mutant: the `Unsupported` mapping of a refusal for a capability the
+provider lacks. The portable provider never refuses that way, so no test can
+provoke it; the budget mapping beside it is probed.
+
+The snap fields are probed through a thin-occluder scene and a seeded
+isometric scene (`rerouted_edges`, `collapsed_regions` and `collapsed_holes`
+are told apart by their different values there).
 """
 import probe_lib
 
@@ -29,6 +28,12 @@ def swap(name, first, second):
     a = f"                {first}: evidence.{first},\n                {second}: evidence.{second},"
     b = f"                {first}: evidence.{second},\n                {second}: evidence.{first},"
     return (name, FACES, a, b, [TEST])
+
+
+def zero(name, field, value="0"):
+    """Evidence mutant: one field is hard-wired to zero."""
+    source = f"                {field}: evidence.{field}" + (".get()," if field == "snap_displacement" else ",")
+    return (name, FACES, source, f"                {field}: {value},", [TEST])
 
 
 def cross(name, field, other):
@@ -108,6 +113,12 @@ MUTANTS = [
     swap('evidence regions and cap regions swapped', 'regions', 'cap_regions'),
     cross('evidence meshes read the crossings', 'source_meshes', 'crossings'),
     cross('evidence intersections read the cap regions', 'intersection_segments', 'cap_regions'),
+    swap('evidence rerouted and collapsed regions swapped', 'rerouted_edges', 'collapsed_regions'),
+    swap('evidence collapsed regions and holes swapped', 'collapsed_regions', 'collapsed_holes'),
+    zero('evidence rerouted edges hard-wired to zero', 'rerouted_edges'),
+    zero('evidence collapsed regions hard-wired to zero', 'collapsed_regions'),
+    zero('evidence collapsed holes hard-wired to zero', 'collapsed_holes'),
+    zero('evidence snap displacement hard-wired to zero', 'snap_displacement', '0.0'),
     # Limits.
     ('limits: regions and vertices swapped', FACES,
      '            limits.max_regions,\n            limits.max_region_vertices,',
