@@ -315,7 +315,7 @@ the depth floor, and every leaf the floor reached was labelled a certified
 touch (#427).
 
 The roots of the second field `H` along the curve `F = 0` are now isolated
-by a Rolle chain of order up to eight on the derivative tower
+by a Rolle chain of order up to eight, where the enclosures resolve it, on the derivative tower
 `H_0 = H`, `H_{j+1} = det(grad F, grad H_j) = F_u ∂_v H_j - F_v ∂_u H_j`
 (`curve_tower.rs`, `root_chain.rs`).
 
@@ -333,7 +333,8 @@ by a Rolle chain of order up to eight on the derivative tower
   equation, then of `H|C` and `F_w|C`, each a polynomial of the partials up
   to the order wanted and of the earlier coefficients. Every partial is
   enclosed once over a box certain to hold the stretch's points (the old
-  hull, plus the error of the solved value itself), the interval Taylor
+  hull, plus the error of the solved value itself, which may reach past
+  the end of its bracket), the interval Taylor
   coefficients over the hull being the order-0 model.
 - **The chain.** `isolate` splits the parameter range until a leaf has an
   order `k` (at most `MAX_CONTACT_ORDER = 8`) whose `H_k` excludes zero, and
@@ -344,11 +345,25 @@ by a Rolle chain of order up to eight on the derivative tower
   The chain allows at most `k - j` zeros of `H_j`, and a cluster between two
   signed neighbours must change sign exactly when its multiplicity is odd;
   either failing refuses.
-- **Generic splits.** A stretch is cut at a cell join, or else at one of 15
-  fixed fractions (the middle first), only where `H_0`, `H_1` and `H_2` are
-  signed, so a cut never sits on a root of order two or less. A cut that
-  nonetheless straddles at a higher order refuses: no zone touches an inner
-  end, and each zero belongs to exactly one leaf.
+- **Generic splits.** A stretch an order settles is never split. An
+  unsettled one is cut at a cell join, or else at one of 15 fixed fractions
+  (the middle first), only where `H_0`, `H_1` and `H_2` are signed, so a cut
+  never sits on a root of order two or less; when no fraction qualifies (the
+  stretch is inside a flat region), a cut where `H_0` alone is signed. A cut
+  that straddles at a higher order makes the chain refuse the leaf, and a
+  leaf the chain refuses is split further instead of refusing the whole
+  isolation: no zone touches an inner end, and each zero belongs to exactly
+  one leaf.
+- **Gaps.** Where the enclosures of `H_j` straddle zero over a run of zones
+  (from overestimation or a true zero), the gaps between the run and its
+  signed neighbours hold no zero of `H_{j+1}`, so `H_j` is monotone there.
+  Each gap is searched from the signed neighbour for the last point still
+  signed like it, and for a point of the opposite sign, which brackets a
+  simple zero. The cluster's extent starts at the last signed point, so every
+  zero lies in a bracket or in a cluster. A zero found in a gap counts
+  against the cluster's multiplicity. At `H_0` a cluster's extent is halved
+  while the enclosure straddles, to the part that does; if the work runs out
+  with the value at the cluster signed, the leaf is refused, not reported.
 - **Curve ends.** The curve's own ends report. A root there carries the
   multiplicity the chain sees at the end, which depends on how far, at
   rounding level, the end is from the contact. A closed curve's seam is one
@@ -390,6 +405,17 @@ Soundness:
    functions), so a certified stretch exists at finite depth as long as it
    is wider than the contact's flat region, the width below which rounding
    hides it. Otherwise the result is `Undecided`.
+
+A flat stretch of the second field next to crossings, below what the
+enclosures resolve, is refused as `Undecided`, never reported as a root
+(the box enclosure of `H` over a wide extent overestimates by the extent's
+width, so a displacement of a high-order contact by 1e-6 is already beyond
+it). Orders 7 and 8 on trigonometric fields and circles are likewise often
+refused, and the tests only show polynomial fields decided there.
+
+The multiplicity of a root at the curve's own end is the order seen at the
+end, at rounding distance from a contact the curve may stop short of; it is
+documented as such on the hit types, not as a crossing/touch class.
 
 The bridge cells of a crossing keep their 64-sample sign scan, which is not
 certified (#441). The caller's merge of close cuts (#381) stays, as the

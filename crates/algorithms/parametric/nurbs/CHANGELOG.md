@@ -27,10 +27,12 @@ caret rule for `0.x` versions.
   before it is bisected (#397).
 - A traced section against a surface that touches it at a higher order (a
   cylinder osculating the section, a plane tangent at its extreme) no longer
-  hangs. Roots are certified with their multiplicity up to order 8 by a
-  Rolle chain on `det(grad F, grad H_j)`, the derivatives of the second
-  field along the curve. Higher orders and over-budget cases return
-  `Undecided` instead of a guessed touch at the depth floor (#427).
+  hangs. Roots are certified with their multiplicity up to order 8, where the
+  enclosures resolve it, by a Rolle chain on `det(grad F, grad H_j)`, the
+  derivatives of the second field along the curve. Higher orders, contacts
+  the enclosures cannot resolve (a flat stretch of a field next to crossings,
+  often at orders 7 and 8 on trigonometric fields) and over-budget cases
+  return `Undecided` instead of a guessed touch at the depth floor (#427).
 
 ## [0.3.8] - 2026-11-03
 
