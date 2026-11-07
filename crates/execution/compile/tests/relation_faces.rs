@@ -1007,3 +1007,62 @@ fn a_revolution_about_a_zero_axis_is_refused() {
     let error = refused(open_sheet(&support, &cylinder_sheet(true, None)));
     assert!(matches!(error, GeomError::InvalidInput(_)), "{error:?}");
 }
+
+// --- linear extrusion ---------------------------------------------------------------
+
+const EXTRUSION: &str = "surface of linear extrusion";
+
+fn extruded_circle(b: &mut GeometryGraphBuilder, direction: Vec3) -> NodeId {
+    let swept_curve = push_curve3(b, horizontal_circle(0.0, 0.0, 0.0, RADIUS));
+    b.push(GeometryNode::SurfaceRelation(
+        SurfaceRelation::LinearExtrusion {
+            swept_curve,
+            direction,
+        },
+    ))
+    .unwrap()
+}
+
+#[test]
+fn a_circle_extruded_along_its_normal_meshes_as_its_cylinder() {
+    let support = |b: &mut GeometryGraphBuilder| extruded_circle(b, Vec3::Z);
+    let expect = Solid3 {
+        family: EXTRUSION,
+        ..cylinder_solid()
+    };
+    assert_closed_wall("extruded circle", &cylinder_wall(&support), &expect);
+}
+
+fn oblique_point(u: Scalar, v: Scalar) -> Point3 {
+    Point3::new(RADIUS * u.cos() + 0.2 * v, RADIUS * u.sin(), v)
+}
+
+#[test]
+fn an_obliquely_extruded_circle_meshes_within_its_bound() {
+    let support = |b: &mut GeometryGraphBuilder| extruded_circle(b, Vec3::new(0.2, 0.0, 1.0));
+    let sheet = Sheet {
+        u: (0.0, PI),
+        v: (0.0, HEIGHT),
+        point: &oblique_point,
+        curves: [
+            Some(horizontal_circle(0.0, 0.0, 0.0, RADIUS)),
+            None,
+            Some(horizontal_circle(0.1, 0.0, HEIGHT, RADIUS)),
+            None,
+        ],
+        pcurves: true,
+        hole: None,
+    };
+    let (mesh, _, _) = assert_sheet("oblique extrusion", &support, &sheet, EXTRUSION);
+    for p in &mesh.positions {
+        let off = ((p.x - 0.2 * p.z).hypot(p.y) - RADIUS).abs();
+        assert!(off <= 1e-12, "a vertex {p:?} is {off:e} off the surface");
+    }
+}
+
+#[test]
+fn a_linear_extrusion_with_a_zero_direction_is_refused() {
+    let support = |b: &mut GeometryGraphBuilder| extruded_circle(b, Vec3::ZERO);
+    let error = refused(open_sheet(&support, &cylinder_sheet(true, None)));
+    assert!(matches!(error, GeomError::InvalidInput(_)), "{error:?}");
+}

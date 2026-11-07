@@ -17,6 +17,10 @@
 //!   turns right-handed about `a`; `u` is in radians, `u = 0` is the swept
 //!   curve itself, and `v` is the curve's own parameter.
 //!
+//! - **LinearExtrusion:** `S(u, v) = c(u) + v d`, `d` the direction. `u` is
+//!   the curve's own parameter and `v` is in units of the direction's
+//!   length: it is not normalised.
+//!
 //! The swept curve is a line, circle, ellipse or B-spline (the family
 //! [`crate::ruled`] reads too); any other curve is refused by name. A
 //! B-spline is read only inside its domain, within a slack of
@@ -33,7 +37,9 @@
 //! is read at the box's midpoint and widened by the half width times the
 //! perpendicular speed, which is `|dir - (dir.a) a|` for a line and
 //! `d.first` otherwise. The bounds are smooth unless a tangent break of the
-//! swept curve lies strictly inside the box.
+//! swept curve lies strictly inside the box. An extrusion over `u0..u1` has
+//! `|S_u| = |c'|`, `|S_v| = |d|`, `|S_uu| = |c''|` and no mixed or `v`
+//! second derivative.
 
 use axiolid_contracts::{GeomError, GeomResult, Operation};
 use axiolid_core::{Interval, Point3, Scalar, Vec3};
@@ -138,6 +144,11 @@ pub(crate) enum RelationSurface<'g> {
         origin: Point3,
         axis: Vec3,
     },
+    /// `S(u, v) = c(u) + v d`.
+    Extrusion {
+        curve: SweptCurve<'g>,
+        direction: Vec3,
+    },
 }
 
 impl<'g> RelationSurface<'g> {
@@ -166,6 +177,23 @@ impl<'g> RelationSurface<'g> {
         })
     }
 
+    /// A surface of linear extrusion of `swept_curve` along `direction`.
+    pub(crate) fn extrusion(
+        graph: &'g GeometryGraph,
+        swept_curve: NodeId,
+        direction: Vec3,
+    ) -> GeomResult<Self> {
+        if !direction.is_finite() || direction == Vec3::ZERO {
+            return Err(GeomError::InvalidInput(
+                "a linear extrusion's direction is zero or not finite".into(),
+            ));
+        }
+        Ok(Self::Extrusion {
+            curve: SweptCurve::resolve(graph, swept_curve)?,
+            direction,
+        })
+    }
+
     /// The point at `(u, v)`.
     pub(crate) fn evaluate(&self, u: Scalar, v: Scalar) -> GeomResult<Point3> {
         match self {
@@ -174,6 +202,7 @@ impl<'g> RelationSurface<'g> {
                 origin,
                 axis,
             } => Ok(*origin + rotate(*axis, u, curve.point(v)? - *origin)),
+            Self::Extrusion { curve, direction } => Ok(curve.point(u)? + *direction * v),
         }
     }
 
@@ -193,6 +222,10 @@ impl<'g> RelationSurface<'g> {
                 let (rw, r1) = (spin(w), spin(d1));
                 Ok([a.cross(rw), r1, a.cross(a.cross(rw)), a.cross(r1), spin(d2)])
             }
+            Self::Extrusion { curve, direction } => {
+                let (d1, d2) = curve.derivatives(u)?;
+                Ok([d1, *direction, d2, Vec3::ZERO, Vec3::ZERO])
+            }
         }
     }
 
@@ -200,6 +233,7 @@ impl<'g> RelationSurface<'g> {
     pub(crate) fn periods(&self) -> (Option<Scalar>, Option<Scalar>) {
         match self {
             Self::Revolution { curve, .. } => (Some(TAU), curve.is_conic().then_some(TAU)),
+            Self::Extrusion { curve, .. } => (curve.is_conic().then_some(TAU), None),
         }
     }
 
@@ -207,6 +241,7 @@ impl<'g> RelationSurface<'g> {
     pub(crate) fn family(&self) -> &'static str {
         match self {
             Self::Revolution { .. } => "surface of revolution",
+            Self::Extrusion { .. } => "surface of linear extrusion",
         }
     }
 }
@@ -237,17 +272,14 @@ impl<'g> RelationOracle<'g> {
     pub(crate) fn new(surface: RelationSurface<'g>) -> Self {
         let breaks = match &surface {
             RelationSurface::Revolution { curve, .. } => [Vec::new(), curve.breaks()],
+            RelationSurface::Extrusion { curve, .. } => [curve.breaks(), Vec::new()],
         };
         Self { surface, breaks }
     }
 
     /// The bounds over the box, clamped to where the surface is read, or
     /// `None` when none can be had.
-    pub(crate) fn bounds(
-        &self,
-        _u: (Scalar, Scalar),
-        v: (Scalar, Scalar),
-    ) -> Option<SurfaceBounds> {
+    pub(crate) fn bounds(&self, u: (Scalar, Scalar), v: (Scalar, Scalar)) -> Option<SurfaceBounds> {
         let smooth = |axis: usize, (lo, hi): (Scalar, Scalar)| {
             !self.breaks[axis].iter().any(|&b| b > lo && b < hi)
         };
@@ -277,6 +309,19 @@ impl<'g> RelationOracle<'g> {
                     dvv: d.second,
                     smooth: smooth(1, (v0, v1)),
                     interpolation: [reach, perp, d.second],
+                }
+            }
+            RelationSurface::Extrusion { curve, direction } => {
+                let (u0, u1) = curve.clamp(u)?;
+                let d = curve_derivative_bounds3(curve.curve, u0, u1)?;
+                SurfaceBounds {
+                    du: d.first,
+                    dv: direction.length(),
+                    duu: d.second,
+                    duv: 0.0,
+                    dvv: 0.0,
+                    smooth: smooth(0, (u0, u1)),
+                    interpolation: [d.second, 0.0, 0.0],
                 }
             }
         };
@@ -682,5 +727,146 @@ mod tests {
             let error = RelationSurface::revolution(&graph, id, origin, direction).unwrap_err();
             assert!(matches!(error, GeomError::InvalidInput(_)), "{error:?}");
         }
+    }
+
+    fn circle_profile() -> Curve3 {
+        Curve3::Circle(Circle3 {
+            frame: frame_at(0.0),
+            radius: 0.3,
+        })
+    }
+
+    #[test]
+    fn a_circle_extruded_along_its_normal_evaluates_to_its_cylinder() {
+        let (graph, id) = curve_graph(circle_profile());
+        let surface = RelationSurface::extrusion(&graph, id, Vec3::Z).unwrap();
+        let cylinder = Surface::Cylinder(Cylinder {
+            frame: frame_at(0.0),
+            radius: 0.3,
+        });
+        assert_same(&surface, &cylinder);
+    }
+
+    #[test]
+    fn an_extrusion_reads_v_in_units_of_its_direction() {
+        let (graph, id) = curve_graph(circle_profile());
+        let surface = RelationSurface::extrusion(&graph, id, Vec3::new(0.0, 0.0, 2.0)).unwrap();
+        let moved = surface.evaluate(0.0, 1.0).unwrap() - surface.evaluate(0.0, 0.0).unwrap();
+        assert_eq!(moved, Vec3::new(0.0, 0.0, 2.0));
+    }
+
+    #[test]
+    fn the_bounds_of_a_cylinder_extrusion_are_its_own() {
+        let (graph, id) = curve_graph(circle_profile());
+        let surface = RelationSurface::extrusion(&graph, id, Vec3::Z).unwrap();
+        let b = bounds_of(surface, (0.0, 1.0), (0.0, 0.5));
+        assert!((b.du - 0.3).abs() <= 1e-9 && (b.duu - 0.3).abs() <= 1e-9);
+        assert!((b.dv - 1.0).abs() <= 1e-9);
+        assert_eq!((b.duv, b.dvv), (0.0, 0.0));
+        assert!(b.smooth);
+    }
+
+    fn oblique() -> Vec3 {
+        Vec3::new(0.2, -0.1, 1.0)
+    }
+
+    #[test]
+    fn extrusion_bounds_dominate_sampled_derivatives() {
+        let mut random = Lcg(11);
+        for (curve, (lo, hi)) in profiles() {
+            let (graph, id) = curve_graph(curve);
+            let surface = RelationSurface::extrusion(&graph, id, oblique()).unwrap();
+            let oracle = RelationOracle::new(surface);
+            for _ in 0..50 {
+                let u0 = lo + (hi - lo) * random.next();
+                let u1 = u0 + (hi - u0) * random.next();
+                let v0 = -2.0 + 4.0 * random.next();
+                let v1 = v0 + 2.0 * random.next();
+                let b = oracle.bounds((u0, u1), (v0, v1)).unwrap();
+                for _ in 0..30 {
+                    let u = u0 + (u1 - u0) * random.next();
+                    let v = v0 + (v1 - v0) * random.next();
+                    let [su, sv, suu, suv, svv] =
+                        surface.partials(u, v).unwrap().map(|x| x.length());
+                    let limit = |x: Scalar, bound: Scalar| {
+                        assert!(x <= bound * (1.0 + 1e-9), "{x} > {bound} at ({u}, {v})");
+                    };
+                    limit(su, b.du);
+                    limit(sv, b.dv);
+                    limit(suu, b.duu);
+                    limit(suv, b.duv);
+                    limit(svv, b.dvv);
+                    limit(suu, b.interpolation[0]);
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn the_extrusion_partials_match_central_differences() {
+        let h = 1e-5;
+        for (curve, (lo, hi)) in profiles() {
+            let (graph, id) = curve_graph(curve);
+            let surface = RelationSurface::extrusion(&graph, id, oblique()).unwrap();
+            let (u, v) = (lo + 0.4 * (hi - lo), 0.7);
+            let at = |u: Scalar, v: Scalar| surface.evaluate(u, v).unwrap();
+            let [su, sv, suu, _, _] = surface.partials(u, v).unwrap();
+            let close = |got: Vec3, want: Vec3, scale: Scalar| {
+                assert!(
+                    (got - want).length() <= scale * (1.0 + want.length()),
+                    "{got:?} vs {want:?}"
+                );
+            };
+            close((at(u + h, v) - at(u - h, v)) / (2.0 * h), su, 1e-6);
+            close((at(u, v + h) - at(u, v - h)) / (2.0 * h), sv, 1e-6);
+            close(
+                (at(u + h, v) - 2.0 * at(u, v) + at(u - h, v)) / (h * h),
+                suu,
+                1e-3,
+            );
+        }
+    }
+
+    #[test]
+    fn extrusion_periods_are_a_turn_in_u_for_a_conic() {
+        let (graph, id) = curve_graph(circle_profile());
+        let surface = RelationSurface::extrusion(&graph, id, Vec3::Z).unwrap();
+        assert_eq!(surface.periods(), (Some(TAU), None));
+        let (graph, id) = curve_graph(line(Point3::ZERO, Vec3::X));
+        let surface = RelationSurface::extrusion(&graph, id, Vec3::Z).unwrap();
+        assert_eq!(surface.periods(), (None, None));
+        let (graph, id) = curve_graph(profiles().remove(1).0);
+        let surface = RelationSurface::extrusion(&graph, id, Vec3::Z).unwrap();
+        assert_eq!(surface.periods(), (None, None));
+    }
+
+    #[test]
+    fn an_extrusion_over_a_spline_is_read_inside_its_domain_only() {
+        let (graph, id) = curve_graph(kinked());
+        let surface = RelationSurface::extrusion(&graph, id, Vec3::Z).unwrap();
+        let error = surface.evaluate(1.0 + 1e-6, 0.0).unwrap_err();
+        assert!(matches!(&error, GeomError::InvalidInput(text) if text == OUTSIDE_SWEPT_DOMAIN));
+        assert!(surface.evaluate(1.0 + 1e-14, 0.0).is_ok());
+        assert!(!bounds_of(surface, (0.4, 0.6), (0.0, 1.0)).smooth);
+        assert!(bounds_of(surface, (0.0, 0.4), (0.0, 1.0)).smooth);
+        let oracle = RelationOracle::new(surface);
+        assert!(oracle.bounds((0.5, 2.0), (0.0, 1.0)).is_some());
+        assert!(oracle.bounds((1.5, 2.0), (0.0, 1.0)).is_none());
+    }
+
+    #[test]
+    fn a_bad_extrusion_is_refused() {
+        let (graph, id) = curve_graph(circle_profile());
+        for direction in [Vec3::ZERO, Vec3::new(0.0, Scalar::NAN, 1.0)] {
+            let error = RelationSurface::extrusion(&graph, id, direction).unwrap_err();
+            assert!(matches!(error, GeomError::InvalidInput(_)), "{error:?}");
+        }
+        let polyline = Curve3::Polyline(Polyline3 {
+            points: vec![Point3::ZERO, Point3::X],
+            closed: false,
+        });
+        let (graph, id) = curve_graph(polyline);
+        let error = RelationSurface::extrusion(&graph, id, Vec3::Z).unwrap_err();
+        assert_eq!(unsupported(error), SWEPT_CURVE_FAMILY);
     }
 }

@@ -264,6 +264,15 @@ fn face_surface<'g>(
                 *axis_direction,
             )?,
         })),
+        Some(GeometryNode::SurfaceRelation(
+            node @ SurfaceRelation::LinearExtrusion {
+                swept_curve,
+                direction,
+            },
+        )) => Ok(Some(Support::Relation {
+            node,
+            surface: RelationSurface::extrusion(graph, *swept_curve, *direction)?,
+        })),
         Some(GeometryNode::SurfaceRelation(_)) => Err(GeomError::UnsupportedInput {
             backend: crate::BACKEND_ID,
             operation: Operation::Tessellation,
