@@ -119,16 +119,14 @@ MUTANTS = [
      "            let bound = m + e.max(zeta) + zeta;",
      "            let bound = Scalar::INFINITY;"),
     # Witness naming.
+    # The witness pair offered as its pair is queued and the foot witnesses
+    # popped with it, not the early touch (#273, #318).
     ("distance witnesses' elements swapped", D,
-     # The witness pair of the general search, not the early touch (#273).
-     "        if let (Some(wa), Some(wb)) = (ea.witness, eb.witness) {\n"
-     "            let d = apart(wa, wb);\n"
-     "            if best.is_none_or(|(current, ..)| d < current) {\n"
-     "                best = Some((d, wa, wb, (ea.shape, eb.shape)));",
-     "        if let (Some(wa), Some(wb)) = (ea.witness, eb.witness) {\n"
-     "            let d = apart(wa, wb);\n"
-     "            if best.is_none_or(|(current, ..)| d < current) {\n"
-     "                best = Some((d, wa, wb, (eb.shape, ea.shape)));"),
+     [("                    *best = Some((d, wa, wb, (a.shape, b.shape)));",
+       "                    *best = Some((d, wa, wb, (b.shape, a.shape)));"),
+      ("                    best = Some((d, wa, wb, on));",
+       "                    best = Some((d, wa, wb, (on.1, on.0)));")],
+     TESTS),
     ("Hausdorff witnesses' elements swapped", H,
      "                        state.witness = Some((w, found.nearest, element.shape, found.on));",
      "                        state.witness = Some((w, found.nearest, found.on, element.shape));"),

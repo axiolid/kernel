@@ -28,7 +28,7 @@ MUTANTS = [
     ('outside patch kept as inside', D, '                        Some(false) => return Ok(None),', '                        Some(false) => inside = true,', BOTH),
     ('pole winding dropped', M, '            if pole > q.y {\n                total += winding;\n            }', '', UNIT),
     ('touch test trusts boxes', M, '        if inside(arc.a) || inside(arc.b) || depth >= 40 {', '        if true {', SOLIDS),
-    ('touch trusts a nanometre gap', T, '    d <= 1e-12 * (p.length() + q.length())', '    d <= 1e-6 * (p.length() + q.length())', UNIT),
+    ('touch trusts a nanometre gap', T, '    d <= FLOOR_EPSILONS * Scalar::EPSILON * (p.length() + q.length())', '    d <= 1e-6 * (p.length() + q.length())', UNIT),
     ('touch off the face trim', T, '        let on_face = inside\n            || match', '        let on_face = true\n            || match', UNIT),
     ('touch misses the crossing', T, '    let candidates = [crossing, Some(t0)', '    let candidates = [None, Some(t0)', UNIT),
     ('touch ignores edge pairs', T, '        (Shape::Edge { .. }, Shape::Edge { .. }) => edge_edge(side_a, a, side_b, b)?,', '        (Shape::Edge { .. }, Shape::Edge { .. }) => None,', UNIT),

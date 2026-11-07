@@ -652,9 +652,12 @@ fn a_central_block_covers_what_a_corner_block_leaves_open() {
     let central = vec![base(), block(0.8, 0.0, 0.0, 1.0, 3.0)];
     let forward = one_sided_body_boundary_hausdorff(&corner, &central, 0.01, tol()).expect("cut");
     contains(&forward.bounds, 0.8, 0.01);
-    assert_eq!(forward.item_from, 0);
+    assert_eq!((forward.item_from, forward.item_to), (0, 0));
     let backward = one_sided_body_boundary_hausdorff(&central, &corner, 0.05, tol()).expect("cut");
     contains(&backward.bounds, 2.0, 0.05);
+    // The central block's top is far from the corner body's base: the two
+    // items differ, which a swapped pair of elements would show (#318).
+    assert_eq!((backward.item_from, backward.item_to), (1, 0));
 }
 
 #[test]

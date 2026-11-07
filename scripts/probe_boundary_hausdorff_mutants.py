@@ -105,7 +105,7 @@ MUTANTS = [
      "        let bound = matched + lipschitz * self.delta + self.slack;",
      "        let bound = lipschitz * self.delta + self.slack;"),
     ("a cone's apex move not folded in", T,
-     "            delta = delta.max(pole + 1e-12 * (p.radius / pa).abs());",
+     "            delta = delta.max(pole + rounding);",
      "            delta = delta.max(0.0 * pole);"),
     ("a cone of another radius matched", T,
      "        if !close(p.radius, q.radius) {",
