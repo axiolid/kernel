@@ -129,6 +129,14 @@ caret rule for `0.x` versions.
   one before it (up to `PIECE_FRAME_TOLERANCE`) is charged its jump.
   `certifies_flattening3` claims a chain plan exactly where `chain_certifies`
   does.
+- `curve::flatten2` and `flatten3` no longer accept a span of a claimed
+  family (`certifies_flattening2/3`) whose chord bound is `None` on its
+  sagitta alone (#438): the span is refined and, at the depth limit,
+  refused with `BudgetExceeded`. A chain under a stretched start frame
+  (stretch 2 or 4) had its table refuse reads near its own bound, because a
+  rounding allowance grew with the square of the stretch; the resulting
+  `None` bounds passed as proven and the polyline lay 3.9e-3 from the curve
+  at a 3e-3 tolerance.
 
 ## [0.3.20] - 2026-11-03
 

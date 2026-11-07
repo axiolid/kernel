@@ -1046,6 +1046,7 @@ pub fn flatten2(
             chord_tolerance,
             max_depth.min(MAX_DEPTH_CEILING),
             MAX_POINTS,
+            crate::bound::certifies_flattening2(curve),
             &mut out,
         )?;
         out.push(evaluate2(curve, b)?);
@@ -1182,6 +1183,7 @@ fn subdivide<P, F, B>(
     tol: Scalar,
     depth: u32,
     budget: usize,
+    claimed: bool,
     out: &mut Vec<P>,
 ) -> GeomResult<()>
 where
@@ -1213,7 +1215,15 @@ where
         )));
     }
     let pm = eval(mid)?;
-    if sagitta(pa, pb, pm) <= tol && bound(a, b).is_none_or(|certified| certified <= tol) {
+    // A span of a claimed family whose bound is `None` is not accepted on
+    // its sagitta: a claim means the bound exists wherever the curve
+    // evaluates, so a missing one is a span to refine, and at the depth
+    // limit a refusal (#438).
+    let certified = match bound(a, b) {
+        Some(certified) => certified <= tol,
+        None => !claimed,
+    };
+    if sagitta(pa, pb, pm) <= tol && certified {
         // Within tolerance: the chord a->b stands, no interior point.
         return Ok(());
     }
@@ -1222,9 +1232,9 @@ where
             resource: "curve flattening depth",
         });
     }
-    subdivide(eval, bound, a, mid, tol, depth - 1, budget, out)?;
+    subdivide(eval, bound, a, mid, tol, depth - 1, budget, claimed, out)?;
     out.push(pm);
-    subdivide(eval, bound, mid, b, tol, depth - 1, budget, out)?;
+    subdivide(eval, bound, mid, b, tol, depth - 1, budget, claimed, out)?;
     Ok(())
 }
 
@@ -1393,6 +1403,7 @@ pub fn flatten3(
             chord_tolerance,
             max_depth.min(MAX_DEPTH_CEILING),
             MAX_POINTS,
+            crate::bound::certifies_flattening3(curve),
             &mut out,
         )?;
         out.push(eval(b)?);
@@ -1811,4 +1822,29 @@ fn verify3(curve: &Curve3, t: Scalar, point: Point3, tolerance: Scalar) -> GeomR
         return Err(point_not_on_curve(distance, tolerance));
     }
     Ok(t)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// A span with no chord bound passes on its sagitta alone for a family
+    /// that makes no claim, and is refined, then refused at the depth
+    /// limit, for a claimed one (#438).
+    #[test]
+    fn a_claimed_family_never_passes_a_span_without_a_bound() {
+        let eval = |t: Scalar| -> GeomResult<Point2> { Ok(Point2::new(t, 0.0)) };
+        let none = |_: Scalar, _: Scalar| None;
+        let mut out = Vec::new();
+        subdivide(&eval, &none, 0.0, 1.0, 1e-3, 6, 1 << 10, false, &mut out).unwrap();
+        assert!(out.is_empty());
+        let refused = subdivide(&eval, &none, 0.0, 1.0, 1e-3, 6, 1 << 10, true, &mut out);
+        assert!(matches!(refused, Err(GeomError::BudgetExceeded { .. })));
+        // A bound that exists decides, claimed or not.
+        let some = |_: Scalar, _: Scalar| Some(1e-4);
+        subdivide(&eval, &some, 0.0, 1.0, 1e-3, 6, 1 << 10, true, &mut out).unwrap();
+        let loose = |_: Scalar, _: Scalar| Some(1.0);
+        let refused = subdivide(&eval, &loose, 0.0, 1.0, 1e-3, 6, 1 << 10, true, &mut out);
+        assert!(matches!(refused, Err(GeomError::BudgetExceeded { .. })));
+    }
 }

@@ -317,7 +317,7 @@ impl ChainPositionTable {
         };
         let w = world(p);
         let point_error =
-            inflate(self.stretch * at + PLACE * (origin + self.stretch * w.length().max(1.0)));
+            inflate(self.stretch * at + PLACE * (origin + self.stretch * p.length().max(1.0)));
         let omega = local.omega + piece.curvature * piece.turn;
         let out = Read {
             point: Point2::new(self.start.origin.x + w.x, self.start.origin.y + w.y),

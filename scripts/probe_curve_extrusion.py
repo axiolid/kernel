@@ -101,8 +101,8 @@ PROBES = [
     (
         "flatten-ignores-the-chord-budget",
         "crates/algorithms/parametric/evaluate/src/curve.rs",
-        "    if sagitta(pa, pb, pm) <= tol && bound(a, b).is_none_or(|certified| certified <= tol) {",
-        "    if sagitta(pa, pb, pm) <= tol * 1e9 && bound(a, b).is_none_or(|certified| certified <= tol * 1e9) {",
+        "    if sagitta(pa, pb, pm) <= tol && certified {",
+        "    let certified = certified || true;\n    if sagitta(pa, pb, pm) <= tol * 1e9 && certified {",
     ),
     (
         "sagitta-ignores-the-chord-and-measures-to-its-start",

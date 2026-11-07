@@ -34,7 +34,7 @@ CERTIFY = ["-p", "axiolid-mesh-compile", "--lib"]
 
 MUTANTS = [
     ('flattener accepts on the midpoint sagitta alone', F,
-     'if sagitta(pa, pb, pm) <= tol && bound(a, b).is_none_or(|certified| certified <= tol) {',
+     'if sagitta(pa, pb, pm) <= tol && certified {',
      'if sagitta(pa, pb, pm) <= tol {', [BOUND, REPORT]),
     ('ellipse second derivative from the minor axis only', E,
      '    let main = beta2 + (alpha2 - beta2) * cos2;',

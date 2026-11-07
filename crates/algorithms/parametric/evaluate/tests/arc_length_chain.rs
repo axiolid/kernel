@@ -764,3 +764,82 @@ fn a_chain_with_a_sinusoid_piece_is_not_certified() {
     assert!(!certifies_flattening2(&Curve2::Chain(chain.clone())));
     assert!(chain_chord_bound(&chain, 0.0, 3.0).is_none());
 }
+
+// --- stretched start frames (#438) -----------------------------------------------
+
+/// The harmonic chain under a scaled start frame: `x = k (0.8, 0.6)`,
+/// `y = k (-0.6, 0.8)`, which stretches by `k`.
+fn stretched_harmonic(k: Scalar) -> Chain2 {
+    let mut chain = harmonic();
+    chain.start.x *= k;
+    chain.start.y *= k;
+    chain
+}
+
+fn stretched_world(chain: &Chain2, local: Vec2) -> Point2 {
+    let f = chain.start;
+    f.origin + f.x * (20.0 + local.x) + f.y * local.y
+}
+
+#[test]
+fn a_stretched_chain_keeps_a_bound_and_flattens_within_it() {
+    // The table's rounding allowance once grew with the square of the
+    // stretch, so a read near the table's own bound was refused and the
+    // chord bound was `None`, which flattening took as proven.
+    for k in [2.0, 4.0] {
+        let chain = stretched_harmonic(k);
+        let curve = Curve2::Chain(chain.clone());
+        let (a, b) = (116.4375, 116.5625);
+        let bound = chord_bound2(&curve, a, b)
+            .unwrap_or_else(|| panic!("stretch {k}: no chord bound on a smooth span"));
+        let (pa, pb) = (
+            chain_point(&chain, a).unwrap(),
+            chain_point(&chain, b).unwrap(),
+        );
+        let mut local = harmonic_exact(0.0, Vec2::ZERO, a);
+        let mut at = a - 20.0;
+        let mut worst: Scalar = 0.0;
+        for i in 0..=64 {
+            let s = a + (b - a) * i as Scalar / 64.0;
+            if i > 0 {
+                local = harmonic_exact(at, local, s);
+                at = s - 20.0;
+            }
+            worst = worst.max(segment_distance(stretched_world(&chain, local), pa, pb));
+        }
+        assert!(worst > k * 2.8e-3, "stretch {k}: the arc lies {worst} off");
+        assert!(bound >= worst, "stretch {k}: {bound} under {worst}");
+
+        // The evaluated ends are centimetres off, so a millimetre tolerance
+        // cannot be met: flattening refuses rather than accept the span.
+        let domain = Interval::new(0.0, 120.0);
+        assert!(
+            matches!(
+                flatten2(&curve, domain, 3e-3 * k, 30),
+                Err(GeomError::BudgetExceeded { .. })
+            ),
+            "stretch {k}"
+        );
+        // Above the ends' gap every point of the exact curve is within the
+        // tolerance of the polyline.
+        let tolerance = 0.05 * k;
+        let points =
+            flatten2(&curve, domain, tolerance, 30).unwrap_or_else(|e| panic!("stretch {k}: {e}"));
+        let mut local = Vec2::ZERO;
+        let mut at = 0.0;
+        for i in 0..2400 {
+            let s = 20.0 + 100.0 * i as Scalar / 2400.0;
+            local = harmonic_exact(at, local, s);
+            at = s - 20.0;
+            let p = stretched_world(&chain, local);
+            let near = points
+                .windows(2)
+                .map(|w| segment_distance(p, w[0], w[1]))
+                .fold(Scalar::INFINITY, Scalar::min);
+            assert!(
+                near <= tolerance,
+                "stretch {k}: {near} from the polyline at {s}"
+            );
+        }
+    }
+}

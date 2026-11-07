@@ -26,13 +26,12 @@ Not probed, because no test can tell them apart:
   errors, and the rounding allowances of the derivatives (`1e-14`): they
   are at most `1e-11` against references good to `1e-13` at the sizes
   tested;
-- the tube's jet charge (`wall_jet_charge`): at most `1e-11` of a `1e-3`
-  budget, below any sampling of the tube. The first-order errors it sums are
-  held against adversarially perturbed jets by a unit test
-  (`deviation::paths::tests`), which `probe_elevated_positions_mutants.py`
-  does not rerun here;
-- the tube reading the chain table's centre instead of the evaluator's: the
-  cubic chain's points agree to `6e-14`.
+- the tube's jet charge (`wall_jet_charge`) through a sampled tube: at most
+  `1e-11` of a `1e-3` budget, below any sampling. The sum it feeds
+  (`tube_error`) and the first-order errors it sums are held by unit tests
+  (`deviation::paths::tests`: a coarse table's wall against the exact series
+  wall, and against adversarially perturbed jets); that `tube_bound` calls
+  `tube_error` at all is only guarded by review.
 
 Every mutant runs in its own process group with a timeout that kills the
 whole group, and the file is restored whatever happens.
@@ -48,12 +47,26 @@ CHAIN_POSITIONS = f"{EVAL}/src/bound/chain_positions.rs"
 ELEVATED = f"{EVAL}/src/bound/elevated_positions.rs"
 BOUND = f"{EVAL}/src/bound.rs"
 CHAIN = f"{EVAL}/src/chain.rs"
+CURVE = f"{EVAL}/src/curve.rs"
 PATHS = "crates/execution/compile/src/deviation/paths.rs"
 
 TABLE = ["-p", "axiolid-evaluate", "--all-features", "--test", "chain_position_table"]
 SOLVER = ["-p", "axiolid-evaluate", "--all-features", "--lib", "chain_positions"]
 CHORDS = ["-p", "axiolid-evaluate", "--all-features", "--test", "arc_length_chain"]
 ELEVATED_TESTS = ["-p", "axiolid-evaluate", "--all-features", "--test", "elevated_positions"]
+WALL_CHAIN = [
+    "-p",
+    "axiolid-mesh-compile",
+    "--lib",
+    "deviation::paths::tests::a_tube_wall_over_a_harmonic_chain_plan",
+]
+WALL_COARSE = [
+    "-p",
+    "axiolid-mesh-compile",
+    "--lib",
+    "deviation::paths::tests::a_wall_from_a_coarse_chain_table",
+]
+NONE_BOUND = ["-p", "axiolid-evaluate", "--all-features", "--lib", "claimed_family"]
 TUBE = [
     "--release",
     "-p",
@@ -100,6 +113,12 @@ MUTANTS = [
     ("a sinusoid piece is claimed certified for flattening", CHAIN,
      "                ) && crate::bound::certifies_flattening2(curve)",
      "                ) || crate::bound::certifies_flattening2(curve)", [CHORDS]),
+    ("a read's rounding grows with the square of the stretch", CHAIN_POSITIONS,
+     "PLACE * (origin + self.stretch * p.length().max(1.0))",
+     "PLACE * (origin + self.stretch * w.length().max(1.0))", [CHORDS]),
+    ("a claimed family passes a span without a bound", CURVE,
+     "        None => !claimed,",
+     "        None => true,", [NONE_BOUND, CHORDS]),
     # Elevated and banked curves over a chain plan.
     ("the elevated chord bound answers a chain plan with the exact chord", ELEVATED,
      "        Curve2::Chain(chain) => (chain.start, chain.length()?),",
@@ -114,6 +133,17 @@ MUTANTS = [
      "                table.max_tangent_error(),",
      "                0.0,", [ELEVATED_TESTS]),
     # The tube.
+    ("the tube's centre reverts to the evaluator's", PATHS,
+     "                table.jet3_on(s, side)\n",
+     "                table.jet3_on(s, side).map(|(_, c1, c2)| {\n"
+     "                    (axiolid_reference::curve::evaluate3(self.curve, s).unwrap(), c1, c2)\n"
+     "                })\n", [WALL_CHAIN]),
+    ("the tube carries no jet charge", PATHS,
+     "    centre + jets.max(caps)",
+     "    centre + 0.0 * jets.max(caps)", [WALL_COARSE]),
+    ("the tube carries no end-disk tilt", PATHS,
+     "    centre + jets.max(caps)",
+     "    centre + jets", [WALL_COARSE]),
     ("a chain plan is refused by name again", PATHS,
      "    has_intrinsic_profile(&base.elevation).then_some(UNCERTIFIED_DIRECTRIX_POINTS)",
      "    (matches!(base.plan.as_ref(), Curve2::Chain(_)) || has_intrinsic_profile(&base.elevation))\n"
