@@ -524,4 +524,44 @@ mod tests {
         assert_eq!(roots[1].1, 1);
         assert!((roots[1].0 - 0.75).abs() < 1e-9);
     }
+
+    /// A tower whose enclosures contradict each other: `H_1 = 2t` has one
+    /// zero, at 0, yet `H_0` changes sign across it and straddles zero only
+    /// in the middle. A zero of `H_1` makes it a double zero of `H_0` or
+    /// none, so the chain cannot be right and must say so.
+    struct Inconsistent;
+
+    impl Tower for Inconsistent {
+        fn enclose(&self, t0: Scalar, t1: Scalar, order: usize) -> Option<Vec<I>> {
+            let h0 = if t1 < -0.25 {
+                I::new(-2.0, -1.0)
+            } else if t0 > 0.25 {
+                I::new(1.0, 2.0)
+            } else {
+                I::new(-1.0, 1.0)
+            };
+            let all = [h0, I::new(2.0 * t0, 2.0 * t1), I::point(2.0)];
+            Some(all[..=order.min(2)].to_vec())
+        }
+
+        fn joins(&self, _t0: Scalar, _t1: Scalar) -> Vec<Scalar> {
+            Vec::new()
+        }
+    }
+
+    #[test]
+    fn a_zone_whose_parity_contradicts_its_neighbours_refuses() {
+        let mut budget = Budget::new(ROOT_BUDGET);
+        assert_eq!(
+            isolate(
+                &Inconsistent,
+                -1.0,
+                1.0,
+                [End::Inner, End::Inner],
+                &mut budget
+            )
+            .unwrap_err(),
+            RootRefusal::Unresolved
+        );
+    }
 }
