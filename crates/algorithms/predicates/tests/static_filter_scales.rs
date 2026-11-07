@@ -38,6 +38,7 @@ fn orient3(a: Point3, b: Point3, c: Point3, p: Point3) -> Sign {
 #[test]
 fn a_range_whose_bound_underflows_is_refused() {
     assert!(StaticFilter::new(1.7440603504673385e-105).is_none());
+    assert!(StaticFilter::new(1e-100).is_none());
     assert!(StaticFilter::new(1e-150).is_none());
     assert!(StaticFilter::new(f64::MIN_POSITIVE).is_none());
     assert!(StaticFilter::new(5e-324).is_none());
