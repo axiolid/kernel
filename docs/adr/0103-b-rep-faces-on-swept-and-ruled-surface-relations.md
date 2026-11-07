@@ -36,6 +36,12 @@ ISO 10303-42 form.
   in units of the direction's length (it is not normalised).
 - `Ruled`: ADR 0097, unchanged.
 
+The turn is about the axis as given, so a producer must emit the axis that
+matches its own sense of `u`: Revit's `Surface::Revolved` turns about `x × y`
+of its frame, so a lowering must emit `axis_direction = x × y` (a mirrored
+frame reverses `u`). A reflecting placement on the IFC side reverses `u`
+relative to the pcurves; the adapter must negate the axis or refuse.
+
 **D2. A crate-private support view.** `axiolid-mesh-compile` reads a face's
 surface as a `Support`: an atomic surface, or a `RelationSurface` that
 evaluates the three relations. The tessellator asks it only for a point, the

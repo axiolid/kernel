@@ -137,7 +137,16 @@ impl<'g> SweptCurve<'g> {
     fn clamp(&self, (lo, hi): (Scalar, Scalar)) -> Option<(Scalar, Scalar)> {
         let (lo, hi) = (lo.min(hi), lo.max(hi));
         let (lo, hi) = match self.domain {
-            Some(domain) => (lo.max(domain.start), hi.min(domain.end)),
+            Some(domain) => {
+                let slack = DOMAIN_SLACK * (domain.end - domain.start).abs().max(1.0);
+                if lo > domain.end + slack || hi < domain.start - slack {
+                    return None;
+                }
+                (
+                    lo.clamp(domain.start, domain.end),
+                    hi.clamp(domain.start, domain.end),
+                )
+            }
             None => (lo, hi),
         };
         (lo.is_finite() && hi.is_finite() && lo <= hi).then_some((lo, hi))
@@ -180,7 +189,11 @@ fn unit(t: Scalar) -> GeomResult<Scalar> {
 
 /// A parameter box clamped to `[0, 1]`, or `None` when nothing is left.
 fn unit_box((lo, hi): (Scalar, Scalar)) -> Option<(Scalar, Scalar)> {
-    let (lo, hi) = (lo.min(hi).max(0.0), lo.max(hi).min(1.0));
+    let (lo, hi) = (lo.min(hi), lo.max(hi));
+    if lo > 1.0 + DOMAIN_SLACK || hi < -DOMAIN_SLACK {
+        return None;
+    }
+    let (lo, hi) = (lo.clamp(0.0, 1.0), hi.clamp(0.0, 1.0));
     (lo.is_finite() && hi.is_finite() && lo <= hi).then_some((lo, hi))
 }
 
@@ -386,9 +399,17 @@ impl<'g> RelationOracle<'g> {
                 let [(a1, a2), (b1, b2)] = [sides[0].speeds(u0, u1)?, sides[1].speeds(u0, u1)?];
                 let (a, b) = (sides[0].at(um).ok()?, sides[1].at(um).ok()?);
                 let (da, db) = (sides[0].derivative(um).ok()?, sides[1].derivative(um).ok()?);
-                let duv = (db - da).length()
+                // Across a tangent break `A'` or `B'` jumps, so the Lipschitz
+                // form no longer holds; `|B' - A'| <= a1 + b1` does.
+                let smooth_box = smooth(0, (u0, u1));
+                let lipschitz = (db - da).length()
                     + 0.5 * h * (a2 + b2)
                     + ROUNDING * (da.length() + db.length());
+                let duv = if smooth_box {
+                    lipschitz.min(a1 + b1)
+                } else {
+                    a1 + b1
+                };
                 let dv = (b - a).length() + 0.5 * h * duv + ROUNDING * (a.length() + b.length());
                 let blend = |a: Scalar, b: Scalar| {
                     [v0, v1]
@@ -403,7 +424,7 @@ impl<'g> RelationOracle<'g> {
                     duu,
                     duv,
                     dvv: 0.0,
-                    smooth: smooth(0, (u0, u1)),
+                    smooth: smooth_box,
                     interpolation: [duu, duv, 0.0],
                 }
             }
@@ -1019,9 +1040,35 @@ mod tests {
         ]
     }
 
+    /// A degree-1 side with a sharp kink at its middle knot.
+    fn sharp_kink() -> Curve3 {
+        Curve3::BSpline(BSplineCurve {
+            degree: 1,
+            control_points: vec![
+                Point3::ZERO,
+                Point3::new(1.0, 0.0, 0.0),
+                Point3::new(1.0, 30.0, 0.0),
+            ],
+            knots: vec![0.0, 0.5, 1.0],
+            multiplicities: vec![2, 1, 2],
+            weights: None,
+            closed: false,
+            self_intersect: None,
+            knot_spec: KnotSpec::Unspecified,
+        })
+    }
+
     fn ruled_cases() -> Vec<[Spec; 2]> {
         let rational = profiles().remove(1).0;
         vec![
+            [
+                Spec::curve(sharp_kink(), 0.0, 1.0),
+                Spec::curve(line(Point3::new(0.0, 0.0, 1.0), Vec3::X), 0.0, 1.0),
+            ],
+            [
+                Spec::curve(sharp_kink(), 0.9, 0.3),
+                Spec::curve(line(Point3::new(0.0, 0.0, 1.0), Vec3::X), 1.0, 0.0),
+            ],
             arc_and_line(false),
             arc_and_line(true),
             [
@@ -1144,6 +1191,47 @@ mod tests {
         let surface = RelationSurface::ruled(&graph, &first, &second).unwrap();
         assert!(!bounds_of(surface, (0.4, 0.6), (0.0, 1.0)).smooth);
         assert!(bounds_of(surface, (0.0, 0.4), (0.0, 1.0)).smooth);
+    }
+
+    #[test]
+    fn a_kink_across_a_box_bounds_the_jump_of_the_sides_speed() {
+        let (graph, [first, second]) = ruled_graph([
+            Spec::curve(sharp_kink(), 0.0, 1.0),
+            Spec::curve(line(Point3::new(0.0, 0.0, 1.0), Vec3::X), 0.0, 1.0),
+        ]);
+        let surface = RelationSurface::ruled(&graph, &first, &second).unwrap();
+        let b = bounds_of(surface, (0.2, 0.6), (0.0, 1.0));
+        assert!(!b.smooth);
+        let [_, sv, _, suv, _] = surface.partials(0.6, 0.5).unwrap().map(|x| x.length());
+        assert!(
+            sv <= b.dv && suv <= b.duv,
+            "{sv} {} / {suv} {}",
+            b.dv,
+            b.duv
+        );
+    }
+
+    #[test]
+    fn a_break_is_mapped_through_a_shifted_reversed_interval() {
+        // The kink at t = 0.5 is at u = (0.5 - 0.9) / (0.3 - 0.9) = 2/3.
+        let (graph, [first, second]) = ruled_graph([
+            Spec::curve(sharp_kink(), 0.9, 0.3),
+            Spec::curve(line(Point3::new(0.0, 0.0, 1.0), Vec3::X), 0.0, 1.0),
+        ]);
+        let surface = RelationSurface::ruled(&graph, &first, &second).unwrap();
+        assert!(!bounds_of(surface, (0.6, 0.7), (0.0, 1.0)).smooth);
+        assert!(bounds_of(surface, (0.4, 0.6), (0.0, 1.0)).smooth);
+    }
+
+    #[test]
+    fn a_box_wholly_within_the_slack_past_the_end_is_clamped_to_it() {
+        let (graph, id) = curve_graph(kinked());
+        let past = 1.0 + 2.0 * Scalar::EPSILON;
+        let oracle = RelationOracle::new(about_z(&graph, id));
+        assert!(oracle.bounds((0.0, 1.0), (past, past)).is_some());
+        let (graph, [first, second]) = ruled_graph(arc_and_line(false));
+        let oracle = RelationOracle::new(RelationSurface::ruled(&graph, &first, &second).unwrap());
+        assert!(oracle.bounds((past, past), (0.0, 1.0)).is_some());
     }
 
     #[test]

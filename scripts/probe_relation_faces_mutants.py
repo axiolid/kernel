@@ -14,6 +14,8 @@ Not listed, as not observable (no fixture, not equivalent):
 - the `DOMAIN_SLACK` clamp of a read inside the slack: the clamped point is
   the evaluated one to the last bit.
 - the sort of the ruled sides' breaks: the smooth test reads them as a set.
+- `Support::same` comparing two relations as always different: it only makes
+  the edge pass locate shared samples again, with the same result.
 - the `finite` check of a bound: the derivative bounds of the supported
   curve families are finite for finite data.
 """
@@ -22,6 +24,7 @@ import probe_lib
 S = "crates/execution/compile/src/surface_relation.rs"
 V = "crates/execution/compile/src/brep/view.rs"
 I = "crates/execution/compile/src/brep/inversion.rs"
+R = "crates/execution/compile/src/ruled.rs"
 TARGETS = [
     ["-p", "axiolid-mesh-compile", "--lib", "surface_relation"],
     ["-p", "axiolid-mesh-compile", "--test", "relation_faces"],
@@ -80,9 +83,13 @@ MUTANTS = [
      "        if !(t >= domain.start - slack && t <= domain.end + slack) {\n",
      "        if false {\n"),
     ("the oracle returns None for a box reaching past the domain instead of clamping it", S,
-     "            Some(domain) => (lo.max(domain.start), hi.min(domain.end)),\n",
-     "            Some(domain) if lo < domain.start || hi > domain.end => return None,\n"
-     "            Some(domain) => (lo.max(domain.start), hi.min(domain.end)),\n"),
+     "                if lo > domain.end + slack || hi < domain.start - slack {\n",
+     "                if lo > domain.end + slack || hi < domain.start - slack\n"
+     "                    || lo < domain.start || hi > domain.end\n"
+     "                {\n"),
+    ("a box wholly within the slack past the end is refused", S,
+     "                if lo > domain.end + slack || hi < domain.start - slack {\n",
+     "                if lo > domain.end || hi < domain.start - slack {\n"),
     ("a box with a break inside is smooth", S,
      "            !self.breaks[axis].iter().any(|&b| b > lo && b < hi)\n",
      "            true\n"),
@@ -110,6 +117,28 @@ MUTANTS = [
      "                axis_direction,\n"
      "            },\n"
      "        )) if false => Ok(Some(Support::Relation {\n"),
+    ("a ruled box across a break keeps the Lipschitz twist", S,
+     "                let duv = if smooth_box {\n"
+     "                    lipschitz.min(a1 + b1)\n"
+     "                } else {\n"
+     "                    a1 + b1\n"
+     "                };\n",
+     "                let duv = lipschitz;\n"),
+    ("a ruled side's break is not mapped through its interval", R,
+     "                    .map(|t| (t - start) / (end - start))\n",
+     "                    .map(|t| t)\n"),
+    ("the view's arm for a linear extrusion is guarded off", V,
+     "                direction,\n"
+     "            },\n"
+     "        )) => Ok(Some(Support::Relation {\n",
+     "                direction,\n"
+     "            },\n"
+     "        )) if false => Ok(Some(Support::Relation {\n"),
+    ("the view's arm for a ruled surface is guarded off", V,
+     "        Some(GeometryNode::SurfaceRelation(node @ SurfaceRelation::Ruled { first, second })) => {\n",
+     "        Some(GeometryNode::SurfaceRelation(node @ SurfaceRelation::Ruled { first, second }))\n"
+     "            if false =>\n"
+     "        {\n"),
     ("the family of a revolution is named a surface", S,
      '            Self::Revolution { .. } => "surface of revolution",\n',
      '            Self::Revolution { .. } => "surface",\n'),

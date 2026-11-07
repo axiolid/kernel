@@ -14,7 +14,9 @@ use std::collections::HashMap;
 use std::f64::consts::{FRAC_PI_2, FRAC_PI_3, FRAC_PI_4, PI, TAU};
 
 use axiolid_contracts::{ExecutionOptions, GeomError, GeomResult, Operation};
-use axiolid_core::{Frame2, Frame3, Interval, Point2, Point3, Scalar, Tolerance, Vec2, Vec3};
+use axiolid_core::{
+    BooleanOperator, Frame2, Frame3, Interval, Point2, Point3, Scalar, Tolerance, Vec2, Vec3,
+};
 use axiolid_curve::{
     BSplineCurve3, Circle2, Circle3, Curve2, Curve3, KnotSpec, Line3, Polyline2, Polyline3,
 };
@@ -23,7 +25,10 @@ use axiolid_mesh::TriMesh;
 use axiolid_mesh_boolean_boolmesh::BoolmeshBoolean;
 use axiolid_mesh_compile::{DeviationBound, DeviationPath, DeviationReport, ReferenceMeshCompiler};
 use axiolid_mesh_compile_contract::MeshClosure;
-use axiolid_model::{GeometryGraphBuilder, GeometryNode, NodeId, RuledSide, SurfaceRelation};
+use axiolid_model::{
+    GeometryGraphBuilder, GeometryNode, NodeId, RuledSide, SolidOperation, SurfaceRelation,
+};
+use axiolid_profile::{Profile, RectangleProfile};
 use axiolid_surface::{Cone, Cylinder, Plane, Sphere, Surface, Torus};
 use axiolid_topology::{
     BRep, Edge, EdgeUse, Face, FaceBound, Loop, Orientation, Shell, Solid, Vertex,
@@ -152,6 +157,11 @@ fn compile(mut builder: GeometryGraphBuilder, brep: BRep<NodeId>) -> GeomResult<
 /// wall with one seam and two planar caps, every edge's every use with its
 /// own pcurve.
 fn closed_wall(wall: &Wall<'_>) -> GeomResult<Compiled> {
+    let (builder, brep) = closed_wall_parts(wall);
+    compile(builder, brep)
+}
+
+fn closed_wall_parts(wall: &Wall<'_>) -> (GeometryGraphBuilder, BRep<NodeId>) {
     let mut builder = GeometryGraphBuilder::new();
     let mut brep: BRep<NodeId> = BRep::default();
     let (u0, u1) = wall.u;
@@ -244,7 +254,7 @@ fn closed_wall(wall: &Wall<'_>) -> GeomResult<Compiled> {
         outer: shell,
         voids: Vec::new(),
     });
-    compile(builder, brep)
+    (builder, brep)
 }
 
 /// A hole in a sheet: a closed edge whose pcurve is a circle in `(u, v)`.
@@ -1196,4 +1206,56 @@ fn a_reversed_side_is_read_backwards() {
         ],
     );
     assert_sheet("reversed sides", &support, &sheet, RULED);
+}
+
+#[test]
+fn a_boolean_over_a_relation_face_operand_meshes_with_a_named_unbounded_report() {
+    let support = |b: &mut GeometryGraphBuilder| {
+        revolution(
+            b,
+            line3(Point3::new(0.3, 0.0, 0.0), Vec3::Z),
+            Point3::ZERO,
+            Vec3::Z,
+        )
+    };
+    let (mut builder, brep) = closed_wall_parts(&cylinder_wall(&support));
+    let cylinder = builder.push(GeometryNode::BRep(brep)).unwrap();
+    let profile = builder
+        .push(GeometryNode::Profile(Profile::Rectangle(
+            RectangleProfile {
+                x: 0.2,
+                y: 0.2,
+                thickness: None,
+                outer_radius: None,
+                inner_radius: None,
+            },
+        )))
+        .unwrap();
+    let block = builder
+        .push(GeometryNode::SolidOperation(SolidOperation::Extrusion {
+            profile,
+            direction: Vec3::Z,
+            depth: 0.3,
+        }))
+        .unwrap();
+    let root = builder
+        .push(GeometryNode::SolidOperation(SolidOperation::Boolean {
+            left: cylinder,
+            right: block,
+            operator: BooleanOperator::Difference,
+        }))
+        .unwrap();
+    let graph = builder.finish(vec![root]).unwrap();
+    let (_, report) = ReferenceMeshCompiler::new(BoolmeshBoolean::new())
+        .compile_mesh_with_deviation(&graph, root, &options())
+        .expect("the boolean meshes");
+    assert!(report.bound.is_none(), "{report:?}");
+    assert!(
+        report.contributions.iter().any(|c| matches!(
+            c.bound,
+            DeviationBound::Unbounded(reason)
+                if reason.starts_with("exact boolean over a B-rep operand with a face that is neither a plane")
+        )),
+        "{report:?}"
+    );
 }

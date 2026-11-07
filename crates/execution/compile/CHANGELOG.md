@@ -27,6 +27,10 @@ caret rule for `0.x` versions.
   or the two sides, a line, circle, ellipse or B-spline (rational too). A
   B-spline is read only inside its domain and a ruled surface inside its
   unit square. Exact compilation of such a face stays refused.
+  A boolean with such a B-rep operand now meshes, reported unbounded by name
+  (`exact boolean over a B-rep operand with a face that is neither a plane
+  with straight edges nor a warped face without a surface`); it was refused
+  at tessellation before.
 
 ### Changed
 
