@@ -805,8 +805,7 @@ impl<B: MeshBoolean> ReferenceMeshCompiler<B> {
                     *operator,
                     options,
                     budget,
-                    cache,
-                    root,
+                    (cache, root),
                 )?;
                 Ok(match measure {
                     // The exact compiler's own result states its bound
@@ -975,8 +974,7 @@ impl<B: MeshBoolean> ReferenceMeshCompiler<B> {
         operator: axiolid_core::BooleanOperator,
         options: &ExecutionOptions,
         budget: Budget,
-        cache: &Cache,
-        root: NodeId,
+        (cache, root): (&Cache, NodeId),
     ) -> GeomResult<(Built, Decided)> {
         if let Ok(Some(built)) =
             self.boolean_in_shared_frame(graph, (left, right), operator, options, budget, cache)

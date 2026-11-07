@@ -213,3 +213,11 @@ intersection in near contact with one shell; a refused referee), the
 `tests/coincident_wall_openings.rs`, and
 `scripts/probe_exact_union_referee_mutants.py` (the operator gate, the
 half-space guard, the trigger, the reading gate, the component check).
+
+## Amendment 2026-11-06: the skin trigger and half-space tools (#400)
+
+[ADR 0102](./0102-a-clip-is-cut-in-its-subjects-frame-and-a-difference-keeps-no-skin-within-rounding.md) adds a second trigger for the referee, on a difference or an
+intersection: the thin-sheet refusal of its guard, for bounded half-space
+tools too. It is accepted only where the referee reads
+nothing above the rounding reach, so D7 of ADR 0096 holds. Unions are
+unchanged; whether the guard reaches them is #434.

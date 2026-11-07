@@ -175,3 +175,12 @@ tolerance, or is refused as a pinch or by D2, is compiled by the exact
 compiler and the exact result tessellated; the mesh result or refusal stands
 where the exact compiler refuses too, and a refusal names the referee's
 reason.
+
+## Amendment 2026-11-06: a clip is cut in its subject's frame (#400)
+
+[ADR 0102](./0102-a-clip-is-cut-in-its-subjects-frame-and-a-difference-keeps-no-skin-within-rounding.md) extends D3 to a half-space clip, which is cut in its subject's frame
+whether or not the linear parts are bit-equal, and settles the defect D7
+left recorded: a difference or intersection whose result holds a skin
+thinner than the snap's rounding reach is refused by name,
+`SKIN_WITHIN_ROUNDING`. A skin above the reach but below the tolerance stays
+authored, as D7 says.

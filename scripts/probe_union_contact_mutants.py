@@ -49,7 +49,7 @@ def edits(*changes):
     return [(ROOT / path, old, new) for path, old, new in changes]
 
 
-SIMILAR = (FRAME, "        && is_similarity(a)\n", "        && true\n")
+SIMILAR = (FRAME, "        && is_similarity(t)\n", "        && true\n")
 FALLBACK = (
     COMPILER,
     "        if let Ok(Some(built)) =\n            self.boolean_in_shared_frame(graph, (left, right), operator, options, budget, cache)\n        {",
@@ -91,8 +91,8 @@ MUTANTS = [
      "        if true || clipping && clip_tool(graph, right).is_some() {\n            return Ok(None);",
      [R]),
     ("linear parts compared loosely", FRAME,
-     "        && columns == b.matrix3.to_cols_array()\n",
-     "        && b.matrix3.determinant().is_finite()\n",
+     "    similarity(a) && a.matrix3.to_cols_array() == b.matrix3.to_cols_array()\n",
+     "    similarity(a) && b.matrix3.determinant().is_finite()\n",
      [R, L]),
     ("tool offset dropped", FRAME,
      "    if same {\n        return Some(Vec3::ZERO);",
@@ -111,7 +111,7 @@ MUTANTS = [
      "    if false && (edge_crosses(a, b) || edge_crosses(b, a)) {",
      [I]),
     ("stretch by direction read as a shared frame", FRAME,
-     "        && is_similarity(a)\n", "        && true\n", [L]),
+     "        && is_similarity(t)\n", "        && true\n", [L]),
     Mutant("stretched frame let through without the world guard",
            edits(SIMILAR, GUARD),
            [["cargo", "test", "-q", *U]]),
@@ -120,7 +120,7 @@ MUTANTS = [
            [["cargo", "test", "-q", *U]]),
     ("shared frame cut at the world tolerance", COMPILER,
      ".with_tolerance(local_budget.tolerance)",
-     ".with_tolerance(budget.tolerance)", [U]),
+     ".with_tolerance(options.tolerance())", [U]),
     ("shared frame takes surface operands", COMPILER,
      '        refuse_surface_operand(subject, "subject")?;\n        refuse_surface_operand(tool, "tool")?;\n',
      "        let _ = (subject, tool);\n", [T]),

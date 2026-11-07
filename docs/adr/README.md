@@ -86,3 +86,4 @@ Package names and paths in older accepted records describe the tree at the time 
 | [0099](./0099-mesh-volume-over-oriented-edge-cycles.md) | Mesh volume over oriented edge cycles |
 | [0100](./0100-exact-arrangements-are-snap-rounded-to-the-binary64-grid.md) | Exact arrangements are snap-rounded to the binary64 grid |
 | [0101](./0101-a-curve-relations-parameter.md) | A curve relation's parameter |
+| [0102](./0102-a-clip-is-cut-in-its-subjects-frame-and-a-difference-keeps-no-skin-within-rounding.md) | A clip is cut in its subject's frame, and a difference keeps no skin within rounding |
