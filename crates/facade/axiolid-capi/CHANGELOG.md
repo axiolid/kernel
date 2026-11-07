@@ -9,6 +9,15 @@ caret rule for `0.x` versions.
 
 ## [Unreleased]
 
+### Changed
+
+- **Breaking for Rust callers only.** The public C-mirroring enums
+  `AxiolidStatus`, `AxiolidOperation`, `AxiolidRepresentation`,
+  `AxiolidExactness` and `AxiolidGeometryKind` gain variants (`MeshHiddenLines`,
+  `MeshVisibleFaces`, `HiddenLines`) and are now `#[non_exhaustive]`, so later
+  C-ABI-additive variants are no longer Rust breaks. The C ABI is unchanged
+  and additive (`abi_patch` 1).
+
 ### Added
 
 - Hidden lines through the C ABI (#473): `axiolid_v0_4_hidden_lines` with

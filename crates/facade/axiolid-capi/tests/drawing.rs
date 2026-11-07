@@ -303,6 +303,17 @@ fn a_depth_bound_is_read_only_when_its_flag_is_set() {
     assert_eq!(status, AxiolidStatus::Ok);
     assert_eq!(segments(context, result).len(), 8);
 
+    // Without hidden pieces only the four visible silhouettes remain.
+    let mut visible_only = Call::new(vec![entry(cube, 1, AXIOLID_MESH_ROLE_SOLID)]);
+    visible_only.edges.hidden = 0;
+    let (status, result) = visible_only.run(context);
+    assert_eq!(status, AxiolidStatus::Ok);
+    let drawn = segments(context, result);
+    assert_eq!(drawn.len(), 4);
+    assert!(drawn
+        .iter()
+        .all(|segment| segment.visibility == AxiolidVisibility::Visible));
+
     // Everything lies at W >= 0, so a near plane at -5 keeps nothing.
     call.view.has_near = 1;
     let (status, result) = call.run(context);
@@ -344,6 +355,31 @@ fn per_triangle_groups_draw_the_group_boundary() {
         .find(|segment| segment.vertices == [0, 2])
         .expect("the diagonal is drawn");
     assert_eq!(diagonal.kind, AxiolidEdgeKind::GroupBoundary);
+    assert!(drawn
+        .iter()
+        .filter(|segment| segment.vertices != [0, 2])
+        .all(|segment| segment.kind == AxiolidEdgeKind::Boundary));
+    let mut evidence = unsafe { std::mem::zeroed::<AxiolidHiddenLineEvidence>() };
+    assert_eq!(
+        unsafe { axiolid_v0_4_hidden_lines_evidence(context, result, &mut evidence) },
+        AxiolidStatus::Ok
+    );
+    assert_eq!(
+        (evidence.visible_segments, evidence.hidden_segments),
+        (5, 0)
+    );
+    // Every escalation settles one examined pair, so there are more pairs.
+    assert!(evidence.exact_escalations > 0);
+    assert!(evidence.candidate_pairs > evidence.exact_escalations);
+
+    // Deselected kinds are not drawn: without boundary edges only the diagonal remains.
+    call.edges.boundary = 0;
+    let (status, result) = call.run(context);
+    assert_eq!(status, AxiolidStatus::Ok);
+    let drawn = segments(context, result);
+    assert_eq!(drawn.len(), 1);
+    assert_eq!(drawn[0].vertices, [0, 2]);
+    call.edges.boundary = 1;
 
     // Planar groups derive one patch: the diagonal is no group boundary.
     call.meshes[0] = entry(square, 4, AXIOLID_MESH_ROLE_SHEET);
@@ -376,14 +412,48 @@ fn per_triangle_groups_draw_the_group_boundary() {
         Some(AxiolidEdgeKind::GroupBoundary)
     );
 
-    // A group array of the wrong length is the contract's refusal, naming the mesh.
-    let short = [0_u32];
-    call.meshes[0].groups = short.as_ptr();
-    call.meshes[0].group_count = 1;
-    call.meshes[0].group_mode = AXIOLID_GROUP_MODE_PER_TRIANGLE;
-    let (status, _) = call.run(context);
-    assert_eq!(status, AxiolidStatus::OperationFailed);
-    assert_eq!(last_error_mesh(context), (AxiolidStatus::Ok, 1, 4));
+    // A fold is a crease once the threshold admits its angle.
+    let mut creased = Call::new(vec![entry(fold, 5, AXIOLID_MESH_ROLE_SHEET)]);
+    creased.edges.crease_cosine = 0.9;
+    let (status, result) = creased.run(context);
+    assert_eq!(status, AxiolidStatus::Ok);
+    let drawn = segments(context, result);
+    let shared = drawn.iter().find(|segment| segment.vertices == [1, 2]);
+    assert_eq!(
+        shared.map(|segment| segment.kind),
+        Some(AxiolidEdgeKind::Crease)
+    );
+}
+
+#[test]
+fn a_group_count_is_checked_against_the_mesh_before_it_is_read() {
+    let context = context();
+    let triangle = triangle(context);
+    let cube = cube(context);
+    let ids = [0_u32];
+    let mut mesh = entry(triangle, 6, AXIOLID_MESH_ROLE_SHEET);
+    mesh.groups = ids.as_ptr();
+    mesh.group_mode = AXIOLID_GROUP_MODE_PER_TRIANGLE;
+    // The count is far beyond the one readable id, and beyond the mesh.
+    for count in [usize::MAX, 12, 2, 0] {
+        mesh.group_count = count;
+        let (status, result) = Call::new(vec![mesh]).run(context);
+        assert_eq!(status, AxiolidStatus::InvalidArgument, "{count}");
+        assert_eq!(result, AxiolidResultHandle::INVALID);
+        assert_eq!(
+            last_error_mesh(context),
+            (AxiolidStatus::Ok, 1, 6),
+            "{count}"
+        );
+    }
+    // The cube's count on the triangle is refused although the cube accepts it.
+    let mut other = entry(cube, 7, AXIOLID_MESH_ROLE_SOLID);
+    other.group_mode = AXIOLID_GROUP_MODE_PER_TRIANGLE;
+    other.groups = ids.as_ptr();
+    other.group_count = 1;
+    let (status, _) = Call::new(vec![other]).run(context);
+    assert_eq!(status, AxiolidStatus::InvalidArgument);
+    assert_eq!(last_error_mesh(context), (AxiolidStatus::Ok, 1, 7));
 }
 
 #[test]
@@ -516,6 +586,13 @@ fn handles_pointers_and_counts_are_checked() {
         call.run(AxiolidContextHandle(u64::MAX)).0,
         AxiolidStatus::InvalidHandle
     );
+
+    // Exactly max_meshes entries are allowed.
+    let two = Call::new(vec![
+        entry(triangle, 1, AXIOLID_MESH_ROLE_SHEET),
+        entry(triangle, 2, AXIOLID_MESH_ROLE_SHEET),
+    ]);
+    assert_eq!(two.run(context).0, AxiolidStatus::Ok);
 
     // More meshes than the context allows are refused before any is read.
     let many = Call::new(vec![entry(triangle, 1, AXIOLID_MESH_ROLE_SHEET); 3]);

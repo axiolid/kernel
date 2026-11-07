@@ -15,6 +15,7 @@ use axiolid::core::Point3;
 use axiolid::mesh::TriMesh;
 
 /// v0.4 ABI status code.
+#[non_exhaustive]
 #[repr(i32)]
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum AxiolidStatus {
@@ -267,6 +268,7 @@ impl AxiolidMeshHandle {
 }
 
 /// Operation identifier in a capability descriptor.
+#[non_exhaustive]
 #[repr(i32)]
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum AxiolidOperation {
@@ -287,6 +289,7 @@ pub enum AxiolidOperation {
 }
 
 /// Representation identifier in a capability descriptor.
+#[non_exhaustive]
 #[repr(i32)]
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum AxiolidRepresentation {
@@ -307,6 +310,7 @@ pub enum AxiolidRepresentation {
 }
 
 /// Exactness promise in a capability descriptor.
+#[non_exhaustive]
 #[repr(i32)]
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum AxiolidExactness {

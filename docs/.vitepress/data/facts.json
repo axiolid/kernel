@@ -70,7 +70,7 @@
       "released": "0.3.4",
       "released_date": "2026-11-07",
       "role": "facade.native-c",
-      "version": "0.3.4"
+      "version": "0.4.0"
     },
     "axiolid-collide": {
       "description": "Convex collision queries: separating axis, overlap, and separation distance",

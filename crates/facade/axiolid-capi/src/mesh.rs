@@ -444,6 +444,7 @@ impl AxiolidResultHandle {
 }
 
 /// Representation stored by an operation result.
+#[non_exhaustive]
 #[repr(i32)]
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum AxiolidGeometryKind {

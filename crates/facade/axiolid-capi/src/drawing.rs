@@ -110,6 +110,7 @@ pub struct AxiolidHiddenLineLimits {
 }
 
 /// Why an edge is drawn.
+#[non_exhaustive]
 #[repr(i32)]
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum AxiolidEdgeKind {
@@ -121,6 +122,7 @@ pub enum AxiolidEdgeKind {
 }
 
 /// Whether a piece of an edge can be seen.
+#[non_exhaustive]
 #[repr(i32)]
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum AxiolidVisibility {
@@ -284,7 +286,7 @@ struct DecodedMesh {
     groups: Vec<FaceGroup>,
 }
 
-fn read_mesh(entry: &AxiolidViewMesh) -> Result<DecodedMesh, Refusal> {
+fn read_mesh(entry: &AxiolidViewMesh, context: &Context) -> Result<DecodedMesh, Refusal> {
     let role = match entry.role {
         AXIOLID_MESH_ROLE_SOLID => MeshRole::Solid,
         AXIOLID_MESH_ROLE_SHEET => MeshRole::Sheet,
@@ -295,6 +297,13 @@ fn read_mesh(entry: &AxiolidViewMesh) -> Result<DecodedMesh, Refusal> {
                 "unknown mesh role",
             ))
         }
+    };
+    let Some(mesh) = context.meshes.get(entry.mesh.0) else {
+        return Err(Refusal::mesh(
+            AxiolidStatus::InvalidHandle,
+            entry.id,
+            "unknown mesh handle",
+        ));
     };
     let groups = match entry.group_mode {
         AXIOLID_GROUP_MODE_SINGLE | AXIOLID_GROUP_MODE_PLANAR => {
@@ -308,6 +317,14 @@ fn read_mesh(entry: &AxiolidViewMesh) -> Result<DecodedMesh, Refusal> {
             Vec::new()
         }
         AXIOLID_GROUP_MODE_PER_TRIANGLE => {
+            // The count is checked against the mesh before any caller memory is read.
+            if entry.group_count != mesh.indices.len() / 3 {
+                return Err(Refusal::mesh(
+                    AxiolidStatus::InvalidArgument,
+                    entry.id,
+                    "group_count must equal the mesh's triangle count",
+                ));
+            }
             if entry.group_count == 0 {
                 Vec::new()
             } else if entry.groups.is_null() {
@@ -358,7 +375,8 @@ fn record_refusal(
 
 /// Map a refused drawing to a status and the mesh it names.
 ///
-/// A capability the provider lacks is `Unsupported` and an exhausted budget
+/// A capability the provider lacks, or an input family it does not support, is
+/// `Unsupported` and an exhausted budget
 /// `LimitExceeded`; anything else, including a provider that failed its
 /// conformance suite, is `OperationFailed`.
 fn record_drawing_error(
@@ -437,6 +455,12 @@ pub unsafe extern "C" fn axiolid_v0_4_hidden_lines(
         let entries: &[AxiolidViewMesh] = if mesh_count == 0 {
             &[]
         } else {
+            let Some(bytes) = mesh_count.checked_mul(std::mem::size_of::<AxiolidViewMesh>()) else {
+                return AxiolidStatus::LimitExceeded;
+            };
+            if bytes > isize::MAX as usize {
+                return AxiolidStatus::LimitExceeded;
+            }
             // SAFETY: non-zero pointer/length was validated; the caller promises a readable
             // array of `mesh_count` entries for this call.
             unsafe { std::slice::from_raw_parts(meshes, mesh_count) }
@@ -454,7 +478,7 @@ pub unsafe extern "C" fn axiolid_v0_4_hidden_lines(
             let region = region.map(read_region).transpose()?;
             let meshes = entries
                 .iter()
-                .map(read_mesh)
+                .map(|entry| read_mesh(entry, &context))
                 .collect::<Result<Vec<_>, _>>()?;
             Ok((view, edges, region, meshes))
         })();

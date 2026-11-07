@@ -9,6 +9,7 @@ Versioned, memory-safe C ABI for the Axiolid application facade.
 | | |
 | --- | --- |
 | Latest release | 0.3.4 (2026-11-07) |
+| On `main` | 0.4.0 (unreleased) |
 | crates.io | [`axiolid-capi`](https://crates.io/crates/axiolid-capi) |
 | Layer | facade (`facade.native-c`) |
 | API documentation | [rustdoc](/api/rustdoc/axiolid_capi/index.html) · [docs.rs](https://docs.rs/axiolid-capi) |
