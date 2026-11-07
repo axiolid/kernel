@@ -32,10 +32,13 @@ class GateCase(unittest.TestCase):
     def env(self, changed=(), **extra):
         listing = self.dir / "changed.txt"
         listing.write_text("\n".join(changed))
+        # A gate running these tests exports its own slot's settings; the
+        # gate under test must start from none of them.
+        inherited = ("CARGO_BUILD_JOBS", "RUST_TEST_THREADS", "CARGO_TARGET_DIR")
         env = {
             key: value
             for key, value in os.environ.items()
-            if not key.startswith("GATE_")
+            if not key.startswith("GATE_") and key not in inherited
         }
         env.update(
             GATE_DRY="1",
