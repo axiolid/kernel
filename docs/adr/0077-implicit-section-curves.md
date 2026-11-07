@@ -341,7 +341,8 @@ by a Rolle chain of order up to eight, where the enclosures resolve it, on the d
   `chain` climbs from `H_k` down to `H_0`. Between two zones of `H_{j+1}`,
   `H_j` is strictly monotone: a sign change brackets exactly one simple
   zero, which is bisected. A run of zones and ends whose enclosures of `H_j`
-  straddle zero is one cluster of multiplicity `1 + sum of the members'`.
+  straddle zero is one cluster of multiplicity `1 + sum of the members'`
+  (a run of two or more critical points refuses, below).
   The chain allows at most `k - j` zeros of `H_j`, and a cluster between two
   signed neighbours must change sign exactly when its multiplicity is odd;
   either failing refuses.
@@ -362,8 +363,9 @@ by a Rolle chain of order up to eight, where the enclosures resolve it, on the d
   simple zero. The cluster's extent starts at the last signed point, so every
   zero lies in a bracket or in a cluster. A zero found in a gap counts
   against the cluster's multiplicity. At `H_0` a cluster's extent is halved
-  while the enclosure straddles, to the part that does; if the work runs out
-  with the value at the cluster signed, the leaf is refused, not reported.
+  while the enclosure straddles, to the part that does; if the value at the
+  cluster is signed, the leaf is refused, not reported (an exact root is never
+  signed at the point reported for it, to the tower's rounding).
   On a piece where `H_1` is signed `H_0` is monotone, so the halving
   decides it from the values at its ends. A run of two or more zones of
   `H_{j+1}` whose enclosures of `H_j` all straddle zero (distinct critical
