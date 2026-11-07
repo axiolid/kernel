@@ -865,3 +865,57 @@ fn a_window_past_the_inner_span_is_refused_in_parameter_units() {
         "first",
     );
 }
+
+#[test]
+fn a_window_may_pass_the_inner_span_by_the_linear_tolerance_along_the_curve() {
+    // A circle of radius 5: a parameter is radians, and the tolerance is
+    // 1e-3 m, so 2e-4 rad is as far as a window may reach past the span.
+    let circle = circle2(Point2::ZERO, 5.0);
+    let on = |t: Scalar| lift(evaluate2(&circle, t).unwrap());
+    let nested = |from: Scalar, to: Scalar| {
+        graph_of(|b| {
+            let basis = b.push_value(circle.clone()).unwrap();
+            let inner = trim(b, basis, p(0.0), p(1.0), true);
+            trim(b, inner, p(from), p(to), true)
+        })
+    };
+    // 1e-5 rad (5e-5 m) past either end is clamped to it.
+    let (graph, root) = nested(-1e-5, 1.0 + 1e-5);
+    let outcome = polyline(&graph, root).unwrap();
+    close(outcome.points[0], on(0.0), "first");
+    close(*outcome.points.last().unwrap(), on(1.0), "last");
+    // 1e-3 rad (5e-3 m) past is not noise.
+    let (graph, root) = nested(-1e-3, 0.5);
+    invalid(polyline(&graph, root));
+    let (graph, root) = nested(0.2, 1.0 + 1e-3);
+    invalid(polyline(&graph, root));
+}
+
+#[test]
+fn a_window_on_a_long_spline_is_read_in_its_length() {
+    // The same spline a thousand times larger: 0.0995 of the parameter is
+    // metres past the inner span, and a part in 1e9 of it is noise.
+    let Curve2::BSpline(mut long) = spline2() else {
+        panic!("a spline")
+    };
+    for point in &mut long.control_points {
+        *point *= 1000.0;
+    }
+    let long = Curve2::BSpline(long);
+    let nested = |from: Scalar| {
+        graph_of(|b| {
+            let basis = b.push_value(long.clone()).unwrap();
+            let inner = trim(b, basis, p(0.1), p(0.9), true);
+            trim(b, inner, p(from), p(0.6), true)
+        })
+    };
+    let (graph, root) = nested(0.0995);
+    invalid(polyline(&graph, root));
+    let (graph, root) = nested(0.1 - 1e-9);
+    let outcome = polyline(&graph, root).unwrap();
+    close(
+        outcome.points[0],
+        lift(evaluate2(&long, 0.1).unwrap()),
+        "first",
+    );
+}

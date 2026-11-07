@@ -84,9 +84,11 @@ caret rule for `0.x` versions.
   name the basis's parameters now, so the point of every station on one
   moves, through `station::resolve`, `station::curve_path` and every run
   on it. Selectors other than parameters on such a trim are refused by name
-  (#432). A window is admitted to a slack relative to its parameters
-  (`1e-12 * max(1, |x|)`, as the evaluator admits a distance), not to a
-  length: a window past the inner trim by more is `InvalidInput`.
+  (#432). A window may lie past the inner trim by the linear tolerance along
+  the curve (the tolerance over a certified upper bound of the carrier's
+  speed, in parameter units; for a station basis, which has no options, by
+  `1e-12 * max(1, |x|)`, the evaluator's rule for a distance); by more it is
+  `InvalidInput`.
 
 - A node placed at a station on a circle, a polyline, an elevated or
   banked curve over a line or a circle, an intrinsic plan alone or under a
@@ -162,9 +164,14 @@ caret rule for `0.x` versions.
   was the near half `[0, pi]`, and a swept directrix's `parameter_range` on
   a full-turn trim read the same way (#424). An end that lands on the start
   of a full turn is its end when it is the larger one asked. The window of a
-  nested trim and of a directrix sweep range is read to a slack relative to
-  its parameters, no longer to the options' linear tolerance, which dropped
-  up to that length of a knot or angle span.
+  nested trim and the sweep range of a directrix on a trimmed conic or a
+  trim of a trim are read to the linear tolerance along the curve (the
+  tolerance over a certified upper bound of the carrier's speed: `1/r` of a
+  circle, `1/|d|` of a line, `1/max semi-axis` of an ellipse, the evaluator's
+  derivative bound of a B-spline, `1` of a composite's arc length), as the
+  tolerance a length is accepted to, no longer to the linear tolerance taken
+  as a parameter. Where no speed bound is known the window is read to
+  `1e-12 * max(1, |x|)`, failing closed.
 
 - A station-placed spine whose section planes fold is refused as invalid
   input, by the mesh and the exact compiler alike (#361). A section vertex

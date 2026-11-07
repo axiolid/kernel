@@ -173,7 +173,11 @@ fn resolve(
             let selected = range.unwrap_or((a, b));
             let lo = a.min(b);
             let hi = a.max(b);
-            let slack = parameter_slack(&[lo, hi, selected.0, selected.1]);
+            let slack = slack_in_parameter(
+                Some(options.tolerance().linear()),
+                relation_speed(graph, *basis, 0),
+                &[lo, hi, selected.0, selected.1],
+            );
             if selected.0.min(selected.1) < lo - slack || selected.0.max(selected.1) > hi + slack {
                 return Err(GeomError::InvalidInput(
                     "sweep range exceeds trimmed directrix".into(),
@@ -499,7 +503,14 @@ fn sample_periodic_trim(
     range: Option<(Scalar, Scalar)>,
     options: &ExecutionOptions,
 ) -> GeomResult<Resolved> {
-    let (lo, hi) = periodic_trim_interval(period, a, b, sense, range, options)?;
+    let (lo, hi) = periodic_trim_interval(
+        period,
+        a,
+        b,
+        sense,
+        range,
+        conic_slack(curve, options, a, b),
+    )?;
     let points = axiolid_reference::curve::flatten3(
         curve,
         axiolid_core::Interval { start: lo, end: hi },
@@ -510,27 +521,20 @@ fn sample_periodic_trim(
 }
 
 /// The unwrapped basis interval `[lo, hi]` of a periodic trim, narrowed to
-/// a sweep `range` when one is given (see [`sample_periodic_trim`]). The
-/// range is read to a slack relative to the parameters
-/// ([`parameter_slack`]), not to the options' linear tolerance, so the
-/// options go unread.
+/// a sweep `range` when one is given (see [`sample_periodic_trim`]), read to
+/// `slack` parameter units of its ends ([`slack_in_parameter`]).
 pub(crate) fn periodic_trim_interval(
     period: Scalar,
     a: Scalar,
     b: Scalar,
     sense: bool,
     range: Option<(Scalar, Scalar)>,
-    _options: &ExecutionOptions,
+    slack: Scalar,
 ) -> GeomResult<(Scalar, Scalar)> {
     let arc = periodic_arc(period, a, b, sense);
     match range {
         None => Ok(arc),
-        Some(range) => range_on_periodic_arc(
-            arc,
-            period,
-            range,
-            parameter_slack(&[arc.0, arc.1, range.0, range.1]),
-        ),
+        Some(range) => range_on_periodic_arc(arc, period, range, slack),
     }
 }
 
@@ -555,13 +559,94 @@ pub(crate) fn periodic_arc(period: Scalar, a: Scalar, b: Scalar, sense: bool) ->
     }
 }
 
-/// The slack within which a parameter may lie beyond the span `[lo, hi]` it
-/// is read against: relative to the parameters' magnitude, as the station
-/// measures admit a distance (`1e-12 * max(1, |x|)`), not a length: a
-/// parameter is a knot or an angle, so a linear tolerance means nothing
-/// against it.
+/// The fallback slack within which a parameter may lie beyond the span it
+/// is read against, where no speed bound of the curve is at hand: relative
+/// to the parameters' magnitude, as the station measures admit a distance
+/// (`1e-12 * max(1, |x|)`). It is as tight as a parameter can be asked to
+/// be, so it fails closed.
 pub(crate) fn parameter_slack(values: &[Scalar]) -> Scalar {
     1e-12 * values.iter().fold(1.0, |m: Scalar, v| m.max(v.abs()))
+}
+
+/// A certified upper bound of the speed `|c'|` of a 2D curve over its
+/// domain: a circle's radius, a line's direction, an ellipse's larger semi
+/// axis, else the evaluator's derivative bound; `None` where there is none.
+pub(crate) fn speed_bound2(curve: &Curve2) -> Option<Scalar> {
+    match curve {
+        Curve2::Circle(circle) => Some(circle.radius),
+        Curve2::Line(line) => Some(line.direction.length()),
+        Curve2::Ellipse(e) => Some(e.semi_axis_x.max(e.semi_axis_y)),
+        _ => {
+            let domain = axiolid_reference::curve::domain2(curve);
+            axiolid_reference::bound::curve_derivative_bounds2(curve, domain.start, domain.end)
+                .map(|bounds| bounds.first)
+        }
+    }
+}
+
+/// [`speed_bound2`] for a 3D curve.
+pub(crate) fn speed_bound3(curve: &Curve3) -> Option<Scalar> {
+    match curve {
+        Curve3::Circle(circle) => Some(circle.radius),
+        Curve3::Line(line) => Some(line.direction.length()),
+        Curve3::Ellipse(e) => Some(e.semi_axis_x.max(e.semi_axis_y)),
+        _ => {
+            let domain = axiolid_reference::curve::domain3(curve);
+            axiolid_reference::bound::curve_derivative_bounds3(curve, domain.start, domain.end)
+                .map(|bounds| bounds.first)
+        }
+    }
+}
+
+/// The slack, in parameter units, within which a parameter may lie beyond
+/// the span it is read against: the linear `tolerance` over a certified
+/// upper bound of the carrier's speed, so it is the tolerance along the
+/// curve, as an exporter's noise is. Without a tolerance (a station basis
+/// is read from the graph alone) or a speed bound it is the relative
+/// [`parameter_slack`] of `values`.
+pub(crate) fn slack_in_parameter(
+    tolerance: Option<Scalar>,
+    speed: Option<Scalar>,
+    values: &[Scalar],
+) -> Scalar {
+    match (tolerance, speed) {
+        (Some(tolerance), Some(speed)) if speed.is_finite() && speed > 0.0 => tolerance / speed,
+        _ => parameter_slack(values),
+    }
+}
+
+/// [`slack_in_parameter`] for the periodic trim of a conic `curve`.
+pub(crate) fn conic_slack(
+    curve: &Curve3,
+    options: &ExecutionOptions,
+    a: Scalar,
+    b: Scalar,
+) -> Scalar {
+    slack_in_parameter(
+        Some(options.tolerance().linear()),
+        speed_bound3(curve),
+        &[a, b],
+    )
+}
+
+/// The speed bound of the curve a directrix trim's basis `id` runs along,
+/// through trims and surface curves.
+fn relation_speed(graph: &GeometryGraph, id: NodeId, depth: usize) -> Option<Scalar> {
+    if depth > MAX_DEPTH {
+        return None;
+    }
+    match graph.get(id) {
+        Some(GeometryNode::Curve3(curve)) => speed_bound3(curve),
+        Some(GeometryNode::CurveRelation(CurveRelation::Trimmed { basis, .. })) => {
+            relation_speed(graph, *basis, depth + 1)
+        }
+        Some(GeometryNode::CurveRelation(CurveRelation::SurfaceCurve {
+            curve_3d,
+            master: MasterRepresentation::Curve3d,
+            ..
+        })) => relation_speed(graph, *curve_3d, depth + 1),
+        _ => None,
+    }
 }
 
 /// A `range` read in the parameter of a periodic arc `[lo, hi]`: each end
@@ -966,8 +1051,14 @@ fn exact_at(
                     ))
                 }
                 Curve3::Circle(circle) => {
-                    let (lo, hi) =
-                        periodic_trim_interval(TAU, a, b, *sense_agreement, range, options)?;
+                    let (lo, hi) = periodic_trim_interval(
+                        TAU,
+                        a,
+                        b,
+                        *sense_agreement,
+                        range,
+                        conic_slack(curve, options, a, b),
+                    )?;
                     Ok(ExactDirectrix::Arc(
                         *circle,
                         axiolid_core::Interval::new(lo, hi),
@@ -1098,8 +1189,14 @@ fn smooth_kind(
                 options.tolerance(),
             )?;
             if let Some(period) = period_of(curve) {
-                let (lo, hi) =
-                    periodic_trim_interval(period, a, b, *sense_agreement, range, options)?;
+                let (lo, hi) = periodic_trim_interval(
+                    period,
+                    a,
+                    b,
+                    *sense_agreement,
+                    range,
+                    conic_slack(curve, options, a, b),
+                )?;
                 DirectrixKind::Smooth(curve.clone(), axiolid_core::Interval::new(lo, hi))
             } else {
                 let (s, e) = range.unwrap_or((a, b));

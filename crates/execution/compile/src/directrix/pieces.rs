@@ -17,8 +17,8 @@ use axiolid_curve::{Circle3, Curve3};
 use axiolid_model::{CurveRelation, GeometryGraph, GeometryNode, MasterRepresentation, NodeId};
 
 use super::{
-    parameter, parameter_only, period_of, periodic_trim_interval, unsupported_curve_evaluation,
-    MAX_DEPTH,
+    conic_slack, parameter, parameter_only, period_of, periodic_trim_interval,
+    unsupported_curve_evaluation, MAX_DEPTH,
 };
 
 /// A directrix read as exact pieces.
@@ -179,8 +179,14 @@ fn resolve(
                 let Curve3::Circle(circle) = curve else {
                     return Ok(None);
                 };
-                let (lo, hi) =
-                    periodic_trim_interval(period, a, b, *sense_agreement, range, options)?;
+                let (lo, hi) = periodic_trim_interval(
+                    period,
+                    a,
+                    b,
+                    *sense_agreement,
+                    range,
+                    conic_slack(curve, options, a, b),
+                )?;
                 let out = arc(circle, lo, hi).and_then(|p| open(vec![p]));
                 return Ok(if *sense_agreement { out } else { reversed(out) });
             }

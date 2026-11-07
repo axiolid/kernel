@@ -25,12 +25,12 @@ TESTS = [
 MUTANTS = [
     # Trims of trims, offsets and placed curves.
     ('outer trim sense ignored', P, '    if !sense {\n        points.reverse();\n    }', '    if false && !sense {\n        points.reverse();\n    }', TESTS),
-    ('own span used instead of the narrowed window', T, '        Some(window) => narrowed(own, carrier.period(), window),', '        Some(_) => Ok(own),', TESTS),
-    ('selectors not read modulo the period of a trim of a conic', T, '            narrowed((lo, hi), period, (a, b))', '            narrowed((lo, hi), None, (a, b))', TESTS),
+    ('own span used instead of the narrowed window', T, '        Some(window) => narrowed(own, carrier.period(), window, slack),', '        Some(_) => Ok(own),', TESTS),
+    ('selectors not read modulo the period of a trim of a conic', T, '            narrowed((lo, hi), period, (a, b), slack)', '            narrowed((lo, hi), None, (a, b), slack)', TESTS),
     ('a trim of a closed conic loses its period', T, '            let period = inner.period();', '            let period: Option<Scalar> = None;', TESTS),
     ('window outside the trimmed curve accepted', T, '    if x < lo - slack || y > hi + slack {', '    if false && (x < lo - slack || y > hi + slack) {', TESTS),
     ('a full turn read at its seam keeps the near arc', D, '    if hi - lo >= period * (1.0 - PERIOD_SLACK) && !(s_lo && e_lo) {', '    if false && hi - lo >= period * (1.0 - PERIOD_SLACK) && !(s_lo && e_lo) {', TESTS),
-    ('parameter slack as a length', D, '    1e-12 * values.iter().fold(1.0, |m: Scalar, v| m.max(v.abs()))', '    1e-3 * values.iter().fold(1.0, |m: Scalar, v| m.max(v.abs()))', TESTS),
+    ('parameter slack as a length', D, '        (Some(tolerance), Some(speed)) if speed.is_finite() && speed > 0.0 => tolerance / speed,', '        (Some(tolerance), Some(speed)) if speed.is_finite() && speed > 0.0 => tolerance + 0.0 * speed,', TESTS),
     # Trims of composites.
     ('piece sense ignored', P, '    if piece.reversed {\n        points.reverse();\n    }', '    if false && piece.reversed {\n        points.reverse();\n    }', TESTS),
     ('cut error not in the bound', P, '        let bound = worst + gap + cut;', '        let bound = worst + gap;', TESTS),

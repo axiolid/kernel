@@ -131,7 +131,12 @@ fn interval(a: Scalar, b: Scalar) -> Carrier {
 ///
 /// A node with no parameter a trim could be read in, by name; the nesting
 /// is bounded.
-pub(crate) fn carrier(graph: &GeometryGraph, id: NodeId, depth: usize) -> GeomResult<Carrier> {
+pub(crate) fn carrier(
+    graph: &GeometryGraph,
+    id: NodeId,
+    tolerance: Option<Scalar>,
+    depth: usize,
+) -> GeomResult<Carrier> {
     if depth > MAX_DEPTH {
         return Err(GeomError::BudgetExceeded {
             resource: "relations and placements nested in a trim",
@@ -140,11 +145,17 @@ pub(crate) fn carrier(graph: &GeometryGraph, id: NodeId, depth: usize) -> GeomRe
     match graph.get(id) {
         Some(GeometryNode::Curve2(curve)) => Ok(carrier2(curve)),
         Some(GeometryNode::Curve3(curve)) => Ok(carrier3(curve)),
-        Some(GeometryNode::Instance(instance)) => carrier(graph, instance.source, depth + 1),
-        Some(GeometryNode::InstanceAtStation(at)) => carrier(graph, at.source, depth + 1),
-        Some(GeometryNode::OpenProfile(profile)) => carrier(graph, profile.path, depth + 1),
+        Some(GeometryNode::Instance(instance)) => {
+            carrier(graph, instance.source, tolerance, depth + 1)
+        }
+        Some(GeometryNode::InstanceAtStation(at)) => {
+            carrier(graph, at.source, tolerance, depth + 1)
+        }
+        Some(GeometryNode::OpenProfile(profile)) => {
+            carrier(graph, profile.path, tolerance, depth + 1)
+        }
         Some(GeometryNode::CurveRelation(CurveRelation::Offset { basis, .. })) => {
-            carrier(graph, *basis, depth + 1)
+            carrier(graph, *basis, tolerance, depth + 1)
         }
         Some(GeometryNode::CurveRelation(CurveRelation::Trimmed {
             basis,
@@ -153,7 +164,7 @@ pub(crate) fn carrier(graph: &GeometryGraph, id: NodeId, depth: usize) -> GeomRe
             sense_agreement,
             preference,
         })) => {
-            let inner = carrier(graph, *basis, depth + 1)?;
+            let inner = carrier(graph, *basis, tolerance, depth + 1)?;
             let span = span_in(
                 graph,
                 inner,
@@ -161,6 +172,8 @@ pub(crate) fn carrier(graph: &GeometryGraph, id: NodeId, depth: usize) -> GeomRe
                 (start, end),
                 (*sense_agreement, *preference),
                 None,
+                tolerance,
+                depth + 1,
             )?;
             let period = inner.period();
             Ok(Carrier::Interval {
@@ -210,12 +223,34 @@ pub(crate) fn composite_basis(graph: &GeometryGraph, id: NodeId) -> GeomResult<C
     Ok(basis)
 }
 
+/// A certified upper bound of the speed of the curve `id` is the parameter
+/// of: its own for an atomic curve, its basis's for a trim, `1` for a
+/// composite (its parameter is arc length); `None` where none is known (an
+/// offset, a placed curve).
+fn carrier_speed(graph: &GeometryGraph, id: NodeId, depth: usize) -> Option<Scalar> {
+    if depth > MAX_DEPTH {
+        return None;
+    }
+    match graph.get(id) {
+        Some(GeometryNode::Curve2(curve)) => crate::directrix::speed_bound2(curve),
+        Some(GeometryNode::Curve3(curve)) => crate::directrix::speed_bound3(curve),
+        Some(GeometryNode::OpenProfile(profile)) => carrier_speed(graph, profile.path, depth + 1),
+        Some(GeometryNode::CurveRelation(CurveRelation::Trimmed { basis, .. })) => {
+            carrier_speed(graph, *basis, depth + 1)
+        }
+        Some(GeometryNode::CurveRelation(CurveRelation::Composite { .. })) => Some(1.0),
+        _ => None,
+    }
+}
+
 /// The span `[lo, hi]` of its basis's parameter a trim of `basis` keeps,
 /// narrowed to the `incoming` window of a trim above it, when one is given.
 ///
 /// The basis's own curve reads its selectors as a station basis does
 /// ([`super::trim_parameters`]: a parameter, an arc length or a point); any
-/// other basis reads a parameter selector in its carrier.
+/// other basis reads a parameter selector in its carrier. A parameter may
+/// lie past the carrier's span by the linear `tolerance` along the curve
+/// (`None`: by the relative [`crate::directrix::parameter_slack`]).
 ///
 /// # Errors
 ///
@@ -228,13 +263,17 @@ pub(crate) fn trimmed_span(
     selectors: (&[TrimSelector], &[TrimSelector]),
     sense: (bool, TrimmingPreference),
     incoming: Option<(Scalar, Scalar)>,
+    tolerance: Option<Scalar>,
     depth: usize,
 ) -> GeomResult<(Scalar, Scalar)> {
-    let inner = carrier(graph, basis, depth)?;
-    span_in(graph, inner, basis, selectors, sense, incoming)
+    let inner = carrier(graph, basis, tolerance, depth)?;
+    span_in(
+        graph, inner, basis, selectors, sense, incoming, tolerance, depth,
+    )
 }
 
 /// [`trimmed_span`] over the `carrier` of the basis, read once.
+#[allow(clippy::too_many_arguments)]
 fn span_in(
     graph: &GeometryGraph,
     carrier: Carrier,
@@ -242,7 +281,17 @@ fn span_in(
     (start, end): (&[TrimSelector], &[TrimSelector]),
     (sense, preference): (bool, TrimmingPreference),
     incoming: Option<(Scalar, Scalar)>,
+    tolerance: Option<Scalar>,
+    depth: usize,
 ) -> GeomResult<(Scalar, Scalar)> {
+    // The slack a parameter may lie past the carrier's span by: the linear
+    // tolerance along the curve, when there is one and a speed bound.
+    let slack = match (tolerance, carrier_speed(graph, basis, depth)) {
+        (Some(tolerance), Some(speed)) if speed.is_finite() && speed > 0.0 => {
+            Some(tolerance / speed)
+        }
+        _ => None,
+    };
     let own = match graph.get(basis) {
         Some(GeometryNode::Curve2(curve)) => {
             super::trim_parameters(StationCurve::Two(curve), start, end, sense, preference)?
@@ -253,12 +302,12 @@ fn span_in(
         _ => {
             let a = relation_parameter(start, preference)?;
             let b = relation_parameter(end, preference)?;
-            cut(carrier, (a, b), sense)?
+            cut(carrier, (a, b), sense, slack)?
         }
     };
     match incoming {
         None => Ok(own),
-        Some(window) => narrowed(own, carrier.period(), window),
+        Some(window) => narrowed(own, carrier.period(), window, slack),
     }
 }
 
@@ -290,7 +339,12 @@ fn relation_parameter(
 
 /// The span `[lo, hi]` a trim between parameters `a` and `b` of a relation
 /// keeps, in the sense it runs by.
-fn cut(carrier: Carrier, (a, b): (Scalar, Scalar), sense: bool) -> GeomResult<(Scalar, Scalar)> {
+fn cut(
+    carrier: Carrier,
+    (a, b): (Scalar, Scalar),
+    sense: bool,
+    slack: Option<Scalar>,
+) -> GeomResult<(Scalar, Scalar)> {
     if a == b {
         return Err(GeomError::Degenerate(
             "a trimmed curve has an empty parameter interval".into(),
@@ -308,15 +362,15 @@ fn cut(carrier: Carrier, (a, b): (Scalar, Scalar), sense: bool) -> GeomResult<(S
             if closed && (b > a) != sense {
                 return Err(unsupported(TRIM_ACROSS_CLOSING_JOINT));
             }
-            narrowed((lo, hi), period, (a, b))
+            narrowed((lo, hi), period, (a, b), slack)
         }
     }
 }
 
 /// The part of the span `(lo, hi)` the `window` names: its ends read modulo
-/// `period` into the span where the carrier repeats, within a slack relative
-/// to the parameters ([`crate::directrix::parameter_slack`]) of the span's
-/// ends otherwise.
+/// `period` into the span where the carrier repeats, within `slack` of the
+/// span's ends otherwise (`None`: the relative
+/// [`crate::directrix::parameter_slack`]).
 ///
 /// # Errors
 ///
@@ -325,8 +379,9 @@ pub(crate) fn narrowed(
     (lo, hi): (Scalar, Scalar),
     period: Option<Scalar>,
     (a, b): (Scalar, Scalar),
+    slack: Option<Scalar>,
 ) -> GeomResult<(Scalar, Scalar)> {
-    let slack = crate::directrix::parameter_slack(&[lo, hi, a, b]);
+    let slack = slack.unwrap_or_else(|| crate::directrix::parameter_slack(&[lo, hi, a, b]));
     if let Some(period) = period {
         return crate::directrix::range_on_periodic_arc((lo, hi), period, (a, b), slack).map_err(
             |error| match error {

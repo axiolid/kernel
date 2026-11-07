@@ -33,7 +33,7 @@
 //! one per span between seams (an offset by stations also split at its
 //! stations), measured in its own length.
 
-use axiolid_contracts::{ExecutionOptions, GeomError, GeomResult, Operation};
+use axiolid_contracts::{GeomError, GeomResult, Operation};
 use axiolid_core::{Scalar, Tolerance, Transform3};
 use axiolid_curve::{Curve2, Curve3, CurvePath, OffsetFrame, OffsetLaw, PathOffsets, PathPiece};
 use axiolid_model::{
@@ -431,6 +431,7 @@ fn flatten_in<'g>(
                     (start, end),
                     (*sense_agreement, *preference),
                     window,
+                    None,
                     depth + 1,
                 )?)
             } else {
@@ -687,7 +688,7 @@ pub(crate) fn trim_parameters(
             b,
             sense,
             None,
-            &ExecutionOptions::new(tolerance),
+            crate::directrix::parameter_slack(&[a, b]),
         );
     }
     Ok((a.min(b), a.max(b)))

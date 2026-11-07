@@ -38,9 +38,14 @@ Three readers of the same relation each had a rule of their own:
 
 A trim of a relation keeps a span of that parameter. Where the carrier is a
 closed conic or a trim of one the selectors are read modulo the period into
-the inner trim's arc; elsewhere they must lie within the inner span, to a slack relative to the
-parameters, `1e-12 * max(1, |x|)` as the station measures admit a distance
-(a linear tolerance means nothing against a knot or an angle). A full turn
+the inner trim's arc; elsewhere they must lie within the inner span, to the linear tolerance
+along the curve: the tolerance over a certified upper bound of the carrier's
+speed, in parameter units (`1/r` of a circle, `1/|d|` of a line, the larger
+semi-axis of an ellipse, the evaluator's derivative bound of a B-spline, `1`
+for a composite's arc length), so exporter noise passes as it does along
+the curve. Where no bound is known, and in a station basis, which has no
+options, the slack is `1e-12 * max(1, |x|)`, as the station measures admit a
+distance. A full turn
 ends where it starts: an end that lands on its start is its end when it is the
 larger one asked, so `[pi, 2 pi]` of a full turn is its far half.
 Only parameter selectors are read on a relation. The outer trim's sense
