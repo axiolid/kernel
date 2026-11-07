@@ -64,6 +64,7 @@ use crate::broad::Broad;
 use crate::caps::Cap;
 use crate::decide::decide;
 use crate::edges::Tri;
+use crate::groups::resolve_groups;
 use crate::occlusion::{kept_constraints, Scene};
 use crate::prepare::Prepared;
 use crate::recipe::{Constraint, ValueSign};
@@ -116,10 +117,8 @@ impl<'a> Faces<'a> {
         let mut mesh_of = Vec::with_capacity(tris.len());
         let mut group_of = Vec::with_capacity(tris.len());
         for (index, (entry, range)) in meshes.iter().zip(&prepared.ranges).enumerate() {
-            for t in range.triangles.clone() {
-                mesh_of.push(index);
-                group_of.push(entry.groups.of(t - range.triangles.start));
-            }
+            mesh_of.resize(mesh_of.len() + range.triangles.len(), index);
+            group_of.extend(resolve_groups(entry, options, &mut work.escalations)?);
         }
         let mut faces = Self {
             verts,

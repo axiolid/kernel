@@ -44,7 +44,7 @@ use crate::{HiddenLineError, HiddenLineMesh, HiddenLineSource, MeshId, Orthograp
 /// Caller-chosen id of a set of triangles that share one surface pattern.
 ///
 /// A material id and a planar face are both encodings the caller picks; the
-/// kernel does not infer planes.
+/// kernel infers planes only on request, as [`FaceGroups::Planar`].
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub struct FaceGroup(pub u32);
 
@@ -56,6 +56,16 @@ pub enum FaceGroups<'a> {
     Single,
     /// One id per triangle; the length equals the triangle count.
     PerTriangle(&'a [FaceGroup]),
+    /// The planar patches of the mesh (ADR 0106). Two triangles are in one
+    /// group when a chain of triangles joins them in which every two
+    /// consecutive triangles share an edge that has exactly these two
+    /// triangles and whose model-space normals are parallel and point the
+    /// same way. Parallel and same-facing is decided exactly as
+    /// `n1 × n2 = 0` in all three components and `n1 · n2 > 0`; no tolerance
+    /// enters. A group's id is `FaceGroup(i)` for the smallest triangle
+    /// index `i` in it, so it does not depend on the view or on the winding
+    /// of the whole mesh. Providers resolve the groups before use.
+    Planar,
 }
 
 impl FaceGroups<'_> {
@@ -64,11 +74,13 @@ impl FaceGroups<'_> {
     /// # Panics
     ///
     /// Panics for `PerTriangle` when `triangle` is out of range; providers
-    /// check the length first.
+    /// check the length first. Panics for `Planar`, whose groups depend on
+    /// the geometry; providers resolve it first.
     pub fn of(&self, triangle: usize) -> FaceGroup {
         match self {
             Self::Single => FaceGroup(0),
             Self::PerTriangle(groups) => groups[triangle],
+            Self::Planar => panic!("planar face groups are resolved from the mesh"),
         }
     }
 }
@@ -345,6 +357,9 @@ impl VisibleFaceOutcome {
 ///   and a `PerTriangle` group slice whose length differs from the triangle
 ///   count is `InvalidInput` naming the mesh; no substitute result is
 ///   returned;
+/// - [`FaceGroups::Planar`] is resolved by the provider as documented there,
+///   exactly, with polled cancellation and a memory-budget refusal, and the
+///   result equals the `PerTriangle` request with the resolved groups;
 /// - output storage is outside the scratch budget.
 pub trait MeshVisibleFaces: Backend {
     /// Scratch needed beyond inputs and result.
@@ -394,6 +409,19 @@ mod tests {
         let ids = [FaceGroup(3)];
         let m = m.with_groups(&ids);
         assert_eq!(m.groups, FaceGroups::PerTriangle(&ids));
+    }
+
+    #[test]
+    fn with_planar_groups_replaces_the_groups() {
+        let mesh = TriMesh::default();
+        let m = HiddenLineMesh::new(MeshId(1), MeshRole::Sheet, &mesh).with_planar_groups();
+        assert_eq!(m.groups, FaceGroups::Planar);
+    }
+
+    #[test]
+    #[should_panic(expected = "planar face groups")]
+    fn planar_groups_are_not_indexable() {
+        let _ = FaceGroups::Planar.of(0);
     }
 
     #[test]

@@ -9,6 +9,12 @@ caret rule for `0.x` versions.
 
 ## [Unreleased]
 
+### Added
+
+- `MeshVisibleFacesRegistry` accepts `FaceGroups::Planar`: it checks that a
+  region's group id is a triangle of the mesh and no later than any triangle
+  the region lists, and does not recompute the groups (ADR 0106, #384).
+
 ## [0.3.12] - 2026-11-03
 
 ### Added

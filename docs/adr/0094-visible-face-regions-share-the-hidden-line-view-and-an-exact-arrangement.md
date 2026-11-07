@@ -5,6 +5,7 @@
 - **Deciders:** Friedrich Schrödter
 - **Supersedes:** —
 - **Amended by:** [0100](./0100-exact-arrangements-are-snap-rounded-to-the-binary64-grid.md): the regions are snap-rounded, and a region that collapses under rounding is counted, not refused.
+- **Amended by:** [0106](./0106-planar-face-groups-are-derived-exactly-and-group-boundaries-are-drawn.md): `FaceGroups::Planar` derives the groups exactly.
 - **Amends:** [0090](./0090-mesh-hidden-line-drawings.md), [0093](./0093-mesh-sections-merge-in-plane-faces-on-an-exact-arrangement.md)
 
 ## Context

@@ -278,11 +278,19 @@ fn validate_outcome(
         }
         match region.source {
             FaceSource::Group(group) => {
-                if region
-                    .triangles
-                    .iter()
-                    .any(|&t| entry.groups.of(t as usize) != group)
-                {
+                // A planar group depends on the geometry, which the registry
+                // does not recompute: it checks the structure only. The id
+                // is the smallest triangle of the group, so it is a triangle
+                // of the mesh and no later than any triangle it lists.
+                let outside = if entry.groups == FaceGroups::Planar {
+                    group.0 as usize >= count || region.triangles.iter().any(|&t| group.0 > t)
+                } else {
+                    region
+                        .triangles
+                        .iter()
+                        .any(|&t| entry.groups.of(t as usize) != group)
+                };
+                if outside {
                     return Err(violation("region triangle is not in the region's group"));
                 }
             }

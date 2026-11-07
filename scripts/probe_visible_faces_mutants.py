@@ -19,6 +19,7 @@ PTS = "crates/algorithms/planar/exact-arrangement/src/points.rs"
 ARR = "crates/algorithms/planar/exact-arrangement/src/arrangement.rs"
 PRE = "crates/algorithms/discrete/hidden-lines/src/prepare.rs"
 PRO = FAC + "provider.rs"
+GRP = "crates/algorithms/discrete/hidden-lines/src/groups.rs"
 ARR_TESTS = ["-p", "axiolid-exact-arrangement"]
 TESTS = ["-p", "axiolid-hidden-lines"]
 
@@ -75,8 +76,8 @@ MUTANTS = [
      '        match (round_ratio(x, w), round_ratio(y, w)) {',
      '        match (Some(x.to_f64() / w.to_f64()), Some(y.to_f64() / w.to_f64())) {', TESTS),
     ('the group is ignored', MOD,
-     '                group_of.push(entry.groups.of(t - range.triangles.start));',
-     '                group_of.push(FaceGroup(0));', TESTS),
+     '            group_of.extend(resolve_groups(entry, options, &mut work.escalations)?);',
+     '            group_of.extend(vec![FaceGroup(0); range.triangles.len()]);', TESTS),
     ('floating components not attributed', REG,
      '                    let placed = place(points, &outlines, at, work).map_err(blame)?;',
      '                    let _ = at;\n                    let placed = 0;', TESTS),
@@ -115,6 +116,19 @@ MUTANTS = [
     ('the collapsed counts are not copied to the evidence', PRO,
      '    evidence.collapsed_regions = built.collapsed_regions;',
      '', TESTS),
+    # Planar face groups (#384, ADR 0106).
+    ('planar groups ignore the facing test', GRP,
+     '    Ok(decide(&dot, escalations)? == Ordering::Greater)',
+     '    Ok(decide(&dot, escalations)? != Ordering::Less || true)', TESTS),
+    ('planar groups join across every interior edge', GRP,
+     '            || !same_plane_and_facing(&points(t1), &points(t2), escalations).map_err(refuse)?',
+     '            || false && !same_plane_and_facing(&points(t1), &points(t2), escalations).map_err(refuse)?', TESTS),
+    ('planar group id is the largest triangle', GRP,
+     '        parent[r1.max(r2) as usize] = r1.min(r2);',
+     '        parent[r1.min(r2) as usize] = r1.max(r2);', TESTS),
+    ('planar groups never join', GRP,
+     '        if t1 == t2\n',
+     '        if true\n            || t1 == t2\n', TESTS),
     # What is refused.
     ('mesh limit unchecked', PRO,
      '            max_meshes: limits.max_meshes,',

@@ -47,7 +47,7 @@ pub(crate) struct DrawEdge {
 }
 
 /// `(b - a) × (c - a)` in model space, in arithmetic `T`.
-fn normal<T: Arith>(p: &[Point3; 3]) -> [T; 3] {
+pub(crate) fn normal<T: Arith>(p: &[Point3; 3]) -> [T; 3] {
     let d = |i: usize, j: usize| {
         let (to, from) = (p[i].to_array(), p[j].to_array());
         [0, 1, 2].map(|k| T::from_f64(to[k]).sub(&T::from_f64(from[k])))
@@ -255,6 +255,6 @@ pub(crate) fn collect(
     Ok(())
 }
 
-fn triangle_points(mesh: &TriMesh, corner: &[u32]) -> [Point3; 3] {
+pub(crate) fn triangle_points(mesh: &TriMesh, corner: &[u32]) -> [Point3; 3] {
     [0, 1, 2].map(|k| mesh.positions[corner[k] as usize])
 }

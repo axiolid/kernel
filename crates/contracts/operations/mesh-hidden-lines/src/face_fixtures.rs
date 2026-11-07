@@ -23,12 +23,15 @@ use crate::{
 };
 
 /// One mesh of a scene. An empty `groups` means every triangle is in
-/// `FaceGroup(0)`.
+/// `FaceGroup(0)`. A `planar` fixture is requested with
+/// `FaceGroups::Planar`; its `groups` are then the groups that request must
+/// resolve to, used by the checks and not sent.
 pub(crate) struct FaceFixture {
     pub id: MeshId,
     pub role: MeshRole,
     pub mesh: TriMesh,
     pub groups: Vec<FaceGroup>,
+    pub planar: bool,
 }
 
 impl FaceFixture {
@@ -38,7 +41,15 @@ impl FaceFixture {
             role,
             mesh,
             groups: Vec::new(),
+            planar: false,
         }
+    }
+
+    /// Request planar groups, which resolve to `resolved`.
+    fn planar(mut self, resolved: &[u32]) -> Self {
+        self.groups = resolved.iter().map(|&g| FaceGroup(g)).collect();
+        self.planar = true;
+        self
     }
 
     fn uniform(mut self, group: u32) -> Self {
@@ -471,6 +482,65 @@ fn two_groups_on_one_face() -> FaceCase {
     )
 }
 
+/// Two unit squares side by side, as a sheet of four triangles in one plane,
+/// requested with planar groups: one group, one region without the interior
+/// vertices `(1,0)` and `(1,1)`.
+fn flat_sheet_is_one_planar_group() -> FaceCase {
+    let mesh = TriMesh::new(
+        vec![
+            Point3::new(0.0, 0.0, 0.0),
+            Point3::new(1.0, 0.0, 0.0),
+            Point3::new(2.0, 0.0, 0.0),
+            Point3::new(0.0, 1.0, 0.0),
+            Point3::new(1.0, 1.0, 0.0),
+            Point3::new(2.0, 1.0, 0.0),
+        ],
+        vec![0, 1, 4, 0, 4, 3, 1, 2, 5, 1, 5, 4],
+    );
+    case(
+        "flat_sheet_is_one_planar_group",
+        vec![sheet(1, mesh).planar(&[0; 4])],
+        plan(),
+        vec![group(
+            1,
+            0,
+            &[[0.0, 0.0], [2.0, 0.0], [2.0, 1.0], [0.0, 1.0]],
+            &[0, 1, 2, 3],
+        )],
+    )
+}
+
+/// A fold: triangle 0 faces `+z` and triangle 1 faces `-z` over the same
+/// edge, so their normals are parallel but not same-facing and planar groups
+/// keep them apart. Seen from above they tie in depth over triangle 1, so
+/// each keeps its area; the vertex `(0.5, 0.5)` of triangle 1 stays on the
+/// hypotenuse of triangle 0.
+fn fold_is_two_planar_groups() -> FaceCase {
+    let mesh = TriMesh::new(
+        vec![
+            Point3::new(0.0, 0.0, 0.0),
+            Point3::new(1.0, 0.0, 0.0),
+            Point3::new(0.0, 1.0, 0.0),
+            Point3::new(0.5, 0.5, 0.0),
+        ],
+        vec![0, 1, 2, 1, 0, 3],
+    );
+    case(
+        "fold_is_two_planar_groups",
+        vec![sheet(1, mesh).planar(&[0, 1])],
+        plan(),
+        vec![
+            group(
+                1,
+                0,
+                &[[0.0, 0.0], [1.0, 0.0], [0.5, 0.5], [0.0, 1.0]],
+                &[0],
+            ),
+            group(1, 1, &[[0.0, 0.0], [1.0, 0.0], [0.5, 0.5]], &[1]),
+        ],
+    )
+}
+
 /// The box-over-slab scene cropped to `[1.5,3]^2`. F is cut to its corner
 /// square `[1.5,2]^2` and B's top to the L around it.
 fn crop() -> FaceCase {
@@ -580,6 +650,8 @@ pub(crate) fn cases() -> Vec<FaceCase> {
         coplanar_tie(),
         edge_on_wall_between_floors(),
         two_groups_on_one_face(),
+        flat_sheet_is_one_planar_group(),
+        fold_is_two_planar_groups(),
         crop(),
         far_clip(),
         floating_cluster(),
@@ -595,18 +667,35 @@ pub(crate) fn area_cases() -> Vec<AreaCase> {
     cube.groups = (0..6u32)
         .flat_map(|face| [FaceGroup(face), FaceGroup(face)])
         .collect();
+    // The same cube with planar groups: each face is named by its smaller
+    // triangle, so face k is group 2k.
+    let planar =
+        solid(1, box_mesh([0.0; 3], [1.0; 3])).planar(&[0, 0, 2, 2, 4, 4, 6, 6, 8, 8, 10, 10]);
     let face = 1.0 / 3.0_f64.sqrt();
-    vec![AreaCase {
-        name: "isometric_cube",
-        meshes: vec![cube],
-        view: OrthographicView::new(isometric_frame(Point3::ZERO)),
-        limits: limits(),
-        areas: vec![
-            (MeshId(1), FaceSource::Group(FaceGroup(1)), face),
-            (MeshId(1), FaceSource::Group(FaceGroup(3)), face),
-            (MeshId(1), FaceSource::Group(FaceGroup(4)), face),
-        ],
-    }]
+    vec![
+        AreaCase {
+            name: "isometric_cube",
+            meshes: vec![cube],
+            view: OrthographicView::new(isometric_frame(Point3::ZERO)),
+            limits: limits(),
+            areas: vec![
+                (MeshId(1), FaceSource::Group(FaceGroup(1)), face),
+                (MeshId(1), FaceSource::Group(FaceGroup(3)), face),
+                (MeshId(1), FaceSource::Group(FaceGroup(4)), face),
+            ],
+        },
+        AreaCase {
+            name: "isometric_cube_planar",
+            meshes: vec![planar],
+            view: OrthographicView::new(isometric_frame(Point3::ZERO)),
+            limits: limits(),
+            areas: vec![
+                (MeshId(1), FaceSource::Group(FaceGroup(2)), face),
+                (MeshId(1), FaceSource::Group(FaceGroup(6)), face),
+                (MeshId(1), FaceSource::Group(FaceGroup(8)), face),
+            ],
+        },
+    ]
 }
 
 fn refusal_of(
@@ -875,6 +964,16 @@ mod tests {
         // Right (x = 1) is 6 and 7, back (y = 1) is 8 and 9.
         assert_eq!(case.meshes[0].group(6), FaceGroup(3));
         assert_eq!(case.meshes[0].group(8), FaceGroup(4));
+    }
+
+    #[test]
+    fn the_planar_cube_relabels_each_face_by_its_smaller_triangle() {
+        let planar = &area_cases()[1].meshes[0];
+        let named = &area_cases()[0].meshes[0];
+        assert!(planar.planar && !named.planar);
+        for t in 0..12 {
+            assert_eq!(planar.group(t).0, 2 * named.group(t).0, "triangle {t}");
+        }
     }
 
     #[test]

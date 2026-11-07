@@ -977,3 +977,47 @@ fn a_refusal_naming_a_mesh_outside_the_request_is_a_contract_violation() {
     assert_eq!(error.mesh, None);
     assert_eq!(calls_of(&calls), 1);
 }
+
+/// A planar group is geometry the registry does not recompute: it checks the
+/// structure, an id that is a triangle of the mesh and no later than any
+/// triangle the region lists (the id is the group's smallest triangle).
+#[test]
+fn a_planar_group_is_checked_for_structure_only() {
+    let a = cube();
+    let meshes = [mesh(1, MeshRole::Solid, &a).with_planar_groups()];
+    let request = VisibleFaceRequest::new(&meshes, view(), limits());
+    let accepted: [(&str, Behaviour); 2] = [
+        ("the id is the listed triangle", |_, o| {
+            o.regions[0].source = FaceSource::Group(FaceGroup(2));
+            Ok(())
+        }),
+        ("the id is before the listed triangle", |_, o| {
+            o.regions[0].source = FaceSource::Group(FaceGroup(0));
+            Ok(())
+        }),
+    ];
+    for (name, behaviour) in accepted {
+        let calls = counter();
+        registry(&calls, behaviour)
+            .visible_faces(&request, &options())
+            .expect(name);
+    }
+    let refused: [(&str, Behaviour); 3] = [
+        ("the id is after the listed triangle", |_, o| {
+            o.regions[0].source = FaceSource::Group(FaceGroup(3));
+            Ok(())
+        }),
+        ("the id is not a triangle", |_, o| {
+            o.regions[0].source = FaceSource::Group(FaceGroup(12));
+            o.regions[0].triangles.clear();
+            Ok(())
+        }),
+        ("the id is not a triangle and one is listed", |_, o| {
+            o.regions[0].source = FaceSource::Group(FaceGroup(40));
+            Ok(())
+        }),
+    ];
+    for (name, behaviour) in refused {
+        assert_violation(&request, behaviour, name);
+    }
+}

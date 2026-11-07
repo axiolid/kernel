@@ -322,7 +322,9 @@ fn answer(
         .iter()
         .map(|f| {
             let mesh = HiddenLineMesh::new(f.id, f.role, &f.mesh);
-            if f.groups.is_empty() {
+            if f.planar {
+                mesh.with_planar_groups()
+            } else if f.groups.is_empty() {
                 mesh
             } else {
                 mesh.with_groups(&f.groups)
@@ -361,6 +363,7 @@ fn check_orientation(
             role: f.role,
             mesh: reversed(&f.mesh),
             groups: f.groups.clone(),
+            planar: f.planar,
         })
         .collect();
     match answer(provider, &flipped, scene.view, region, limits, options) {
@@ -798,7 +801,7 @@ mod tests {
             .count();
         assert_eq!(missing, REFUSAL_CASES.len(), "{report}");
         assert_eq!(regions, cases, "{report}");
-        assert_eq!(areas, 3, "{report}");
+        assert_eq!(areas, 6, "{report}");
     }
 
     /// Returns the expected regions of one exact case, whatever it is asked,

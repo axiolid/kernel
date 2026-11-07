@@ -59,6 +59,12 @@ impl<'a> HiddenLineMesh<'a> {
         self.groups = FaceGroups::PerTriangle(groups);
         self
     }
+
+    /// Group the triangles into planar patches ([`FaceGroups::Planar`]).
+    pub const fn with_planar_groups(mut self) -> Self {
+        self.groups = FaceGroups::Planar;
+        self
+    }
 }
 
 /// An orthographic view.

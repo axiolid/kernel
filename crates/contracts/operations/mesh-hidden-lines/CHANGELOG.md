@@ -9,6 +9,14 @@ caret rule for `0.x` versions.
 
 ## [Unreleased]
 
+### Added
+
+- `FaceGroups::Planar` and `HiddenLineMesh::with_planar_groups`: the groups are
+  the edge-connected components of triangles joined across an edge of exactly
+  two triangles with parallel, same-facing normals, decided exactly, each named
+  by its smallest triangle (ADR 0106, #384). Conformance gains the planar
+  isometric cube, a flat sheet and a fold.
+
 ## [0.1.4] - 2026-11-07
 
 ### Added
