@@ -77,6 +77,17 @@ Latest release, 0.3.29 (2026-11-03):
 
 ### Added
 
+- `revolve_profile_exact` and `revolve_arc_ring` revolve a full turn of a
+  profile that touches the axis along edges lying on it and at straight
+  edges ending on it exactly perpendicularly: a solid cylinder, a stepped
+  shaft (#379, step 1). An axis edge sweeps no face and a perpendicular edge
+  sweeps a disc cap. The contact is classified with the exact `side_of_axis`
+  sign, no tolerance. A section crossing the axis, touching it at an
+  isolated vertex (cone apex) or ending on it at an arc or an oblique edge
+  (sphere and cone poles) stays `UnsupportedInput`, naming `TODO(#379)`
+  steps 2 and 3; so does a vertex within the tolerance of the axis but not
+  on it, and the crossing refusal now says "crossing the axis" only.
+
 - `ExactProfileValidator::validate_with` and `validate_contours_with` take
   `ArcCheckOptions`; with a clearance, segments of the lowered contour whose
   distance has a local minimum below it away from their meeting points, or
@@ -105,6 +116,11 @@ Latest release, 0.3.29 (2026-11-03):
   (#389).
 
 ### Fixed
+
+- `revolve_arc_ring` mirrored a section on the negative side of the axis
+  without walking it backwards, so its walls faced inward and its signed
+  volume was negative; the mirrored section is now walked the other way
+  round (#379).
 
 - `extrude_profile_exact` ran no profile check and built a solid from a
   contour with a self-contact (a chord crossing an arc, a bow tie, a pinch),

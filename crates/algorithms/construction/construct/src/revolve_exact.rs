@@ -23,10 +23,17 @@
 //! A turn beyond a full turn sweeps through itself and is refused by name;
 //! a zero or non-finite angle is invalid input.
 //!
-//! A FULL turn of a profile touching or crossing the axis degenerates: the
-//! inner wall collapses to the axis line and the caps stop being annuli.
-//! Refused for the same reason. A partial turn crossing the axis sweeps
-//! through itself and is refused too.
+//! A FULL turn of a profile crossing the axis sweeps through itself and is
+//! refused, as is a partial turn crossing it.
+//!
+//! A FULL turn of a profile touching the axis (#379) is exact when its
+//! contact is only edges lying on the axis, which sweep no face, and straight
+//! edges ending on it exactly perpendicularly, which sweep disc caps: a solid
+//! cylinder, a stepped shaft. The contact is classified with the exact
+//! `side_of_axis` sign, no tolerance. A vertex on the axis where the profile
+//! meets it at a point (a cone apex, `TODO(#379)` step 2) or where an arc or
+//! an oblique edge ends (a sphere or cone pole, `TODO(#379)` step 3) is
+//! refused by name until the degenerate vertex is modelled.
 //!
 //! The mesh path in `revolve.rs` handles all of these. Refusing here means a
 //! caller asking for exactness gets a typed refusal naming the gap instead of
@@ -63,7 +70,8 @@ fn unsupported(input: &'static str) -> GeomError {
 /// `axis_direction`.
 ///
 /// A full turn (`|angle|` within tolerance of `2 pi`) revolves every profile
-/// that lowers to a contour, provided it does not touch the axis: a sharp
+/// that lowers to a contour, provided it does not cross the axis and touches
+/// it only along edges or at perpendicular edge ends (#379): a sharp
 /// rectangle becomes an annular tube of two cylinders and two annular caps,
 /// a hole becomes a void shell. A partial turn (`0 < |angle| < 2 pi`)
 /// revolves the same profiles into a solid capped by the profile at both
@@ -71,7 +79,8 @@ fn unsupported(input: &'static str) -> GeomError {
 /// straight segments (see [`crate::revolve_partial`]).
 ///
 /// Refused by name: an ellipse, a turn beyond a full turn, a profile crossing
-/// the axis, an arc whose circle reaches the axis. A zero or non-finite angle
+/// the axis, one touching it at an isolated vertex or at an oblique or arc
+/// edge end (`TODO(#379)` steps 2 and 3), an arc whose circle reaches the axis. A zero or non-finite angle
 /// is invalid input.
 pub fn revolve_profile_exact(
     profile: &Profile,
@@ -185,9 +194,26 @@ fn revolve_rectangle(
     // Straddling the axis means the swept solid is not an annulus: the inner
     // wall collapses onto the axis and the caps stop being annuli. That is a
     // different topology, so refuse rather than emit a degenerate cylinder.
-    if left * right < 0.0 || left.abs() <= tolerance.linear() || right.abs() <= tolerance.linear() {
+    // An edge exactly on the axis is a solid cylinder, which the contour path
+    // builds (#379); crossing it, or lying within the tolerance of it without
+    // touching it, is refused there and here.
+    if left == 0.0 || right == 0.0 {
+        return revolve_via_contour(
+            &Profile::Rectangle(*rectangle),
+            axis_origin,
+            axis_direction,
+            None,
+            tolerance,
+        );
+    }
+    if left * right < 0.0 {
         return Err(unsupported(
-            "exact revolution of a profile touching or crossing the axis",
+            "exact revolution of a section crossing the axis",
+        ));
+    }
+    if left.abs() <= tolerance.linear() || right.abs() <= tolerance.linear() {
+        return Err(unsupported(
+            "exact revolution of a section within tolerance of the axis but not on it",
         ));
     }
     let inner = left.abs().min(right.abs());

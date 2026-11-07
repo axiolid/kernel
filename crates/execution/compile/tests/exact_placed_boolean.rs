@@ -695,18 +695,18 @@ fn a_solid_placed_at_a_station_is_cut_exactly() {
 
 #[test]
 fn a_tool_the_exact_compiler_refuses_is_refused_by_name() {
-    // A solid cylinder turned from a rectangle on the axis degenerates.
+    // A rectangle straddling the axis sweeps through itself.
     let mut g = Graph::new();
     let wall = g.wall(building());
     let solid = g.revolution(
         rect(0.4, 0.15),
-        Point3::new(-0.2, 0.0, 0.0),
+        Point3::new(-0.1, 0.0, 0.0),
         Vec3::Y,
         2.0 * PI,
     );
     let solid = g.instance(solid, building());
     let cut = g.minus(wall, solid);
-    named(&refusal(g, cut), "touching or crossing the axis");
+    named(&refusal(g, cut), "crossing the axis");
     // A tapered revolution is not compiled exactly.
     let mut g = Graph::new();
     let wall = g.wall(building());

@@ -37,9 +37,11 @@ use axiolid_topology::{
     Vertex, VertexId,
 };
 
+use axiolid_guarantees::Sign;
 use axiolid_overlay::ArcRing;
 
 use crate::contour_lower::arc_ring_signed_area;
+use crate::revolve::side_of_axis;
 use crate::BACKEND_ID;
 
 const TAU: Scalar = core::f64::consts::TAU;
@@ -61,12 +63,34 @@ struct Station {
     height: Scalar,
     /// Bulge of the segment LEAVING this station.
     bulge: Scalar,
+    /// Exactly on the axis (#379): the exact `side_of_axis` sign is zero.
+    on_axis: bool,
+}
+
+/// What a section edge sweeps when one of its ends may lie on the axis.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum Contact {
+    /// Both ends on the axis, straight: sweeps nothing, so no face.
+    Axis,
+    /// One end on the axis, straight and exactly perpendicular to it: a disc.
+    Cap,
+    /// Anything else with an end on the axis: an arc, or a straight edge
+    /// that meets the axis obliquely (a cone apex or a pole).
+    Other,
 }
 /// Revolve a lowered section a full turn about the profile's local y axis.
 ///
-/// The section must lie entirely on one side of the axis: a section touching
-/// or crossing it produces a solid whose walls collapse onto the axis, which
-/// is a different topology rather than a degenerate case of this one.
+/// The section may touch the axis (#379), classified with the exact
+/// `side_of_axis` sign, no tolerance: an edge lying on the axis sweeps no
+/// face, and a straight edge ending on it exactly perpendicularly (equal
+/// heights) sweeps a disc cap, so a solid cylinder and a stepped shaft
+/// revolve. A section with vertices on both sides of the axis is refused as
+/// crossing it. A vertex on the axis that meets it at a point (a cone apex,
+/// `TODO(#379)` step 2) or where an arc or an oblique edge ends (a pole,
+/// `TODO(#379)` step 3) is refused by name: the surface is not a closed
+/// two-manifold with a seam there until the degenerate vertex is modelled.
+/// A vertex off the axis by no more than the tolerance is refused too, as
+/// neither on it nor clear of it.
 pub fn revolve_arc_ring(
     ring: &ArcRing,
     axis_origin: Point3,
@@ -90,10 +114,17 @@ pub fn revolve_arc_ring(
     }
     let forward = area > 0.0;
 
-    let stations: Vec<Station> = (0..count)
+    let axis_point = Point2::new(axis_origin.x, axis_origin.y);
+    let (mut positive, mut negative) = (false, false);
+    let stations = (0..count)
         .map(|index| {
             let source = if forward { index } else { count - 1 - index };
             let vertex = ring.vertices[source];
+            if !(vertex.point.x.is_finite() && vertex.point.y.is_finite()) {
+                return Err(GeomError::InvalidInput(
+                    "revolved section must have finite vertices".to_owned(),
+                ));
+            }
             let bulge = if forward {
                 vertex.bulge
             } else {
@@ -101,45 +132,101 @@ pub fn revolve_arc_ring(
                 // now leaves this station, and flips its side.
                 -ring.vertices[(source + count - 1) % count].bulge
             };
-            Station {
+            let side = side_of_axis(axis_point, Vec3::Y, vertex.point);
+            match side {
+                Sign::Positive => positive = true,
+                Sign::Negative => negative = true,
+                _ => {}
+            }
+            Ok(Station {
                 radius: vertex.point.x - axis_origin.x,
                 height: vertex.point.y,
                 bulge,
-            }
+                on_axis: side == Sign::Zero,
+            })
         })
-        .collect();
+        .collect::<GeomResult<Vec<Station>>>()?;
 
-    let min = stations
-        .iter()
-        .map(|station| station.radius)
-        .fold(Scalar::INFINITY, Scalar::min);
-    let max = stations
-        .iter()
-        .map(|station| station.radius)
-        .fold(Scalar::NEG_INFINITY, Scalar::max);
-    if min * max < 0.0 || min.abs() <= epsilon || max.abs() <= epsilon {
+    if positive && negative {
         return Err(unsupported(
-            "exact revolution of a section touching or crossing the axis",
+            "exact revolution of a section crossing the axis",
         ));
     }
-    // Mirror a section on the negative side so every radius is positive; a
-    // full turn makes the two cases the same solid.
-    let flip = max < 0.0;
-    let stations: Vec<Station> = stations
+    if stations
         .iter()
-        .map(|station| Station {
-            radius: if flip {
-                -station.radius
-            } else {
-                station.radius
-            },
-            height: station.height,
-            bulge: if flip { -station.bulge } else { station.bulge },
-        })
-        .collect();
+        .any(|station| !station.on_axis && station.radius.abs() <= epsilon)
+    {
+        return Err(unsupported(
+            "exact revolution of a section within tolerance of the axis but not on it",
+        ));
+    }
+    check_axis_contact(&stations)?;
+    // Mirror a section on the negative side so every radius is positive; a
+    // full turn makes the two cases the same solid. `side_of_axis` is
+    // positive to the left of the upward axis, which is the negative radius.
+    // A mirror turns the walk clockwise, so it is walked backwards again:
+    // each bulge moves onto the segment that now leaves its station, and
+    // mirroring flips it back.
+    let stations: Vec<Station> = if positive {
+        (0..count)
+            .map(|index| {
+                let source = count - 1 - index;
+                Station {
+                    radius: -stations[source].radius,
+                    height: stations[source].height,
+                    bulge: stations[(source + count - 1) % count].bulge,
+                    on_axis: stations[source].on_axis,
+                }
+            })
+            .collect()
+    } else {
+        stations
+    };
 
     build(&stations, axis_origin, epsilon)
 }
+
+/// What the edge leaving station `index` sweeps, judged exactly.
+fn contact(stations: &[Station], index: usize) -> Option<Contact> {
+    let here = stations[index];
+    let there = stations[(index + 1) % stations.len()];
+    match (here.on_axis, there.on_axis) {
+        (false, false) => None,
+        _ if here.bulge != 0.0 => Some(Contact::Other),
+        (true, true) => Some(Contact::Axis),
+        _ if here.height == there.height => Some(Contact::Cap),
+        _ => Some(Contact::Other),
+    }
+}
+
+/// Refuse every vertex on the axis that is not the end of an edge along the
+/// axis whose other edge runs along it or perpendicular to it.
+fn check_axis_contact(stations: &[Station]) -> GeomResult<()> {
+    let count = stations.len();
+    for (index, station) in stations.iter().enumerate() {
+        if !station.on_axis {
+            continue;
+        }
+        let incoming = contact(stations, (index + count - 1) % count);
+        let outgoing = contact(stations, index);
+        match (incoming, outgoing) {
+            (Some(Contact::Axis), Some(Contact::Axis | Contact::Cap))
+            | (Some(Contact::Cap), Some(Contact::Axis)) => {}
+            (Some(Contact::Axis), _) | (_, Some(Contact::Axis)) => {
+                return Err(unsupported(
+                    "exact revolution of a section ending on the axis at an arc or an oblique edge (pole, TODO(#379) step 3)",
+                ));
+            }
+            _ => {
+                return Err(unsupported(
+                    "exact revolution of a section touching the axis at an isolated vertex (apex, TODO(#379) step 2)",
+                ));
+            }
+        }
+    }
+    Ok(())
+}
+
 /// Assemble the revolved solid: one circular edge per station, one wall face
 /// per segment.
 fn build(stations: &[Station], axis_origin: Point3, epsilon: Scalar) -> GeomResult<ExactBRep> {
@@ -154,12 +241,19 @@ fn build(stations: &[Station], axis_origin: Point3, epsilon: Scalar) -> GeomResu
 
     let axis_frame = |height: Scalar| frame_at(axis_origin.x, height);
 
-    // One circular edge per station, plus a seam so each wall loop closes.
+    // One circular edge per station off the axis, plus a seam so each wall
+    // loop closes. A station on the axis traces no circle and has none.
     let mut circles = Vec::with_capacity(count);
     let mut vertices = Vec::with_capacity(count);
     let mut points = Vec::with_capacity(count);
     for station in stations {
         let position = Point3::new(axis_origin.x + station.radius, station.height, 0.0);
+        points.push(position);
+        if station.on_axis {
+            circles.push(None);
+            vertices.push(None);
+            continue;
+        }
         let vertex = builder.topology_mut().add_vertex(Vertex { position });
         let curve = builder.add_curve3(Curve3::Circle(Circle3 {
             frame: axis_frame(station.height),
@@ -171,9 +265,8 @@ fn build(stations: &[Station], axis_origin: Point3, epsilon: Scalar) -> GeomResu
             curve: Some(curve),
         });
         builder.set_edge_interval(edge, Interval::new(0.0, TAU));
-        circles.push(edge);
-        vertices.push(vertex);
-        points.push(position);
+        circles.push(Some(edge));
+        vertices.push(Some(vertex));
     }
 
     let mut faces = Vec::with_capacity(count);
@@ -181,7 +274,13 @@ fn build(stations: &[Station], axis_origin: Point3, epsilon: Scalar) -> GeomResu
         let next = (index + 1) % count;
         let here = stations[index];
         let there = stations[next];
-        let face = if here.bulge != 0.0 {
+        let face = if here.on_axis || there.on_axis {
+            // `check_axis_contact` admitted only an axis edge and a disc.
+            if here.on_axis && there.on_axis {
+                continue;
+            }
+            cap_wall(&mut builder, axis_origin.x, &circles, stations, index)?
+        } else if here.bulge != 0.0 {
             torus_wall(
                 &mut builder,
                 axis_origin.x,
@@ -242,8 +341,8 @@ fn build(stations: &[Station], axis_origin: Point3, epsilon: Scalar) -> GeomResu
 fn straight_wall(
     builder: &mut ExactBRepBuilder,
     axis_x: Scalar,
-    circles: &[EdgeId],
-    vertices: &[VertexId],
+    circles: &[Option<EdgeId>],
+    vertices: &[Option<VertexId>],
     points: &[Point3],
     stations: &[Station],
     index: usize,
@@ -260,8 +359,8 @@ fn straight_wall(
         direction: points[next] - points[index],
     }));
     let seam = builder.topology_mut().add_edge(Edge {
-        start: vertices[index],
-        end: vertices[next],
+        start: slot(vertices, index)?,
+        end: slot(vertices, next)?,
         curve: Some(seam_curve),
     });
     builder.set_edge_interval(seam, Interval::UNIT);
@@ -282,15 +381,58 @@ fn straight_wall(
         }))
     };
 
-    let loop_id = seam_loop(builder, circles[index], circles[next], seam, rise);
+    let loop_id = seam_loop(
+        builder,
+        slot(circles, index)?,
+        slot(circles, next)?,
+        seam,
+        rise,
+    );
     Ok(add_face(builder, surface, loop_id, Orientation::Forward))
+}
+
+/// The circle or vertex of a station, which a station on the axis has none of.
+fn slot<T: Copy>(slots: &[Option<T>], index: usize) -> GeomResult<T> {
+    slots[index]
+        .ok_or_else(|| GeomError::Degenerate("a wall references a station on the axis".to_owned()))
+}
+
+/// A planar disc: the straight edge between a station off the axis and one on
+/// it, exactly perpendicular to the axis, swept a full turn.
+///
+/// The one circle of the off-axis station bounds it; it faces the way the
+/// annulus does, outward on an edge that runs inward to the axis and the
+/// other way on one that leaves it.
+fn cap_wall(
+    builder: &mut ExactBRepBuilder,
+    axis_x: Scalar,
+    circles: &[Option<EdgeId>],
+    stations: &[Station],
+    index: usize,
+) -> GeomResult<FaceId> {
+    let next = (index + 1) % stations.len();
+    let (rim, orientation) = if stations[index].on_axis {
+        (next, Orientation::Reversed)
+    } else {
+        (index, Orientation::Forward)
+    };
+    let surface = builder.add_surface(Surface::Plane(Plane {
+        frame: frame_at(axis_x, stations[rim].height),
+    }));
+    let loop_id = circle_loop(
+        builder,
+        slot(circles, rim)?,
+        stations[rim].radius,
+        Orientation::Forward,
+    );
+    Ok(add_face(builder, surface, loop_id, orientation))
 }
 
 /// A planar annulus between two circles at the same height.
 fn annulus_wall(
     builder: &mut ExactBRepBuilder,
     axis_x: Scalar,
-    circles: &[EdgeId],
+    circles: &[Option<EdgeId>],
     stations: &[Station],
     index: usize,
 ) -> GeomResult<FaceId> {
@@ -311,13 +453,13 @@ fn annulus_wall(
     };
     let outer_loop = circle_loop(
         builder,
-        circles[outer],
+        slot(circles, outer)?,
         stations[outer].radius,
         Orientation::Forward,
     );
     let inner_loop = circle_loop(
         builder,
-        circles[inner],
+        slot(circles, inner)?,
         stations[inner].radius,
         Orientation::Reversed,
     );
@@ -351,8 +493,8 @@ fn annulus_wall(
 fn torus_wall(
     builder: &mut ExactBRepBuilder,
     axis_x: Scalar,
-    circles: &[EdgeId],
-    vertices: &[VertexId],
+    circles: &[Option<EdgeId>],
+    vertices: &[Option<VertexId>],
     stations: &[Station],
     index: usize,
 ) -> GeomResult<FaceId> {
@@ -412,13 +554,20 @@ fn torus_wall(
         radius: arc.radius,
     }));
     let seam = builder.topology_mut().add_edge(Edge {
-        start: vertices[index],
-        end: vertices[next],
+        start: slot(vertices, index)?,
+        end: slot(vertices, next)?,
         curve: Some(seam_curve),
     });
     builder.set_edge_interval(seam, Interval::new(start, end));
 
-    let loop_id = seam_loop_between(builder, circles[index], circles[next], seam, start, end);
+    let loop_id = seam_loop_between(
+        builder,
+        slot(circles, index)?,
+        slot(circles, next)?,
+        seam,
+        start,
+        end,
+    );
     Ok(add_face(builder, surface, loop_id, Orientation::Forward))
 }
 // --- shared helpers ---------------------------------------------------------

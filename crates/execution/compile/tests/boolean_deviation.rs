@@ -930,6 +930,33 @@ fn a_ring_groove_turned_from_a_rectangle_is_certified() {
 }
 
 #[test]
+fn a_wall_minus_a_solid_cylinder_turned_on_the_axis_is_certified() {
+    // A rectangle with an edge on the axis turns into a solid cylinder
+    // (#379): a round recess cut from half the wall's thickness.
+    let options = options(1e-3);
+    let case = compile(
+        |g| {
+            let wall = g.extrusion(rect(2.0, 0.3), 3.0);
+            let wall = g.place(wall, building());
+            let peg = g.revolution(
+                rect(0.2, 0.3),
+                Point3::new(-0.1, 0.0, 0.0),
+                Vec3::Y,
+                2.0 * PI,
+            );
+            let peg = g.place(
+                peg,
+                building() * Transform3::from_translation(Vec3::new(0.4, 0.15, 1.5)),
+            );
+            g.boolean(wall, peg, BooleanOperator::Difference)
+        },
+        &options,
+    );
+    let (bound, _) = assert_measured("wall minus solid cylinder", case, &options, 2.0);
+    assert!(bound <= 1e-3, "{bound}");
+}
+
+#[test]
 fn a_union_whose_tool_is_a_boolean_is_certified() {
     // A boolean is a compiled solid like any other, as the tool too (#326).
     let options = options(1e-3);

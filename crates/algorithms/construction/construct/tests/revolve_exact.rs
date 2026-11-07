@@ -109,7 +109,7 @@ fn a_profile_crossing_the_axis_is_refused() {
         matches!(
             error,
             GeomError::UnsupportedInput {
-                input: "exact revolution of a profile touching or crossing the axis",
+                input: "exact revolution of a section crossing the axis",
                 ..
             }
         ),

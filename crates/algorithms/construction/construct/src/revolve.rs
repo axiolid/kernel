@@ -196,7 +196,7 @@ fn bounded_steps(
 ///
 /// Not `orient2d(a, a + d, p)`: `a + d` rounds, which tilts the line it
 /// decides against.
-fn side_of_axis(a: Point2, d: Vec3, p: Point2) -> Sign {
+pub(crate) fn side_of_axis(a: Point2, d: Vec3, p: Point2) -> Sign {
     let term = |x: Scalar, y: Scalar, negate: bool| {
         let (product, error) = two_product(x, y);
         if negate {
