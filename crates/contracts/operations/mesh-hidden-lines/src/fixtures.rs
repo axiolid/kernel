@@ -1086,6 +1086,161 @@ pub(crate) fn refusals() -> Vec<Refusal> {
     refusals
 }
 
+// --- perspective (ADR 0107) --------------------------------------------------
+
+/// The eye at the origin of the plan frame, looking down `-z`: the image of
+/// `(U, V, W)` is `(U / -W, V / -W)`.
+fn eye(near: f64) -> View {
+    View::perspective(plan_frame(), near).expect("a negative finite near")
+}
+
+/// The drawings a provider that claims perspective must reproduce. Every
+/// number is a closed form of the pinhole projection.
+pub(crate) fn perspective_cases() -> Vec<Case> {
+    use EdgeKind::{Crease, Silhouette};
+    use Visibility::{Hidden, Visible};
+    let sqrt2 = std::f64::consts::SQRT_2;
+    let mut cases = Vec::new();
+
+    // The box [-1,1]^2 x [-4,-2]. Its front face (z = -2, depth 2) projects
+    // to the square of half-width 1/2 and its back face (depth 4) to the one
+    // of half-width 1/4, inside it. The four front edges are silhouettes
+    // (the side faces face away from the eye) of length 1 and visible. The
+    // four back edges (length 1/2) and the four depth edges, from a corner
+    // (+-1/2, +-1/2) to (+-1/4, +-1/4) (length sqrt(2)/4), are creases behind
+    // the front face: hidden. Vertices 4..7 are the front corners.
+    let mut hand = case(
+        "perspective box",
+        vec![solid(1, box_mesh([-1.0, -1.0, -4.0], [1.0, 1.0, -2.0]))],
+        eye(-1.0),
+        crease_half(),
+        Expect {
+            rows: Some(vec![
+                row(Silhouette, Visible, 4, 4.0),
+                row(Crease, Hidden, 8, 2.0 + sqrt2),
+            ]),
+            edges: vec![EdgePieces {
+                edge: edge(1, 4, 5),
+                kind: Silhouette,
+                pieces: vec![piece(Visible, [-0.5, -0.5], [0.5, -0.5])],
+            }],
+            selected_edges: Some(12),
+            point_edges: Some(0),
+            clipped_edges: Some(0),
+        },
+    );
+    hand.orientation_independent = true;
+    cases.push(hand);
+
+    // The same box cut at depth 3: the cap (the square of half-width 1/3)
+    // hides what is left, the back ring (4 x 1/2) and the kept depth edges,
+    // from (+-1/3, +-1/3) to (+-1/4, +-1/4) (4 x sqrt(2)/12). The front ring
+    // lies beyond the plane and is clipped away with the four edges at it.
+    cases.push(case(
+        "perspective box cut by the near plane",
+        vec![solid(1, box_mesh([-1.0, -1.0, -4.0], [1.0, 1.0, -2.0]))],
+        eye(-3.0),
+        crease_half(),
+        Expect {
+            rows: Some(vec![row(Crease, Hidden, 8, 2.0 + sqrt2 / 3.0)]),
+            selected_edges: Some(12),
+            point_edges: Some(0),
+            clipped_edges: Some(4),
+            ..Expect::default()
+        },
+    ));
+
+    // The eye inside the box [-1,1]^3, near depth 1/2: the back ring (depth
+    // 1, image half-width 1, 4 x 2) and the depth edges from (+-1, +-1) to
+    // the cap's corners (+-2, +-2) (4 x sqrt(2)) are behind the cap (image
+    // half-width 2). The front ring is behind the eye, 4 edges clipped.
+    cases.push(case(
+        "perspective eye inside a box",
+        vec![solid(1, box_mesh([-1.0, -1.0, -1.0], [1.0, 1.0, 1.0]))],
+        eye(-0.5),
+        crease_half(),
+        Expect {
+            rows: Some(vec![row(Crease, Hidden, 8, 8.0 + 4.0 * sqrt2)]),
+            selected_edges: Some(12),
+            point_edges: Some(0),
+            clipped_edges: Some(4),
+            ..Expect::default()
+        },
+    ));
+
+    // A slab [1,2] x [-4,4] x [-3,-2] in front of the wall
+    // [-3,3]^2 x [-9,-6]. The wall's front edge from (3,3,-6) to (-3,3,-6)
+    // projects to y = 1/2 from x = 1/2 to -1/2. The slab's nearest left
+    // corner (1, y, -3) projects to x = 1/3, the left end of its image, so
+    // the part from x = 1/2 to the non-dyadic 1/3 is hidden and the rest
+    // visible: the boundary is the exact 1/3 rounded once.
+    cases.push(case(
+        "perspective slab hides part of an edge",
+        vec![
+            solid(1, box_mesh([-3.0, -3.0, -9.0], [3.0, 3.0, -6.0])),
+            solid(2, box_mesh([1.0, -4.0, -3.0], [2.0, 4.0, -2.0])),
+        ],
+        eye(-1.0),
+        crease_half(),
+        Expect {
+            rows: None,
+            edges: vec![EdgePieces {
+                edge: edge(1, 6, 7),
+                kind: Silhouette,
+                pieces: vec![
+                    piece(Hidden, [0.5, 0.5], [1.0 / 3.0, 0.5]),
+                    piece(Visible, [1.0 / 3.0, 0.5], [-0.5, 0.5]),
+                ],
+            }],
+            ..Expect::default()
+        },
+    ));
+
+    // The box [0,1] x [0,1] x [-3,-2] has an edge along the eye ray through
+    // the origin: its image is the single point (0, 0), a point edge.
+    cases.push(case(
+        "perspective edge along the eye ray",
+        vec![solid(1, box_mesh([0.0, 0.0, -3.0], [1.0, 1.0, -2.0]))],
+        eye(-1.0),
+        crease_half(),
+        Expect {
+            rows: None,
+            selected_edges: Some(12),
+            point_edges: Some(1),
+            clipped_edges: Some(0),
+            ..Expect::default()
+        },
+    ));
+    cases
+}
+
+/// Perspective requests a provider that claims perspective must refuse.
+pub(crate) fn perspective_refusals() -> Vec<Refusal> {
+    let invalid: fn(&GeomError) -> bool = |e| matches!(e, GeomError::InvalidInput(_));
+    [None, Some(0.0), Some(1.0), Some(f64::NAN)]
+        .into_iter()
+        .zip([
+            "perspective view without a near depth",
+            "perspective view with the near depth at the eye",
+            "perspective view with the near depth behind the eye",
+            "perspective view with a non-finite near depth",
+        ])
+        .map(|(near, name)| {
+            let mut view = eye(-1.0);
+            view.near = near;
+            Refusal {
+                name,
+                meshes: vec![solid(1, box_mesh([-1.0, -1.0, -4.0], [1.0, 1.0, -2.0]))],
+                view,
+                edges: crease_half(),
+                limits: limits(),
+                accepts: invalid,
+                mesh: None,
+            }
+        })
+        .collect()
+}
+
 #[cfg(test)]
 mod tests {
     use axiolid_core::Tolerance;

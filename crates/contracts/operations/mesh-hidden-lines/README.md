@@ -13,8 +13,9 @@ frontmost. See ADR 0094.
 A view is orthographic by default. A perspective view (`ViewProjection`, ADR 0107)
 is part of the contract, and a provider says whether it draws one with
 `supports_projection`; the registries never give it a view it does not
-support, and `PerspectiveConformanceSuite` checks the claim. No provider
-draws perspective yet.
+support, and `PerspectiveConformanceSuite` checks the claim: a hidden-line
+provider that claims it must draw the perspective fixtures, and a visible-face
+claim is not yet verifiable.
 
 ```bash
 cargo add axiolid-mesh-hidden-lines-contract

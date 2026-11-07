@@ -7,9 +7,12 @@
 //! for [`ViewProjection::Perspective`] does not claim it, and must then refuse a
 //! valid perspective request with `Unsupported` or `UnsupportedInput`, so
 //! that a registry can fall back past it. A provider that answers `true`
-//! claims it, and the suite has no perspective fixtures to verify the claim
-//! with yet, so the claim fails closed with
-//! [`PerspectiveConformanceFailure::ClaimUnverifiable`] until they land.
+//! claims it, and the suite then draws the perspective fixtures (a box, a box
+//! cut by the near plane, an eye inside a box, an exact boundary, an edge
+//! along the eye ray) and checks the drawing and the refusal of a bad near
+//! depth. Hidden-line fixtures exist; the visible-face claim has none yet and
+//! fails closed with [`PerspectiveConformanceFailure::ClaimUnverifiable`]
+//! until they land.
 
 use core::fmt;
 
@@ -17,8 +20,10 @@ use axiolid_contracts::{ExecutionOptions, GeomError};
 use axiolid_core::Tolerance;
 
 use super::faces::FaceConformanceFailure;
-use super::ConformanceFailure;
-use crate::fixtures::{box_mesh, limits, plan_frame};
+use super::{check_outcome, draw, mesh_of, same_drawing, ConformanceFailure, ConformanceReport};
+use crate::fixtures::{
+    box_mesh, limits, perspective_cases, perspective_refusals, plan_frame, reversed, Fixture,
+};
 use crate::{
     EdgeSelection, HiddenLineError, HiddenLineMesh, HiddenLineRequest, MeshHiddenLines, MeshId,
     MeshRole, MeshVisibleFaces, View, ViewProjection, VisibleFaceRequest,
@@ -49,6 +54,9 @@ pub enum PerspectiveConformanceFailure {
         /// The refusal.
         error: HiddenLineError,
     },
+    /// A hidden-line provider that claims perspective failed a perspective
+    /// fixture; the failure names the fixture.
+    HiddenLines(ConformanceFailure),
     /// The provider claims perspective, which this suite cannot verify.
     ClaimUnverifiable {
         /// The operation, `"hidden lines"` or `"visible faces"`.
@@ -106,11 +114,10 @@ impl PerspectiveConformanceSuite {
         };
         const OPERATION: &str = "hidden lines";
         if claimed {
-            report
-                .failures
-                .push(PerspectiveConformanceFailure::ClaimUnverifiable {
-                    operation: OPERATION,
-                });
+            report.failures = claimed_failures(provider)
+                .into_iter()
+                .map(PerspectiveConformanceFailure::HiddenLines)
+                .collect();
             return report;
         }
         let mesh = box_mesh([-1.0, -1.0, -4.0], [1.0, 1.0, -2.0]);
@@ -150,6 +157,74 @@ impl PerspectiveConformanceSuite {
         record_unclaimed(&mut report, OPERATION, result.map(|_| ()));
         report
     }
+}
+
+/// The failures of a provider that claims perspective against the
+/// perspective fixtures. The provider is called directly, as in the base
+/// suite, so it must refuse a bad near depth itself.
+fn claimed_failures(provider: &dyn MeshHiddenLines) -> Vec<ConformanceFailure> {
+    let options = options();
+    let mut report = ConformanceReport::default();
+    for case in perspective_cases() {
+        let first = draw(provider, &case, &case.meshes, &options);
+        let second = draw(provider, &case, &case.meshes, &options);
+        match (first, second) {
+            (Ok(a), Ok(b)) => {
+                check_outcome(&mut report, &case, &a);
+                if a != b {
+                    report
+                        .failures
+                        .push(ConformanceFailure::NonDeterministic { case: case.name });
+                }
+                if case.orientation_independent {
+                    let flipped: Vec<Fixture> = case
+                        .meshes
+                        .iter()
+                        .map(|f| Fixture {
+                            id: f.id,
+                            role: f.role,
+                            mesh: reversed(&f.mesh),
+                            groups: f.groups.clone(),
+                            planar: f.planar,
+                        })
+                        .collect();
+                    match draw(provider, &case, &flipped, &options) {
+                        Ok(outcome) if same_drawing(&outcome, &a) => {}
+                        Ok(_) => report
+                            .failures
+                            .push(ConformanceFailure::OrientationDependent { case: case.name }),
+                        Err(error) => report.failures.push(ConformanceFailure::ReturnedError {
+                            case: case.name,
+                            error,
+                        }),
+                    }
+                }
+            }
+            (Err(error), _) | (_, Err(error)) => {
+                report.failures.push(ConformanceFailure::ReturnedError {
+                    case: case.name,
+                    error,
+                })
+            }
+        }
+    }
+    for refusal in perspective_refusals() {
+        let meshes: Vec<HiddenLineMesh<'_>> = refusal.meshes.iter().map(mesh_of).collect();
+        let request = HiddenLineRequest::new(&meshes, refusal.view, refusal.edges, refusal.limits);
+        match provider.hidden_lines(&request, &options) {
+            Ok(_) => report
+                .failures
+                .push(ConformanceFailure::MissingRefusal { case: refusal.name }),
+            Err(error) if !(refusal.accepts)(&error.error) => {
+                report.failures.push(ConformanceFailure::ReturnedError {
+                    case: refusal.name,
+                    error,
+                })
+            }
+            Err(_) => {}
+        }
+    }
+    report.failures
 }
 
 fn perspective_view() -> View {
@@ -322,16 +397,55 @@ mod tests {
     }
 
     #[test]
-    fn a_claim_is_inferred_from_supports_projection_and_fails_closed() {
-        for report in both(&Probe {
+    fn a_claim_is_inferred_from_supports_projection_and_verified_by_the_fixtures() {
+        let probe = Probe {
             claims: true,
             answer: Answer::Draw,
-        }) {
-            assert!(report.claimed);
-            assert!(matches!(
-                report.failures[..],
-                [PerspectiveConformanceFailure::ClaimUnverifiable { .. }]
-            ));
+        };
+        let lines = PerspectiveConformanceSuite::run(&probe);
+        assert!(lines.claimed);
+        // The probe draws nothing, so every fixture with segments fails and
+        // every bad near depth is drawn instead of refused.
+        assert!(!lines.is_success());
+        assert!(lines
+            .failures
+            .iter()
+            .all(|f| matches!(f, PerspectiveConformanceFailure::HiddenLines(_))));
+        for case in [
+            "perspective box",
+            "perspective box cut by the near plane",
+            "perspective eye inside a box",
+        ] {
+            assert!(
+                lines.failures.iter().any(|f| matches!(
+                    f,
+                    PerspectiveConformanceFailure::HiddenLines(
+                        ConformanceFailure::WrongSegmentCount { case: c, .. }
+                    ) if *c == case
+                )),
+                "{case}: {lines}"
+            );
         }
+        assert!(lines.failures.iter().any(|f| matches!(
+            f,
+            PerspectiveConformanceFailure::HiddenLines(ConformanceFailure::MissingRefusal {
+                case: "perspective view without a near depth"
+            })
+        )));
+    }
+
+    #[test]
+    fn a_visible_face_claim_still_fails_closed() {
+        let faces = PerspectiveConformanceSuite::run_faces(&Probe {
+            claims: true,
+            answer: Answer::Draw,
+        });
+        assert!(faces.claimed);
+        assert!(matches!(
+            faces.failures[..],
+            [PerspectiveConformanceFailure::ClaimUnverifiable {
+                operation: "visible faces"
+            }]
+        ));
     }
 }

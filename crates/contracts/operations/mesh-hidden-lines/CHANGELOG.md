@@ -9,6 +9,18 @@ caret rule for `0.x` versions.
 
 ## [Unreleased]
 
+### Added
+
+- Perspective fixtures for hidden lines (a box in front of the eye, the same
+  box cut by the near plane, an eye inside a box, an exact non-dyadic
+  boundary, an edge along the eye ray) and the refusal of a perspective near
+  depth that is missing, zero, positive or not finite. A hidden-line provider
+  that claims perspective is checked against them by
+  `PerspectiveConformanceSuite::run`, which reports a failure as the new
+  `PerspectiveConformanceFailure::HiddenLines`. This replaces the 0.1.5
+  behaviour in which every claim failed closed with `ClaimUnverifiable`; a
+  visible-face claim still does until its fixtures land (ADR 0107, #387).
+
 ## [0.1.5] - 2026-11-13
 
 ### Added
