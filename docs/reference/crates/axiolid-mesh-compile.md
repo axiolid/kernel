@@ -213,4 +213,18 @@ Latest release, 0.3.45 (2026-11-07):
   boolean's reading and the tolerance (and never less than the chord
   budget); the disagreement is part of the bound.
 
+- A boolean with a face reaching a cone's apex or a sphere's pole is
+  measured (#379). The deviation oracle no longer refuses the pole gap of
+  such a face's loop ("an exact face's loops do not close in its
+  parameters"): a loop that leaves the pole at the height it reached it
+  closes there, whatever the jump in u. A cone's box ends at its apex,
+  where its derivative bound is undefined, so the face is no longer
+  reported unbounded ("cannot be bounded over its domain"). A partial cone
+  keeping its apex, cut from a box, is certified within the budget.
+- The B-rep tessellator refuses a curved face whose trim closes across a
+  sphere pole or a cone apex by name, as `UnsupportedInput` ("a curved
+  B-rep face whose trim closes across a sphere pole or a cone apex"). It
+  used to exhaust the refinement depth after seconds (`BudgetExceeded`) or
+  fail with "ring folds back"; the pole row of samples is `TODO(#463)`.
+
 Full history: [`crates/execution/compile/CHANGELOG.md`](https://github.com/axiolid/kernel/blob/main/crates/execution/compile/CHANGELOG.md)

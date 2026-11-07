@@ -1613,7 +1613,11 @@ fn distinct_steps(values: &mut Vec<Scalar>, start: Scalar, span: Scalar) -> Opti
 /// Whether a trim jumps from `end` to `start` across a sphere pole or a cone
 /// apex: both are poles of `surface` (u does not move the point there) but
 /// not the same parameter point.
-fn across_pole(surface: &axiolid_surface::Surface, end: Point2, start: Point2) -> bool {
+fn across_pole(support: Support<'_>, end: Point2, start: Point2) -> bool {
+    // A surface relation has no poles of its own.
+    let Some(surface) = support.atomic() else {
+        return false;
+    };
     let pole = |p: Point2| match axiolid_reference::surface::partials(surface, p.x, p.y) {
         Ok((du, dv)) => du.length() <= 1e-9 * (1.0 + dv.length()),
         Err(_) => false,
