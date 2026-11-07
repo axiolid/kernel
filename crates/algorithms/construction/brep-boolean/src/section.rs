@@ -343,7 +343,8 @@ pub(crate) fn sections_and_contacts(
                 // The window's own crossings come after the merge: they are
                 // where the window ends, not features to be merged.
                 if let Some(w) = &common {
-                    cuts.extend(w.crossings(branch).into_iter().filter(|&c| {
+                    let ends = window_ends(&cuts, w.crossings(branch));
+                    cuts.extend(ends.into_iter().filter(|&c| {
                         bounds.is_none_or(|b| c >= b.start.min(b.end) && c <= b.start.max(b.end))
                     }));
                 }
@@ -1015,6 +1016,26 @@ fn pieces_within(curve: &Curve3, span: Interval, cuts: Vec<Scalar>) -> Vec<Inter
         .collect()
 }
 
+/// Whether two parameters are one cut: [`pieces`]' deduplication slack, relative
+/// to the parameter. In world-charted parameters it is not small: at
+/// |t| = 5.6e6 it is 5.6e-6, wider than the 1.2e-6 by which a window's
+/// crossing can pass a face (#445).
+fn same_cut(x: Scalar, y: Scalar) -> bool {
+    (x - y).abs() <= 1e-12 * (1.0 + x.abs().max(y.abs()))
+}
+
+/// The crossings of a window that may end a piece: those that are not
+/// [`same_cut`] with a feature cut. A window end within the slack of a
+/// feature cut would otherwise sort first and replace it in [`pieces`]'
+/// deduplication, moving the section's end off the feature's exact vertex
+/// (#445). The cut ends the piece.
+fn window_ends(cuts: &[Scalar], crossings: Vec<Scalar>) -> Vec<Scalar> {
+    crossings
+        .into_iter()
+        .filter(|&c| !cuts.iter().any(|&f| same_cut(c, f)))
+        .collect()
+}
+
 /// The stretches between consecutive cuts, each with the curve it lies on:
 /// finite stretches of a line (its unbounded ends leave every bounded
 /// face), the cyclic arcs of a conic, and for a traced section the
@@ -1022,7 +1043,7 @@ fn pieces_within(curve: &Curve3, span: Interval, cuts: Vec<Scalar>) -> Vec<Inter
 /// becomes a curve of its own.
 fn pieces(curve: &Curve3, mut cuts: Vec<Scalar>) -> Result<Vec<(Curve3, Interval)>, BooleanError> {
     cuts.sort_by(Scalar::total_cmp);
-    cuts.dedup_by(|x, y| (*x - *y).abs() <= 1e-12 * (1.0 + x.abs()));
+    cuts.dedup_by(|x, y| same_cut(*x, *y));
     let plain = |spans: Vec<Interval>| spans.into_iter().map(|s| (curve.clone(), s)).collect();
     Ok(match curve {
         Curve3::Line(_) => plain(
@@ -1749,6 +1770,31 @@ mod tests {
     use axiolid_curve::{Circle3, Line3};
 
     const EPS: Scalar = 1e-6;
+
+    #[test]
+    fn a_window_end_never_replaces_a_cut() {
+        // #445: the corbel's section line at world y = 5.6e6. The window's
+        // crossings pass the feature cuts by 1.2e-6, inside the dedup slack.
+        let line = Curve3::Line(Line3 {
+            origin: Point3::new(600000.2, 0.0, 203.5),
+            direction: -Vec3::Y,
+        });
+        let cuts = vec![-5600000.1, -5599999.9];
+        let ends = window_ends(&cuts, vec![-5599999.8999988, -5600000.1000012]);
+        assert!(ends.is_empty());
+        let spans: Vec<Interval> = pieces(&line, cuts)
+            .expect("pieces")
+            .into_iter()
+            .map(|p| p.1)
+            .collect();
+        assert_eq!(spans, vec![Interval::new(-5600000.1, -5599999.9)]);
+        // Near the origin the slack is 1e-12 and both ends stay.
+        let kept = window_ends(
+            &[-0.1, 0.1],
+            vec![0.10000119073677866, -0.10000119073677866],
+        );
+        assert_eq!(kept.len(), 2);
+    }
 
     fn tol() -> Tolerance {
         Tolerance::METRE
