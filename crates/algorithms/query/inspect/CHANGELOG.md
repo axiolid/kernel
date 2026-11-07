@@ -13,6 +13,11 @@ caret rule for `0.x` versions.
 
 ### Added
 
+- `thin_sheet` and `ThinSheet`: the first pair of triangles of one mesh that
+  face each other within a linear distance on one plane and overlap in more
+  than an edge. A boolean whose operand lands a rounding residue off the
+  face it should meet leaves such a lid in a Solid (#400).
+
 - `near_coplanar` and `NearCoplanar`: the first pair of triangles of two
   meshes that nearly share a plane within a linear distance, not exactly
   coplanar. Placement leaves such a residue where faces meet in exact

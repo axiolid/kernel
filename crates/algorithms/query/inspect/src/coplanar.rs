@@ -99,7 +99,7 @@ fn nearly_share_a_plane(a: &[Point3; 3], b: &[Point3; 3], linear: f64) -> Option
 
 /// The largest distance from a corner of `corners` to the plane of `plane`,
 /// or `None` if `plane` is degenerate.
-fn corner_distances(plane: &[Point3; 3], corners: &[Point3; 3]) -> Option<f64> {
+pub(crate) fn corner_distances(plane: &[Point3; 3], corners: &[Point3; 3]) -> Option<f64> {
     let normal = (plane[1] - plane[0]).cross(plane[2] - plane[0]);
     let length = normal.length();
     if !length.is_finite() || length <= 0.0 {
