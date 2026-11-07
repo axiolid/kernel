@@ -177,8 +177,11 @@ Latest release, 0.3.44 (2026-11-03):
   amendment of 2026-11-06), no longer as a distance along the inner trim.
   A nested trim's outer selectors that were distances along the inner trim
   name the basis's parameters now, so the point of every station on one
-  moves. Selectors other than parameters on such a trim are refused by name
-  (#432).
+  moves, through `station::resolve`, `station::curve_path` and every run
+  on it. Selectors other than parameters on such a trim are refused by name
+  (#432). A window is admitted to a slack relative to its parameters
+  (`1e-12 * max(1, |x|)`, as the evaluator admits a distance), not to a
+  length: a window past the inner trim by more is `InvalidInput`.
 
 - A node placed at a station on a circle, a polyline, an elevated or
   banked curve over a line or a circle, an intrinsic plan alone or under a
@@ -248,6 +251,15 @@ Latest release, 0.3.44 (2026-11-03):
   shell; fewer components are no refusal.
 
 ### Fixed
+
+- A trim of a full-turn trim of a closed conic kept the wrong arc when an
+  outer selector landed on the seam: `trim(trim(circle, 0, 2 pi), pi, 2 pi)`
+  was the near half `[0, pi]`, and a swept directrix's `parameter_range` on
+  a full-turn trim read the same way (#424). An end that lands on the start
+  of a full turn is its end when it is the larger one asked. The window of a
+  nested trim and of a directrix sweep range is read to a slack relative to
+  its parameters, no longer to the options' linear tolerance, which dropped
+  up to that length of a knot or angle span.
 
 - A station-placed spine whose section planes fold is refused as invalid
   input, by the mesh and the exact compiler alike (#361). A section vertex
