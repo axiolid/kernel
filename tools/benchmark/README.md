@@ -21,7 +21,7 @@ so it stays out of the release.
 | `benches/scenario.rs` | End-to-end cost through the public `axiolid::application` facade |
 | `benches/audit.rs` | How the mesh audit scales with triangle count |
 | `benches/exact_openings.rs` | Cost per placed opening cut exactly from a placed wall, by openings already cut (#228) |
-| `benches/boundary_distance.rs` | Exact boundary distance between building elements that touch or cross, and a control pair apart (#273) |
+| `benches/boundary_distance.rs` | Exact boundary distance between building elements that touch or cross, and a control pair apart (#273); the same pairs at georeferenced coordinates (450012, 5599993), and two regular 8- and 128-gon prisms 1.1 m apart at the origin and there (#318) |
 | `benches/minkowski_plan.rs` | Time and peak memory of the exact Minkowski sum and erosion of a floor's walls by a 0.9 m square, against corner count (#292) |
 | `benches/disc_erosion.rs` | Time and peak memory of the inner and outer disc erosions of a room whose walls carry 0.5 mm teeth or exactly collinear corners, at 102, 602 and 1,202 corners, beside the plain rectangle (#323); and of the erosions and dilations of the toothed room and of the same ring as a hole, at 2,402, 5,002 and 10,002 corners (#330) |
 | `benches/triangulate_points.rs` | Planar Delaunay triangulation of 1k to 16k random points, whose growth shows the adjacency is maintained locally (#268) |
