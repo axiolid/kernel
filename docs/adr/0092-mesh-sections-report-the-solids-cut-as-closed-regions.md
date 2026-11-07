@@ -236,3 +236,48 @@ those of an edge that does not move in a coordinate) take a fast path with
 `orient2d` and plain comparisons; without it the request took 0.67 ms. Only exactly degenerate cases
 (contacts, shared collinear edges) reach `Dyadic`. The nesting stays quadratic
 in the worst case.
+
+## Amendment 2026-11-07: pair the boundary at a pinch vertex (#373)
+
+A cut whose boundary meets itself at a vertex (two piers whose footprints
+meet at a corner, a void whose corner touches its wall) was refused as
+`REFUSED_PINCHED_CUT_REGION`. The cut tracer now pairs the edges there, with
+no tolerance:
+
+1. **Pair by exact angle.** The edges at the vertex are ordered
+   counter-clockwise in the frame by exact signs: first the half-plane on the
+   projected axes, then `orient` within a half (the construction of
+   `axiolid_exact_arrangement::Arrangement::fan`, correct under a negative
+   frame sign). Outgoing and incoming edges must alternate; each incoming
+   edge continues with the next outgoing edge clockwise, the one that opens
+   its material wedge.
+2. **Split each closed walk where it returns to a vertex.** No ring repeats a
+   vertex, as the cut contract already promises. Each region is one connected
+   piece of the cut's inside, written as simple rings that may touch. Two
+   corners that touch give two regions; a hole touching its outer ring is a
+   hole that touches it; a hole touching its outer ring twice leaves two
+   regions. The result does not depend on where a walk starts.
+3. **Still refused by name.** `REFUSED_PINCHED_CUT_REGION` for two edges along
+   one ray and for a chain through the pinch that the rings would part
+   (chains are not split at a pinch, ADR 0091);
+   `REFUSED_CROSSING_CUT_RINGS` for edges that do not alternate (the material
+   overlaps); a zero-length edge is `Degenerate`. A `Both` ring that repeats a
+   vertex stays refused, because it must equal a cut region bit for bit.
+
+The conformance fixtures are `RegionsOrRefused`: a provider may still refuse
+a pinch by name.
+
+**Rejected.**
+
+- *Pairing without the split.* A hole touching its outer ring becomes a ring
+  that repeats a vertex, which the contract forbids and `ring_nesting`
+  refuses.
+- *Pairing counter-clockwise, then splitting.* The same for two touching
+  corners, but a hole touching its outer ring twice becomes one region whose
+  inside is disconnected (#467).
+- *Weakly simple rings, as ADR 0093 uses for in-plane regions.* This breaks
+  the cut contract and the outer/hole and contact logic of `ring_nesting`.
+
+The split is how overlay writes regions (ADR 0104: rings touch at points).
+One convention for in-plane and visible-face regions is #478; splitting
+chains at a pinch is #479.
