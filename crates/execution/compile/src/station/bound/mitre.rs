@@ -1,4 +1,96 @@
 //! The bound of a cell beside a mitre (#335, ADR 0082 amendment).
+//!
+//! # The exact solid at a mitre
+//!
+//! Where a run crosses a seam whose tangents differ, the parent module's
+//! [seams](super::super#seams-263) mitre it: the surface `P_in` of the piece
+//! ending at the seam and `P_out` of the piece starting there (the surfaces of
+//! the [parent module](super)) meet in the plane `H` through the seam point
+//! moved along its unit normal `n` by the longitudinal offset there. Write
+//! `h(x) = (x - q0) . n` for the height above `H`. The exact solid is
+//!
+//! - `P_in` continued past the seam by extruding its end section along its end
+//!   tangent `t_in`, cut by `H` and kept where `h <= 0`; and `P_out`
+//!   continued backwards along `t_out`, kept where `h >= 0` (the projection
+//!   of the amendment on seams, along each side's own tangent);
+//! - the planar faces of `H` inside one side's cut and not the other's,
+//!   where the two cuts differ: on the inner side of a curved piece, in a
+//!   turn on a grade in the section frame, and with a longitudinal offset.
+//!
+//! The mesh keeps one mitre row `M`, the midpoint of the two sides' projections
+//! moved by the offset (`axiolid_reference::station::Mitre::place`), so no
+//! topology changes; the bound measures `M` against the solid above.
+//!
+//! # The cell
+//!
+//! Take a cell `[lo, hi]` with a mitre at `hi`; at `lo` everything is
+//! mirrored (the outgoing side, `toward = -t_out`, `normal = -n`). Let `a`
+//! be the mesh's far row, `c` the exact section of the cell's own side at
+//! the knot, `P = c - toward h(c) / cos` its projection onto `H` along
+//! `toward = t_in` (`cos = toward . n`), `M` the mesh's mitre row and
+//! `w = c - a` the chord of each vertex. Each term below holds along a wall
+//! edge `(k, l)` because everything in it is affine in `v`.
+//!
+//! 1. The per-vertex bound `eta` of the parent (chord, breakpoints at seams
+//!    inside the cell, read errors) holds against the quad `V = (a, c)`,
+//!    measured to the exact section `c` and not to the mesh's mitre row: the
+//!    exact surface up to the knot is `V` up to `eta`. The extrusion is
+//!    exactly the strip `(c, P)`.
+//! 2. A point of `V` with `h <= 0` and the point of `(a, P)` at the same `v`
+//!    and the same height differ only in `H`'s direction, by at most the
+//!    **kink** `K = |h(c)| |w_H| / (w . n)`, `w_H = w - (w . n / cos) toward`
+//!    ([`kink`], over eight stretches of `v`). It is second order on a
+//!    curved piece and first order in a changing section's rate. Pairing the
+//!    two vertices of an edge at equal distance instead would charge an
+//!    in-plane slide of about the section's width times the half turn, since
+//!    they cross `H` at different distances.
+//! 3. A point of `V` up to `eta'` past `H` (the read errors) is clamped back
+//!    onto it for at most `eta' Gamma`, `Gamma = max(|w_k| / w_k . n, |w_l| /
+//!    w_l . n, 1 / cos)`.
+//! 4. The quads `(a, P)` and `(a, M)` differ by `D = |M - P|` per vertex; the
+//!    triangles lie within `quad_deviation` of their quad.
+//! 5. A face of `H` is a point inside one cut ring and not the other. By the
+//!    winding number of the two rings it lies within the crossing error of
+//!    the mesh's mitre row, whose edges are mesh edges, so within `D`, the
+//!    row's distance from `H` and the reach of the extrusion past the plane
+//!    ([`reach_past`]).
+//!
+//! The read errors are the plane's: `e_p` of the point and `e_t`, `e_t'` of
+//! the tangents on the cell's side and across the knot (the frame laws'
+//! `point_error`, `axis_error` and measure), `e_n = (e_t + e_t') / cos` of
+//! the normal, so `eta_H = e_p + rho e_n` at the reach `rho` of the points
+//! involved.
+//!
+//! The wall and the cut are
+//!
+//! `wall = eta_s + K + D + quad_deviation + eta' Gamma`,
+//! `cut = eta_s + K + D + max(eta' Gamma, reach) + hm + eta_H`,
+//!
+//! `eta_s = eta + lambda e_t` (the vertex's bound plus the read error of the
+//! extrusion's length, `lambda` the largest extension), `eta' = eta_s +
+//! eta_H`, `hm` the mesh row's largest distance from `H`; the cell's bound is
+//! the largest over its edges, times `1 + 1e-12`. The cell's **floor** is
+//! the largest `D`: splitting a cell never removes it, so refinement stops at
+//! a cell whose floor exceeds the budget.
+//!
+//! A cell on a straight piece with a constant section (every vertex runs on a
+//! line through `H`: `K = 0`, `P` is exact and the quad is the wall) keeps
+//! only `D`, `hm`, `eta_H` and the quad: [`SectionLaw::straight_mitre_cell`].
+//! It is exact for `D = 0`, which holds when the two sides' cuts coincide (a
+//! flat turn without an offset), and reports the real gap otherwise.
+//!
+//! # Refusals
+//!
+//! The argument needs each vertex to cross `H` once over the cell
+//! (`mu_j = (w_j . n - 2 slide_j - |w_j| e_n) / span - span second_j > 0`,
+//! `span = hi - lo + 2 measure`: the advance across `H` at the chord's rate
+//! less the curvature's, so the crossing is unique), the plane to advance
+//! (`cos - e_t - e_n > 0`) and the far row to lie strictly on the cell's side
+//! (`h(a_j) + slide_j + eta_H < 0`). A cell where it does not hold is
+//! unbounded by name, `MITRE_NOT_TRANSVERSAL`, and a curved or changing cell
+//! between two mitres, `MITRE_ON_BOTH_ENDS`; both are refinable
+//! ([`refinable`](super::refinable)): a shorter cell crosses `H` more
+//! transversally, and a half of a cell between two mitres has one.
 
 use axiolid_contracts::GeomResult;
 use axiolid_core::{Point3, Scalar, Vec3};

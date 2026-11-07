@@ -34,8 +34,9 @@
 //! cant law -- and [`DeviationBound::Unbounded`] by name elsewhere (a frame on a
 //! chain, on a banked curve over one or on an intrinsic space
 //! curve with torsion or tilted, an offset beside an intrinsic curve or a
-//! chain, a cell beside a mitre on a curved piece or with a changing
-//! section, different curved profiles that do not pair).
+//! chain, different curved profiles that do not pair). A cell beside a
+//! mitre is bounded (#335) against the exact mitred solid, see
+//! [seams](#seams-263).
 //!
 //! Different curved profiles that pair segment for segment (#361) -- lines,
 //! circular and elliptic arcs, matched by ring and segment index after
@@ -96,6 +97,16 @@
 //! refines on either side of it as before. A near reversal is refused by
 //! name. A seam whose tangents agree (a chain join, a jump in a banked
 //! curve's roll alone) is sampled as before.
+//!
+//! The deviation reported across a mitre (#335) is measured against the
+//! exact mitred solid: each side's surface extruded past its end along its
+//! end tangent and cut by the mitre plane, moved along its normal by the
+//! longitudinal offset, plus the planar faces between the two cuts. The mesh
+//! keeps its one mitre row, the midpoint of the projections; the `bound`
+//! module's `mitre` states the bound per cell. A cell that does not cross the
+//! plane transversally, or lies between two mitres on a curved piece or with
+//! a changing section, is unbounded by name and refined; a gap between the
+//! mitre row and a side's cut that no refinement removes is reported as it is.
 //!
 //! An [`OrientedCurveStation`] may carry a seam-snapping window (#294),
 //! a distance in its basis's measure: within it of exactly one seam whose
@@ -935,6 +946,8 @@ fn quad_spread(a: Point3, b: Point3, c: Point3, d: Point3) -> Scalar {
 /// incoming piece's, so an interval beside a mitre is sampled as that
 /// piece alone would be. A midpoint section a mitre would cut (`None`) is
 /// not inserted: the interval is joined straight to its end instead.
+/// `accept` bounds the cell by the rows the mesh stands (#335): at a mitre's
+/// knot the mitred row, not the plain section the sampling test reads.
 fn refine<F, A>(
     a: Scalar,
     b: Scalar,
@@ -1472,7 +1485,9 @@ fn profile_bound(
 
 /// Whether a sampled cell is fine enough (#247): its certified bound within
 /// `budget`, or any cell where the run is not bounded (the sampling test
-/// alone decides there).
+/// alone decides there). A cell beside a mitre is split while its bound is
+/// past the budget unless its floor is (#335: the gap no splitting removes),
+/// and while it is unbounded for a reason a split can remove.
 fn within(
     law: &bound::SectionLaw<'_, '_>,
     bounded: bool,

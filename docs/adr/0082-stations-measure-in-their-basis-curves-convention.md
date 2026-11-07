@@ -1946,3 +1946,91 @@ the seams, the pivot's rate jumping),
 `tests/station_placement_bound.rs`, `tests/station_fold.rs` (a fold inside a
 canted transition found and refused) and
 `scripts/probe_clothoid_frames_mutants.py`.
+
+## Amendment 2026-11-07: cells beside a mitre (#335)
+
+Context: the amendment on certified bounds (#247) bounded a cell beside a
+mitre only on a straight piece with a constant section, on the argument that
+the mesh quad is then the exact wall, and left every other cell unbounded by
+name (`MITRED_SECTIONS`): a mitre on a curved piece, a changing section, a
+seam inside the cell. That left openbimrs/ifc#443's deck, a run along an
+offset that starts to widen at a corner of the offset, without a bound
+although its volume is right. The straight-leg argument was also wrong where
+the mesh's mitre row is not on each side's own cut.
+
+- **One exact solid at a mitre.** Each side's surface is continued past its
+  end by extruding its end section along its end tangent (the projection of
+  the amendment on seams, #263) and cut by the mitre plane through the seam
+  point moved along the plane's normal by the longitudinal offset there. The
+  incoming side keeps the points on or behind the plane, the outgoing side
+  those on or ahead of it. Where the two cuts differ (the inner side of a
+  curved piece, a turn on a grade in the section frame, a longitudinal
+  offset) the boundary also holds the planar faces of the plane inside one
+  cut and not the other. The mesh keeps its single mitre row, the midpoint
+  of the two sides' projections moved by the offset; no topology changes.
+- **The bound, closed form per cell.** For a cell with the mitre at one end
+  and `c` the exact section of the cell's own side at the knot, `P` its
+  projection along the end tangent onto the plane, `M` the mesh's mitre row:
+  the per-vertex bound of the amendment on certified bounds holds against
+  the quad `(far row, c)`; the extrusion `(c, P)` is exact; a point of the
+  quad at equal height differs from the quad `(far row, P)` only in the
+  plane, by the kink `|h(c)| |oblique(w)| / (w . n)` (`w = c - far row`),
+  second order on a curved piece and first order in a changing section's
+  rate; a point up to the plane's read error past the plane is clamped back
+  onto it; `(far row, P)` and the mesh quad `(far row, M)` differ by
+  `D = |M - P|`; and a face of the plane lies, by the winding number of the
+  two cuts, within the crossing error of the mesh's mitre row, whose edges
+  are mesh edges. The frame laws' certified derivative bounds give every
+  read error (the plane's point, the tangents at the knot and across it).
+  Taking the cut points at equal height, not at equal distance, is what
+  keeps the kink second order: the two vertices of an edge cross the plane
+  at different distances, and pairing at equal distance charges an in-plane
+  slide of about the section's width times the half turn.
+- **Straight legs, corrected.** A cell on a straight piece with a constant
+  section keeps its closed form but is no longer the mesh quad alone: the
+  mesh's mitre row is not on each side's cut when the two sides' cuts
+  differ, so `D`, the row's distance from the plane and the plane's read
+  error enter. A turn on a grade (reported 0.0987, the exact walls stray
+  0.1007) and a longitudinal offset of 0.5 (reported 3.6e-11, the exact
+  walls stray 0.5) were reported certified and wrong; they now report the
+  gap, 0.2236 and 0.5.
+- **Transversality, refusals, refinement.** The argument needs each vertex
+  to cross the plane once over the cell and the far row to lie strictly on
+  the cell's side. When it does not (a corner too sharp for the piece's
+  turning over the cell, or a section at the far end on the plane) the cell
+  is unbounded by name, `MITRE_NOT_TRANSVERSAL`, and so is a curved or
+  changing cell between two mitres, `MITRE_ON_BOTH_ENDS`; refinement splits
+  both, since a shorter cell crosses the plane more transversally, and the
+  halves of a cell between two mitres have one mitre each. A cell is also refined
+  while its bound exceeds the budget unless its floor, the largest `D`
+  (the mesh's mitre row's distance from the projection), already exceeds it:
+  no splitting removes that gap. Refinement reads a mitre's knot as the
+  mitred row the mesh stands, not the plain section of the piece next to it;
+  the chord of a cell beside a mitre is measured from the exact section of
+  its own side there.
+- **How it composes.** The global fold check of #407 reads each side only up
+  to its mitre plane, since the two sides overlap before the cut by design.
+  The transversality test is its own bound along the fixed mitre normal and
+  does not use the fold check (#406). A frame law with certified bounds that
+  lands later (#393, #396) gets its mitred cells bounded with no further
+  work; a roll mismatch across the seam shows up as `D`.
+
+| Option | Why not |
+| --- | --- |
+| Branch and bound against the clipped exact surface (`crate::certify`, as the swept-disk mitre beside an arc, #248) | It needs the built mesh, so it cannot steer refinement, it has no inside test for general sections on the planar faces, and it runs under a work cap. |
+| Pair the two vertices of an edge at equal distance | They cross the plane at different distances; the in-plane slide charged is about the section's width times the half turn, 20 to 100 times too loose in simulation. |
+| Treat the mesh's mitre section as the exact one | The exact walls would then depend on how the mesh mitres. |
+| Mesh each side's own cut plus the faces between them | Tight for turns on a grade, but a change of the mesh's topology; not done until a consumer needs it. |
+
+Evidence: `crates/execution/compile/src/station/bound/mitre.rs` (the
+definition, the terms and the argument in its module documentation; unit
+tests of `kink` and `reach_past` against a dense supremum),
+`crates/execution/compile/tests/station_bound_mitre.rs` (an oracle sampling
+the exact mitred solid piece by piece, faces on the shifted plane: a turn on
+a grade, a longitudinal offset of 0.5 and 0.2, a flat turn, two arcs plain
+and turned, a line beside a tight arc, a widening section, a grade break over
+a circular plan, a short arc between two mitres, a corner too sharp, and a
+sheet), `crates/execution/compile/tests/station_bound_quadrature.rs` (the
+deck, certified at 4.88e-4 within its 1e-3 request, and a B-spline's corner
+knot) and `scripts/probe_station_mitre_mutants.py`. Every test asserts the
+sampled exact solid stays within the reported bound.

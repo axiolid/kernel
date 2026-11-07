@@ -4724,6 +4724,13 @@ Every publishable crate versions and publishes independently ([ADR 0067](/adr/00
   canted transition is found between the stations and refused ("sections
   fold"); it was checked conservatively and never refused. A canted run over
   a chain plan stays unbounded by name (`TODO(#394)`).
+- A certified bound for the cells beside a mitre of a run of sections at
+  stations, on a curved piece, with a changing section or a seam inside the
+  cell (#335, ADR 0082). The exact solid at a mitre is each side extruded
+  along its end tangent to the mitre plane (moved by the longitudinal offset)
+  plus the planar faces between the two sides' cuts; the bound is closed form
+  per cell and the mesh is unchanged. The openbimrs/ifc#443 deck, unbounded
+  by name in 0.3.44, reports `Certified(4.88e-4)`, within its 1e-3 request.
 
 ### Changed
 
@@ -4759,6 +4766,15 @@ Every publishable crate versions and publishes independently ([ADR 0067](/adr/00
 - An exact boolean whose result has a vertex off its edge's curve beyond
   what its report allows is refused by name (#445). It needs
   `axiolid-brep-boolean` with `BooleanError::VertexOffCurve`.
+
+- A cell beside a mitre that 0.3.44 reported unbounded ("a cell beside a
+  mitred seam on a curved piece, or with a section that changes across it")
+  is bounded, or named by one of two reasons refinement splits: "a cell
+  beside a mitre does not advance across the mitre plane fast enough to bound
+  the plane's cut" (a corner too sharp for the piece's turning over the cell)
+  and "a cell between two mitres, on a curved piece or with a changing
+  section, is too short to split". Runs that were unbounded there are refined
+  near their mitres and report a bound (#335).
 
 ### Fixed
 
@@ -4842,6 +4858,14 @@ Every publishable crate versions and publishes independently ([ADR 0067](/adr/00
   B-rep face whose trim closes across a sphere pole or a cone apex"). It
   used to exhaust the refinement depth after seconds (`BudgetExceeded`) or
   fail with "ring folds back"; the pole row of samples is `TODO(#463)`.
+
+- The certified bound of a straight cell beside a mitre no longer assumes the
+  mesh's mitre row lies on each side's own cut (#335). It does not where the
+  two sides' cuts differ: a turn on a grade in the section frame, which 0.3.44
+  reported `Certified(0.0987)` while the exact walls stray 0.1007 (now
+  0.2236), and a longitudinal offset at the mitre, which it reported at 3.6e-11
+  while the exact walls stray 0.5 (now 0.5). Both may stop meeting the
+  requested chord error.
 
 ### 0.3.44 - 2026-11-03
 
