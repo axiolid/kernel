@@ -8,6 +8,7 @@ import importlib.util
 import io
 from pathlib import Path
 import re
+import sys
 import tarfile
 import tempfile
 from types import SimpleNamespace
@@ -29,6 +30,8 @@ def load_script(name: str, filename: str):
 publish = load_script("publish_workspace", "publish-workspace.py")
 verify = load_script("verify_packages", "verify-packages.py")
 prepare_release = load_script("prepare_release", "prepare-release.py")
+sys.path.insert(0, str(ROOT / "scripts"))
+minimal_probe = load_script("probe_minimal_versions_gate", "probe_minimal_versions_gate.py")
 
 
 def write_crate_archive(path: Path, lock_text: str | None) -> None:
@@ -547,6 +550,105 @@ class MinimalVersionsTests(unittest.TestCase):
             verify.locked_internal_versions(INCIDENT_LOCK),
         )
         self.assertIn("axiolid-reference 0.3.8 (crates.io) does not build", message)
+
+
+class StaleFloorSelectionTests(unittest.TestCase):
+    """The minimal-versions probe picks its stale floors from the registry."""
+
+    def metadata(self, root: Path) -> dict:
+        def member(name: str, version: str) -> dict:
+            return {
+                "name": name,
+                "version": version,
+                "manifest_path": str(root / name / "Cargo.toml"),
+                "dependencies": [],
+            }
+
+        probe = member(minimal_probe.PROBE_CRATE, "0.3.44")
+        probe["dependencies"] = [
+            {"name": name, "kind": kind}
+            for name, kind in [
+                ("axiolid-aaa", None),
+                ("axiolid-pending", None),
+                ("axiolid-fresh", None),
+                ("axiolid-dev", "dev"),
+                ("serde", None),
+            ]
+        ]
+        return {
+            "packages": [
+                probe,
+                member("axiolid-aaa", "0.3.5"),
+                member("axiolid-pending", "0.1.14"),
+                member("axiolid-fresh", "0.3.0"),
+                member("axiolid-dev", "0.3.5"),
+            ]
+        }
+
+    def edits(self, index: dict):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            manifest = root / minimal_probe.PROBE_CRATE / "Cargo.toml"
+            manifest.parent.mkdir()
+            manifest.write_text(
+                "axiolid-aaa.workspace = true\naxiolid-pending.workspace = true\n"
+                "axiolid-fresh.workspace = true\naxiolid-dev.workspace = true\n"
+            )
+            return minimal_probe.stale_floor_edits(
+                self.metadata(root), manifest, lookup=lambda name: index.get(name, {})
+            )
+
+    def test_lowers_only_published_dependencies_to_the_oldest_compatible_version(self):
+        index = {
+            "axiolid-aaa": {
+                "0.2.9": False,
+                "0.3.0": True,
+                "0.3.2": False,
+                "0.3.4": False,
+                "0.3.5": False,
+            },
+            "axiolid-pending": {"0.1.1": False, "0.1.13": False},
+            "axiolid-fresh": {"0.3.0": False},
+            "axiolid-dev": {"0.3.0": False, "0.3.5": False},
+        }
+        self.assertEqual(
+            self.edits(index),
+            [
+                (
+                    "axiolid-aaa.workspace = true\n",
+                    'axiolid-aaa = { path = "../axiolid-aaa", version = "0.3.2" }\n',
+                )
+            ],
+        )
+
+    def test_refuses_when_nothing_can_be_lowered(self):
+        with self.assertRaises(SystemExit) as raised:
+            self.edits({"axiolid-aaa": {"0.3.5": False}})
+        self.assertIn("no published dependency to probe with", str(raised.exception))
+
+    def test_every_dependency_pending_is_inapplicable_not_an_error(self):
+        index = {
+            "axiolid-aaa": {"0.3.4": False},
+            "axiolid-pending": {"0.1.13": False},
+            "axiolid-fresh": {"0.2.0": False},
+        }
+        with self.assertRaises(minimal_probe.Inapplicable) as raised:
+            self.edits(index)
+        self.assertEqual(
+            raised.exception.args[0], ["axiolid-aaa", "axiolid-pending", "axiolid-fresh"]
+        )
+
+    def test_a_published_dependency_without_an_older_version_is_an_error(self):
+        index = {"axiolid-aaa": {"0.3.5": False}, "axiolid-pending": {"0.1.13": False}}
+        with self.assertRaises(SystemExit):
+            self.edits(index)
+
+    def test_caret_compatibility_follows_cargos_zero_major_rule(self):
+        compatible = minimal_probe.caret_compatible
+        self.assertTrue(compatible("0.3.0", "0.3.9"))
+        self.assertFalse(compatible("0.2.9", "0.3.0"))
+        self.assertTrue(compatible("1.2.0", "1.9.0"))
+        self.assertFalse(compatible("1.9.0", "2.0.0"))
 
 
 if __name__ == "__main__":
