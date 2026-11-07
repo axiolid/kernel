@@ -69,6 +69,7 @@ use crate::nurbs::SplineAxis;
 
 mod graph;
 mod implicit;
+mod interval;
 mod intrinsic;
 mod offset;
 mod position_table;

@@ -24,6 +24,7 @@ box by `d`, too little for the bound to change visibly.
 import probe_lib
 
 G = "crates/algorithms/parametric/evaluate/src/bound/graph.rs"
+I = "crates/algorithms/parametric/evaluate/src/bound/interval.rs"
 B = "crates/algorithms/parametric/evaluate/src/bound.rs"
 UNIT = ["-p", "axiolid-evaluate", "--lib", "bound::graph"]
 PUBLIC = ["-p", "axiolid-evaluate", "--test", "graph_chord_bound"]
@@ -34,28 +35,28 @@ FW_CHECK = (
 
 MUTANTS = [
     # Outward rounding.
-    ('widen rounds inward', G,
+    ('widen rounds inward', I,
      '            lo: self.lo.next_down(),\n            hi: self.hi.next_up(),',
      '            lo: self.lo.next_up(),\n            hi: self.hi.next_down(),', [UNIT]),
-    ('a sum is not widened', G,
+    ('a sum is not widened', I,
      '            hi: self.hi + o.hi,\n        }\n        .widen()',
      '            hi: self.hi + o.hi,\n        }', [UNIT]),
-    ('a product is not widened', G,
+    ('a product is not widened', I,
      '            hi: p.iter().copied().fold(Scalar::NEG_INFINITY, Scalar::max),\n        }\n        .widen()',
      '            hi: p.iter().copied().fold(Scalar::NEG_INFINITY, Scalar::max),\n        }', [UNIT]),
-    ('a square is not widened above', G,
+    ('a square is not widened above', I,
      '            hi: a.max(b).next_up(),',
      '            hi: a.max(b),', [UNIT]),
-    ('a cosine range is padded inward', G,
+    ('a cosine range is padded inward', I,
      '    let (min, max) = cos_range(lo, hi);\n    Iv {\n        lo: min - TRIG_PAD,\n        hi: max + TRIG_PAD,',
      '    let (min, max) = cos_range(lo, hi);\n    Iv {\n        lo: min + TRIG_PAD,\n        hi: max - TRIG_PAD,', [UNIT]),
-    ('a sine range is padded inward', G,
+    ('a sine range is padded inward', I,
      '        lo.sin().min(hi.sin())\n    };\n    Iv {\n        lo: min - TRIG_PAD,\n        hi: max + TRIG_PAD,',
      '        lo.sin().min(hi.sin())\n    };\n    Iv {\n        lo: min + TRIG_PAD,\n        hi: max - TRIG_PAD,', [UNIT]),
-    ('a sine maximum inside is not searched', G,
+    ('a sine maximum inside is not searched', I,
      '    let max = if contains_lattice(lo, hi, FRAC_PI_2, TAU) {',
      '    let max = if false {', [UNIT]),
-    ('a sine minimum inside is not searched', G,
+    ('a sine minimum inside is not searched', I,
      '    let min = if contains_lattice(lo, hi, -FRAC_PI_2, TAU) {',
      '    let min = if false {', [UNIT]),
     # The height range.
@@ -105,8 +106,8 @@ MUTANTS = [
     ('the loosest split is taken', G,
      'best.is_none_or(|b| bound < b)', 'best.is_none_or(|b| bound > b)', [PUBLIC]),
     ('a piece is not certified from its own box', G,
-     '        let piece = piece_bend(field, a, b)?;',
-     '        let piece = piece_bend(field, lo, hi)?;', [PUBLIC]),
+     '        let piece = piece_enclosure(field, a, b)?;',
+     '        let piece = piece_enclosure(field, lo, hi)?;', [PUBLIC]),
     # The partials of the two fields.
     ('the quadratic F_t loses its linear term', G,
      '            t: poly(k.a.first, k.b.first, k.c.first),',

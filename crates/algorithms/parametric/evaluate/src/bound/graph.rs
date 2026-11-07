@@ -38,126 +38,10 @@
 use axiolid_core::Scalar;
 use axiolid_curve::{AngleGraph2, QuadraticGraph2, Trig2};
 
-use super::{contains_lattice, cos_range};
-
-/// Absolute padding of a sine or cosine range, covering the library's
-/// rounding of the endpoint values.
-const TRIG_PAD: Scalar = 8.0 * Scalar::EPSILON;
+use super::interval::{cos_iv, sin_iv, Iv};
 
 /// Growth steps of `rho` before the bound is refused.
 const RHO_STEPS: usize = 64;
-
-/// A closed interval whose operations round outward.
-#[derive(Debug, Clone, Copy)]
-struct Iv {
-    lo: Scalar,
-    hi: Scalar,
-}
-
-impl Iv {
-    fn point(x: Scalar) -> Self {
-        Self { lo: x, hi: x }
-    }
-
-    fn widen(self) -> Self {
-        Self {
-            lo: self.lo.next_down(),
-            hi: self.hi.next_up(),
-        }
-    }
-
-    fn add(self, o: Self) -> Self {
-        Self {
-            lo: self.lo + o.lo,
-            hi: self.hi + o.hi,
-        }
-        .widen()
-    }
-
-    fn neg(self) -> Self {
-        Self {
-            lo: -self.hi,
-            hi: -self.lo,
-        }
-    }
-
-    fn mul(self, o: Self) -> Self {
-        let p = [
-            self.lo * o.lo,
-            self.lo * o.hi,
-            self.hi * o.lo,
-            self.hi * o.hi,
-        ];
-        Self {
-            lo: p.iter().copied().fold(Scalar::INFINITY, Scalar::min),
-            hi: p.iter().copied().fold(Scalar::NEG_INFINITY, Scalar::max),
-        }
-        .widen()
-    }
-
-    fn scale(self, k: Scalar) -> Self {
-        self.mul(Self::point(k))
-    }
-
-    fn sq(self) -> Self {
-        let (a, b) = (self.lo * self.lo, self.hi * self.hi);
-        let lo = if self.lo <= 0.0 && self.hi >= 0.0 {
-            0.0
-        } else {
-            a.min(b).next_down().max(0.0)
-        };
-        Self {
-            lo,
-            hi: a.max(b).next_up(),
-        }
-    }
-
-    fn straddles_zero(self) -> bool {
-        self.lo <= 0.0 && self.hi >= 0.0
-    }
-
-    /// `sup |x|`.
-    fn mag(self) -> Scalar {
-        self.lo.abs().max(self.hi.abs())
-    }
-
-    /// `inf |x|`, for an interval holding no zero.
-    fn mig(self) -> Scalar {
-        self.lo.abs().min(self.hi.abs())
-    }
-
-    fn finite(self) -> bool {
-        self.lo.is_finite() && self.hi.is_finite()
-    }
-}
-
-/// The range of `cos` over `[lo, hi]`.
-fn cos_iv(lo: Scalar, hi: Scalar) -> Iv {
-    let (min, max) = cos_range(lo, hi);
-    Iv {
-        lo: min - TRIG_PAD,
-        hi: max + TRIG_PAD,
-    }
-}
-
-/// The range of `sin` over `[lo, hi]`.
-fn sin_iv(lo: Scalar, hi: Scalar) -> Iv {
-    use core::f64::consts::{FRAC_PI_2, TAU};
-    let max = if contains_lattice(lo, hi, FRAC_PI_2, TAU) {
-        1.0
-    } else {
-        lo.sin().max(hi.sin())
-    };
-    let min = if contains_lattice(lo, hi, -FRAC_PI_2, TAU) {
-        -1.0
-    } else {
-        lo.sin().min(hi.sin())
-    };
-    Iv {
-        lo: min - TRIG_PAD,
-        hi: max + TRIG_PAD,
-    }
-}
 
 /// A trigonometric polynomial and its first two derivatives over a span.
 #[derive(Debug, Clone, Copy)]
@@ -216,7 +100,16 @@ struct Partials {
 
 /// A family `F(t, w) = 0` with a closed form `w(t)`.
 trait Field {
-    fn coefficients(&self) -> [&Trig2; 3];
+    /// What the family encloses over a span, the input of `value` and
+    /// `partials`.
+    type Piece;
+
+    /// Whether every number of the family is finite.
+    fn is_finite(&self) -> bool;
+
+    /// The enclosure of the family over `[lo, hi]`, or `None` where `F(t,
+    /// .)` certainly has no root for some `t` of the span.
+    fn piece(&self, lo: Scalar, hi: Scalar) -> Option<Self::Piece>;
 
     /// The closed-form `w(t)`.
     fn height(&self, t: Scalar) -> Option<Scalar>;
@@ -226,18 +119,38 @@ trait Field {
     fn cut(&self, heights: Iv) -> bool;
 
     /// `F` at `t` in the span and `w` in `heights`.
-    fn value(&self, k: &Coefficients, heights: Iv) -> Iv;
-
-    /// Whether `F(t, .)` certainly has no root for some `t` of the span.
-    fn undefined(&self, k: &Coefficients) -> bool;
+    fn value(&self, k: &Self::Piece, heights: Iv) -> Iv;
 
     /// The partials of `F` over `t` in the span and `w` in `heights`.
-    fn partials(&self, k: &Coefficients, heights: Iv) -> Partials;
+    fn partials(&self, k: &Self::Piece, heights: Iv) -> Partials;
+}
+
+/// The enclosures of the three coefficients of a [`Trig2`] family over a
+/// span, or `None` where `undefined` holds of them.
+fn enclose_family(
+    [a, b, c]: [&Trig2; 3],
+    lo: Scalar,
+    hi: Scalar,
+    undefined: impl Fn(&Coefficients) -> bool,
+) -> Option<Coefficients> {
+    let [a, b, c] = [a, b, c].map(|t| trig_enclose(t, lo, hi));
+    let k = Coefficients { a, b, c };
+    (!undefined(&k)).then_some(k)
 }
 
 impl Field for QuadraticGraph2 {
-    fn coefficients(&self) -> [&Trig2; 3] {
-        [&self.a, &self.b, &self.c]
+    type Piece = Coefficients;
+
+    fn is_finite(&self) -> bool {
+        [&self.a, &self.b, &self.c].iter().all(|t| t.is_finite())
+    }
+
+    fn piece(&self, lo: Scalar, hi: Scalar) -> Option<Coefficients> {
+        enclose_family([&self.a, &self.b, &self.c], lo, hi, |k| {
+            // `b^2 - 4ac < 0`.
+            let d = k.b.value.sq().add(k.a.value.mul(k.c.value).scale(-4.0));
+            d.hi < 0.0
+        })
     }
 
     fn height(&self, t: Scalar) -> Option<Scalar> {
@@ -250,12 +163,6 @@ impl Field for QuadraticGraph2 {
 
     fn value(&self, k: &Coefficients, w: Iv) -> Iv {
         k.a.value.mul(w.sq()).add(k.b.value.mul(w)).add(k.c.value)
-    }
-
-    fn undefined(&self, k: &Coefficients) -> bool {
-        // `b^2 - 4ac < 0`.
-        let d = k.b.value.sq().add(k.a.value.mul(k.c.value).scale(-4.0));
-        d.hi < 0.0
     }
 
     fn partials(&self, k: &Coefficients, w: Iv) -> Partials {
@@ -273,8 +180,18 @@ impl Field for QuadraticGraph2 {
 }
 
 impl Field for AngleGraph2 {
-    fn coefficients(&self) -> [&Trig2; 3] {
-        [&self.a, &self.b, &self.c]
+    type Piece = Coefficients;
+
+    fn is_finite(&self) -> bool {
+        [&self.a, &self.b, &self.c].iter().all(|t| t.is_finite())
+    }
+
+    fn piece(&self, lo: Scalar, hi: Scalar) -> Option<Coefficients> {
+        enclose_family([&self.a, &self.b, &self.c], lo, hi, |k| {
+            // `a^2 + b^2 - c^2 < 0`.
+            let e = k.a.value.sq().add(k.b.value.sq()).add(k.c.value.sq().neg());
+            e.hi < 0.0
+        })
     }
 
     fn height(&self, t: Scalar) -> Option<Scalar> {
@@ -294,12 +211,6 @@ impl Field for AngleGraph2 {
             .mul(cw)
             .add(k.b.value.mul(sw))
             .add(k.c.value.neg())
-    }
-
-    fn undefined(&self, k: &Coefficients) -> bool {
-        // `a^2 + b^2 - c^2 < 0`.
-        let e = k.a.value.sq().add(k.b.value.sq()).add(k.c.value.sq().neg());
-        e.hi < 0.0
     }
 
     fn partials(&self, k: &Coefficients, w: Iv) -> Partials {
@@ -350,7 +261,7 @@ fn certify<F: Field>(field: &F, lo: Scalar, hi: Scalar) -> Option<Scalar> {
     if !(lo.is_finite() && hi.is_finite() && lo < hi) {
         return None;
     }
-    if field.coefficients().iter().any(|t| !t.is_finite()) {
+    if !field.is_finite() {
         return None;
     }
     let span = Iv::point(hi).add(Iv::point(-lo)).hi;
@@ -382,8 +293,8 @@ fn rounding(a: Scalar, b: Scalar) -> Scalar {
 
 /// A certified piece: `sup |w''|`, and how far each computed end is from its
 /// root.
-#[derive(Debug, Clone, Copy, PartialEq)]
-struct Piece {
+#[derive(Debug, Clone, Copy)]
+struct Enclosure {
     bend: Scalar,
     start: Scalar,
     end: Scalar,
@@ -392,8 +303,7 @@ struct Piece {
 /// A distance `d` such that the root of `F(t, .)` lies within `d` of `w`,
 /// certified by a sign change of `F` across `[w - d, w + d]`, or `None`.
 fn end_error<F: Field>(field: &F, t: Scalar, w: Scalar) -> Option<Scalar> {
-    let [a, b, c] = field.coefficients().map(|x| trig_enclose(x, t, t));
-    let k = Coefficients { a, b, c };
+    let k = field.piece(t, t)?;
     let mut d = rounding(w, w);
     for _ in 0..RHO_STEPS {
         let at = |x: Scalar| field.value(&k, Iv::point(x).widen());
@@ -429,7 +339,7 @@ fn split_bend<F: Field>(
         if a >= b {
             return None;
         }
-        let piece = piece_bend(field, a, b)?;
+        let piece = piece_enclosure(field, a, b)?;
         bend = bend.max(piece.bend);
         if i == 0 {
             start = piece.start;
@@ -441,13 +351,9 @@ fn split_bend<F: Field>(
 
 /// `sup |w''|` over one piece, from the box of the piece by the heights
 /// `rho` about the ends' (see the module docs).
-fn piece_bend<F: Field>(field: &F, lo: Scalar, hi: Scalar) -> Option<Piece> {
+fn piece_enclosure<F: Field>(field: &F, lo: Scalar, hi: Scalar) -> Option<Enclosure> {
     let (w_lo, w_hi) = (field.height(lo)?, field.height(hi)?);
-    let [a, b, c] = field.coefficients().map(|t| trig_enclose(t, lo, hi));
-    let k = Coefficients { a, b, c };
-    if field.undefined(&k) {
-        return None;
-    }
+    let k = field.piece(lo, hi)?;
     let span = Iv::point(hi).add(Iv::point(-lo)).hi;
     let (w_min, w_max) = (w_lo.min(w_hi), w_lo.max(w_hi));
     let (d_lo, d_hi) = (end_error(field, lo, w_lo)?, end_error(field, hi, w_hi)?);
@@ -475,7 +381,7 @@ fn piece_bend<F: Field>(field: &F, lo: Scalar, hi: Scalar) -> Option<Piece> {
                 .add(Iv::point(p.tw.mag()).mul(l).scale(2.0))
                 .add(Iv::point(p.ww.mag()).mul(l).mul(l));
             let bend = (numerator.hi / floor).next_up();
-            return bend.is_finite().then_some(Piece {
+            return bend.is_finite().then_some(Enclosure {
                 bend,
                 start: d_lo,
                 end: d_hi,

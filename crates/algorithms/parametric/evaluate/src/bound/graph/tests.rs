@@ -102,7 +102,7 @@ fn a_piece_holds_a_height_that_leaves_the_hull_of_its_ends() {
     // `w'' = q''/(2w) - q'^2/(4 w^3)` at the bottom of the dip.
     let at_bottom = g.bend(0.0).unwrap().abs();
     assert!(at_bottom > 0.9, "{at_bottom}");
-    if let Some(bend) = piece_bend(&g, -1.0, 1.0).map(|p| p.bend) {
+    if let Some(bend) = piece_enclosure(&g, -1.0, 1.0).map(|p| p.bend) {
         assert!(bend >= at_bottom, "{bend} under {at_bottom}");
     }
 }
@@ -114,8 +114,8 @@ fn a_piece_refuses_a_zero_of_the_height_derivative() {
         c: trig(-0.5, 0.5, 0.0, 0.0, 0.0),
         ..dip()
     };
-    assert_eq!(piece_bend(&g, -0.5, 0.5), None);
-    assert_eq!(piece_bend(&g, 0.0, 0.2), None);
+    assert!(piece_enclosure(&g, -0.5, 0.5).is_none());
+    assert!(piece_enclosure(&g, 0.0, 0.2).is_none());
 }
 
 #[test]
@@ -212,8 +212,12 @@ struct Shifted {
 }
 
 impl Field for Shifted {
-    fn coefficients(&self) -> [&Trig2; 3] {
-        self.graph.coefficients()
+    type Piece = Coefficients;
+    fn is_finite(&self) -> bool {
+        self.graph.is_finite()
+    }
+    fn piece(&self, lo: Scalar, hi: Scalar) -> Option<Coefficients> {
+        self.graph.piece(lo, hi)
     }
     fn height(&self, t: Scalar) -> Option<Scalar> {
         self.graph.height(t).map(|w| w + self.shift)
@@ -223,9 +227,6 @@ impl Field for Shifted {
     }
     fn value(&self, k: &Coefficients, heights: Iv) -> Iv {
         self.graph.value(k, heights)
-    }
-    fn undefined(&self, k: &Coefficients) -> bool {
-        self.graph.undefined(k)
     }
     fn partials(&self, k: &Coefficients, heights: Iv) -> Partials {
         self.graph.partials(k, heights)
