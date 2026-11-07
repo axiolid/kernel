@@ -18,7 +18,9 @@
 //!
 //! over a span, and a caller decides `F` for the points of its sections.
 //! They are affine in the point's coordinates, so over a section the
-//! smallest `F` stands at a vertex.
+//! smallest `F` stands at a vertex. A section turned about the frame needs
+//! the frame's twist and rise too: [`FrameLaw::rates`] (#406), of which
+//! [`FrameLaw::bend`] is the projection.
 //!
 //! # Closed forms
 //!
@@ -83,13 +85,18 @@ pub struct BendBounds {
 /// station distance, as the piece presents it (reversed, placed); `None`
 /// for a curve whose point is not closed form.
 pub(crate) fn closed_jet(piece: &StationPiece<'_>, u: Scalar) -> Option<(Vec3, Vec3)> {
+    presented(piece, closed_raw_jet(piece, u)?)
+}
+
+/// [`closed_jet`] in the curve's own measure, before the piece reverses or
+/// places it.
+pub(super) fn closed_raw_jet(piece: &StationPiece<'_>, u: Scalar) -> Option<(Vec3, Vec3)> {
     let (m, _) = piece.read_at(u, SeamSide::Outgoing);
-    let jet = match piece.curve {
-        StationCurve::Two(curve) => jet2(curve, m)?,
-        StationCurve::Three(curve) => jet3(curve, m)?,
-        StationCurve::Offset(_) => return None,
-    };
-    presented(piece, jet)
+    match piece.curve {
+        StationCurve::Two(curve) => jet2(curve, m),
+        StationCurve::Three(curve) => jet3(curve, m),
+        StationCurve::Offset(_) => None,
+    }
 }
 
 /// A curve's jet in its own measure as `piece` presents it: negated
@@ -165,7 +172,7 @@ fn jet3(curve: &Curve3, m: Scalar) -> Option<(Vec3, Vec3)> {
 /// The Lipschitz constants, in station distance, of `sigma`, `beta_L` and
 /// `beta_U` from the span's frame bounds (`beta_U` is zero in the plan
 /// reading, where `U = +Z` and `N'` is horizontal).
-fn lipschitz(bounds: &FrameLawBounds, plan: bool) -> [Scalar; 3] {
+pub(super) fn lipschitz(bounds: &FrameLawBounds, plan: bool) -> [Scalar; 3] {
     let beta = |axis: [Scalar; 2]| axis[0] * bounds.tangent[0] + bounds.tangent[1];
     [
         bounds.point[1] + bounds.point[0] * bounds.tangent[0],
@@ -217,64 +224,21 @@ impl FrameLaw<'_, '_> {
     /// Certified bounds of the coefficients of the signed bend over the
     /// distances `[a, b]` along the basis, a span that crosses no seam,
     /// read as `reading`; see the [module documentation](super#the-signed-bend-361).
+    /// A projection of [`Self::rates`].
     ///
-    /// `None` for frames read by quadrature (an ellipse, a B-spline, an
-    /// offset) and wherever [`Self::bounds`] is `None`.
+    /// `None` wherever [`Self::rates`] is: a chain, a span the jet is not
+    /// bounded over, and a frame read by quadrature whose span crosses a
+    /// point where its curvature may jump.
     #[must_use]
     pub fn bend(&self, a: Scalar, b: Scalar, reading: FrameReading) -> Option<BendBounds> {
-        let bounds = self.bounds(a, b, reading)?;
-        let at = self.locate(a, b)?;
-        let mid = 0.5 * (at.from + at.to);
-        let (v, w) = match self.slots[at.slot].get()? {
-            Slot::Closed => closed_jet(&at.piece, mid)?,
-            Slot::Intrinsic(reader) => {
-                let (m, _) = at.piece.read_at(mid, SeamSide::Outgoing);
-                presented(&at.piece, reader.jet(m)?)?
-            }
-            Slot::Read(_) | Slot::Unbounded => return None,
-        };
-        let mut frame = at.piece.section_on(mid, SeamSide::Outgoing).ok()?;
-        let plan = reading == FrameReading::Plan;
-        if plan {
-            frame = frame.plan().ok()?;
-        }
-        let speed = if plan { v.x.hypot(v.y) } else { v.length() };
-        if !(speed.is_finite() && speed > 0.0) {
-            return None;
-        }
-        let middle = [
-            v.dot(frame.tangent),
-            frame.lateral.dot(w) / speed,
-            if plan { 0.0 } else { frame.up.dot(w) / speed },
-        ];
-        let (rounding, axis) = (64.0 * Scalar::EPSILON, bounds.axis_error);
-        let turn = (rounding + 3.0 * axis) * w.length() / speed;
-        let middle_error = [
-            (rounding + 2.0 * axis) * v.length(),
-            turn,
-            if plan { 0.0 } else { turn },
-        ];
-        let reach = 0.5 * (b - a) + bounds.measure;
-        let lip = lipschitz(&bounds, plan);
-        let range = |j: usize| {
-            let pad = middle_error[j] + reach * lip[j];
-            [middle[j] - pad, middle[j] + pad]
-        };
-        let mut forward = range(0);
-        forward[0] = forward[0].max(bounds.forward);
-        let out = BendBounds {
-            forward,
-            lateral: range(1),
-            up: range(2),
-            middle,
-            middle_error,
-        };
-        [out.forward, out.lateral, out.up]
-            .iter()
-            .flatten()
-            .chain(&out.middle)
-            .chain(&out.middle_error)
-            .all(|x| x.is_finite())
-            .then_some(out)
+        let rates = self.rates(a, b, reading)?;
+        let [forward, lateral, up] = [rates.forward, rates.lateral, rates.up];
+        Some(BendBounds {
+            forward: forward.range,
+            lateral: lateral.range,
+            up: up.range,
+            middle: [forward.middle, lateral.middle, up.middle],
+            middle_error: [forward.error, lateral.error, up.error],
+        })
     }
 }

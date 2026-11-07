@@ -85,6 +85,17 @@
 //! longitudinal rate, and the planes fold where that is not positive. The
 //! `bend` module states the closed forms.
 //!
+//! # The rates (#406)
+//!
+//! A section turned about the frame also moves with the frame's twist and
+//! the basis point's rise: [`FrameLaw::rates`] bounds the whole Darboux
+//! form `E' = E Omega` of the frame `[T, L, U]` in station distance (`O' =
+//! sigma T + rise U`, `T' = beta_L L + beta_U U`, `L' = -beta_L T + tau U`),
+//! of which [`FrameLaw::bend`] is the projection onto `sigma`, `beta_L` and
+//! `beta_U`. The twist is `tau = phi' + T'.(u x Z) / |T_xy|`, the rolled
+//! reference-up frame's, and the rise `O'.Z` under the plan reading; the
+//! `rates` module states the closed forms.
+//!
 //! # Read by quadrature (#316)
 //!
 //! An ellipse, a B-spline and an offset beside a line, a circle, an
@@ -197,9 +208,11 @@ use crate::bound::ROUNDING;
 
 mod bend;
 mod error;
+mod rates;
 
 pub use bend::BendBounds;
 pub use error::StationFrameError;
+pub use rates::{FrameRates, RateBounds};
 
 /// Which section frame a run places its sections in.
 #[non_exhaustive]

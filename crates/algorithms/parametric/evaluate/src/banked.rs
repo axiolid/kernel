@@ -268,6 +268,40 @@ fn cant_jet(curve: &Banked3, d: Scalar, before: bool) -> Option<[Scalar; 3]> {
     out.iter().all(|v| v.is_finite()).then_some(out)
 }
 
+/// `(phi', error)` of a banked curve's roll at plan distance `d`, read from
+/// the piece starting there, for the path's jet `(v, w)` there (`v.z` the
+/// grade `G`, `w.z` its rate `G'`): `phi = asin(g)` with `g = D / b` under
+/// the tangent rotation and `g = D hypot(G, 1) / b` under the vertical rise,
+/// so `phi' = g' / sqrt(1 - g^2)`. The error is the rounding of that
+/// evaluation. `None` off the law, for a held-rail piece, and where `|g|`
+/// reaches one.
+pub(crate) fn roll_rate(
+    curve: &Banked3,
+    d: Scalar,
+    (v, w): (Vec3, Vec3),
+) -> Option<(Scalar, Scalar)> {
+    let b = curve.rail_head_distance;
+    let [cant, rate, _] = cant_jet(curve, d, false)?;
+    let (g, slope) = match curve.convention {
+        axiolid_curve::BankConvention::TangentRotation => (cant / b, rate / b),
+        axiolid_curve::BankConvention::VerticalRise => {
+            let scale = v.z.hypot(1.0);
+            let scale_rate = v.z * w.z / scale;
+            (cant * scale / b, (rate * scale + cant * scale_rate) / b)
+        }
+        _ => return None,
+    };
+    if g.is_nan() || g.abs() >= 1.0 {
+        return None;
+    }
+    let c = (1.0 - g * g).sqrt();
+    let out = (
+        slope / c,
+        64.0 * Scalar::EPSILON * (slope.abs() / c) * (2.0 + 1.0 / (c * c)),
+    );
+    (out.0.is_finite() && out.1.is_finite()).then_some(out)
+}
+
 /// `(v, v', v'')` of a height piece `s` into it, in plan distance; `None`
 /// for an angle or held-rail piece.
 fn height_jet(piece: &CantPiece, s: Scalar) -> Option<[Scalar; 3]> {
@@ -588,4 +622,82 @@ pub(crate) fn rolled_axes(curve: &Banked3, d: Scalar, derivative: Vec3) -> GeomR
         cant,
         bank_angle,
     })
+}
+
+#[cfg(test)]
+mod tests {
+    use axiolid_core::{Frame2, Point2, Vec2};
+    use axiolid_curve::{BankConvention, Circle2, Curve2, Elevated3, ElevationLaw, RailSide};
+
+    use super::*;
+
+    fn canted(convention: BankConvention, cant: Vec<CantPiece>) -> Banked3 {
+        let plan = Curve2::Circle(Circle2 {
+            frame: Frame2 {
+                origin: Point2::ZERO,
+                x: Vec2::X,
+                y: Vec2::Y,
+            },
+            radius: 100.0,
+        });
+        Banked3::new(
+            Elevated3::new(
+                plan,
+                ElevationLaw::Polynomial {
+                    coefficients: vec![0.0, 0.1, 0.002],
+                },
+            ),
+            CantLaw::new(cant),
+            // A pivot that moves tilts the tangent: the grade is not the
+            // profile's alone.
+            CantLaw::new(vec![CantPiece::linear(60.0, 0.0, 0.05)]),
+            1.5,
+            convention,
+        )
+    }
+
+    /// `phi'` against a central difference of the section's roll, for a
+    /// height piece and an angle piece, under both conventions.
+    #[test]
+    fn the_roll_rate_matches_a_difference_of_the_roll() {
+        let h = 1e-5;
+        for convention in [
+            BankConvention::TangentRotation,
+            BankConvention::VerticalRise,
+        ] {
+            for cant in [
+                vec![CantPiece::linear(60.0, 0.0, 0.2)],
+                vec![CantPiece::viennese_bend(60.0, 0.0, 0.2)],
+            ] {
+                let curve = canted(convention, cant);
+                for d in [5.0, 20.0, 41.0] {
+                    let jet = (
+                        banked_derivative(&curve, d).unwrap(),
+                        banked_second_derivative(&curve, d).unwrap(),
+                    );
+                    let (rate, error) = roll_rate(&curve, d, jet).unwrap();
+                    let reference = (banked_section(&curve, d + h).unwrap().roll
+                        - banked_section(&curve, d - h).unwrap().roll)
+                        / (2.0 * h);
+                    assert!(
+                        (rate - reference).abs() <= error + 1e-8,
+                        "{convention:?} at {d}: {rate} against {reference}"
+                    );
+                    assert!(rate.abs() > 1e-4 && error < 1e-12);
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn a_held_rail_cant_has_no_roll_rate() {
+        let mut curve = canted(
+            BankConvention::TangentRotation,
+            vec![CantPiece::linear(60.0, 0.0, 0.2)],
+        );
+        let jet = (Vec3::X, Vec3::Y);
+        assert!(roll_rate(&curve, 10.0, jet).is_some());
+        curve.cant = CantLaw::new(vec![CantPiece::about_rail(60.0, RailSide::Right, 0.0)]);
+        assert!(roll_rate(&curve, 10.0, jet).is_none());
+    }
 }

@@ -159,7 +159,8 @@ pub(crate) use certify::CurveLengths;
 pub use certify::{DistanceInterval, MAX_CERTIFIED_PANELS, POINT_ROUNDING, UNCERTIFIED_LENGTH};
 pub use composite::{CompositeBasis, StationCurve, StationPiece, JOINT_TOLERANCE};
 pub use frame_bound::{
-    piece_frame_bounds, BendBounds, FrameLaw, FrameLawBounds, FrameReading, StationFrameError,
+    piece_frame_bounds, BendBounds, FrameLaw, FrameLawBounds, FrameRates, FrameReading, RateBounds,
+    StationFrameError,
 };
 pub use offset::{offset_pieces, StationOffset, CUSP_TOLERANCE, OFFSET_TOLERANCE};
 pub use path_bound::{
