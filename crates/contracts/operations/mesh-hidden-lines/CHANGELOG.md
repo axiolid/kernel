@@ -13,6 +13,16 @@ caret rule for `0.x` versions.
 
 ### Added
 
+- `Projection` (`Orthographic`, the default, and `Perspective`), the
+  `OrthographicView::projection` field, `OrthographicView::perspective(frame,
+  near)` (refuses a `near` that is not finite and below zero) and a defaulted
+  `supports_projection` on `MeshHiddenLines` and `MeshVisibleFaces` that is
+  `true` for `Orthographic` only. Registries route by it, so a provider that
+  predates the field is never given a perspective view. The new
+  `conformance::perspective::PerspectiveConformanceSuite` infers the claim
+  from `supports_projection`: an unclaiming provider must refuse a perspective
+  request by name, and a claim fails closed until perspective fixtures exist
+  (ADR 0107, #387). No provider draws perspective yet.
 - `FaceGroups::Planar` and `HiddenLineMesh::with_planar_groups`: the groups are
   the edge-connected components of triangles joined across an edge of exactly
   two triangles with parallel, same-facing normals, decided exactly, each named

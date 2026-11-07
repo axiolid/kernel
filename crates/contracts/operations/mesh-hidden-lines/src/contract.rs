@@ -1,6 +1,8 @@
 //! Portable orthographic hidden-line provider contract.
 
-use axiolid_contracts::{Backend, CancellationGranularity, ExecutionOptions, ScratchRequirement};
+use axiolid_contracts::{
+    Backend, CancellationGranularity, ExecutionOptions, GeomError, ScratchRequirement,
+};
 use axiolid_core::{Aabb2, Frame3, Point2};
 use axiolid_mesh::TriMesh;
 
@@ -67,13 +69,35 @@ impl<'a> HiddenLineMesh<'a> {
     }
 }
 
-/// An orthographic view.
+/// How a view maps model points to the image.
 ///
-/// For a model point `p` the image is `((p - o)·x, (p - o)·y)` and the depth
-/// is `W = (p - o)·z`, where `o`, `x`, `y`, `z` are the frame's origin and
-/// axes. The viewer sits on the `+z` side and looks along `-z`, so a larger
-/// `W` is nearer. Geometry is kept where `far <= W <= near` (both closed);
-/// an absent bound is no bound.
+/// [`Orthographic`](Self::Orthographic) is the default and the only projection
+/// the in-tree providers draw today. A provider says which it draws with
+/// `supports_projection` on [`MeshHiddenLines`] and [`crate::MeshVisibleFaces`]
+/// (ADR 0107), and a registry never hands it a view it does not support.
+#[non_exhaustive]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum Projection {
+    /// Parallel projection along the frame's `-z` axis.
+    #[default]
+    Orthographic,
+    /// Central projection from the eye at the frame's origin onto the plane
+    /// `W = -1`: the image of a point with view coordinates `(U, V, W)` and
+    /// `W < 0` is `(U / -W, V / -W)`. The view requires `near < 0`, so every
+    /// kept point is strictly in front of the eye.
+    Perspective,
+}
+
+/// A view: orthographic by default, or perspective (see [`Projection`]).
+///
+/// For a model point `p` the view coordinates are `((p - o)·x, (p - o)·y)`
+/// and the depth `W = (p - o)·z`, where `o`, `x`, `y`, `z` are the frame's
+/// origin and axes. The viewer sits on the `+z` side and looks along `-z`, so
+/// a larger `W` is nearer. An orthographic view's image is the view
+/// coordinates; a perspective view's is described at
+/// [`Projection::Perspective`]. Geometry is kept where `far <= W <= near`
+/// (both closed); an absent bound is no bound, except that a perspective view
+/// has a `near` below zero.
 #[non_exhaustive]
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct OrthographicView {
@@ -83,16 +107,37 @@ pub struct OrthographicView {
     pub near: Option<f64>,
     /// Farthest kept depth.
     pub far: Option<f64>,
+    /// How points are projected to the image.
+    pub projection: Projection,
 }
 
 impl OrthographicView {
-    /// A view without depth clipping.
+    /// An orthographic view without depth clipping.
     pub const fn new(frame: Frame3) -> Self {
         Self {
             frame,
             near: None,
             far: None,
+            projection: Projection::Orthographic,
         }
+    }
+
+    /// A perspective view from the eye at `frame.origin`, keeping depths
+    /// `W <= near`. `near` must be finite and below zero; anything else is
+    /// refused, since the central projection is undefined at and behind the
+    /// eye.
+    pub fn perspective(frame: Frame3, near: f64) -> Result<Self, HiddenLineError> {
+        if !near.is_finite() || near >= 0.0 {
+            return Err(HiddenLineError::request(GeomError::InvalidInput(
+                "perspective near depth must be finite and below zero".into(),
+            )));
+        }
+        Ok(Self {
+            frame,
+            near: Some(near),
+            far: None,
+            projection: Projection::Perspective,
+        })
     }
 
     /// Keep only depths `W <= near`.
@@ -448,6 +493,16 @@ impl HiddenLineOutcome {
 ///   substitute drawing is returned;
 /// - output storage is outside the scratch budget.
 pub trait MeshHiddenLines: Backend {
+    /// Whether the provider draws views of this projection. The default is
+    /// `true` for [`Projection::Orthographic`] only, so a provider written
+    /// before [`Projection`] existed, which ignores the field, is never given
+    /// a perspective view by a registry (ADR 0107). A provider that returns
+    /// `true` for a projection must draw it exactly and pass that
+    /// projection's conformance suite.
+    fn supports_projection(&self, projection: Projection) -> bool {
+        projection == Projection::Orthographic
+    }
+
     /// Scratch needed beyond inputs and result.
     fn scratch_requirement(&self) -> ScratchRequirement {
         ScratchRequirement::Unbounded
@@ -465,4 +520,31 @@ pub trait MeshHiddenLines: Backend {
         request: &HiddenLineRequest<'_>,
         options: &ExecutionOptions,
     ) -> Result<HiddenLineOutcome, HiddenLineError>;
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::fixtures::plan_frame;
+
+    #[test]
+    fn a_view_is_orthographic_unless_built_as_perspective() {
+        let view = OrthographicView::new(plan_frame());
+        assert_eq!(view.projection, Projection::Orthographic);
+        assert_eq!(Projection::default(), Projection::Orthographic);
+        assert_eq!(view.with_near(-1.0).projection, Projection::Orthographic);
+    }
+
+    #[test]
+    fn a_perspective_view_needs_a_finite_negative_near() {
+        let view = OrthographicView::perspective(plan_frame(), -1.0).expect("valid");
+        assert_eq!(view.projection, Projection::Perspective);
+        assert_eq!(view.near, Some(-1.0));
+        assert_eq!(view.far, None);
+        for near in [0.0, -0.0, 1.0, f64::NAN, f64::INFINITY, f64::NEG_INFINITY] {
+            let error = OrthographicView::perspective(plan_frame(), near).expect_err("refused");
+            assert_eq!(error.mesh, None);
+            assert!(matches!(error.error, GeomError::InvalidInput(_)), "{near}");
+        }
+    }
 }

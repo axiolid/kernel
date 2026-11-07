@@ -11,7 +11,13 @@ use std::sync::Arc;
 use axiolid_contracts::{BackendId, ExecutionOptions, GeomError, Operation};
 use axiolid_core::Point2;
 use axiolid_mesh_hidden_lines_contract::{
-    conformance::faces::{FaceConformanceReport, FaceConformanceSuite},
+    conformance::{
+        faces::{FaceConformanceReport, FaceConformanceSuite},
+        perspective::{
+            PerspectiveConformanceFailure, PerspectiveConformanceReport,
+            PerspectiveConformanceSuite,
+        },
+    },
     FaceGroups, FaceSource, HiddenLineError, HiddenLineMesh, MeshRole, MeshVisibleFaces,
     VisibleFaceOutcome, VisibleFaceRequest,
 };
@@ -74,6 +80,31 @@ impl MeshVisibleFacesRegistry {
         Ok(())
     }
 
+    /// Validate a provider with the shared suite and the perspective suite
+    /// before registration (ADR 0107); see
+    /// [`MeshHiddenLinesRegistry::register_perspective_conformant`](crate::MeshHiddenLinesRegistry::register_perspective_conformant).
+    pub fn register_perspective_conformant<P>(
+        &mut self,
+        priority: i32,
+        provider: P,
+    ) -> Result<(), Box<PerspectiveConformanceReport>>
+    where
+        P: MeshVisibleFaces + 'static,
+    {
+        let mut report = PerspectiveConformanceSuite::run_faces(&provider);
+        report.failures.extend(
+            FaceConformanceSuite::run(&provider)
+                .failures
+                .into_iter()
+                .map(PerspectiveConformanceFailure::VisibleFacesBase),
+        );
+        if !report.is_success() {
+            return Err(Box::new(report));
+        }
+        self.register(priority, provider);
+        Ok(())
+    }
+
     /// Register a shared implementation. Higher priorities run first.
     pub fn register_arc(&mut self, priority: i32, provider: Arc<dyn MeshVisibleFaces>) {
         self.providers
@@ -100,7 +131,9 @@ impl MeshVisibleFacesRegistry {
         let mut has_budgeted_provider = false;
         for entry in &self.providers {
             let descriptor = entry.provider.descriptor();
-            if matches_device(options.device(), descriptor.id, descriptor.target) {
+            if matches_device(options.device(), descriptor.id, descriptor.target)
+                && entry.provider.supports_projection(request.view.projection)
+            {
                 has_matching_provider = true;
                 has_budgeted_provider |= scratch_fits(
                     entry.provider.scratch_requirement(),
@@ -124,6 +157,7 @@ impl MeshVisibleFacesRegistry {
         for entry in &self.providers {
             let descriptor = entry.provider.descriptor();
             if !matches_device(options.device(), descriptor.id, descriptor.target)
+                || !entry.provider.supports_projection(request.view.projection)
                 || !scratch_fits(
                     entry.provider.scratch_requirement(),
                     request.meshes,

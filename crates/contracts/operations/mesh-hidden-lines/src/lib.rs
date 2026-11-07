@@ -32,7 +32,7 @@ mod fixtures;
 pub use contract::{
     EdgeKind, EdgeSelection, HiddenLineEvidence, HiddenLineLimits, HiddenLineMesh,
     HiddenLineOutcome, HiddenLineRequest, HiddenLineSegment, HiddenLineSource, MeshHiddenLines,
-    MeshId, MeshRole, OrthographicView, SourceEdge, Visibility,
+    MeshId, MeshRole, OrthographicView, Projection, SourceEdge, Visibility,
 };
 pub use error::{HiddenLineError, RefusedMesh};
 pub use faces::{

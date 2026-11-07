@@ -11,7 +11,7 @@ use axiolid_contracts::{ExecutionOptions, GeomError, ScratchRequirement};
 use axiolid_core::Aabb2;
 use axiolid_mesh::{audit_mesh_scratch_bytes, try_audit_mesh};
 use axiolid_mesh_hidden_lines_contract::{
-    FaceGroups, HiddenLineError, HiddenLineMesh, MeshRole, OrthographicView,
+    FaceGroups, HiddenLineError, HiddenLineMesh, MeshRole, OrthographicView, Projection,
 };
 
 use crate::frame::validate_frame;
@@ -136,6 +136,17 @@ pub(crate) fn validate_view(
         if bound.is_some_and(|value| !value.is_finite()) {
             return Err(invalid(format!("{label} {name} depth is not finite")));
         }
+    }
+    match view.projection {
+        Projection::Orthographic => {}
+        Projection::Perspective => {
+            if !view.near.is_some_and(|near| near < 0.0) {
+                return Err(invalid(format!(
+                    "{label} perspective view needs a near depth below zero"
+                )));
+            }
+        }
+        _ => return Err(invalid(format!("{label} projection is not known"))),
     }
     if let (Some(near), Some(far)) = (view.near, view.far) {
         if far >= near {

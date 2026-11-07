@@ -91,3 +91,4 @@ Package names and paths in older accepted records describe the tree at the time 
 | [0104](./0104-a-regions-rings-lie-apart-and-nested.md) | A region's rings lie apart and nested |
 | [0105](./0105-drawings-join-the-discrete-and-application-bundles.md) | Drawings join the `discrete` and `application` bundles |
 | [0106](./0106-planar-face-groups-are-derived-exactly-and-group-boundaries-are-drawn.md) | Planar face groups are derived exactly, and group boundaries are drawn |
+| [0107](./0107-perspective-views-share-the-hidden-line-and-visible-face-traits.md) | Perspective views share the hidden-line and visible-face traits |

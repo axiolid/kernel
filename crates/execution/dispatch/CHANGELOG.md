@@ -11,6 +11,12 @@ caret rule for `0.x` versions.
 
 ### Added
 
+- `MeshHiddenLinesRegistry` and `MeshVisibleFacesRegistry` route by
+  `supports_projection`: a provider that does not support the view's
+  projection is skipped, and a request no provider supports is `Unsupported`
+  before the topology audit. A perspective view needs a `near` below zero
+  (`InvalidInput` otherwise). `register_perspective_conformant` registers a
+  provider after the base suite and the perspective suite (ADR 0107, #387).
 - `MeshVisibleFacesRegistry` accepts `FaceGroups::Planar`: it checks that a
   region's group id is a triangle of the mesh and no later than any triangle
   the region lists, and does not recompute the groups (ADR 0106, #384).

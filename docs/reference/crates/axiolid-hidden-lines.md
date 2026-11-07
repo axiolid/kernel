@@ -30,7 +30,8 @@ near clipping plane that cuts a `Solid` mesh leaves a cap that occludes, decided
 by exact ray parity with a symbolic perturbation of the image point; a face of a
 cut solid in the plane needs no special case. A solid wholly beyond the plane is
 removed.
-It does not draw perspective views, exact B-rep edges or smooth silhouettes.
+It refuses perspective views by name (ADR 0107) and does not draw exact B-rep
+edges or smooth silhouettes.
 
 `ScalarVisibleFaces` is the provider for `MeshVisibleFaces` (ADR 0094): the
 visible face regions of caller-grouped triangles in the same view, with the

@@ -10,6 +10,12 @@ It also holds the sibling `MeshVisibleFaces` contract: the regions of the
 same view where each face group, or the near-plane cap of a cut solid, is
 frontmost. See ADR 0094.
 
+A view is orthographic by default. A perspective view (`Projection`, ADR 0107)
+is part of the contract, and a provider says whether it draws one with
+`supports_projection`; the registries never give it a view it does not
+support, and `PerspectiveConformanceSuite` checks the claim. No provider
+draws perspective yet.
+
 ```bash
 cargo add axiolid-mesh-hidden-lines-contract
 ```

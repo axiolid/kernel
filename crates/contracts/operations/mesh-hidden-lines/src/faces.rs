@@ -39,7 +39,9 @@ use axiolid_contracts::{
 };
 use axiolid_core::{Aabb2, Point2};
 
-use crate::{HiddenLineError, HiddenLineMesh, HiddenLineSource, MeshId, OrthographicView};
+use crate::{
+    HiddenLineError, HiddenLineMesh, HiddenLineSource, MeshId, OrthographicView, Projection,
+};
 
 /// Caller-chosen id of a set of triangles that share one surface pattern.
 ///
@@ -363,6 +365,14 @@ impl VisibleFaceOutcome {
 ///   `exact_escalations`;
 /// - output storage is outside the scratch budget.
 pub trait MeshVisibleFaces: Backend {
+    /// Whether the provider computes regions for views of this projection.
+    /// The default is `true` for [`Projection::Orthographic`] only; see
+    /// [`MeshHiddenLines::supports_projection`](crate::MeshHiddenLines::supports_projection)
+    /// (ADR 0107).
+    fn supports_projection(&self, projection: Projection) -> bool {
+        projection == Projection::Orthographic
+    }
+
     /// Scratch needed beyond inputs and result.
     fn scratch_requirement(&self) -> ScratchRequirement {
         ScratchRequirement::Unbounded

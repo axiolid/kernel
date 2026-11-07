@@ -5,8 +5,29 @@
 //! keeps its exact value (the exact tier) and an enclosure (bounding boxes
 //! only; a decision never reads the enclosure directly).
 
+use axiolid_contracts::{BackendId, GeomError, Operation};
 use axiolid_core::{Frame3, Point3};
 use axiolid_exact::{Arith, Dyadic, Interval};
+use axiolid_mesh_hidden_lines_contract::{HiddenLineError, OrthographicView, Projection};
+
+/// The refusal of a view this crate does not draw, by name. The providers
+/// leave `supports_projection` at its default, so a registry does not reach
+/// them with such a view (ADR 0107); a direct call is refused here.
+pub(crate) fn require_orthographic(
+    view: &OrthographicView,
+    backend: BackendId,
+    operation: Operation,
+) -> Result<(), HiddenLineError> {
+    if view.projection == Projection::Orthographic {
+        return Ok(());
+    }
+    Err(GeomError::UnsupportedInput {
+        backend,
+        operation,
+        input: "perspective view",
+    }
+    .into())
+}
 
 /// One vertex in view space.
 #[derive(Debug, Clone)]

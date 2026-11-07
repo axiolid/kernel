@@ -19,7 +19,7 @@ use axiolid_mesh::TriMesh;
 use axiolid_mesh_hidden_lines_contract::{
     EdgeKind, EdgeSelection, FaceGroup, HiddenLineError, HiddenLineEvidence, HiddenLineLimits,
     HiddenLineMesh, HiddenLineOutcome, HiddenLineRequest, HiddenLineSegment, MeshHiddenLines,
-    MeshId, MeshRole, OrthographicView, SourceEdge, Visibility,
+    MeshId, MeshRole, OrthographicView, Projection, SourceEdge, Visibility,
 };
 
 fn cube() -> TriMesh {
@@ -100,6 +100,7 @@ struct Recorder {
     calls: Arc<AtomicUsize>,
     scratch: ScratchRequirement,
     behaviour: Behaviour,
+    perspective: bool,
 }
 
 impl Recorder {
@@ -109,7 +110,13 @@ impl Recorder {
             calls: Arc::clone(calls),
             scratch: ScratchRequirement::None,
             behaviour,
+            perspective: false,
         }
+    }
+
+    fn claiming_perspective(mut self) -> Self {
+        self.perspective = true;
+        self
     }
 }
 
@@ -143,6 +150,10 @@ fn segment(mesh: MeshId, vertices: [u32; 2]) -> HiddenLineSegment {
 }
 
 impl MeshHiddenLines for Recorder {
+    fn supports_projection(&self, projection: Projection) -> bool {
+        projection == Projection::Orthographic || self.perspective
+    }
+
     fn scratch_requirement(&self) -> ScratchRequirement {
         self.scratch
     }
@@ -1142,4 +1153,127 @@ fn audit_lists_a_short_group_slice_exactly_when_group_boundaries_are_selected() 
     let error = registry.hidden_lines(&selected, &options()).unwrap_err();
     assert_eq!(error.mesh, Some(MeshId(2)));
     assert_eq!(error.error, refused[0].error);
+}
+
+fn perspective_view() -> OrthographicView {
+    OrthographicView::perspective(frame(), -1.0).expect("valid perspective view")
+}
+
+#[test]
+fn a_perspective_view_reaches_only_providers_that_claim_it() {
+    let (declining, claiming) = (counter(), counter());
+    let cube = cube();
+    let meshes = [mesh(1, MeshRole::Solid, &cube)];
+    let request = HiddenLineRequest::new(&meshes, perspective_view(), selection(), limits());
+
+    // The higher-priority provider ignores the projection by default, so the
+    // registry must skip it rather than hand it the view.
+    let mut registry = MeshHiddenLinesRegistry::new();
+    registry.register(1, Recorder::new("declines", &declining, well_behaved));
+    registry.register(
+        0,
+        Recorder::new("claims", &claiming, well_behaved).claiming_perspective(),
+    );
+    let outcome = registry
+        .hidden_lines(&request, &options())
+        .expect("the claiming provider draws");
+    assert_eq!(outcome.view, perspective_view());
+    assert_eq!((calls_of(&declining), calls_of(&claiming)), (0, 1));
+
+    // An orthographic request still reaches the first provider.
+    let ortho = HiddenLineRequest::new(&meshes, view(), selection(), limits());
+    registry.hidden_lines(&ortho, &options()).expect("draws");
+    assert_eq!((calls_of(&declining), calls_of(&claiming)), (1, 1));
+}
+
+#[test]
+fn a_perspective_view_without_a_claiming_provider_is_unsupported() {
+    let calls = counter();
+    let cube = cube();
+    let meshes = [mesh(1, MeshRole::Solid, &cube)];
+    let request = HiddenLineRequest::new(&meshes, perspective_view(), selection(), limits());
+    let error = registry(&calls, well_behaved)
+        .hidden_lines(&request, &options())
+        .expect_err("no provider supports the projection");
+    assert_eq!(calls_of(&calls), 0);
+    assert_eq!(error.mesh, None);
+    assert!(matches!(
+        error.error,
+        GeomError::Unsupported {
+            operation: Operation::MeshHiddenLines,
+            ..
+        }
+    ));
+    let empty = MeshHiddenLinesRegistry::new();
+    assert!(empty.hidden_lines(&request, &options()).is_err());
+}
+
+#[test]
+fn a_perspective_view_needs_a_negative_near_even_when_built_by_hand() {
+    let calls = counter();
+    let cube = cube();
+    let meshes = [mesh(1, MeshRole::Solid, &cube)];
+    let mut registry = MeshHiddenLinesRegistry::new();
+    registry.register(
+        0,
+        Recorder::new("claims", &calls, well_behaved).claiming_perspective(),
+    );
+    let good = perspective_view();
+    let mut bad_near = good;
+    bad_near.near = Some(0.0);
+    let mut no_near = good;
+    no_near.near = None;
+    for view in [bad_near, no_near] {
+        let request = HiddenLineRequest::new(&meshes, view, selection(), limits());
+        let error = registry
+            .hidden_lines(&request, &options())
+            .expect_err("refused before dispatch");
+        assert!(matches!(error.error, GeomError::InvalidInput(_)));
+        assert_eq!(error.mesh, None);
+    }
+    assert_eq!(calls_of(&calls), 0);
+}
+
+#[test]
+fn perspective_conformance_registration_follows_the_claim() {
+    let calls = counter();
+    let mut registry = MeshHiddenLinesRegistry::new();
+    // A recorder draws a perspective view, which an unclaiming provider must
+    // refuse; one that claims has no fixtures to prove it yet.
+    let unclaimed = registry
+        .register_perspective_conformant(0, Recorder::new("declines", &calls, well_behaved));
+    assert!(unclaimed.is_err());
+    let claimed = registry.register_perspective_conformant(
+        0,
+        Recorder::new("claims", &calls, well_behaved).claiming_perspective(),
+    );
+    assert!(claimed.expect_err("unverifiable").claimed);
+    assert_eq!(registry.providers().count(), 0);
+}
+
+#[test]
+fn routing_by_projection_comes_before_the_topology_audit() {
+    // Two triangles traversing their shared edge the same way are
+    // inconsistently wound. With no provider for the view the answer is
+    // Unsupported, not the mesh refusal, as for any unsupported request.
+    let calls = counter();
+    let bad = TriMesh::new(
+        vec![Vec3::ZERO, Vec3::X, Vec3::Y, Vec3::new(1.0, 1.0, 0.0)],
+        vec![0, 1, 2, 0, 1, 3],
+    );
+    let meshes = [mesh(1, MeshRole::Sheet, &bad)];
+    let request = HiddenLineRequest::new(&meshes, perspective_view(), selection(), limits());
+    let error = registry(&calls, well_behaved)
+        .hidden_lines(&request, &options())
+        .expect_err("unsupported");
+    assert_eq!(calls_of(&calls), 0);
+    assert!(
+        matches!(error.error, GeomError::Unsupported { .. }),
+        "{error}"
+    );
+    let ortho = HiddenLineRequest::new(&meshes, view(), selection(), limits());
+    let error = registry(&calls, well_behaved)
+        .hidden_lines(&ortho, &options())
+        .expect_err("the audit refuses the mesh");
+    assert_eq!(error.mesh, Some(MeshId(1)));
 }

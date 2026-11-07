@@ -20,7 +20,7 @@ use axiolid_dispatch::MeshVisibleFacesRegistry;
 use axiolid_mesh::TriMesh;
 use axiolid_mesh_hidden_lines_contract::{
     FaceGroup, FaceSource, HiddenLineError, HiddenLineMesh, MeshId, MeshRole, MeshVisibleFaces,
-    OrthographicView, VisibleFaceEvidence, VisibleFaceLimits, VisibleFaceOutcome,
+    OrthographicView, Projection, VisibleFaceEvidence, VisibleFaceLimits, VisibleFaceOutcome,
     VisibleFaceRequest, VisibleRegion,
 };
 
@@ -99,6 +99,7 @@ struct Recorder {
     calls: Arc<AtomicUsize>,
     scratch: ScratchRequirement,
     behaviour: Behaviour,
+    perspective: bool,
 }
 
 impl Recorder {
@@ -108,7 +109,13 @@ impl Recorder {
             calls: Arc::clone(calls),
             scratch: ScratchRequirement::None,
             behaviour,
+            perspective: false,
         }
+    }
+
+    fn claiming_perspective(mut self) -> Self {
+        self.perspective = true;
+        self
     }
 }
 
@@ -148,6 +155,10 @@ fn base_outcome(request: &VisibleFaceRequest<'_>) -> VisibleFaceOutcome {
 }
 
 impl MeshVisibleFaces for Recorder {
+    fn supports_projection(&self, projection: Projection) -> bool {
+        projection == Projection::Orthographic || self.perspective
+    }
+
     fn scratch_requirement(&self) -> ScratchRequirement {
         self.scratch
     }
@@ -1020,4 +1031,117 @@ fn a_planar_group_is_checked_for_structure_only() {
     for (name, behaviour) in refused {
         assert_violation(&request, behaviour, name);
     }
+}
+
+fn perspective_view() -> OrthographicView {
+    OrthographicView::perspective(frame(), -1.0).expect("valid perspective view")
+}
+
+#[test]
+fn a_perspective_view_reaches_only_providers_that_claim_it() {
+    let (declining, claiming) = (counter(), counter());
+    let cube = cube();
+    let meshes = [mesh(1, MeshRole::Solid, &cube)];
+    let request = VisibleFaceRequest::new(&meshes, perspective_view(), limits());
+
+    let mut registry = MeshVisibleFacesRegistry::new();
+    registry.register(1, Recorder::new("declines", &declining, well_behaved));
+    registry.register(
+        0,
+        Recorder::new("claims", &claiming, well_behaved).claiming_perspective(),
+    );
+    let outcome = registry
+        .visible_faces(&request, &options())
+        .expect("the claiming provider answers");
+    assert_eq!(outcome.view, perspective_view());
+    assert_eq!((calls_of(&declining), calls_of(&claiming)), (0, 1));
+
+    let ortho = VisibleFaceRequest::new(&meshes, view(), limits());
+    registry.visible_faces(&ortho, &options()).expect("answers");
+    assert_eq!((calls_of(&declining), calls_of(&claiming)), (1, 1));
+}
+
+#[test]
+fn a_perspective_view_without_a_claiming_provider_is_unsupported() {
+    let calls = counter();
+    let cube = cube();
+    let meshes = [mesh(1, MeshRole::Solid, &cube)];
+    let request = VisibleFaceRequest::new(&meshes, perspective_view(), limits());
+    let error = registry(&calls, well_behaved)
+        .visible_faces(&request, &options())
+        .expect_err("no provider supports the projection");
+    assert_eq!(calls_of(&calls), 0);
+    assert_eq!(error.mesh, None);
+    assert!(matches!(
+        error.error,
+        GeomError::Unsupported {
+            operation: Operation::MeshVisibleFaces,
+            ..
+        }
+    ));
+}
+
+#[test]
+fn a_perspective_view_needs_a_negative_near_even_when_built_by_hand() {
+    let calls = counter();
+    let cube = cube();
+    let meshes = [mesh(1, MeshRole::Solid, &cube)];
+    let mut registry = MeshVisibleFacesRegistry::new();
+    registry.register(
+        0,
+        Recorder::new("claims", &calls, well_behaved).claiming_perspective(),
+    );
+    let good = perspective_view();
+    let mut bad_near = good;
+    bad_near.near = Some(0.5);
+    let mut no_near = good;
+    no_near.near = None;
+    for view in [bad_near, no_near] {
+        let request = VisibleFaceRequest::new(&meshes, view, limits());
+        let error = registry
+            .visible_faces(&request, &options())
+            .expect_err("refused before dispatch");
+        assert!(matches!(error.error, GeomError::InvalidInput(_)));
+        assert_eq!(error.mesh, None);
+    }
+    assert_eq!(calls_of(&calls), 0);
+}
+
+#[test]
+fn routing_by_projection_comes_before_the_topology_audit() {
+    let calls = counter();
+    let bad = TriMesh::new(
+        vec![Vec3::ZERO, Vec3::X, Vec3::Y, Vec3::new(1.0, 1.0, 0.0)],
+        vec![0, 1, 2, 0, 1, 3],
+    );
+    let meshes = [mesh(1, MeshRole::Sheet, &bad)];
+    let request = VisibleFaceRequest::new(&meshes, perspective_view(), limits());
+    let error = registry(&calls, well_behaved)
+        .visible_faces(&request, &options())
+        .expect_err("unsupported");
+    assert_eq!(calls_of(&calls), 0);
+    assert!(
+        matches!(error.error, GeomError::Unsupported { .. }),
+        "{error}"
+    );
+    let ortho = VisibleFaceRequest::new(&meshes, view(), limits());
+    let error = registry(&calls, well_behaved)
+        .visible_faces(&ortho, &options())
+        .expect_err("the audit refuses the mesh");
+    assert_eq!(error.mesh, Some(MeshId(1)));
+}
+
+#[test]
+fn perspective_conformance_registration_follows_the_claim() {
+    let calls = counter();
+    let mut registry = MeshVisibleFacesRegistry::new();
+    let unclaimed = registry
+        .register_perspective_conformant(0, Recorder::new("declines", &calls, well_behaved));
+    assert!(unclaimed.is_err());
+    let claimed = registry.register_perspective_conformant(
+        0,
+        Recorder::new("claims", &calls, well_behaved).claiming_perspective(),
+    );
+    assert!(claimed.expect_err("unverifiable").claimed);
+    assert_eq!(registry.providers().count(), 0);
 }

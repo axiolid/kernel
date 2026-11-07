@@ -13,6 +13,9 @@ caret rule for `0.x` versions.
 
 ### Added
 
+- The hidden-line and visible-face providers refuse a perspective view by
+  name (`UnsupportedInput`, input `perspective view`) when called directly,
+  and do not claim it through `supports_projection` (ADR 0107, #387).
 - `ScalarVisibleFaces` resolves `FaceGroups::Planar` exactly before labelling
   (new `groups` module: union-find over edges of exactly two triangles with
   parallel, same-facing normals, polled for cancellation, memory-budgeted;

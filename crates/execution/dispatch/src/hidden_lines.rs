@@ -6,7 +6,13 @@ use std::sync::Arc;
 use axiolid_contracts::{BackendId, ExecutionOptions, GeomError, Operation};
 use axiolid_mesh::audit_mesh_scratch_bytes;
 use axiolid_mesh_hidden_lines_contract::{
-    conformance::{ConformanceReport, ConformanceSuite},
+    conformance::{
+        perspective::{
+            PerspectiveConformanceFailure, PerspectiveConformanceReport,
+            PerspectiveConformanceSuite,
+        },
+        ConformanceReport, ConformanceSuite,
+    },
     EdgeKind, HiddenLineError, HiddenLineOutcome, HiddenLineRequest, MeshHiddenLines, RefusedMesh,
     Visibility,
 };
@@ -63,6 +69,34 @@ impl MeshHiddenLinesRegistry {
         P: MeshHiddenLines + 'static,
     {
         let report = ConformanceSuite::run(&provider);
+        if !report.is_success() {
+            return Err(Box::new(report));
+        }
+        self.register(priority, provider);
+        Ok(())
+    }
+
+    /// Validate a provider with the shared suite and the perspective suite
+    /// before registration (ADR 0107). The claim is the provider's
+    /// `supports_projection(Projection::Perspective)`: a provider that does
+    /// not claim it must refuse perspective views by name, one that does must
+    /// pass the perspective fixtures. Failures of either suite are in the
+    /// report.
+    pub fn register_perspective_conformant<P>(
+        &mut self,
+        priority: i32,
+        provider: P,
+    ) -> Result<(), Box<PerspectiveConformanceReport>>
+    where
+        P: MeshHiddenLines + 'static,
+    {
+        let mut report = PerspectiveConformanceSuite::run(&provider);
+        report.failures.extend(
+            ConformanceSuite::run(&provider)
+                .failures
+                .into_iter()
+                .map(PerspectiveConformanceFailure::HiddenLinesBase),
+        );
         if !report.is_success() {
             return Err(Box::new(report));
         }
@@ -134,7 +168,9 @@ impl MeshHiddenLinesRegistry {
         let mut has_budgeted_provider = false;
         for entry in &self.providers {
             let descriptor = entry.provider.descriptor();
-            if matches_device(options.device(), descriptor.id, descriptor.target) {
+            if matches_device(options.device(), descriptor.id, descriptor.target)
+                && entry.provider.supports_projection(request.view.projection)
+            {
                 has_matching_provider = true;
                 has_budgeted_provider |= scratch_fits(
                     entry.provider.scratch_requirement(),
@@ -162,6 +198,7 @@ impl MeshHiddenLinesRegistry {
         for entry in &self.providers {
             let descriptor = entry.provider.descriptor();
             if !matches_device(options.device(), descriptor.id, descriptor.target)
+                || !entry.provider.supports_projection(request.view.projection)
                 || !scratch_fits(
                     entry.provider.scratch_requirement(),
                     request.meshes,

@@ -4,7 +4,7 @@ use std::cmp::Ordering;
 
 use axiolid_contracts::{
     Backend, BackendDescriptor, BackendId, CancellationGranularity, ExecutionOptions,
-    ExecutionTarget, GeomError, ScratchRequirement,
+    ExecutionTarget, GeomError, Operation, ScratchRequirement,
 };
 use axiolid_exact_arrangement::{arrange, PairBudget, Segment};
 use axiolid_mesh_hidden_lines_contract::{
@@ -20,6 +20,7 @@ use super::segments::{clip_segments, crop_segments, edge_segments, PAIRS};
 use super::{Faces, Work};
 use crate::broad::{Broad, BroadPhase};
 use crate::prepare::{prepare, Prepared, ResourceNames, SharedLimits};
+use crate::view::require_orthographic;
 
 /// Bytes of scratch per source triangle that the provider declares.
 const SCRATCH_PER_ELEMENT: usize = 3072;
@@ -80,6 +81,7 @@ impl MeshVisibleFaces for ScalarVisibleFaces {
         request: &VisibleFaceRequest<'_>,
         options: &ExecutionOptions,
     ) -> Result<VisibleFaceOutcome, HiddenLineError> {
+        require_orthographic(&request.view, Self::ID, Operation::MeshVisibleFaces)?;
         run(BroadPhase::Tree, true, request, options)
     }
 }
@@ -113,6 +115,11 @@ impl MeshVisibleFaces for ScanVisibleFaces {
         request: &VisibleFaceRequest<'_>,
         options: &ExecutionOptions,
     ) -> Result<VisibleFaceOutcome, HiddenLineError> {
+        require_orthographic(
+            &request.view,
+            self.descriptor().id,
+            Operation::MeshVisibleFaces,
+        )?;
         run(BroadPhase::Scan, true, request, options)
     }
 }
@@ -148,6 +155,11 @@ impl MeshVisibleFaces for UnprunedVisibleFaces {
         request: &VisibleFaceRequest<'_>,
         options: &ExecutionOptions,
     ) -> Result<VisibleFaceOutcome, HiddenLineError> {
+        require_orthographic(
+            &request.view,
+            self.descriptor().id,
+            Operation::MeshVisibleFaces,
+        )?;
         run(BroadPhase::Tree, false, request, options)
     }
 }
