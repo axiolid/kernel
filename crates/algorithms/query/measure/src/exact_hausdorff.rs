@@ -339,6 +339,8 @@ impl<'a> Nearest<'a> {
         accuracy: Scalar,
     ) -> Result<Option<PointDistance>, ExactMeasureError> {
         let scale = p.length() + self.side.scale;
+        let error = self.side.witness_error();
+        let excess = self.side.witness_excess();
         // Ties pop first come, first served: the third entry counts up.
         let mut heap = BinaryHeap::new();
         let mut order = 0;
@@ -368,9 +370,9 @@ impl<'a> Nearest<'a> {
                     }
                 }
             }
-            let upper = best.map_or(Scalar::INFINITY, |(d, ..)| d);
+            let upper = best.map_or(Scalar::INFINITY, |(d, ..)| super::exact_distance::witnessed_upper(d, error));
             if upper.is_finite()
-                && (bound >= upper || closed(bound, upper, accuracy, floor(scale, upper)))
+                && (bound >= upper || closed(bound, upper, accuracy, floor(scale, upper) + excess))
             {
                 break;
             }
@@ -393,12 +395,14 @@ impl<'a> Nearest<'a> {
         if let Some(Reverse((DistanceKey(bound), ..))) = heap.peek() {
             lower = Scalar::min(lower, *bound);
         }
-        Ok(best.map(|(upper, nearest, on)| PointDistance {
+        Ok(best.map(|(d, nearest, on)| {
+            let upper = super::exact_distance::witnessed_upper(d, error);
+            PointDistance {
             lower: lower.min(upper),
             upper,
             nearest,
             on,
-        }))
+        }}))
     }
 }
 
@@ -721,6 +725,12 @@ fn displacements(
     Ok(found)
 }
 
+/// A lower bound on `h(A, B)` from a point computed on `A`'s boundary: the
+/// point's own bound less the point's evaluation rounding `error` (#439).
+fn witnessed_lower(found: &PointDistance, error: Scalar) -> Scalar {
+    (found.lower - error).max(0.0)
+}
+
 /// What the search has certified so far.
 struct State {
     lower: Scalar,
@@ -741,6 +751,8 @@ fn search(
     // The width the outer loop settles at: the point queries' floor and the
     // matched bounds' pads, each below 128 eps of a side's scale.
     let outer_scale = 2.0 * (source.scale + target.side.scale);
+    let outer_excess = 2.0 * (source.witness_excess() + target.side.witness_excess());
+    let source_error = source.witness_error();
     let mut state = State {
         lower: 0.0,
         witness: None,
@@ -760,8 +772,9 @@ fn search(
             continue;
         };
         if let Some(found) = target.query(p, point_accuracy)? {
-            if found.lower > state.lower || state.witness.is_none() {
-                state.lower = state.lower.max(found.lower);
+            let lower = witnessed_lower(&found, source_error);
+            if lower > state.lower || state.witness.is_none() {
+                state.lower = state.lower.max(lower);
                 let on = Shape::Edge {
                     edge,
                     t0: 0.0,
@@ -811,8 +824,9 @@ fn search(
         if let Some(w) = element.witness {
             if upper > state.lower {
                 if let Some(found) = target.query(w, point_accuracy)? {
-                    if found.lower > state.lower || state.witness.is_none() {
-                        state.lower = state.lower.max(found.lower);
+                    let lower = witnessed_lower(&found, source_error);
+                    if lower > state.lower || state.witness.is_none() {
+                        state.lower = state.lower.max(lower);
                         state.witness = Some((w, found.nearest, element.shape, found.on));
                     }
                     // `d(., dB)` is 1-Lipschitz about the witness.
@@ -849,7 +863,7 @@ fn search(
         // one already bounded below `lower`.
         let face_top = faces.peek().map_or(Scalar::NEG_INFINITY, |(key, _)| key.0);
         let upper = face_top.max(state.lower);
-        let settled = floor(outer_scale, upper);
+        let settled = floor(outer_scale, upper) + outer_excess;
         if upper - state.lower <= accuracy.max(settled) || splits >= max_splits {
             break;
         }
@@ -1270,10 +1284,9 @@ mod tests {
                         .query(p, 1e-10)
                         .expect("evaluates")
                         .expect("a boundary point");
-                    let slack = 32.0 * f64::EPSILON * (p.length() + found.nearest.length());
                     let settled = floor(p.length() + nearest.side.scale, found.upper);
                     assert!(
-                        found.lower <= 0.02 && 0.02 <= found.upper + slack,
+                        found.lower <= 0.02 && 0.02 <= found.upper,
                         "{p:?}: [{}, {}]",
                         found.lower,
                         found.upper
@@ -1304,5 +1317,116 @@ mod tests {
             .expect("a boundary point");
         assert!(found.lower <= 0.5 && 0.5 <= found.upper, "{found:?}");
         assert!(found.upper - found.lower <= 1e-12, "{found:?}");
+    }
+
+    /// A one-face sheet on the plane of `frame`, bounded by the polygon
+    /// `corners` of its parameters, counter-clockwise; its edges are the
+    /// lines through the corners' points.
+    fn charted_sheet(frame: Frame3, corners: &[Point2]) -> axiolid_brep::ExactBRep {
+        use axiolid_core::{Interval, Vec2};
+        use axiolid_curve::{Curve2, Curve3, Line2, Line3};
+        use axiolid_topology::{Edge, EdgeUse, Face, FaceBound, Loop, Orientation, Vertex};
+        let mut builder = axiolid_brep::ExactBRepBuilder::default();
+        let surface = builder.add_surface(Surface::Plane(Plane { frame }));
+        let at = |p: Point2| frame.origin + frame.x * p.x + frame.y * p.y;
+        let vertices: Vec<_> = corners
+            .iter()
+            .map(|p| builder.topology_mut().add_vertex(Vertex { position: at(*p) }))
+            .collect();
+        let n = corners.len();
+        let mut uses = Vec::new();
+        let mut lengths = Vec::new();
+        for i in 0..n {
+            let (p, q) = (corners[i], corners[(i + 1) % n]);
+            let length = (q - p).length();
+            let d = Vec2::new((q.x - p.x) / length, (q.y - p.y) / length);
+            let curve = builder.add_curve3(Curve3::Line(Line3 {
+                origin: at(p),
+                direction: frame.x * d.x + frame.y * d.y,
+            }));
+            let pcurve = builder.add_curve2(Curve2::Line(Line2 {
+                origin: p,
+                direction: d,
+            }));
+            let edge = builder.topology_mut().add_edge(Edge {
+                start: vertices[i],
+                end: vertices[(i + 1) % n],
+                curve: Some(curve),
+            });
+            builder.set_edge_interval(edge, Interval::new(0.0, length));
+            uses.push(EdgeUse {
+                edge,
+                orientation: Orientation::Forward,
+                pcurve: Some(pcurve),
+            });
+            lengths.push(length);
+        }
+        let loop_id = builder.topology_mut().add_loop(Loop { edges: uses });
+        for (index, length) in lengths.into_iter().enumerate() {
+            builder.set_pcurve_interval(loop_id, index, Interval::new(0.0, length));
+        }
+        builder.topology_mut().add_face(Face {
+            surface: Some(surface),
+            bounds: vec![FaceBound {
+                loop_id,
+                orientation: Orientation::Forward,
+                outer: true,
+            }],
+            orientation: Orientation::Forward,
+        });
+        builder.finish().expect("a valid sheet")
+    }
+
+    /// A sheet at the origin charted from far away -- its frame origin up to
+    /// (9600000, 12800000), its parameters as large -- over a parallel sheet
+    /// `0.3125` from it, so `h = 0.3125` exactly. Its witnesses round by up
+    /// to `1e-9` off it, while the point queries against the near sheet are
+    /// exact to `1e-15`: the lower bound must take the witnesses' rounding
+    /// off (#439).
+    #[test]
+    fn a_far_charted_face_never_lifts_the_lower_bound_past_the_distance() {
+        let x = Vec3::new(0.375, 0.5, 0.0);
+        let frame = |origin: Point3| Frame3 {
+            origin,
+            x,
+            y: Vec3::Z,
+            z: x.cross(Vec3::Z),
+        };
+        let b = charted_sheet(
+            frame(Point3::new(0.25, -0.1875, 0.0)),
+            &[
+                Point2::new(-1.0, -1.0),
+                Point2::new(4.0, -1.0),
+                Point2::new(4.0, 2.0),
+                Point2::new(-1.0, 2.0),
+            ],
+        );
+        for k in 1..=16_i32 {
+            let along = 1.6e6 * f64::from(k);
+            let a = charted_sheet(
+                frame(Point3::ZERO + x * along),
+                &[
+                    Point2::new(-along, 0.0),
+                    Point2::new(-along + 1.6, 0.0),
+                    Point2::new(-along + 1.6, 1.0),
+                    Point2::new(-along, 1.0),
+                ],
+            );
+            let found = super::one_sided_boundary_hausdorff_with_budget(
+                &a,
+                &b,
+                1e-9,
+                axiolid_core::Tolerance::METRE,
+                16,
+            )
+            .expect("bounded");
+            assert!(
+                found.lower <= 0.3125 && 0.3125 <= found.upper,
+                "{k}: [{}, {}]",
+                found.lower,
+                found.upper
+            );
+            assert!(found.lower >= 0.3125 - 2e-7, "{k}: {}", found.lower);
+        }
     }
 }
