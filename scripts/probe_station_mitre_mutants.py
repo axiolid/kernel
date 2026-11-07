@@ -8,8 +8,7 @@ sign flipped. The terms: the in-plane kink dropped (`kink`), the general
 cell's gap between the mesh row and the side's projection dropped, the
 straight cell's gap dropped, a changing section bounded as a straight one,
 each chord end at a mitre taken from the mesh's row, an orientation that
-turns not counted as a change, the straight cell bounded without its chord
-and breakpoint terms. The reach past the
+turns not counted as a change. The reach past the
 plane: the crossing of `reach_past` dropped. The refusals: the
 transversality check and the far row's clearance (`clear`, reachable when the
 mesher's unshifted plane and the bound's shifted one disagree, #484) each
@@ -32,6 +31,11 @@ Not probed, because no test can tell them apart:
   closed form and about `1e-9` on the two read by quadrature (the deck and
   the B-spline), below the tolerance their values are pinned to; pinning
   them tighter would pin the quadrature's certified error, not the bound;
+- the straight cell's `eta` (chord and breakpoint terms in place of the slide
+  alone): a straight cell with a constant section has no chord, and a
+  breakpoint only from a frame jump at a non-mitre seam, which no test
+  builds; the turning orientation that once reached it is routed to the
+  general cell;
 - the general cell's wall (`wall`, with its `clamp` and `quad`): the cut
   dominates it on every cell the tests build, their quads being planar and
   the faces' `reach_past` reaching at least the clamp.
@@ -83,9 +87,6 @@ MUTANTS = [
     ('a turning orientation is not a change', BOUND,
      '            || turn.lateral[0] > 0.0\n',
      '', [CELLS]),
-    ('the straight cell drops the chord and breakpoint terms', MITRE,
-     'let along = inputs.eta[k].max(inputs.eta[l]) + extension;',
-     'let along = inputs.slide[k].max(inputs.slide[l]) + extension;', [CELLS]),
     ('a changing section is bounded as a straight one', BOUND,
      '            if straight && !changes && inside.is_empty() {',
      '            if straight && inside.is_empty() {', [CELLS]),

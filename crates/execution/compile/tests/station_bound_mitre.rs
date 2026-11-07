@@ -1051,7 +1051,11 @@ fn a_twisting_section_on_straight_legs_is_certified() {
         ],
         closed: false,
     });
-    for (twist, bound_at_least) in [(0.2, 1e-3), (0.5, 1e-2), (1.0, 3.8e-2)] {
+    for (twist, expected, tolerance) in [
+        (0.2, 1.137e-2, 1e-5),
+        (0.5, 6.877e-2, 1e-4),
+        (1.0, 0.22761, 1e-4),
+    ] {
         let o0 = StationOrientation::new(Some(Vec3::Z), Some(Vec3::X));
         let o1 = StationOrientation::new(Some(Vec3::Z), Some(Vec3::new(1.0, twist, 0.0)));
         let mut b = GeometryGraphBuilder::new();
@@ -1080,12 +1084,8 @@ fn a_twisting_section_on_straight_legs_is_certified() {
         }
         .measure(&compiled.mesh, 800, 24);
         assert_holds(&compiled, &strays);
-        // Far from zero: the straight-cell shortcut reported 7.5e-11 at 0.2.
-        assert!(
-            compiled.certified() >= bound_at_least,
-            "{twist}: {compiled:?}",
-            compiled = compiled.bound
-        );
+        // The straight-cell shortcut reported 7.5e-11 at 0.2.
+        assert_value(&compiled, expected, tolerance);
     }
 }
 
