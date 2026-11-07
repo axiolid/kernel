@@ -16,8 +16,15 @@ refusing. Each must turn
 `evaluate/tests/station_bend.rs`, the `frame_bound` unit tests or
 `compile/tests/station_fold.rs` red.
 
+The sheets of open sections (#407) share the decision and add three steps in
+`station::sectioned_surface`: a sectioned surface and an open-section run
+skipping the fold check (each by its own test), and an undecided fold
+reported certified. Each must turn `compile/tests/station_fold_sheet.rs` red.
+
 Not probed, because no test can tell them apart:
 
+- the `within` flag of a sheet (`fold.is_ok()`): refinement does not change
+  when a run is unbounded, so no test can tell it from `true`;
 - the profile's flattening bound in the clear test and the conservative rate
   (a margin of about the chord budget, far below any distance the tests put
   between a vertex and a fold);
@@ -46,6 +53,11 @@ COMPILE_STATION = f"{COMPILE}/src/station.rs"
 BEND_TEST = ["-p", "axiolid-evaluate", "--all-features", "--test", "station_bend"]
 UNIT = ["-p", "axiolid-evaluate", "--all-features", "--lib", "frame_bound"]
 FOLD_TEST = ["-p", "axiolid-mesh-compile", "--all-features", "--test", "station_fold"]
+SHEET = ["-p", "axiolid-mesh-compile", "--all-features", "--test", "station_fold_sheet"]
+
+SHEET_CHECK = (COMPILE_STATION,
+               "    let fold = law.fold(0.0)?;\n",
+               "    let fold: Result<(), &'static str> = Ok(());\n")
 
 MUTANTS = [
     # The bend's coefficients.
@@ -104,6 +116,14 @@ MUTANTS = [
      "            if depth >= CONSERVATIVE_FOLD_DEPTH {\n"
      "                return Err(GeomError::InvalidInput(\"sections fold\".into()));\n",
      [FOLD_TEST]),
+    # The sheets of open sections.
+    ("a sectioned surface skips the fold check", *SHEET_CHECK,
+     [SHEET + ["--", "a_sectioned_surface_reaching"]]),
+    ("an open section run skips the fold check", *SHEET_CHECK,
+     [SHEET + ["--", "an_open_section_run_reaching"]]),
+    ("a sheet's undecided fold is reported certified", COMPILE_STATION,
+     "    let bound = settle(&law, Ok(0.0), fold, &samples, &rows)?;\n",
+     "    let bound = settle(&law, Ok(0.0), Ok(()), &samples, &rows)?;\n", [SHEET]),
 ]
 
 probe_lib.main(MUTANTS, root=ROOT, timeout=TIMEOUT, baseline=False)

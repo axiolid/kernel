@@ -9,6 +9,19 @@ caret rule for `0.x` versions.
 
 ## [Unreleased]
 
+### Fixed
+
+- A sectioned surface and an open-section run (`SurfaceRelation::SectionedSurface`,
+  `OpenSectionsAtStations`) whose section planes stop advancing are refused
+  as invalid input, as a stationed spine is since #361 (#407). The same
+  decision applies: exact for unturned sections on closed-form bend frames,
+  a touch within rounding included (such a sheet was refused as a collapsed
+  triangle before, now as a fold); conservative for turned sections and
+  frames read by quadrature, never refusing and reporting the sheet
+  unbounded by name when a fold cannot be excluded. A sheet that meets
+  itself far away is not detected yet. The refusal reads 'station-placed
+  sections fold' for spines too.
+
 ## [0.3.44] - 2026-11-03
 
 ### Added

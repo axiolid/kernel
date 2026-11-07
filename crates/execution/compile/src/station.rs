@@ -48,7 +48,8 @@
 //! different segment structure does not pair and stays unbounded by name;
 //! the exact compiler refuses a curved section that changes either way.
 //!
-//! A spine whose section planes fold is no solid (#361): where a section
+//! A spine whose section planes fold is no solid (#361), and a sectioned
+//! surface or open-section run alike no sheet (#407): where a section
 //! vertex lies on the inner side of a bend at or past its centre of
 //! curvature, or recedes along the tangent faster than the basis advances,
 //! the planes stop advancing and the sections cross. The spine is refused as
@@ -57,9 +58,8 @@
 //! rounding included; for a turned section or a frame read by quadrature the
 //! `bound` module's conservative bound never refuses and reports
 //! [`DeviationBound::Unbounded`] by name when it cannot exclude a fold. The
-//! check is local: a run that meets itself far away is not detected, and a
-//! [`SectionedSurface`] is not checked (#407); a turned section or a frame
-//! read by quadrature is never refused (#406).
+//! check is local: a run that meets itself far away is not detected (#407);
+//! a turned section or a frame read by quadrature is never refused (#406).
 //!
 //! The `exact` module builds the runs with a closed form exactly (#247):
 //! a constant section along a line or a straight polyline (an extrusion)
@@ -1711,7 +1711,13 @@ fn open_section(graph: &GeometryGraph, section: &SectionAtStation) -> GeomResult
 /// Mesh a [`SurfaceRelation::SectionedSurface`](axiolid_model::SurfaceRelation::SectionedSurface)
 /// as an open sheet, with its deviation (#247): the worst cell's certified
 /// bound ([`bound`]; an open section is a polyline, its own exact
-/// section), or the reason it is unbounded.
+/// section), or the reason it is unbounded. Sections whose planes fold are
+/// no sheet (#407): refused as a spine is, with no flattening margin.
+///
+/// # Errors
+///
+/// A fold, or a touch within rounding, is `InvalidInput`; the bisection
+/// budget fails by name with `BudgetExceeded`.
 pub(crate) fn sectioned_surface(
     graph: &GeometryGraph,
     directrix: NodeId,
@@ -1792,8 +1798,12 @@ pub(crate) fn sectioned_surface(
         &edges,
         chord,
     )?;
+    // Sections whose planes fold are no sheet either (#407): refused where
+    // the planes are certified to stop advancing; an open section is its
+    // own exact polyline, so no flattening margin.
+    let fold = law.fold(0.0)?;
     let samples = sample_run(&knots, chord, &edges, placed, |lo, hi, at_lo, at_hi| {
-        within(&law, true, chord, lo, hi, at_lo, at_hi)
+        within(&law, fold.is_ok(), chord, lo, hi, at_lo, at_hi)
     })?;
     let mut positions = Vec::with_capacity(samples.len() * count);
     let mut rows = Vec::with_capacity(samples.len());
@@ -1802,7 +1812,7 @@ pub(crate) fn sectioned_surface(
         positions.extend(row.iter().copied());
         rows.push(row);
     }
-    let bound = settle(&law, Ok(0.0), Ok(()), &samples, &rows)?;
+    let bound = settle(&law, Ok(0.0), fold, &samples, &rows)?;
     let mut indices = Vec::with_capacity((samples.len() - 1) * (count - 1) * 6);
     for row in 0..samples.len() - 1 {
         let a = (row * count) as u32;

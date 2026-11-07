@@ -2,11 +2,12 @@
 //!
 //! The exact surface of the [parent module](super) is `A_k(s) = O + a L +
 //! b U + c T + x_k L_t + y_k U_t`. A run of sections that stands in planes
-//! normal to the frame's tangent `N` is a solid only while the planes keep
-//! advancing past every vertex; where a vertex lies on the inner side of a
-//! bend at or beyond its centre of curvature, the planes stop advancing, the
-//! sections cross and the loft is not a solid. That is invalid input, as a
-//! swept disk whose radius reaches the bend's (`pipe::horn_torus`) is.
+//! normal to the frame's tangent `N` is a solid, or a sheet, only while the
+//! planes keep advancing past every vertex; where a vertex lies on the inner
+//! side of a bend at or beyond its centre of curvature, the planes stop
+//! advancing, the sections cross and the loft is not a solid. That is
+//! invalid input, as a swept disk whose radius reaches the bend's
+//! (`pipe::horn_torus`) is.
 //!
 //! # The condition
 //!
@@ -46,6 +47,16 @@
 //! The bisection visits at most [`MAX_FOLD_SPANS`] spans, then fails with a
 //! budget error by name.
 //!
+//! # Sheets (#407)
+//!
+//! A sectioned surface or open-section run is decided by the same condition
+//! at the vertices of its polylines with margin 0: an open section is its own
+//! exact polyline, and the rate is affine in the section coordinates, so the
+//! minimum stands at a polyline vertex. The rule, planes that advance past
+//! every section point, is stricter than the sheet merely being regular (a
+//! sheet wholly past the centre of a bend is regular yet refused; ADR 0082
+//! amendment).
+//!
 //! # Conservative bound
 //!
 //! A run with a turned section, or whose frames are read by quadrature (an
@@ -71,10 +82,10 @@
 //! # Local only
 //!
 //! The condition is local: the section planes advance at every station
-//! distance. A run that meets itself far away (a loop of the basis, two
-//! legs of a spiral) is not detected here (#407, which also covers sectioned
-//! surfaces). A turned section or a frame read by quadrature is never
-//! refused, only checked conservatively (#406 asks for an exact decision).
+//! distance. A run that meets itself far away (a loop of the basis, two legs
+//! of a spiral) is not detected here (#407). A turned section or a frame read
+//! by quadrature is never refused, only checked conservatively (#406 asks for
+//! an exact decision).
 
 use axiolid_contracts::{GeomError, GeomResult};
 use axiolid_core::{Point3, Scalar, Vec3};
@@ -87,7 +98,7 @@ use super::{
 };
 
 /// The refusal's prefix.
-const FOLD: &str = "station-placed spine sections fold";
+const FOLD: &str = "station-placed sections fold";
 
 /// The halvings of an exact span before it counts as undecided.
 const MAX_FOLD_DEPTH: u32 = 48;
