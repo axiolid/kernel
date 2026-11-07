@@ -51,7 +51,9 @@ pub struct RegionEvidence {
     pub emptied: bool,
 }
 
-/// A validated planar region: a normalised set of polygons with holes.
+/// A validated planar region: a normalised set of polygons with holes,
+/// whose holes lie apart inside their outer rings and whose polygons do
+/// not overlap (#448).
 ///
 /// Construction validates; operations preserve validity. Ring ordering is
 /// canonical (outer counter-clockwise, holes clockwise, each rotated to its
@@ -128,12 +130,29 @@ impl Region {
         Self::default()
     }
 
-    /// Build a region from polygons, validating every ring.
+    /// Build a region from polygons, validating every ring and where the
+    /// rings lie.
     ///
-    /// Validation is the same used by [`crate::overlay`], so the two cannot
-    /// disagree about what a well-formed polygon is.
+    /// Each ring is validated as [`crate::overlay`] validates an operand's,
+    /// so the two cannot disagree about what a well-formed ring is. Then,
+    /// decided exactly and with no tolerance, every hole must lie inside its
+    /// own outer ring and in no other of its holes, and no point may lie in
+    /// two polygons (#448). Rings may touch at points, and along a stretch
+    /// they run with their insides on opposite sides, as settled outputs
+    /// do. An `overlay` operand is not held to this: its rings may overlap,
+    /// read by its fill rule.
+    ///
+    /// # Errors
+    ///
+    /// A ring's own refusal ([`OverlayError::RingTooShort`] and the
+    /// others [`crate::overlay`] gives); [`OverlayError::HoleOutsideOuter`]
+    /// for a hole crossing or leaving its outer ring;
+    /// [`OverlayError::HolesOverlap`] for holes of one polygon that cross,
+    /// nest or repeat; [`OverlayError::PolygonsOverlap`] for polygons that
+    /// overlap. With several defects, one is named.
     pub fn new(polygons: Vec<Polygon>, tolerance: Tolerance) -> Result<Self, OverlayError> {
         let validated = Validated::check(&polygons, tolerance)?;
+        crate::nesting::check(&polygons)?;
         let mut region = Self::from_valid(normalise(polygons), false);
         // Turning and rotating a ring, and ordering rings, change nothing
         // validation reads.
@@ -233,10 +252,10 @@ impl Region {
 
     /// Number of disjoint connected components.
     ///
-    /// One polygon is one component: the overlay backend already resolves
-    /// touching and overlapping input into disjoint output polygons, so
+    /// One polygon is one component: [`Self::new`] refuses polygons that
+    /// overlap (#448) and every operation returns polygons that do not, so
     /// counting them is the component count rather than an approximation
-    /// of it.
+    /// of it. Polygons touching at a point or along an edge count apart.
     #[must_use]
     pub fn component_count(&self) -> usize {
         self.polygons.len()

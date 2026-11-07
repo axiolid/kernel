@@ -244,9 +244,34 @@ fn unions_of_subdivided_cells_are_operands_again() {
         let soup = Region::new(axiolid_overlay::union_soup(&rings, t()).unwrap(), t()).unwrap();
         round_trips("union_soup", &soup);
         let half = cells.len() / 2;
-        let a = Region::new(cells[..half].to_vec(), t()).unwrap();
-        let b = Region::new(cells[half..].to_vec(), t()).unwrap();
-        let both = a.union(&b, t()).unwrap();
+        // Cells share edges, so a half is an overlay operand, not a region (#448).
+        let operand = |cells: &[Polygon]| axiolid_overlay::OverlayInput {
+            frame: axiolid_core::Frame2 {
+                origin: Point2::new(0.0, 0.0),
+                x: axiolid_core::Vec2::new(1.0, 0.0),
+                y: axiolid_core::Vec2::new(0.0, 1.0),
+            },
+            polygons: cells.to_vec(),
+        };
+        let united = |cells: &[Polygon]| {
+            let rings: Vec<Ring> = cells.iter().map(|p| p.outer.clone()).collect();
+            Region::new(axiolid_overlay::union_soup(&rings, t()).unwrap(), t()).unwrap()
+        };
+        let a = united(&cells[..half]);
+
+        let both = Region::new(
+            axiolid_overlay::overlay(
+                &operand(&cells[..half]),
+                &operand(&cells[half..]),
+                axiolid_overlay::OverlayOperation::Union,
+                axiolid_overlay::FillRule::NonZero,
+                t(),
+            )
+            .unwrap()
+            .polygons,
+            t(),
+        )
+        .unwrap();
         round_trips("halves", &both);
         both.union(&a, t()).unwrap();
         both.union(&soup, t()).unwrap();
@@ -289,9 +314,8 @@ fn a_hole_touching_its_outer_ring_at_its_first_vertex_is_an_operand() {
         outer: ring(&[(0.0, 0.0), (4.0, 0.0), (4.0, 4.0), (0.0, 4.0)]),
         holes: vec![ring(&[(5.0, 1.0), (6.0, 1.0), (6.0, 2.0)])],
     };
-    let bad = Region::new(vec![outside], t()).unwrap();
     assert_eq!(
-        bad.union(&rect(0.0, 0.0, 1.0, 1.0), t()),
+        Region::new(vec![outside], t()),
         Err(axiolid_overlay::OverlayError::HoleOutsideOuter)
     );
 }

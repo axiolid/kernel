@@ -7,7 +7,7 @@
       "released": "0.4.7",
       "released_date": "2026-11-03",
       "role": "facade",
-      "version": "0.4.7"
+      "version": "0.5.0"
     },
     "axiolid-arrangement": {
       "description": "Editable planar subdivision with persistent half-edge topology",
@@ -412,7 +412,7 @@
       "released": "0.3.22",
       "released_date": "2026-11-03",
       "role": "algorithm.planar",
-      "version": "0.3.22"
+      "version": "0.4.0"
     },
     "axiolid-pointcloud": {
       "description": "Portable point-sampled geometry values with optional per-point channels.",

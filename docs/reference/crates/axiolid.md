@@ -9,6 +9,7 @@ Feature-gated facade for Axiolid's format-neutral geometry stack.
 | | |
 | --- | --- |
 | Latest release | 0.4.7 (2026-11-03) |
+| On `main` | 0.5.0 (unreleased) |
 | crates.io | [`axiolid`](https://crates.io/crates/axiolid) |
 | Layer | facade (`facade`) |
 | API documentation | [rustdoc](/api/rustdoc/axiolid/index.html) · [docs.rs](https://docs.rs/axiolid) |

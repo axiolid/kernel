@@ -23,6 +23,15 @@
 //! (`degenerate`, #256); a self-intersecting ring is never dropped.
 //! `scripts/probe_degenerate_drop_mutants.py` lists the faults the tests
 //! in `tests/degenerate_drop.rs` must catch.
+//!
+//! A [`Region`]'s rings lie apart and nested: every hole inside its own
+//! outer ring and in no other of its holes, and no point in two polygons
+//! (`nesting`, #448). [`Region::new`] decides that exactly, on one
+//! arrangement of all the rings, and refuses by name; rings may touch.
+//! Operands of [`overlay`] and [`union_soup`] are not held to it: their
+//! rings may overlap, read by the fill rule.
+//! `scripts/probe_region_nesting_mutants.py` lists the faults the tests in
+//! `tests/region_nesting.rs` must catch.
 mod arc;
 mod arc_check;
 mod arc_clearance;
@@ -38,6 +47,7 @@ mod exact_arc;
 mod exact_overlay;
 mod fill;
 mod minkowski;
+mod nesting;
 mod offset;
 mod rectangle;
 mod region;
@@ -169,6 +179,7 @@ pub struct OverlayInput {
     pub polygons: Vec<Polygon>,
 }
 #[derive(Debug, Clone, PartialEq, Eq)]
+#[non_exhaustive]
 pub enum OverlayError {
     InvalidFrame,
     NonFinitePoint,
@@ -177,6 +188,8 @@ pub enum OverlayError {
     ZeroArea,
     /// Non-adjacent boundary segments meet or cross.
     SelfIntersection,
+    /// A hole is not inside its outer ring: it lies outside it or crosses
+    /// it.
     HoleOutsideOuter,
     /// An offset distance or stroke width was not finite, or a width was not
     /// positive. A non-finite distance cannot produce a bounded region.
@@ -192,6 +205,13 @@ pub enum OverlayError {
     /// enough while the bulge still implies a radius too small to be a real
     /// boundary. Such an edge is a point, not an arc.
     ZeroRadiusArc,
+    /// Two holes of one polygon of a [`Region`] overlap: one crosses, holds
+    /// or repeats the other (#448). Holes may touch at points and along a
+    /// stretch they share.
+    HolesOverlap,
+    /// Two polygons of a [`Region`] overlap: a point lies in both (#448).
+    /// Polygons may touch at points and along a stretch they share.
+    PolygonsOverlap,
 }
 
 impl core::fmt::Display for OverlayError {
@@ -203,12 +223,14 @@ impl core::fmt::Display for OverlayError {
             Self::RepeatedVertex => "a ring repeats a vertex within tolerance",
             Self::ZeroArea => "a ring encloses no area above tolerance",
             Self::SelfIntersection => "non-adjacent boundary segments meet or cross",
-            Self::HoleOutsideOuter => "a hole lies outside its outer ring",
+            Self::HoleOutsideOuter => "a hole lies outside its outer ring or crosses it",
             Self::InvalidOffsetDistance => {
                 "an offset distance or stroke width is not finite, or a width is not positive"
             }
             Self::InvalidOffsetStyle => "a join or cap parameter is not a finite positive value",
             Self::ZeroRadiusArc => "an arc edge implies a radius not above tolerance",
+            Self::HolesOverlap => "two holes of a polygon overlap",
+            Self::PolygonsOverlap => "two polygons of a region overlap",
         })
     }
 }
@@ -1018,7 +1040,13 @@ mod tests {
         let mut hole = square(20.0, 20.0, 0.5).outer;
         hole.points.reverse();
         stray.holes.push(hole);
-        let stray = Region::new(vec![stray], t).expect("each ring valid");
+        assert_eq!(
+            Region::new(vec![stray.clone()], t),
+            Err(OverlayError::HoleOutsideOuter)
+        );
+        let stray = Region::from_valid_polygons(vec![stray.clone()], false).with_validated(Some(
+            crate::settle::Validated::check(&[stray], t).expect("each ring valid"),
+        ));
         assert_eq!(stray.union(&a, t), Err(OverlayError::HoleOutsideOuter));
     }
 
@@ -1032,6 +1060,8 @@ mod tests {
             OverlayError::ZeroArea,
             OverlayError::SelfIntersection,
             OverlayError::HoleOutsideOuter,
+            OverlayError::HolesOverlap,
+            OverlayError::PolygonsOverlap,
             OverlayError::InvalidOffsetDistance,
             OverlayError::InvalidOffsetStyle,
             OverlayError::ZeroRadiusArc,

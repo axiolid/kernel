@@ -9,6 +9,13 @@ caret rule for `0.x` versions.
 
 ## [Unreleased]
 
+### Changed
+
+- **Breaking:** requires `axiolid-overlay` 0.4, so `axiolid::overlay` carries
+  `OverlayError` as `#[non_exhaustive]` with the new `HolesOverlap` and
+  `PolygonsOverlap`, and `Region::new` refuses rings that cross into each
+  other. A `match` on `OverlayError` needs a wildcard arm (#448, ADR 0104).
+
 ## [0.4.7] - 2026-11-03
 
 ### Added

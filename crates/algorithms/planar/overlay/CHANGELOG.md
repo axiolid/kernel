@@ -9,7 +9,33 @@ caret rule for `0.x` versions.
 
 ## [Unreleased]
 
+### Changed
+
+- **Breaking:** `OverlayError` is `#[non_exhaustive]` and gains
+  `HolesOverlap` and `PolygonsOverlap`, which `Region::new` returns; a
+  `match` on it needs a wildcard arm. `HoleOutsideOuter` now also names a
+  hole that crosses its outer ring (#448, ADR 0104).
+
 ### Fixed
+
+- `Region::new` refuses a polygon set whose rings cross into each other:
+  part of a hole outside its own outer ring (`HoleOutsideOuter`), two holes
+  of one polygon that cross, nest or repeat (`HolesOverlap`), and a point in
+  two polygons (`PolygonsOverlap`). It accepted them, and the operations read
+  such a set three ways: the fast morphology's notch fill took a hole's
+  needles beyond its outer ring for the set's boundary. On #345's fuzz seed
+  21351 (needles at y = 2.2955 past the outer ring's top edge at 2.1202)
+  `dilate_outer_with(0.9046, fast(1e-2))` left out (2.0172, 3.0256), 0.8993
+  from the region, with a stated deviation of 4.7e-3. The check is exact, with
+  no tolerance, on one arrangement of all rings. Rings may still touch at
+  points and share a stretch where their insides lie on opposite sides, which
+  settled outputs do. A region of one ring costs what it did. `Region::new` of
+  a floor of 100,000 corners with 200 holes takes 0.34 s instead of 0.083 s
+  (10,000 corners: 0.032 s instead of 0.007 s;
+  `benches/ring_validation.rs`, case `holes`). `overlay` and `union_soup`
+  operands are unchanged. `src/nesting.rs`;
+  `scripts/probe_region_nesting_mutants.py` lists the faults its tests must
+  catch (#448, ADR 0104).
 
 - `MorphologyMode::Fast` fills the walls of a floor with sub-budget teeth
   in bounded time and memory. On #345's 3 m floor (teeth 0.5 mm deep, 1 mm

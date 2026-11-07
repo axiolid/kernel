@@ -41,6 +41,13 @@ cargo add axiolid-overlay
   tolerance, set only by `Region::new` and by settled outputs, and booleans on regions under that
   tolerance do not validate them again (#341). `scripts/probe_ring_validation_mutants.py` lists
   the faults its tests must catch.
+- `Region::new` also refuses rings that cross into each other (`src/nesting.rs`, ADR 0104,
+  #448): a hole outside its outer ring (`HoleOutsideOuter`), two holes of a polygon that
+  overlap (`HolesOverlap`), two polygons that overlap (`PolygonsOverlap`). The decision is exact
+  and tolerance-free, on one arrangement of all rings; rings may touch at points or share a
+  stretch with their insides on opposite sides, as settled outputs do. Operations do not
+  re-check their outputs. `scripts/probe_region_nesting_mutants.py` lists the faults its tests
+  must catch.
 - A degenerate input ring refuses the operation by default. `overlay_with` and
   `union_soup_with` with `OverlayOptions::dropping_degenerate_rings` leave out a ring that
   is too short, has a repeated vertex, or has zero area under the exact `ZeroArea` rule,
