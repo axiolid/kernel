@@ -14,8 +14,9 @@
 //!    half-plane on the projected axes, then `orient`), outgoing and incoming
 //!    edges alternate, and each incoming edge continues with the next
 //!    outgoing edge clockwise, the one that opens its material wedge. Edges
-//!    that do not alternate are refused as crossing rings, two edges along
-//!    one ray as a pinch.
+//!    that do not alternate, or two of one direction along one ray, are
+//!    refused as crossing rings; an edge in and an edge out along one ray as
+//!    a pinch.
 //! 3. Each closed walk is split wherever it comes back to a vertex, so no
 //!    ring repeats a vertex: corners that touch give rings that touch there,
 //!    and a hole that touches its outer ring stays a hole that touches it.
@@ -235,7 +236,10 @@ fn spoke_before(exact: &PlanePoints, here: usize, a: &Spoke, b: &Spoke) -> GeomR
     match exact.orient(here, a.towards, b.towards)? {
         Sign::Positive => Ok(true),
         Sign::Negative => Ok(false),
-        // Two edges leave along one ray: their pairing is not decided.
+        // Two edges of one direction along one ray: their material overlaps.
+        _ if a.incoming == b.incoming => Err(refused(REFUSED_CROSSING_CUT_RINGS)),
+        // An edge in and an edge out along one ray: their pairing is not
+        // decided.
         _ => Err(refused(REFUSED_PINCHED_CUT_REGION)),
     }
 }
@@ -781,6 +785,19 @@ mod tests {
     }
 
     #[test]
+    fn two_outgoing_edges_along_one_ray_are_crossing_rings() {
+        // A leaves 0 towards 1 = (2,0) and B towards 3 = (1,0): the material
+        // of the two overlaps along the ray.
+        let points = at(&[(0.0, 0.0), (2.0, 0.0), (2.0, 1.0), (1.0, 0.0), (1.0, 1.0)]);
+        let all = [0, 1, 2, 3, 4];
+        let overlap = trace(points, &[], &[&[0, 1, 2, 0], &[0, 3, 4, 0]], &all, &all);
+        assert!(
+            refused_as(&overlap, REFUSED_CROSSING_CUT_RINGS),
+            "{overlap:?}"
+        );
+    }
+
+    #[test]
     fn two_outgoing_edges_side_by_side_at_a_pinch_are_crossing_rings() {
         // A leaves 0 at 0 degrees and returns at 90; B leaves at 45 and
         // returns at 135: their material overlaps between 45 and 90.
@@ -790,6 +807,54 @@ mod tests {
         assert!(
             refused_as(&overlap, REFUSED_CROSSING_CUT_RINGS),
             "{overlap:?}"
+        );
+    }
+
+    #[test]
+    fn an_island_touching_a_hole_at_every_corner_is_a_region_beside_it() {
+        // A square with a hole 4 9 6 8 5 7 whose corners 4, 5 and 6 also bound
+        // the triangle 4 5 6: no vertex of the triangle is strictly inside or
+        // outside the hole, so an edge midpoint decides.
+        let points = at(&[
+            (0.0, 0.0),
+            (6.0, 0.0),
+            (6.0, 6.0),
+            (0.0, 6.0),
+            (2.0, 2.0),
+            (4.0, 2.0),
+            (4.0, 4.0),
+            (3.0, 1.0),
+            (5.0, 3.0),
+            (2.0, 4.0),
+        ]);
+        let all = [0, 1, 2, 3, 4, 5, 6, 7, 8, 9];
+        let (regions, _) = trace(
+            points,
+            &[],
+            &[&[0, 1, 2, 3, 0], &[4, 9, 6, 8, 5, 7, 4], &[4, 5, 6, 4]],
+            &all,
+            &all,
+        )
+        .expect("cut");
+        assert_eq!(
+            regions
+                .iter()
+                .map(|region| (region.outer.len(), region.holes.clone()))
+                .collect::<Vec<_>>(),
+            [
+                (
+                    4,
+                    vec![ring(&[
+                        (2.0, 2.0),
+                        (2.0, 4.0),
+                        (4.0, 4.0),
+                        (5.0, 3.0),
+                        (4.0, 2.0),
+                        (3.0, 1.0)
+                    ])]
+                ),
+                (3, vec![]),
+            ]
         );
     }
 

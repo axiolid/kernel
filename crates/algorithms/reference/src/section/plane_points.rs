@@ -231,7 +231,6 @@ impl PlanePoints {
     }
 
     /// The exact homogeneous coordinates of a point.
-    #[cfg(test)]
     pub(super) fn exact(&self, index: usize) -> &[Dyadic; 3] {
         self.points.exact(PointId(index))
     }

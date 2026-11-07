@@ -33,6 +33,7 @@ use std::cmp::Ordering;
 
 use axiolid_contracts::{ExecutionOptions, GeomError, GeomResult, Operation, Sign};
 use axiolid_core::Point2;
+use axiolid_exact::Arith;
 use axiolid_mesh_section_contract::{CutRegion, CutRegionLimits, REFUSED_CROSSING_CUT_RINGS};
 
 use super::plane_points::{Location, PlanePoints, RingBox};
@@ -115,7 +116,7 @@ fn is_hole(exact: &PlanePoints, nodes: &[usize]) -> GeomResult<bool> {
 /// Group the rings into regions, outer rings counter-clockwise and holes
 /// clockwise; also return the number of candidate pairs compared.
 pub(super) fn nest_rings(
-    exact: &PlanePoints,
+    exact: &mut PlanePoints,
     rings: Vec<TracedRing>,
     limits: CutRegionLimits,
     options: &ExecutionOptions,
@@ -128,7 +129,7 @@ pub(super) fn nest_rings(
     }
     let mut rings: Vec<Ring> = rings
         .into_iter()
-        .map(|traced| Ring::new(exact, traced))
+        .map(|traced| Ring::new(&*exact, traced))
         .collect();
 
     let mut pairs = 0usize;
@@ -423,9 +424,36 @@ fn edges_conflict(exact: &PlanePoints, first: &Edge, second: &Edge) -> GeomResul
     Ok(overlap && same_way)
 }
 
+/// Whether the ring `inner`, all of whose corners lie on `outer`, is inside it:
+/// the first inner edge whose exact midpoint is off the boundary decides. If
+/// every midpoint is on the boundary the rings coincide, which is refused.
+fn inside_by_midpoint(
+    exact: &mut PlanePoints,
+    inner: &[usize],
+    outer: &[usize],
+) -> GeomResult<bool> {
+    for (position, &from) in inner.iter().enumerate() {
+        let to = inner[(position + 1) % inner.len()];
+        let [x1, y1, w1] = exact.exact(from).clone();
+        let [x2, y2, w2] = exact.exact(to).clone();
+        let weight = w1.mul(&w2);
+        let midpoint = exact.store_mut().push([
+            x1.mul(&w2).add(&x2.mul(&w1)),
+            y1.mul(&w2).add(&y2.mul(&w1)),
+            weight.add(&weight),
+        ])?;
+        match exact.locate(midpoint.0, outer)? {
+            Location::Inside => return Ok(true),
+            Location::Outside => return Ok(false),
+            Location::Boundary => {}
+        }
+    }
+    Err(refused())
+}
+
 /// For each ring, the rings that contain it.
 fn containers(
-    exact: &PlanePoints,
+    exact: &mut PlanePoints,
     rings: &[Ring],
     limits: CutRegionLimits,
     pairs: &mut usize,
@@ -450,10 +478,19 @@ fn containers(
             match (inside, outside) {
                 (true, false) => containers[inner_index].push(outer_index),
                 (false, true) => {}
+                // No vertex decides: every corner of the inner ring touches
+                // the outer ring. The ring is simple and meets the outer ring
+                // only at points (the sweep refused anything else), so the
+                // midpoint of an inner edge off the outer boundary decides.
+                (false, false) => {
+                    if inside_by_midpoint(exact, &inner.nodes, &outer.nodes)? {
+                        containers[inner_index].push(outer_index);
+                    }
+                }
                 // Mixed: some vertices strictly inside and some strictly
-                // outside needs a crossing or a contact, which the sweep
-                // refuses first. Kept as a guard.
-                _ => return Err(refused()),
+                // outside needs a crossing, which the sweep refuses first.
+                // Kept as a guard.
+                (true, true) => return Err(refused()),
             }
         }
     }
@@ -529,7 +566,7 @@ mod tests {
         let (_, mut exact) = flat_plane();
         let rings = traced(&mut exact, rings);
         nest_rings(
-            &exact,
+            &mut exact,
             rings,
             limits,
             &ExecutionOptions::new(Tolerance::METRE),
@@ -610,6 +647,27 @@ mod tests {
             1_000,
         )
         .expect("neighbours");
+        assert_eq!(regions.len(), 2);
+    }
+
+    #[test]
+    fn an_island_sharing_edges_with_its_hole_is_decided_by_an_edge_midpoint() {
+        // The triangle (0,0) (4,0) (4,4) shares two edges with the hole and
+        // has its third inside it. Its first edge lies on the hole's boundary,
+        // so the decision falls to the third.
+        let (regions, _) = nest(
+            vec![
+                square(-1.0, 5.0, false),
+                vec![
+                    Point2::new(0.0, 0.0),
+                    Point2::new(4.0, 0.0),
+                    Point2::new(4.0, 4.0),
+                ],
+            ],
+            vec![square(0.0, 4.0, true)],
+            1_000,
+        )
+        .expect("island in its hole");
         assert_eq!(regions.len(), 2);
     }
 
@@ -913,7 +971,7 @@ mod tests {
                 .any(|corner| orient_sign(a[2], a[3], corner) == Ok(Sign::Positive));
             let options = ExecutionOptions::new(Tolerance::METRE);
             let (regions, _) = nest_rings(
-                &exact,
+                &mut exact,
                 rings,
                 CutRegionLimits::new(10, 1_000, 1_000),
                 &options,

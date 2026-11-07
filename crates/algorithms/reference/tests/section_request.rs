@@ -1605,6 +1605,9 @@ fn block_with_a_void_touching_its_wall() -> TriMesh {
     mesh.finish()
 }
 
+/// An outer ring and its holes.
+type ExactRegion = (Vec<Point2>, Vec<Vec<Point2>>);
+
 /// Outer ring and hole lengths of each cut region.
 type Shape = Vec<(usize, Vec<usize>)>;
 
@@ -1644,7 +1647,37 @@ fn pinched_cuts_split_at_their_vertex_in_every_frame_and_rotated_mesh() {
             vec![(5, vec![3])],
         ),
     ];
-    for (name, mesh, shape) in cases {
+    let exact: [Vec<ExactRegion>; 3] = [
+        vec![
+            (
+                ring(&[(0.0, 0.0), (1.0, 0.0), (1.0, 1.0), (0.0, 1.0)]),
+                vec![],
+            ),
+            (
+                ring(&[(1.0, 1.0), (2.0, 1.0), (2.0, 2.0), (1.0, 2.0)]),
+                vec![],
+            ),
+        ],
+        vec![
+            (ring(&[(-2.0, -2.0), (0.0, -2.0), (0.0, 0.0)]), vec![]),
+            (ring(&[(-2.0, 0.0), (0.0, 0.0), (0.0, 2.0)]), vec![]),
+            (ring(&[(0.0, 0.0), (2.0, 0.0), (2.0, 2.0)]), vec![]),
+        ],
+        vec![(
+            ring(&[(0.0, 0.0), (1.5, 0.0), (3.0, 0.0), (3.0, 3.0), (0.0, 3.0)]),
+            vec![ring(&[(0.5, 2.0), (2.5, 2.0), (1.5, 0.0)])],
+        )],
+    ];
+    for ((name, mesh, shape), exact) in cases.into_iter().zip(exact) {
+        let section =
+            cut(&mesh, horizontal(1.0)).unwrap_or_else(|error| panic!("{name}: {error:?}"));
+        let got: Vec<_> = section
+            .cut_regions
+            .expect("cut regions")
+            .into_iter()
+            .map(|region| (region.outer, region.holes))
+            .collect();
+        assert_eq!(got, exact, "{name}, identity frame");
         for k in 1..=200 {
             let section = cut(&mesh, turned(k, 201, 1.0))
                 .unwrap_or_else(|error| panic!("{name}, frame {k}: {error:?}"));
@@ -1653,5 +1686,88 @@ fn pinched_cuts_split_at_their_vertex_in_every_frame_and_rotated_mesh() {
                 .unwrap_or_else(|error| panic!("{name}, mesh {k}: {error:?}"));
             assert_eq!(cut_shape(&section), shape, "{name}, mesh {k}");
         }
+    }
+}
+
+/// A 5 x 5 grid of unit squares, a height field of 2 except at the corners of
+/// three pockets (z = 1, in the plane) that surround the lower-right triangle
+/// of the square (2,2). That triangle is raised to a pyramid, so it is cut
+/// material that touches the rest of the cut at its three corners only.
+fn island_between_pockets() -> TriMesh {
+    let id = |i: u32, j: u32| j * 6 + i;
+    let pocket = [(2, 1), (2, 2), (2, 3), (3, 2), (3, 3), (4, 3)];
+    let mut positions = Vec::new();
+    for z in [true, false] {
+        for j in 0..6u32 {
+            for i in 0..6u32 {
+                let low = pocket.contains(&(i, j));
+                let height = if !z {
+                    0.0
+                } else if low {
+                    1.0
+                } else {
+                    2.0
+                };
+                positions.push(Point3::new(f64::from(i), f64::from(j), height));
+            }
+        }
+    }
+    let bottom = |index: u32| index + 36;
+    let apex = u32::try_from(positions.len()).expect("small fixture");
+    positions.push(Point3::new(2.75, 2.25, 2.0));
+    let mut indices = Vec::new();
+    let mut top = |a: u32, b: u32, c: u32| {
+        indices.extend([a, b, c, bottom(a), bottom(c), bottom(b)]);
+    };
+    for j in 0..5 {
+        for i in 0..5 {
+            top(id(i, j), id(i + 1, j + 1), id(i, j + 1));
+            if (i, j) != (2, 2) {
+                top(id(i, j), id(i + 1, j), id(i + 1, j + 1));
+            }
+        }
+    }
+    drop(top);
+    // The pyramid over (2,2) (3,2) (3,3), and the bottom under it.
+    indices.extend([bottom(id(2, 2)), bottom(id(3, 3)), bottom(id(3, 2))]);
+    for (a, b) in [
+        (id(2, 2), id(3, 2)),
+        (id(3, 2), id(3, 3)),
+        (id(3, 3), id(2, 2)),
+    ] {
+        indices.extend([a, b, apex]);
+    }
+    // Walls, counter-clockwise around the grid.
+    let mut ring_of = Vec::new();
+    ring_of.extend((0..5).map(|i| id(i, 0)));
+    ring_of.extend((0..5).map(|j| id(5, j)));
+    ring_of.extend((1..6).rev().map(|i| id(i, 5)));
+    ring_of.extend((1..6).rev().map(|j| id(0, j)));
+    for k in 0..ring_of.len() {
+        let (a, b) = (ring_of[k], ring_of[(k + 1) % ring_of.len()]);
+        indices.extend([a, bottom(a), bottom(b), a, bottom(b), b]);
+    }
+    TriMesh::new(positions, indices)
+}
+
+#[test]
+fn an_island_touching_a_hole_at_every_corner_is_a_region_in_every_frame_and_rotated_mesh() {
+    // No corner of the island is strictly inside or outside the hole, so the
+    // containment test decides on an edge midpoint (#373).
+    let mesh = island_between_pockets();
+    let shape: Shape = vec![(4, vec![6]), (3, vec![])];
+    let section = cut(&mesh, horizontal(1.0)).expect("identity frame");
+    assert_eq!(cut_shape(&section), shape, "identity frame");
+    for k in 1..=200 {
+        let section =
+            cut(&mesh, turned(k, 201, 1.0)).unwrap_or_else(|error| panic!("frame {k}: {error:?}"));
+        assert_eq!(cut_shape(&section), shape, "frame {k}");
+        let section = cut(&turned_mesh(&mesh, k), horizontal(1.0))
+            .unwrap_or_else(|error| panic!("mesh {k}: {error:?}"));
+        // Rounding keeps the wall crossings on the outer ring as vertices.
+        let rotated = cut_shape(&section);
+        assert_eq!(rotated.len(), 2, "mesh {k}");
+        assert_eq!(rotated[0].1.len(), 1, "mesh {k}");
+        assert_eq!(rotated[1], (3, vec![]), "mesh {k}");
     }
 }
