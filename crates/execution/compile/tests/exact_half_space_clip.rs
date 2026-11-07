@@ -594,17 +594,22 @@ fn unsupported_clips_are_refused_by_name() {
     let union = g.boolean(wall, roof, BooleanOperator::Union);
     named(&refusal(g, union), "union with a half-space");
 
+    // An intersection commutes (#326): the half-space as its left operand
+    // clips the solid on its right as it does on its left.
     let mut g = Graph::new();
     let wall = g.wall(placement);
     let roof = g.half_space(plane, true, placement, true);
     let swapped = g.boolean(roof, wall, BooleanOperator::Intersection);
-    named(&refusal(g, swapped), "half-space");
+    check(g, swapped, T * L * (H - 2.4), &[]);
 
     let mut g = Graph::new();
     let roof = g.half_space(plane, true, placement, true);
     let floor = g.half_space((Point3::ZERO, Vec3::Z), false, placement, true);
     let slab = g.boolean(roof, floor, BooleanOperator::Intersection);
-    named(&refusal(g, slab), "subject is a half-space");
+    named(
+        &refusal(g, slab),
+        "intersection of half-spaces without a subject",
+    );
 
     let mut g = Graph::new();
     let wall = g.wall(placement);

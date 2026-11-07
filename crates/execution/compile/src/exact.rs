@@ -11,14 +11,14 @@
 //! the reason, and the booleans above it absorb it by the identities of
 //! `crate::empty` (`S - 0 = S`, `0 - T = 0`, `S & 0 = 0`, `S | 0 = S`); an
 //! instance of nothing is nothing. Only an empty root is refused, with
-//! `GeomError::Degenerate` giving the reason, for a value no consumer has
-//! asked for in place of the refusal.
+//! `GeomError::Degenerate` giving the reason: an empty `ExactBRep` would
+//! change the representation for a value no consumer has asked for.
 //!
 //! It never falls back to mesh compilation. Extrusions (either way along
 //! the profile normal, #275), revolutions,
 //! booleans of sharp rectangle prisms along +z, booleans of placed
-//! extrusions, revolutions and booleans ([`boolean`], #228, #378), clips of those by half-spaces ([`clip`],
-//! #234), disks swept along one segment or one arc, runs of sections at
+//! extrusions, revolutions and booleans ([`boolean`], #228, #378), clips of those by half-spaces and
+//! intersections of half-spaces ([`clip`], #234, #326), disks swept along one segment or one arc, runs of sections at
 //! stations with a closed form (#247: a constant section along a line or a
 //! horizontal circle, a linear taper along a line; `crate::station`), and
 //! instances of any of these under a rigid transform are compiled

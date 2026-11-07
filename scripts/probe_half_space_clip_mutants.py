@@ -27,8 +27,8 @@ TESTS = [
 
 MUTANTS = [
     ("the clip not dispatched", D,
-     "        if let Some(tool) = self.clip_tool(right)? {",
-     "        if let Some(tool) = self.clip_tool(right)?.filter(|_| false) {"),
+     "        if let Some((subject, region)) = self.clip_of(left, right, operator)? {",
+     "        if let Some((subject, region)) = self.clip_of(left, right, operator)?.filter(|_| false) {"),
     ("agreement ignored", C,
      "        let side = if half_space.agreement {",
      "        let side = if true {"),
@@ -62,9 +62,9 @@ MUTANTS = [
     ("vertices left out of the envelope", C,
      "        envelope.include(vertex.position);",
      "        let _ = vertex;"),
-    ("unions with a half-space let through", C,
-     "        if operator == BooleanOperator::Union {",
-     "        if false {"),
+    ("unions with a half-space let through", D,
+     "        if self.region(left)?.is_some() || self.region(right)?.is_some() {",
+     "        if (self.region(left)?.is_some() || self.region(right)?.is_some())\n            && operator != BooleanOperator::Union\n        {"),
     ("a scaled half-space not named", C,
      "        TransformError::NotRigid => {",
      "        TransformError::NotRigid if false => {"),

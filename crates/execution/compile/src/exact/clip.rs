@@ -16,6 +16,25 @@
 //! not, so a similarity's arcs stay exact cylinder walls; any other map
 //! makes them ellipses, refused by name.
 //!
+//! # Regions (#326)
+//!
+//! A region is a half-space, or an intersection of regions, read through
+//! instances (`ExactCompilation::region`): a wall less the part under two
+//! roof planes is the wall minus their intersection. It is the tool of a
+//! difference or an intersection, and, an intersection being commutative,
+//! the left operand of an intersection with a solid (`clip_of`). The
+//! stand-in is built leaf by leaf (`region_cover`): the first leaf that
+//! crosses the subject's envelope is built over it, exactly as a single
+//! clip is, and each further leaf is built over the box of the stand-in so
+//! far and intersected with it through the general boolean, its report
+//! merged into the clip's. A leaf that holds that box adds nothing, and one
+//! that misses it, or whose stand-in meets the one so far in nothing, leaves
+//! nothing of the region. The margin argument below holds at each step, so
+//! the result does not depend on the margins; a region of one leaf takes
+//! the path of a single clip unchanged. The leaves are bounded by the
+//! graph's size, so a graph that shares a sub-region cannot blow up the
+//! walk.
+//!
 //! # Prisms along the placement's `z` (#321)
 //!
 //! `SolidOperation::BoundedHalfSpaceAlongZ` sweeps the boundary, as written in the
@@ -96,8 +115,9 @@
 //!
 //! # Refused, by name
 //!
-//! A union with a half-space (unbounded), a half-space as the subject, a
-//! subject not built from placed extrusions, a bounded half-space whose
+//! A union or symmetric difference with a half-space (unbounded), a half-space
+//! or an intersection of half-spaces as the subject or on its own (unbounded
+//! on the side it keeps), a subject not built from placed extrusions, a bounded half-space whose
 //! boundary curve is not a polyline, whose profile does not bound a region
 //! or cannot be extruded exactly, or whose plane is placed by an instance,
 //! one along its placement's `z` whose axis lies within the angular
@@ -132,6 +152,13 @@ pub(super) struct ClipTool {
     clip: Clip,
     /// The placements above the half-space, composed.
     placement: Transform3,
+}
+
+/// An intersection of half-spaces (#326): the tool of a difference or an
+/// intersection, in graph order with the left operand first.
+#[derive(Debug, Clone)]
+pub(super) struct Region {
+    leaves: Vec<ClipTool>,
 }
 
 #[derive(Debug, Clone)]
@@ -266,21 +293,99 @@ impl ExactCompilation<'_> {
         ))
     }
 
-    /// `left` clipped by the half-space `tool`.
+    /// The region `id` is, through its instances, or `None` when it is not
+    /// one: a half-space, or an intersection of regions (#326), each leaf
+    /// placed by the instances above it.
+    pub(super) fn region(&self, id: NodeId) -> GeomResult<Option<Region>> {
+        let mut leaves = Vec::new();
+        let is_region = self.collect_leaves(id, Transform3::IDENTITY, &mut leaves)?;
+        Ok(is_region.then_some(Region { leaves }))
+    }
+
+    /// Append the half-spaces `id` intersects, under `placement`, when it is
+    /// a region; nothing is left appended when it is not.
+    fn collect_leaves(
+        &self,
+        mut id: NodeId,
+        mut placement: Transform3,
+        leaves: &mut Vec<ClipTool>,
+    ) -> GeomResult<bool> {
+        for _ in 0..=self.graph.len() {
+            let node = self.graph.get(id).ok_or_else(|| {
+                GeomError::InvalidInput(format!("operand {id:?} does not belong to this graph"))
+            })?;
+            match node {
+                GeometryNode::Instance(instance) => {
+                    placement *= instance.transform;
+                    id = instance.source;
+                }
+                GeometryNode::SolidOperation(SolidOperation::Boolean {
+                    left,
+                    right,
+                    operator: BooleanOperator::Intersection,
+                }) => {
+                    let (left, right) = (*left, *right);
+                    let mark = leaves.len();
+                    let both = self.collect_leaves(left, placement, leaves)?
+                        && self.collect_leaves(right, placement, leaves)?;
+                    if !both {
+                        leaves.truncate(mark);
+                    }
+                    return Ok(both);
+                }
+                _ => {
+                    let Some(mut leaf) = self.clip_tool(id)? else {
+                        return Ok(false);
+                    };
+                    leaf.placement = placement * leaf.placement;
+                    // A shared sub-region can be read through many paths: the
+                    // leaves are bounded by the graph, not by its size alone.
+                    if leaves.len() >= self.graph.len() {
+                        return Err(unsupported(
+                            "exact half-space intersection with more half-spaces than its graph has nodes",
+                        ));
+                    }
+                    leaves.push(leaf);
+                    return Ok(true);
+                }
+            }
+        }
+        Err(GeomError::InvalidInput(
+            "exact boolean operand placements form a cycle".to_owned(),
+        ))
+    }
+
+    /// The subject and the region of a clip: a difference or an
+    /// intersection with a region as the tool, or, an intersection being
+    /// commutative, as the left operand of a solid.
+    pub(super) fn clip_of(
+        &self,
+        left: NodeId,
+        right: NodeId,
+        operator: BooleanOperator,
+    ) -> GeomResult<Option<(NodeId, Region)>> {
+        if !matches!(
+            operator,
+            BooleanOperator::Difference | BooleanOperator::Intersection
+        ) {
+            return Ok(None);
+        }
+        Ok(match (self.region(left)?, self.region(right)?) {
+            (None, Some(region)) => Some((left, region)),
+            (Some(region), None) if operator == BooleanOperator::Intersection => {
+                Some((right, region))
+            }
+            _ => None,
+        })
+    }
+
+    /// `left` clipped by the region `region`.
     pub(super) fn compile_clip(
         &mut self,
         left: NodeId,
-        tool: ClipTool,
+        region: Region,
         operator: BooleanOperator,
     ) -> GeomResult<Body> {
-        if operator == BooleanOperator::Union {
-            return Err(unsupported(
-                "exact union with a half-space, which is unbounded",
-            ));
-        }
-        if self.clip_tool(left)?.is_some() {
-            return Err(unsupported("exact boolean whose subject is a half-space"));
-        }
         // Nothing clipped is still nothing.
         let subject = match self.body(left)? {
             Body::Solid(subject) => subject,
@@ -289,7 +394,7 @@ impl ExactCompilation<'_> {
         let envelope = self.envelope(left)?;
         let tolerance = self.options.tolerance();
         let keeps = operator == BooleanOperator::Intersection;
-        let (solid, tool_report) = match self.leaf_cover(&tool, envelope)? {
+        let (solid, tool_report) = match self.region_cover(&region, envelope)? {
             Cover::Misses if keeps => return Ok(Body::Empty(CLIP_EMPTIED)),
             Cover::Misses => return Ok(Body::Solid(subject)),
             Cover::Holds if keeps => return Ok(Body::Solid(subject)),
@@ -309,6 +414,58 @@ impl ExactCompilation<'_> {
         };
         self.boolean_report = Some(report);
         Ok(Body::new(body))
+    }
+
+    /// What the region does to `envelope`: the finite solid standing in for
+    /// it, unless the envelope decides alone.
+    ///
+    /// The first leaf that crosses the envelope is built over it, as a
+    /// single clip is. Each further leaf is built over the box of the
+    /// stand-in so far and intersected with it, so the stand-in stays within
+    /// the margin the module's argument needs: at every step it equals the
+    /// intersection of the leaves so far on the envelope. A leaf that holds
+    /// that box adds nothing; one that misses it, or whose stand-in meets
+    /// the one so far in nothing, leaves nothing of the region.
+    fn region_cover(&self, region: &Region, envelope: Envelope) -> GeomResult<Cover> {
+        let tolerance = self.options.tolerance();
+        let mut tool: Option<(ExactBRep, Option<BooleanReport>)> = None;
+        for leaf in &region.leaves {
+            let around = match &tool {
+                None => envelope,
+                Some((stand_in, _)) => edge_box(stand_in)?,
+            };
+            match self.leaf_cover(leaf, around)? {
+                Cover::Misses => return Ok(Cover::Misses),
+                Cover::Holds => {}
+                Cover::Cuts(side, side_report) => {
+                    tool = Some(match tool.take() {
+                        None => (*side, side_report),
+                        Some((stand_in, report)) => {
+                            let (both, both_report) = match boolean_with_report(
+                                &stand_in,
+                                &side,
+                                BooleanOperator::Intersection,
+                                tolerance,
+                            ) {
+                                Ok(done) => done,
+                                // The two stand-ins share nothing.
+                                Err(BooleanError::EmptyResult) => return Ok(Cover::Misses),
+                                Err(error) => return Err(remap_boolean_error(error)),
+                            };
+                            let merged = [report, side_report, Some(both_report)]
+                                .into_iter()
+                                .flatten()
+                                .reduce(|a, b| a.merged(&b));
+                            (both, merged)
+                        }
+                    });
+                }
+            }
+        }
+        Ok(match tool {
+            None => Cover::Holds,
+            Some((solid, report)) => Cover::Cuts(Box::new(solid), report),
+        })
     }
 
     /// What the half-space `tool` does to `envelope`: the finite prism
@@ -672,7 +829,9 @@ impl ExactCompilation<'_> {
             }) => {
                 let (left, right, operator) = (*left, *right, *operator);
                 // A difference or a clip removes nothing outside its subject.
-                if operator == BooleanOperator::Difference || self.clip_tool(right)?.is_some() {
+                if let Some((subject, _)) = self.clip_of(left, right, operator)? {
+                    self.envelope(subject)
+                } else if operator == BooleanOperator::Difference {
                     self.envelope(left)
                 } else {
                     Ok(self.envelope(left)?.union(self.envelope(right)?))

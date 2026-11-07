@@ -8,6 +8,9 @@
 //!
 //! # Dispatch
 //!
+//! - A region (a half-space, or an intersection of half-spaces) as the tool
+//!   of a difference or an intersection, or as the left operand of an
+//!   intersection with a solid, is a clip (`super::clip`, #234, #326).
 //! - Two bare sharp rectangles extruded along `+z`, without placements,
 //!   keep the prism path (`boolean_prisms_exact`): it decides the plan
 //!   with integer predicates and takes every operator.
@@ -32,7 +35,8 @@
 //!
 //! An operand the exact compiler refuses (a primitive, a tapered
 //! revolution, a mesh, a half-space as subject) is refused with its own
-//! family named. So are a symmetric difference of placed operands, a scaled
+//! family named. So are a union or symmetric difference with a half-space, a
+//! region without a solid to clip, a symmetric difference of placed operands, a scaled
 //! or sheared placement, and every configuration the general boolean cannot
 //! build exactly ([`BooleanError`]): `GeomError::UnsupportedInput` naming
 //! the case. A boolean that leaves
@@ -69,9 +73,24 @@ impl ExactCompilation<'_> {
         right: NodeId,
         operator: BooleanOperator,
     ) -> GeomResult<Body> {
-        // A half-space tool is a clip (#234, `super::clip`).
-        if let Some(tool) = self.clip_tool(right)? {
-            return self.compile_clip(left, tool, operator);
+        // A region as the tool, or as the left operand of an intersection,
+        // is a clip (#234, #326, `super::clip`).
+        if let Some((subject, region)) = self.clip_of(left, right, operator)? {
+            return self.compile_clip(subject, region, operator);
+        }
+        // Any other boolean with a region is unbounded on the side it keeps.
+        if self.region(left)?.is_some() || self.region(right)?.is_some() {
+            return Err(unsupported(match operator {
+                BooleanOperator::Union => "exact union with a half-space, which is unbounded",
+                BooleanOperator::SymmetricDifference => {
+                    "exact symmetric difference with a half-space, which is unbounded"
+                }
+                BooleanOperator::Intersection => {
+                    "exact intersection of half-spaces without a subject: it is unbounded, \
+                     and is compiled only as the tool of a difference or an intersection"
+                }
+                _ => "exact boolean whose subject is a half-space",
+            }));
         }
         if let (Some(subject), Some(tool)) = (self.bare_prism(left)?, self.bare_prism(right)?) {
             return boolean_prisms_exact(&subject, &tool, operator, self.options.tolerance())
