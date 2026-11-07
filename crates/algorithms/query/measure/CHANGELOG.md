@@ -27,6 +27,10 @@ caret rule for `0.x` versions.
   point's (#439).
 - B-spline witnesses are padded by the de Boor evaluation's rounding, a
   bound that counts the degrees and the weights' spread (#439).
+- The exact Hausdorff upper bound about a B-spline patch's witness adds the
+  distance from the witness to the centre of the patch's enclosing sphere
+  (the control net's box midpoint), which it left out and so could report an
+  upper bound below the distance (#459).
 
 - The exact boundary distance and Hausdorff distance carry rounding margins
   derived from the magnitudes their numbers are computed from, in ulps of the

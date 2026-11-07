@@ -93,6 +93,9 @@ MUTANTS = [
     ("a B-spline witness's M without its weights' spread", D,
      "            hi / lo\n",
      "            1.0\n", UNIT),
+    ("a B-spline patch's Hausdorff bound about its centre, not its witness", H,
+     "    (w - element.centre).length() * (1.0 + RATIO_EPSILONS * Scalar::EPSILON)",
+     "    0.0 * (w - element.centre).length()", UNIT),
 ]
 
 probe_lib.main(MUTANTS, timeout=1200)

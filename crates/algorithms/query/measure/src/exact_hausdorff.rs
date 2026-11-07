@@ -45,7 +45,9 @@
 //!   - a *Lipschitz* bound: `d(., dB)` is 1-Lipschitz, so over a patch inside
 //!     a sphere of radius `r` about `c` it is at most `d(c, dB) + r`, with
 //!     `d(c, dB)` bounded above by a point found on `dB` plus that point's
-//!     evaluation rounding (#439).
+//!     evaluation rounding (#439). A B-spline patch's sphere is
+//!     about the control net's box midpoint, not its witness, so the bound
+//!     about the witness adds their distance (#459).
 //!
 //! The witnesses are `point_from`, the point realising `lower`, and
 //! `point_to`, the nearest point found to it on the other boundary.
@@ -729,6 +731,15 @@ fn displacements(
     Ok(found)
 }
 
+/// How far an element's witness `w` lies from the centre of its enclosing
+/// sphere: a patch point is within `radius + witness_offset` of the witness
+/// (#459). It is zero for an analytic patch, whose centre is its witness,
+/// and positive for a B-spline patch, whose centre is the control net's
+/// box midpoint.
+fn witness_offset(element: &Element, w: Point3) -> Scalar {
+    (w - element.centre).length() * (1.0 + RATIO_EPSILONS * Scalar::EPSILON)
+}
+
 /// A lower bound on `h(A, B)` from a point computed on `A`'s boundary: the
 /// point's own bound less the point's evaluation rounding `error` (#439).
 fn witnessed_lower(found: &PointDistance, error: Scalar) -> Scalar {
@@ -833,8 +844,9 @@ fn search(
                         state.lower = state.lower.max(lower);
                         state.witness = Some((w, found.nearest, element.shape, found.on));
                     }
-                    // `d(., dB)` is 1-Lipschitz about the witness.
-                    upper = upper.min(found.upper + element.radius);
+                    // `d(., dB)` is 1-Lipschitz about the witness, and the
+                    // sphere about `centre` need not be centred on it (#459).
+                    upper = upper.min(found.upper + element.radius + witness_offset(&element, w));
                 }
             }
         }
@@ -1436,5 +1448,155 @@ mod tests {
             );
             assert!(found.lower >= 0.3125 - 2e-7, "{k}: {}", found.lower);
         }
+    }
+
+    /// A sheet on a bicubic rational B-spline surface, over its
+    /// parameter square, bounded by the four straight edges of the net's
+    /// boundary: the points `(i / 3, j / 3, 0)` at the weight 1 (so the
+    /// edges are linear in the parameter), whatever the interior.
+    fn spline_sheet(interior: [[f64; 2]; 2], weight: f64) -> axiolid_brep::ExactBRep {
+        use axiolid_core::{Interval, Vec2};
+        use axiolid_curve::{Curve2, Curve3, Line2, Line3};
+        use axiolid_topology::{Edge, EdgeUse, Face, FaceBound, Loop, Orientation, Vertex};
+        let mut points = vec![vec![Point3::ZERO; 4]; 4];
+        let mut weights = vec![vec![1.0; 4]; 4];
+        for (i, column) in points.iter_mut().enumerate() {
+            for (j, point) in column.iter_mut().enumerate() {
+                let height = if (1..3).contains(&i) && (1..3).contains(&j) {
+                    interior[i - 1][j - 1]
+                } else {
+                    0.0
+                };
+                *point = Point3::new(i as f64 / 3.0, j as f64 / 3.0, height);
+            }
+        }
+        weights[1][1] = weight;
+        let net = BSplineSurface {
+            u_degree: 3,
+            v_degree: 3,
+            control_points: points,
+            u_knots: vec![0.0, 1.0],
+            u_multiplicities: vec![4, 4],
+            v_knots: vec![0.0, 1.0],
+            v_multiplicities: vec![4, 4],
+            weights: Some(weights),
+            u_closed: false,
+            v_closed: false,
+            knot_spec: KnotSpec::Unspecified,
+            self_intersect: None,
+        };
+        let mut builder = axiolid_brep::ExactBRepBuilder::default();
+        let surface = builder.add_surface(Surface::BSpline(net));
+        let corners = [(0.0, 0.0), (1.0, 0.0), (1.0, 1.0), (0.0, 1.0)];
+        let directions = [(1.0, 0.0), (0.0, 1.0), (-1.0, 0.0), (0.0, -1.0)];
+        let vertices: Vec<_> = corners
+            .iter()
+            .map(|c| {
+                builder.topology_mut().add_vertex(Vertex {
+                    position: Point3::new(c.0, c.1, 0.0),
+                })
+            })
+            .collect();
+        let mut uses = Vec::new();
+        for i in 0..4 {
+            let (p, d) = (corners[i], directions[i]);
+            let curve = builder.add_curve3(Curve3::Line(Line3 {
+                origin: Point3::new(p.0, p.1, 0.0),
+                direction: Vec3::new(d.0, d.1, 0.0),
+            }));
+            let pcurve = builder.add_curve2(Curve2::Line(Line2 {
+                origin: Point2::new(p.0, p.1),
+                direction: Vec2::new(d.0, d.1),
+            }));
+            let edge = builder.topology_mut().add_edge(Edge {
+                start: vertices[i],
+                end: vertices[(i + 1) % 4],
+                curve: Some(curve),
+            });
+            builder.set_edge_interval(edge, Interval::new(0.0, 1.0));
+            uses.push(EdgeUse {
+                edge,
+                orientation: Orientation::Forward,
+                pcurve: Some(pcurve),
+            });
+        }
+        let loop_id = builder.topology_mut().add_loop(Loop { edges: uses });
+        for i in 0..4 {
+            builder.set_pcurve_interval(loop_id, i, Interval::new(0.0, 1.0));
+        }
+        builder.topology_mut().add_face(Face {
+            surface: Some(surface),
+            bounds: vec![FaceBound {
+                loop_id,
+                orientation: Orientation::Forward,
+                outer: true,
+            }],
+            orientation: Orientation::Forward,
+        });
+        builder.finish().expect("a valid sheet")
+    }
+
+    /// A square of side `0.15` in the plane `z = 0`, near the origin.
+    fn small_sheet() -> axiolid_brep::ExactBRep {
+        charted_sheet(
+            Frame3 {
+                origin: Point3::ZERO,
+                x: Vec3::X,
+                y: Vec3::Y,
+                z: Vec3::Z,
+            },
+            &[
+                Point2::new(0.25, 0.25),
+                Point2::new(0.4, 0.25),
+                Point2::new(0.4, 0.4),
+                Point2::new(0.25, 0.4),
+            ],
+        )
+    }
+
+    /// The heavy control point pulls the witness `S(1/2, 1/2)` towards the
+    /// small sheet, `0.25` from the centre of the control net's box. The far
+    /// corner of the sheet is `0.6 sqrt 2 = 0.8485` from the small sheet and
+    /// no edge witness shows it: bounding the patch about the witness with
+    /// the radius about the centre gave an upper bound of `0.7681` (#459).
+    #[test]
+    fn a_spline_patch_is_bounded_about_its_witness_not_its_net_centre() {
+        let b = small_sheet();
+        let a = spline_sheet([[0.05, 0.1], [-0.05, 0.3]], 1000.0);
+        let h = 0.6 * 2.0_f64.sqrt();
+        for budget in 0..4 {
+            let found = super::one_sided_boundary_hausdorff_with_budget(
+                &a,
+                &b,
+                1e-9,
+                axiolid_core::Tolerance::METRE,
+                budget,
+            )
+            .expect("bounded");
+            assert!(
+                found.lower <= h && h <= found.upper,
+                "{budget}: [{}, {}] must contain {h}",
+                found.lower,
+                found.upper
+            );
+        }
+    }
+
+    #[test]
+    fn a_witness_is_off_its_patch_centre_only_on_a_spline() {
+        use super::{witness_offset, Metric, Shape, Side};
+        let tolerance = axiolid_core::Tolerance::METRE.linear();
+        let offsets = |brep: &axiolid_brep::ExactBRep| -> Vec<f64> {
+            let side = Side::new(brep, tolerance, Metric::Space).expect("a side");
+            side.elements
+                .iter()
+                .filter(|e| matches!(e.shape, Shape::Face { .. }))
+                .map(|e| witness_offset(e, e.witness.expect("a face witness")))
+                .collect()
+        };
+        assert_eq!(offsets(&small_sheet()), [0.0]);
+        let spline = offsets(&spline_sheet([[0.05, 0.1], [-0.05, 0.3]], 1000.0));
+        assert_eq!(spline.len(), 1);
+        assert!(spline[0] > 0.2, "{spline:?}");
     }
 }

@@ -96,8 +96,8 @@ parameters) and edge spans.
 - `scripts/probe_boundary_distance_mutants.py`: 11 faults, all caught.
 - `crates/algorithms/query/measure/src/exact_distance/witness.rs`: the certified
   foot witnesses (#318).
-- `scripts/probe_distance_rounding_mutants.py`: 13 faults in the derived margins
-  and witness bounds, all caught (#318, #439).
+- `scripts/probe_distance_rounding_mutants.py`: 14 faults in the derived margins
+  and witness bounds, all caught (#318, #439, #459).
 
 ## Amendment 2026-11-07: rounding margins in ulps of the coordinates, a floor, and foot witnesses (#318)
 
