@@ -83,6 +83,7 @@ use crate::curve::span_in;
 use crate::nurbs::SplineAxis;
 
 mod carrier;
+mod chain_positions;
 mod continuation;
 mod elevated_positions;
 mod enclosure;
@@ -98,6 +99,8 @@ mod positions;
 mod section;
 mod separation;
 
+pub(crate) use chain_positions::evaluated_chain_chord_bound;
+pub use chain_positions::{ChainPositionTable, SeamSide};
 pub use elevated_positions::ElevatedPositionTable;
 pub use intrinsic::{intrinsic_chord_bound2, intrinsic_chord_bound3, intrinsic_derivative_bounds2};
 pub use offset::{offset_chord_bound2, offset_chord_bound3, offset_point2, offset_point3};
@@ -665,7 +668,10 @@ pub fn chord_bound2(curve: &Curve2, a: Scalar, b: Scalar) -> Option<Scalar> {
         // A point has no chord, but the families whose evaluated point is
         // off the exact one carry that distance (#414): read it from the
         // next representable span.
-        if matches!(curve, Curve2::Lifted(_) | Curve2::Intrinsic(_)) {
+        if matches!(
+            curve,
+            Curve2::Lifted(_) | Curve2::Intrinsic(_) | Curve2::Chain(_)
+        ) {
             return chord_bound2(curve, a, a.next_up())
                 .or_else(|| chord_bound2(curve, a.next_down(), a));
         }
@@ -688,7 +694,7 @@ pub fn chord_bound2(curve: &Curve2, a: Scalar, b: Scalar) -> Option<Scalar> {
         )),
         Curve2::BSpline(spline) => bspline_bounds(spline, |p| [p.x, p.y], a, b)
             .map(|(_, chord, _)| inflate(taylor(b - a, chord))),
-        Curve2::Chain(chain) => crate::chain::chain_chord_bound(chain, a, b),
+        Curve2::Chain(chain) => chain_positions::evaluated_chain_chord_bound(chain, a, b),
         Curve2::Implicit(c) => {
             let (lo, hi) = ordered(a, b);
             implicit::chord_bound(c, lo, hi).map(inflate)

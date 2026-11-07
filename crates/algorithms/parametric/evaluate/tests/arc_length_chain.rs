@@ -582,3 +582,161 @@ fn an_elevated_b_spline_plan_is_still_refused() {
     let curve = Elevated3::new(cubic(1e-3, 10.0), ElevationLaw::level(0.0));
     assert!(elevated_point(&curve, 1.0).is_err());
 }
+
+// --- evaluated ends (#438) -----------------------------------------------------
+
+/// `k = 0.01 sin 50 s` over 100 m after a straight 20 m, where the
+/// evaluator's quadrature is a centimetre off.
+fn harmonic() -> Chain2 {
+    Chain2::new(
+        Frame2 {
+            origin: Point2::new(20.0, 10.0),
+            x: Vec2::new(0.8, 0.6),
+            y: Vec2::new(-0.6, 0.8),
+        },
+        vec![
+            ChainPiece2::Intrinsic {
+                curvature: CurvatureLaw::circular(0.0),
+                length: 20.0,
+            },
+            ChainPiece2::Intrinsic {
+                curvature: CurvatureLaw::Sinusoid {
+                    mean: 0.0,
+                    amplitude: 0.01,
+                    angular_frequency: 50.0,
+                    phase: 0.0,
+                },
+                length: 100.0,
+            },
+        ],
+    )
+}
+
+/// The harmonic chain's exact point at `s`: composite Simpson of the
+/// closed-form heading `0.01 / 50 (1 - cos 50 m)`, in steps of 1/8192, from
+/// a base point `(m0, base)` (the piece's local coordinates).
+fn harmonic_exact(m0: Scalar, base: Vec2, s: Scalar) -> Vec2 {
+    let heading = |m: Scalar| 0.01 / 50.0 * (1.0 - (50.0 * m).cos());
+    let (a, b) = (m0, s - 20.0);
+    let n = (((b - a) * 8192.0).ceil() as usize)
+        .max(2)
+        .next_multiple_of(2);
+    let h = (b - a) / n as Scalar;
+    let (mut x, mut y) = (0.0, 0.0);
+    for i in 0..=n {
+        let m = a + h * i as Scalar;
+        let w = if i == 0 || i == n {
+            1.0
+        } else if i % 2 == 1 {
+            4.0
+        } else {
+            2.0
+        };
+        x += w * heading(m).cos();
+        y += w * heading(m).sin();
+    }
+    base + Vec2::new(x, y) * (h / 3.0)
+}
+
+fn harmonic_world(local: Vec2) -> Point2 {
+    let f = harmonic().start;
+    f.origin + f.x * (20.0 + local.x) + f.y * local.y
+}
+
+#[test]
+fn a_chain_chord_bound_covers_its_evaluated_ends() {
+    // Main gave 1.95e-5 here: the chord of the evaluated ends is 2.8e-3 from
+    // the exact arc, because the evaluated ends are 1.7e-3 and 2.8e-3 off.
+    let chain = harmonic();
+    let (a, b) = (116.4375, 116.5625);
+    let bound = chord_bound2(&Curve2::Chain(chain.clone()), a, b).unwrap();
+    let (pa, pb) = (
+        chain_point(&chain, a).unwrap(),
+        chain_point(&chain, b).unwrap(),
+    );
+    // The exact base point at the start of the span, then forward.
+    let mut local = harmonic_exact(0.0, Vec2::ZERO, a);
+    let mut at = a - 20.0;
+    let mut worst: Scalar = 0.0;
+    for k in 0..=64 {
+        let s = a + (b - a) * k as Scalar / 64.0;
+        if k > 0 {
+            local = harmonic_exact(at, local, s);
+            at = s - 20.0;
+        }
+        worst = worst.max(segment_distance(harmonic_world(local), pa, pb));
+    }
+    assert!(worst > 2.8e-3, "the exact arc lies {worst} from the chord");
+    assert!(bound >= worst, "bound {bound} under {worst}");
+    assert!(bound <= 2.9e-3, "bound {bound} is loose");
+}
+
+#[test]
+fn a_chain_point_is_charged_the_distance_of_its_evaluated_point() {
+    let curve = Curve2::Chain(harmonic());
+    let bound = chord_bound2(&curve, 116.5, 116.5).unwrap();
+    // The evaluated point is 1.4e-2 off the exact one.
+    assert!((1.39e-2..=1.5e-2).contains(&bound), "{bound}");
+}
+
+#[test]
+fn a_span_ending_at_an_offset_join_is_charged_the_jump() {
+    // The second piece's curve starts 5e-10 off its local origin: the exact
+    // chain jumps at the join, and the evaluated upper end is read past it.
+    let chain = Curve2::Chain(Chain2::new(
+        frame(Point2::new(3.0, -1.0), 0.6),
+        vec![
+            ChainPiece2::Intrinsic {
+                curvature: CurvatureLaw::circular(0.0),
+                length: 10.0,
+            },
+            ChainPiece2::Parametric {
+                curve: Curve2::Line(Line2 {
+                    origin: Vec2::new(0.0, 5e-10),
+                    direction: Vec2::X,
+                }),
+                start: 0.0,
+                length: 10.0,
+            },
+        ],
+    ));
+    let bound = chord_bound2(&chain, 5.0, 10.0).unwrap();
+    assert!((4.9e-10..=1e-9).contains(&bound), "{bound}");
+    // Starting at the join the piece is read from its own start.
+    let after = chord_bound2(&chain, 10.0, 15.0).unwrap();
+    assert!(after <= 1e-11, "{after}");
+}
+
+#[test]
+fn the_layouts_chord_bounds_keep_their_size() {
+    // The gaps of a layout whose pieces are closed forms are rounding: the
+    // bounds stay what the curvature alone gave (main: 1.04166e-4, 4.14590e-4).
+    let chain = Curve2::Chain(layout());
+    let straight_cubic = chord_bound2(&chain, 60.0, 60.5).unwrap();
+    assert!(
+        (straight_cubic - 1.04166e-4).abs() <= 0.01 * 1.04166e-4,
+        "{straight_cubic}"
+    );
+    let arc = chord_bound2(&chain, 100.0, 101.0).unwrap();
+    assert!((arc - 4.14590e-4).abs() <= 0.01 * 4.14590e-4, "{arc}");
+}
+
+#[test]
+fn a_chain_with_a_sinusoid_piece_is_not_certified() {
+    // No certified arc length: the evaluated ends could not be charged.
+    let chain = Chain2::new(
+        frame(Point2::ZERO, 0.0),
+        vec![ChainPiece2::Parametric {
+            curve: Curve2::Sinusoid(axiolid_curve::Sinusoid2 {
+                mean: 0.0,
+                cosine: 0.0,
+                sine: 0.0,
+            }),
+            start: 0.0,
+            length: 3.0,
+        }],
+    );
+    assert!(!axiolid_evaluate::chain::chain_certifies(&chain));
+    assert!(!certifies_flattening2(&Curve2::Chain(chain.clone())));
+    assert!(chain_chord_bound(&chain, 0.0, 3.0).is_none());
+}

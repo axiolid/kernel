@@ -52,31 +52,31 @@ fn invalid(detail: String) -> GeomError {
 /// Where a piece starts, in the chain's start-frame coordinates: its origin
 /// and its unit `+x` direction.
 #[derive(Debug, Clone, Copy)]
-struct Placement {
-    origin: Vec2,
-    x: Vec2,
+pub(crate) struct Placement {
+    pub(crate) origin: Vec2,
+    pub(crate) x: Vec2,
 }
 
 impl Placement {
-    const IDENTITY: Self = Self {
+    pub(crate) const IDENTITY: Self = Self {
         origin: Vec2::ZERO,
         x: Vec2::X,
     };
 
-    fn turn(&self, v: Vec2) -> Vec2 {
+    pub(crate) fn turn(&self, v: Vec2) -> Vec2 {
         Vec2::new(
             self.x.x * v.x - self.x.y * v.y,
             self.x.y * v.x + self.x.x * v.y,
         )
     }
 
-    fn place(&self, p: Vec2) -> Vec2 {
+    pub(crate) fn place(&self, p: Vec2) -> Vec2 {
         self.origin + self.turn(p)
     }
 }
 
 /// The identity frame an intrinsic piece is integrated in.
-fn local_frame() -> Frame2 {
+pub(crate) fn local_frame() -> Frame2 {
     Frame2 {
         origin: Point2::ZERO,
         x: Vec2::X,
@@ -84,7 +84,7 @@ fn local_frame() -> Frame2 {
     }
 }
 
-fn unit(v: Vec2, what: &str) -> GeomResult<Vec2> {
+pub(crate) fn unit(v: Vec2, what: &str) -> GeomResult<Vec2> {
     let length = v.length();
     if !(length.is_finite() && length > 0.0) {
         return Err(GeomError::Degenerate(format!(
@@ -95,7 +95,7 @@ fn unit(v: Vec2, what: &str) -> GeomResult<Vec2> {
 }
 
 /// Refuse a structurally malformed chain, naming the piece at fault.
-fn check_well_formed(chain: &Chain2) -> GeomResult<()> {
+pub(crate) fn check_well_formed(chain: &Chain2) -> GeomResult<()> {
     if chain.pieces.is_empty() {
         return Err(invalid("arc-length chain has no pieces".into()));
     }
@@ -136,7 +136,7 @@ fn check_well_formed(chain: &Chain2) -> GeomResult<()> {
 
 /// A parametric piece's curve must start at its local origin with tangent
 /// `+x`: the chain places it rigidly and never moves it there.
-fn check_local_start(
+pub(crate) fn check_local_start(
     index: usize,
     curve: &Curve2,
     start: Scalar,
@@ -272,20 +272,42 @@ fn piece_parameter(piece: &ChainPiece2, s: Scalar) -> Option<GeomResult<Scalar>>
     }
 }
 
+/// Certified bound on the distance from a chain over arc lengths `[a, b]`
+/// inside one piece to the chord joining its *evaluated* ends (#232, #438);
+/// `None` across a join, for a span outside the chain, a piece whose curve
+/// has no certified bound, a chain no [`ChainPositionTable`] covers, or a
+/// chain that does not evaluate.
+///
+/// The exact arc lies within the curvature bound of the chord of its
+/// exact ends. The evaluated ends are off the exact ones (a quadrature on an
+/// intrinsic piece, an arc-length inverse on a parametric one, carried
+/// through every placement before them), and a chord whose ends move by at
+/// most `g` moves by at most `g` everywhere, so the bound adds the larger of
+/// the two ends' distances from a certified table's points, each with that
+/// point's own error (#414's rule for intrinsic curves). The lower end is
+/// read as the piece that starts there, the upper end as the piece that
+/// ends there, so a parametric piece that starts off the end of the one
+/// before it charges its jump.
+///
+/// [`ChainPositionTable`]: crate::bound::ChainPositionTable
+#[must_use]
+pub fn chain_chord_bound(chain: &Chain2, a: Scalar, b: Scalar) -> Option<Scalar> {
+    crate::bound::evaluated_chain_chord_bound(chain, a, b)
+}
+
 /// Certified chord bound of a chain over arc lengths `[a, b]` inside one
-/// piece (#232); `None` across a join, for a span outside the chain, a
-/// piece whose curve has no certified bound, or a chain that does not
-/// evaluate.
+/// piece (#232) for the chain as defined (its exact ends); `None` across a
+/// join, for a span outside the chain, a piece whose curve has no certified
+/// bound, or a chain that does not evaluate.
 ///
 /// A chain is parameterised by arc length, so `|c''|` is its curvature.
 /// An intrinsic piece bounds that from its law; a parametric piece is the
 /// same point set as its curve between the two parameters the span reads,
 /// so its chord bound is the curve's. Either is then mapped through the
-/// rigid placement (a rotation) and the chain's start frame. The bound is
-/// about the chain as evaluated: vertices carry the accuracy contract of
-/// the [module documentation](self).
+/// rigid placement (a rotation) and the chain's start frame. The evaluated
+/// ends are not charged here: [`chain_chord_bound`] adds them.
 #[must_use]
-pub fn chain_chord_bound(chain: &Chain2, a: Scalar, b: Scalar) -> Option<Scalar> {
+pub(crate) fn exact_chain_chord_bound(chain: &Chain2, a: Scalar, b: Scalar) -> Option<Scalar> {
     let (lo, hi) = (a.min(b), a.max(b));
     let (index, local_lo, _) = locate(chain, lo).ok()?;
     let piece = &chain.pieces[index];
@@ -349,14 +371,7 @@ pub(crate) fn chain_second_derivative(chain: &Chain2, s: Scalar) -> GeomResult<V
             piece_local(index, piece, local)?;
             let u = piece_parameter(piece, local)
                 .ok_or_else(|| invalid("chain piece has no parameter there".into()))??;
-            let c1 = derivative2(curve, u)?;
-            let c2 = crate::curve::second_derivative2(curve, u)?;
-            let speed2 = c1.length_squared();
-            if !(speed2 > 0.0 && speed2.is_finite()) {
-                return Err(invalid("chain piece curve has no tangent there".into()));
-            }
-            let t = c1 / speed2.sqrt();
-            (c2 - t * t.dot(c2)) / speed2
+            parametric_bend(curve, u)?
         }
         _ => {
             return Err(GeomError::Unsupported {
@@ -366,6 +381,19 @@ pub(crate) fn chain_second_derivative(chain: &Chain2, s: Scalar) -> GeomResult<V
         }
     };
     Ok(to_world(&chain.start, placement.turn(bend)))
+}
+
+/// `(c'' - t (t . c'')) / |c'|^2` of a parametric piece's curve at the
+/// parameter `u`: its curvature vector in arc length.
+pub(crate) fn parametric_bend(curve: &Curve2, u: Scalar) -> GeomResult<Vec2> {
+    let c1 = derivative2(curve, u)?;
+    let c2 = crate::curve::second_derivative2(curve, u)?;
+    let speed2 = c1.length_squared();
+    if !(speed2 > 0.0 && speed2.is_finite()) {
+        return Err(invalid("chain piece curve has no tangent there".into()));
+    }
+    let t = c1 / speed2.sqrt();
+    Ok((c2 - t * t.dot(c2)) / speed2)
 }
 
 /// Certified `(sup |p''|, sup |p'''|)` of a chain `p` in its arc length
@@ -435,15 +463,29 @@ pub(crate) fn parametric_plan_bounds(
     u0: Scalar,
     u1: Scalar,
 ) -> Option<(Scalar, Scalar)> {
+    parametric_plan_jet(curve, u0, u1).map(|(p2, p3, _)| (p2, p3))
+}
+
+/// `(sup |p''|, sup |p'''|, inf |c'|)` of a 2D curve read by its arc length
+/// between parameters `u0` and `u1`: [`parametric_plan_bounds`] and the
+/// smallest speed it divides by (a line's and a unit-frame circle's exact).
+pub(crate) fn parametric_plan_jet(
+    curve: &Curve2,
+    u0: Scalar,
+    u1: Scalar,
+) -> Option<(Scalar, Scalar, Scalar)> {
     let (lo, hi) = (u0.min(u1), u0.max(u1));
     match curve {
-        Curve2::Line(_) => return Some((0.0, 0.0)),
+        Curve2::Line(l) => {
+            let speed = l.direction.length();
+            return (speed > 0.0 && speed.is_finite()).then_some((0.0, 0.0, speed));
+        }
         Curve2::Circle(c) => {
             let (x, y) = (c.frame.x, c.frame.y);
             let unit = |v: Vec2| (v.length() - 1.0).abs() <= 1e-12;
             if unit(x) && unit(y) && x.dot(y).abs() <= 1e-12 && c.radius > 0.0 {
                 let k = 1.0 / c.radius;
-                return Some((k, k * k));
+                return Some((k, k * k, c.radius));
             }
         }
         _ => {}
@@ -463,7 +505,7 @@ pub(crate) fn parametric_plan_bounds(
     }
     let k2 = 2.0 * d3 / sigma + 6.0 * d2 * d2 / (sigma * sigma);
     let s2 = sigma * sigma;
-    Some((d2 / s2, k2 / s2 + d2 * d2 / (s2 * s2)))
+    Some((d2 / s2, k2 / s2 + d2 * d2 / (s2 * s2), sigma))
 }
 
 /// Seams of the intrinsic pieces' curvature laws, in chain arc length:
@@ -488,7 +530,8 @@ pub(crate) fn chain_curvature_seams(chain: &Chain2) -> Vec<Scalar> {
 
 /// Whether [`crate::curve::flatten2`] certifies a chain's chords: every
 /// intrinsic piece's curvature is bounded and every parametric piece's curve
-/// is a certified family with no corner anywhere in its domain (#232).
+/// is a line, a circle, an ellipse or a B-spline with no corner anywhere in
+/// its domain (#232, #438).
 ///
 /// Conservative: a corner outside the stretch a piece reads still answers
 /// `false`, since locating the stretch needs the arc-length inverse.
@@ -499,8 +542,14 @@ pub fn chain_certifies(chain: &Chain2) -> bool {
             ChainPiece2::Intrinsic { curvature, length } => {
                 curvature_bound(curvature, 0.0, *length).is_some()
             }
+            // Only the families a `ChainPositionTable` reads certify: a
+            // sinusoid or a polyline piece has no certified arc length for
+            // the evaluated ends to be charged against (#438).
             ChainPiece2::Parametric { curve, .. } => {
-                crate::bound::certifies_flattening2(curve)
+                matches!(
+                    curve,
+                    Curve2::Line(_) | Curve2::Circle(_) | Curve2::Ellipse(_) | Curve2::BSpline(_)
+                ) && crate::bound::certifies_flattening2(curve)
                     && crate::bound::continuity_breaks2(curve, 1).is_empty()
             }
             _ => false,
