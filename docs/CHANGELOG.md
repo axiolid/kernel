@@ -10,7 +10,9 @@ All notable changes to Axiolid are documented in this file.
   binaries in parallel; doctests stay on `cargo test --doc`. The gate needs
   `cargo install cargo-nextest --version 0.9.148 --locked`. Measured:
   `axiolid-mesh-compile`'s 950 tests 229 s against 598 s; the whole workspace
-  with all features, 5138 tests, 255 s, bounded by its slowest test. One test
+  with all features, 5138 tests, 255 s, bounded by its slowest test. The
+  full gate with every probe took 1717 s, against 2889 s before (its two test
+  steps 630 s against 1806 s). One test
   binary per crate, optimised dependencies and a higher workspace opt-level
   were measured and not adopted (#444 records why).
 - Gate tiers, slots and the gate's own probes on demand (#443).
