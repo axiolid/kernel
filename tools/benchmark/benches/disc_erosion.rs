@@ -26,6 +26,13 @@
 //! radius 0.4 m (`t` 0.2 m) holds the needles' depth, which is above
 //! `t / 16` (0.0125 m), the reach of #330's proposals.
 //!
+//! The cases of #345 take a floor (`floor`): a 3 m square whose bottom and
+//! top sides carry teeth 0.5 mm deep, eroded inner by 1.4 m, 1.49 m and
+//! 1.6 m (which empties it) at 50,000, 100,000, 150,000 and 200,000
+//! corners, in `fast` mode only (`DISC_EROSION_FLOOR` sets the corners,
+//! empty runs none). Its numbers are in
+//! `docs/research/fast-morphology-on-toothed-floors.md`.
+//!
 //! Each case is validated before its time counts: the result is not
 //! empty, every vertex lies inside the region for an erosion and outside
 //! it for a dilation, an inner erosion's vertices and an outer dilation's
@@ -63,6 +70,10 @@ const NEEDLE_FAST: [usize; 2] = [2002, 10002];
 const NEEDLE_EXACT: usize = 2002;
 /// The needles' depth.
 const NEEDLE_DEPTH: f64 = 0.05;
+/// Corners of #345's floor, in `fast` mode.
+const FLOOR_CORNERS: [usize; 4] = [50_000, 100_000, 150_000, 200_000];
+/// Radii of #345's floor.
+const FLOOR_RADII: [f64; 3] = [1.4, 1.49, 1.6];
 /// Timed runs per case; the median is reported.
 const RUNS: usize = 3;
 /// The disc's radius in #323's cases.
@@ -99,6 +110,23 @@ fn room(teeth: usize, depth: f64) -> Vec<Point2> {
     points
 }
 
+/// Side of #345's floor, a square.
+const FLOOR: f64 = 3.0;
+/// The teeth's depth on #345's floor.
+const FLOOR_DEPTH: f64 = 5e-4;
+
+/// #345's floor, counter-clockwise: a square of 3 m whose bottom and top
+/// sides carry teeth 0.5 mm deep into the room, `corners` corners in all
+/// (`corners / 2 - 1` steps along each).
+fn floor(corners: usize) -> Vec<Point2> {
+    let n = (corners / 2 - 1) as u32;
+    let at = |k: u32| FLOOR * f64::from(k) / f64::from(n);
+    let tooth = |k: u32| if k % 2 == 1 { FLOOR_DEPTH } else { 0.0 };
+    let mut points: Vec<Point2> = (0..=n).map(|k| Point2::new(at(k), tooth(k))).collect();
+    points.extend((0..=n).map(|k| Point2::new(FLOOR - at(k), FLOOR - tooth(k))));
+    points
+}
+
 /// The distance from `p` to the segment `a -> b`.
 fn to_segment(p: Point2, a: Point2, b: Point2) -> f64 {
     let (dx, dy) = (b.x - a.x, b.y - a.y);
@@ -122,15 +150,23 @@ fn inside(rings: &[Vec<Point2>], p: Point2) -> bool {
 
 /// Every vertex of `out` lies inside the region for an erosion, outside it
 /// for a dilation, and on the operation's side of the radius.
-fn validate(rings: &[Vec<Point2>], out: &Region, erode: bool, outer: bool, radius: f64) {
-    assert!(!out.is_empty(), "an empty result");
+fn validate(
+    rings: &[Vec<Point2>],
+    out: &Region,
+    erode: bool,
+    outer: bool,
+    radius: f64,
+    hollow: bool,
+) {
+    assert!(hollow || !out.is_empty(), "an empty result");
     let deviation = out.bound().expect("a disc morphology's bound").deviation;
     // An outer erosion and an inner dilation reach no farther than the
     // radius plus the deviation; the other two no nearer than the radius.
     let within = outer == erode;
     for polygon in out.polygons() {
         for r in std::iter::once(&polygon.outer).chain(&polygon.holes) {
-            for &v in &r.points {
+            // At most about 400 vertices per ring: the check is quadratic.
+            for &v in r.points.iter().step_by(r.points.len() / 400 + 1) {
                 let d = rings
                     .iter()
                     .flat_map(|ring| {
@@ -193,7 +229,11 @@ fn case(spec: &str) {
         .and_then(|r| r.parse().ok())
         .unwrap_or(RUNS);
     let tolerance = Tolerance::new(1.0e-9, 1.0e-9).expect("a tolerance");
-    let ring = room(teeth, depth);
+    let ring = if parts[0] == "floor" {
+        floor(corners)
+    } else {
+        room(teeth, depth)
+    };
     let rings: Vec<Vec<Point2>> = if parts[0] == "hole" {
         let (w, h) = ROOM;
         let around = vec![
@@ -229,7 +269,9 @@ fn case(spec: &str) {
         .expect("the disc morphology")
     };
     let out = run();
-    validate(&rings, &out, erode, outer, radius);
+    // A floor eroded by more than half its side is empty (#345).
+    let hollow = parts[0] == "floor" && radius > FLOOR / 2.0;
+    validate(&rings, &out, erode, outer, radius, hollow);
     let out_corners: usize = out
         .polygons()
         .iter()
@@ -342,6 +384,13 @@ fn main() {
                     }
                 }
             }
+        }
+    }
+    // #345: the toothed floor, in `fast` mode only (`exact` does not
+    // finish). `DISC_EROSION_FLOOR` lists the corners, empty runs none.
+    for n in sizes("DISC_EROSION_FLOOR", &FLOOR_CORNERS) {
+        for r in FLOOR_RADII {
+            cases.push(format!("floor:erode:inner:{n}:{r}:fast"));
         }
     }
     for spec in cases {

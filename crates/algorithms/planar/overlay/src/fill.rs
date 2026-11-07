@@ -116,6 +116,21 @@
 //! vertices the one nearest the middle is taken, so a long wall splits
 //! into halves and costs about `n log n`.
 //!
+//! A chord that is not proved is tried without its start edge, without its
+//! end edge, then without both, before it is split (#345). Along a wall
+//! of teeth the chord wanted runs between two tips, but the split of a
+//! proposal over a room's corner (too deep for the budget, split at the
+//! corner) leaves a chord from the corner, a valley of the wall, along it.
+//! That chord is not proved, for the tips between lie on the wrong side of
+//! it, and neither is either half the nearest-vertex split makes: it halves
+//! a chord between valleys at a valley again and again, so every tooth
+//! between the corner and the far end stayed, about an eighth of a floor's
+//! teeth, and the sum of that many teeth cost what #330's did. The parity
+//! of the teeth decides whether the far end is a tip or a valley, hence
+//! the three trims. The first one used replaces the chord: it is proved,
+//! within the disc and the budget, with no ring in its notch, as any
+//! chord is, so the excess and the side are those of the other chords.
+//!
 //! The proposals are [`cover::proposals`] for discs of radius `t`: chords
 //! whose spanned vertices lie within `t` of the line (#340; #330 proposed
 //! within `t / 16`, and so filled no needle deeper than that).
@@ -272,6 +287,18 @@ fn excess(polygon: &[Point2], t: f64) -> Option<f64> {
     bound.is_finite().then_some(bound)
 }
 
+/// How a chord fares (`fill`): used with its excess, or refused.
+enum Verdict {
+    /// Proved, within the disc and the budget, and no ring in its notch.
+    Used(f64),
+    /// Not proved to lie outside the set.
+    Unproved,
+    /// Too deep for the disc, or over the budget.
+    TooBig,
+    /// Another ring lies in its notch.
+    Holds,
+}
+
 /// Where to split a refused `chord`, as a step from its start: at the
 /// spanned vertex farthest from its line when it was too deep or over the
 /// budget (`deepest`), else (no proof, or a ring in its notch) at the
@@ -328,6 +355,23 @@ pub(crate) fn fill(
         let n = points.len();
         // The chord lies outside the set: in the set on the other side.
         let outside = sides[r].flip();
+        // The chord's verdict (module docs): used with its excess, or why not.
+        let judge = |chord: Chord| {
+            if !cover::proved(r, &boundary, chord, outside, &index) {
+                return Verdict::Unproved;
+            }
+            let polygon = notch(points, chord);
+            match excess(&polygon, t) {
+                Some(e) if e <= budget => {
+                    if encloses_none(r, &polygon, &index) {
+                        Verdict::Used(e)
+                    } else {
+                        Verdict::Holds
+                    }
+                }
+                _ => Verdict::TooBig,
+            }
+        };
         // The chords used and their excess.
         let mut used: Vec<(Chord, f64)> = Vec::new();
         let mut pending = cover::proposals(&boundary, outside, t);
@@ -336,31 +380,33 @@ pub(crate) fn fill(
             if chord.span < 2 {
                 continue;
             }
-            let polygon = notch(points, chord);
-            // `Err(true)`: too deep or over the budget; `Err(false)`: not
-            // proved, or a ring inside the notch.
-            let taken = if cover::proved(r, &boundary, chord, outside, &index) {
-                match excess(&polygon, t) {
-                    Some(e) if e <= budget => {
-                        if encloses_none(r, &polygon, &index) {
-                            Ok(e)
-                        } else {
-                            Err(false)
-                        }
+            let verdict = judge(chord);
+            if let Verdict::Used(e) = verdict {
+                used.push((chord, e));
+                continue;
+            }
+            // A chord not proved may have a valley of the wall for an end,
+            // where a tip is wanted (module docs): it is tried without an
+            // end edge, or both, in turn.
+            if matches!(verdict, Verdict::Unproved) {
+                let trimmed = [(1, 0), (0, 1), (1, 1)].into_iter().find_map(|(a, b)| {
+                    let span = chord.span.checked_sub(a + b).filter(|&s| s >= 2)?;
+                    let c = Chord {
+                        from: (chord.from + a) % n,
+                        span,
+                    };
+                    match judge(c) {
+                        Verdict::Used(e) => Some((c, e)),
+                        _ => None,
                     }
-                    _ => Err(true),
-                }
-            } else {
-                Err(false)
-            };
-            let deepest = match taken {
-                Ok(e) => {
-                    used.push((chord, e));
+                });
+                if let Some(used_chord) = trimmed {
+                    used.push(used_chord);
                     continue;
                 }
-                Err(deepest) => deepest,
-            };
+            }
             // Split, the first part tried first.
+            let deepest = matches!(verdict, Verdict::TooBig);
             let k = split_step(points, chord, deepest);
             pending.push(Chord {
                 from: (chord.from + k) % n,
@@ -558,6 +604,36 @@ mod tests {
         assert_eq!(f.rings[0].len(), 4);
     }
 
+    /// #345's floor: a square of 3 m with `corners` corners, 0.5 mm teeth
+    /// on the bottom and top.
+    pub(super) fn floor(corners: usize) -> Vec<Point2> {
+        let n = (corners / 2 - 1) as u32;
+        let at = |k: u32| 3.0 * f64::from(k) / f64::from(n);
+        let tooth = |k: u32| if k % 2 == 1 { 5e-4 } else { 0.0 };
+        let mut p: Vec<Point2> = (0..=n).map(|k| Point2::new(at(k), tooth(k))).collect();
+        p.extend((0..=n).map(|k| Point2::new(3.0 - at(k), 3.0 - tooth(k))));
+        p
+    }
+
+    #[test]
+    fn a_floors_corner_chord_leaves_no_wall_of_teeth() {
+        // #345: the floor's erosion fills the complement's notches. The
+        // proposal over the room's corner (deeper than the budget) is split
+        // at the corner, and the chord left, from the corner's valley to a
+        // tip or a valley of the wall, is trimmed to the tips; whichever
+        // the parity of the teeth, the wall is one chord, not one per tooth.
+        for corners in [2_000, 2_002, 2_004, 20_000, 20_002] {
+            for t in [0.7, 0.745, 0.8] {
+                let rings = vec![floor(corners)];
+                let f = fill(&rings, &[Sign::Negative], t, 1e-3, 1e-9);
+                let what = format!("{corners} corners, t {t}");
+                assert!(f.chords <= 8, "{what}: {} chords", f.chords);
+                assert!(f.rings[0].len() <= 16, "{what}: {}", f.rings[0].len());
+                assert!(f.excess > 0.0 && f.excess <= 1e-3, "{what}: {}", f.excess);
+            }
+        }
+    }
+
     #[test]
     fn a_needle_wall_deeper_than_the_disc_is_kept() {
         // Teeth 0.25 deep, a disc of 0.2: no chord is proposed over them.
@@ -584,5 +660,34 @@ mod tests {
         // An overhang past the chord's end, deeper than the disc: refused.
         let overhang = points(&[(0.0, 0.0), (-1e-4, 0.5), (2e-4, 0.0)]);
         assert!(excess(&overhang, t).is_none());
+    }
+}
+
+#[cfg(test)]
+mod diagnosis {
+    //! #345: how the fast fill fares on a floor with sub-budget teeth, and
+    //! what it leaves. Run with
+    //! `cargo test -p axiolid-overlay --release --lib -- --ignored --nocapture diagnosis`.
+    use super::tests::floor;
+    use super::*;
+
+    #[test]
+    #[ignore = "diagnosis for #345, prints"]
+    fn the_floor_with_sub_budget_teeth() {
+        for corners in [2_000, 50_000, 100_000, 200_000] {
+            for (what, side) in [("erosion", Sign::Negative), ("dilation", Sign::Positive)] {
+                for r in [1.4_f64, 1.49, 1.6] {
+                    // `t` is half the radius; the budget 1 mm.
+                    let rings = vec![floor(corners)];
+                    let f = fill(&rings, &[side], 0.5 * r, 1e-3, 1e-9);
+                    println!(
+                        "{corners} corners, r {r}, {what}: {} chords, ring {} corners, excess {:.1e}",
+                        f.chords,
+                        f.rings[0].len(),
+                        f.excess
+                    );
+                }
+            }
+        }
     }
 }

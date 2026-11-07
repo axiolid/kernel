@@ -151,3 +151,28 @@ filled and the sum kept its quadratic cost.
   `docs/research/exact-morphology-on-needle-walls.md`.
 - **`Exact` is unchanged.** Its profile on the needle shape is in that
   note; changing it stays a separate decision.
+
+## Amendment 2026-11-07: trim the chord a deep split leaves (#345)
+
+#345's floor (a 3 m square, teeth 0.5 mm deep on two sides, a budget of
+1 mm) kept thousands of teeth under #340's proposals at `t`. The proposal
+over the room's corner is deeper than the budget; it is split at the
+corner, and the chord left runs from the corner, a valley of the wall,
+along the wall. It is not proved, and the nearest-vertex split of a chord
+not proved halves it between valleys again and again, down to single
+edges. The cost was that of #330, from 13 s and 0.86 GB at 10,000 corners
+to over 20 GB at 50,000.
+
+- **Rule.** A chord not proved is tried without its start edge, without
+  its end edge, then without both, before it is split as before; the first
+  that is used (proved, within the disc and the budget, no ring in its
+  notch) is taken. Its ends are then the wall's tips whichever the parity
+  of the teeth.
+- **Contract.** Unchanged: the proof, the excess and the budget check are
+  those of any chord, so the side and the reported excess hold; `Exact` is
+  unchanged. #330's and #340's `fast` cases give the same hashes.
+- **Cost.** Linear from 50,000 to 200,000 corners: 0.39 s and 15 MB to
+  1.57 s and 48 MB at r = 1.4 m. The numbers, the diagnosis and the
+  hypotheses it rejected are in
+  `docs/research/fast-morphology-on-toothed-floors.md`.
+

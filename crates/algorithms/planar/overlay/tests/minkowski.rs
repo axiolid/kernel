@@ -1168,3 +1168,97 @@ fn the_fast_mode_fills_the_notches_between_needles() {
         }
     }
 }
+
+/// #345's floor: a square of 3 m with `corners` corners, its bottom and
+/// top sides carrying teeth 0.5 mm deep.
+fn toothed_floor(corners: u32) -> Region {
+    let n = corners / 2 - 1;
+    let at = |k: u32| 3.0 * f64::from(k) / f64::from(n);
+    let tooth = |k: u32| if k % 2 == 1 { 5e-4 } else { 0.0 };
+    let mut points: Vec<Point2> = (0..=n).map(|k| Point2::new(at(k), tooth(k))).collect();
+    points.extend((0..=n).map(|k| Point2::new(3.0 - at(k), 3.0 - tooth(k))));
+    let t = Tolerance::new(1e-9, 1e-9).unwrap();
+    Region::new(
+        vec![Polygon {
+            outer: Ring { points },
+            holes: vec![],
+        }],
+        t,
+    )
+    .unwrap()
+}
+
+#[test]
+fn the_fast_mode_on_a_floor_of_sub_budget_teeth_keeps_its_side() {
+    // #345: 10,000 and 10,002 corners (the two parities of the teeth, one
+    // tooth per 0.6 mm) by a disc of 1.4 m, 0.1 m short of closing the
+    // floor. The fast mode fills each wall's teeth (an excess within the
+    // budget, the result a few corners) and lies on the certified side
+    // within its deviation of the true morphology, sampled in bands about
+    // the offsets of the walls, and over the whole plane.
+    let (radius, budget, slack) = (1.4, 1e-3, 1e-7);
+    let mut bands = Vec::new();
+    for centre in [-radius, radius, 3.0 - radius, 3.0 + radius] {
+        bands.extend(samples(
+            Point2::new(-1.6, centre - 1e-2),
+            Point2::new(4.6, centre + 1e-2),
+            600,
+        ));
+        bands.extend(samples(
+            Point2::new(centre - 1e-2, -1.6),
+            Point2::new(centre + 1e-2, 4.6),
+            600,
+        ));
+    }
+    let broad = samples(Point2::new(-1.6, -1.6), Point2::new(4.6, 4.6), 600);
+    for corners in [10_000, 10_002] {
+        let r = toothed_floor(corners);
+        for (erode, outer) in [(true, false), (true, true), (false, false), (false, true)] {
+            let what = format!("{corners} corners, erode {erode}, outer {outer}");
+            let fast = morphology(&r, erode, outer, radius, MorphologyMode::fast(budget)).unwrap();
+            let bound = fast.bound().unwrap();
+            let excess = fast.excess().expect("a fast result's excess");
+            assert!(excess > 0.0 && excess <= budget, "{what}: {excess}");
+            assert_eq!(
+                bound.side,
+                if outer {
+                    BoundSide::Outer
+                } else {
+                    BoundSide::Inner
+                },
+                "{what}"
+            );
+            let corners_out: usize = fast
+                .polygons()
+                .iter()
+                .flat_map(|p| std::iter::once(&p.outer).chain(&p.holes))
+                .map(|ring| ring.points.len())
+                .sum();
+            assert!(corners_out < 100, "{what}: {corners_out} corners");
+            let d = bound.deviation + slack;
+            let mut checked = 0;
+            for &p in bands.iter().chain(&broad) {
+                let held = in_region(&fast, p);
+                let (sure, near) = if erode {
+                    let rule = |s: f64| in_exact_erosion(&r, p, s);
+                    if outer {
+                        (rule(radius), rule(radius - d))
+                    } else {
+                        (rule(radius + d), rule(radius))
+                    }
+                } else {
+                    let rule = |s: f64| in_exact_dilation(&r, p, s);
+                    if outer {
+                        (rule(radius), rule(radius + d))
+                    } else {
+                        (rule(radius - d), rule(radius))
+                    }
+                };
+                assert!(!sure || held, "{what}: {p:?} left out");
+                assert!(!held || near, "{what}: {p:?} taken");
+                checked += usize::from(sure || !near);
+            }
+            assert!(checked > 100, "{what}: {checked} points checked");
+        }
+    }
+}

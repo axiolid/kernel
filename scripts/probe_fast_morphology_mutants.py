@@ -6,7 +6,8 @@ Each mutant weakens one step -- the mode switch either way, the side of
 the set whose notches are filled, each condition on a chord (its exact
 proof, the depth within the disc or the slab, the budget, no ring inside its notch),
 the excess (the gap term, the supports, the depth bound, the slab bound), splitting a
-refused chord, the ring a fill would close, the inscribed polygon drawn in
+refused chord, the trim of a chord not proved (#345),
+the ring a fill would close, the inscribed polygon drawn in
 by the excess and the deviation carrying it, and the budget's refusal --
 and must turn a test red.
 
@@ -57,14 +58,14 @@ MUTANTS = [
      '            if !budget.is_finite() || budget < 0.0 {',
      '            if false {', ROUTE),
     ('an unproved chord used', F,
-     '            let taken = if cover::proved(r, &boundary, chord, outside, &index) {',
-     '            let taken = if true {', BOTH),
+     '            if !cover::proved(r, &boundary, chord, outside, &index) {',
+     '            if false {', BOTH),
     ('a chord over the budget used', F,
-     '                    Some(e) if e <= budget => {',
-     '                    Some(e) => {', BOTH),
+     '                Some(e) if e <= budget => {',
+     '                Some(e) => {', BOTH),
     ('a notch holding another ring filled', F,
-     '                        if encloses_none(r, &polygon, &index) {',
-     '                        if true {', BOTH),
+     '                    if encloses_none(r, &polygon, &index) {',
+     '                    if true {', BOTH),
     ('a ring inside the notch not found', F,
      '        !inside(polygon, index.rings[r][e])',
      '        true', BOTH),
@@ -113,6 +114,15 @@ MUTANTS = [
     ('a ring the fill would close used', F,
      '        if filled.len() < 3 || crate::zero_area(&filled, linear) {',
      '        if false {', BOTH),
+    ('a chord not proved not trimmed', F,
+     '            if matches!(verdict, Verdict::Unproved) {',
+     '            if false {', BOTH),
+    ('the trim without its start edge only', F,
+     '[(1, 0), (0, 1), (1, 1)]', '[(0, 1)]', BOTH),
+    ('the trim without its end edge only', F,
+     '[(1, 0), (0, 1), (1, 1)]', '[(1, 0)]', BOTH),
+    ('the trim without both edges', F,
+     '[(1, 0), (0, 1), (1, 1)]', '[(1, 0), (0, 1)]', BOTH),
 ]
 
 probe_lib.main(MUTANTS, timeout=600)
