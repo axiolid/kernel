@@ -275,6 +275,7 @@ features = []
 # topology exactly with it (ADR 0070). `axiolid-numeric` arrives with
 # `axiolid-nurbs` for #150 (ledger B11, ADR 0079): see the `cad-exact`
 # profile above.
+# `axiolid-hidden-lines` and its contract arrive with the drawings (ADR 0105).
 expected_internal = [
     "axiolid",
     "axiolid-backend-cpu",
@@ -290,12 +291,14 @@ expected_internal = [
     "axiolid-exact",
     "axiolid-exact-arrangement",
     "axiolid-guarantees",
+    "axiolid-hidden-lines",
     "axiolid-linear",
     "axiolid-measure",
     "axiolid-mesh",
     "axiolid-mesh-boolean-boolmesh",
     "axiolid-mesh-boolean-contract",
     "axiolid-mesh-contracts",
+    "axiolid-mesh-hidden-lines-contract",
     "axiolid-mesh-section-contract",
     "axiolid-model",
     "axiolid-numeric",
@@ -324,6 +327,7 @@ features = []
 # topology exactly with it (ADR 0070). `axiolid-numeric` arrives with
 # `axiolid-nurbs` for #150 (ledger B11, ADR 0079): see the `cad-exact`
 # profile above.
+# `axiolid-hidden-lines` and its contract arrive with the drawings (ADR 0105).
 expected_internal = [
     "axiolid",
     "axiolid-backend-cpu",
@@ -340,12 +344,14 @@ expected_internal = [
     "axiolid-exact",
     "axiolid-exact-arrangement",
     "axiolid-guarantees",
+    "axiolid-hidden-lines",
     "axiolid-linear",
     "axiolid-measure",
     "axiolid-mesh",
     "axiolid-mesh-boolean-boolmesh",
     "axiolid-mesh-boolean-contract",
     "axiolid-mesh-contracts",
+    "axiolid-mesh-hidden-lines-contract",
     "axiolid-mesh-section-contract",
     "axiolid-model",
     "axiolid-numeric",
@@ -547,6 +553,7 @@ features = []
 # package even though `full` does not enable `application`. Recorded so
 # the gate stays honest about what cargo resolves.
 #
+# `axiolid-mesh-hidden-lines-contract` arrives with `discrete` (ADR 0105).
 # The ceiling: narrow profiles assert what a focused application AVOIDS
 # compiling; this one records the cost when nothing is avoided.
 # `axiolid-exact` arrives with `axiolid-overlay`: the arc path decides its
@@ -576,6 +583,7 @@ expected_internal = [
     "axiolid-mesh-boolean-contract",
     "axiolid-mesh-compile-contract",
     "axiolid-mesh-contracts",
+    "axiolid-mesh-hidden-lines-contract",
     "axiolid-mesh-section-contract",
     "axiolid-model",
     "axiolid-numeric",

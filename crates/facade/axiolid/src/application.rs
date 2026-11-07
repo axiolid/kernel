@@ -3,6 +3,12 @@
 //! Concrete providers stay private. Selection is explicit on
 //! [`ApplicationBuilder`](crate::application::ApplicationBuilder),
 //! while results and errors use only public contract and representation types.
+//!
+//! Hidden-line drawings and visible faces (ADR 0090, ADR 0094) are part of
+//! this boundary (ADR 0105); the `drawing` module holds their builder calls,
+//! methods and the once-per-process conformance verification they rely on.
+
+mod drawing;
 
 use core::fmt;
 
@@ -13,7 +19,10 @@ use axiolid_contracts::{
     IntegrationDescriptor, Operation, Representation,
 };
 use axiolid_core::{BooleanOperator, Frame3, Ray3, Scalar, Tolerance, Vec3};
-use axiolid_dispatch::{MeshBooleanRegistry, MeshPlaneSectionRegistry};
+use axiolid_dispatch::{
+    MeshBooleanRegistry, MeshHiddenLinesRegistry, MeshPlaneSectionRegistry,
+    MeshVisibleFacesRegistry,
+};
 use axiolid_measure::{
     surface_properties, volume_properties, MeshMeasureError, SurfaceProperties, VolumeProperties,
 };
@@ -22,6 +31,7 @@ use axiolid_mesh_boolean_boolmesh::BoolmeshBoolean;
 use axiolid_mesh_boolean_contract::{
     conformance::ConformanceReport as BooleanConformanceReport, BooleanOutcome,
 };
+use axiolid_mesh_hidden_lines_contract::{conformance as drawing_conformance, HiddenLineError};
 use axiolid_mesh_section_contract::{
     conformance::ConformanceReport as SectionConformanceReport, PlaneSection, SectionLimits,
     SectionOutcome, SectionRequest,
@@ -58,8 +68,14 @@ pub struct CallContext {
 
 /// Typed lower-level reason an application call failed.
 #[derive(Debug)]
+#[non_exhaustive]
 pub enum ApplicationErrorSource {
     Geometry(axiolid_contracts::GeomError),
+    /// A drawing refusal; keeps the mesh it names as data (ADR 0090).
+    HiddenLines(HiddenLineError),
+    /// A portable provider failed its conformance suite when first used, so
+    /// the call was refused without output.
+    ProviderConformance(ProviderConformanceReport),
     MeshAudit(Box<MeshAuditError>),
     Measurement(Box<MeshMeasureError>),
     RayMesh(RayMeshError),
@@ -69,6 +85,8 @@ impl fmt::Display for ApplicationErrorSource {
     fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
             Self::Geometry(error) => error.fmt(formatter),
+            Self::HiddenLines(error) => error.fmt(formatter),
+            Self::ProviderConformance(report) => report.fmt(formatter),
             Self::MeshAudit(error) => error.fmt(formatter),
             Self::Measurement(error) => error.fmt(formatter),
             Self::RayMesh(error) => error.fmt(formatter),
@@ -80,6 +98,8 @@ impl std::error::Error for ApplicationErrorSource {
     fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
         match self {
             Self::Geometry(error) => Some(error),
+            Self::HiddenLines(error) => Some(error),
+            Self::ProviderConformance(_) => None,
             Self::MeshAudit(error) => Some(error),
             Self::Measurement(error) => Some(error),
             Self::RayMesh(error) => Some(error),
@@ -112,9 +132,24 @@ impl std::error::Error for ApplicationError {
 
 /// Shared conformance report without provider implementation types.
 #[derive(Debug, Clone)]
+#[non_exhaustive]
 pub enum ProviderConformanceReport {
     MeshBoolean(Box<BooleanConformanceReport>),
     MeshSection(Box<SectionConformanceReport>),
+    MeshHiddenLines(Box<drawing_conformance::ConformanceReport>),
+    MeshVisibleFaces(Box<drawing_conformance::faces::FaceConformanceReport>),
+}
+
+impl ProviderConformanceReport {
+    /// Whether the suite found nothing to report.
+    fn is_success(&self) -> bool {
+        match self {
+            Self::MeshBoolean(report) => report.is_conformant(),
+            Self::MeshSection(report) => report.is_success(),
+            Self::MeshHiddenLines(report) => report.is_success(),
+            Self::MeshVisibleFaces(report) => report.is_success(),
+        }
+    }
 }
 
 impl fmt::Display for ProviderConformanceReport {
@@ -122,6 +157,8 @@ impl fmt::Display for ProviderConformanceReport {
         match self {
             Self::MeshBoolean(report) => report.fmt(formatter),
             Self::MeshSection(report) => report.fmt(formatter),
+            Self::MeshHiddenLines(report) => report.fmt(formatter),
+            Self::MeshVisibleFaces(report) => report.fmt(formatter),
         }
     }
 }
@@ -151,8 +188,12 @@ impl std::error::Error for ApplicationBuildError {}
 pub struct ApplicationBuilder {
     boolean: MeshBooleanRegistry,
     section: MeshPlaneSectionRegistry,
+    hidden_lines: MeshHiddenLinesRegistry,
+    visible_faces: MeshVisibleFacesRegistry,
     boolean_provider: Option<BackendId>,
     section_provider: Option<BackendId>,
+    hidden_lines_provider: Option<BackendId>,
+    visible_faces_provider: Option<BackendId>,
 }
 
 impl ApplicationBuilder {
@@ -161,8 +202,12 @@ impl ApplicationBuilder {
         Self {
             boolean: MeshBooleanRegistry::new(),
             section: MeshPlaneSectionRegistry::new(),
+            hidden_lines: MeshHiddenLinesRegistry::new(),
+            visible_faces: MeshVisibleFacesRegistry::new(),
             boolean_provider: None,
             section_provider: None,
+            hidden_lines_provider: None,
+            visible_faces_provider: None,
         }
     }
 
@@ -229,6 +274,11 @@ impl ApplicationBuilder {
                 deterministic: true,
             });
         }
+        drawing::push_capabilities(
+            &mut descriptor,
+            self.hidden_lines_provider,
+            self.visible_faces_provider,
+        );
         descriptor
             .capabilities
             .sort_by_key(|capability| capability.id);
@@ -237,8 +287,12 @@ impl ApplicationBuilder {
             ray_indices: crate::ray_index::RayIndexCache::default(),
             boolean: self.boolean,
             section: self.section,
+            hidden_lines: self.hidden_lines,
+            visible_faces: self.visible_faces,
             boolean_provider: self.boolean_provider,
             section_provider: self.section_provider,
+            hidden_lines_provider: self.hidden_lines_provider,
+            visible_faces_provider: self.visible_faces_provider,
             descriptor,
         }
     }
@@ -298,8 +352,12 @@ pub struct Application {
     ray_indices: crate::ray_index::RayIndexCache,
     boolean: MeshBooleanRegistry,
     section: MeshPlaneSectionRegistry,
+    hidden_lines: MeshHiddenLinesRegistry,
+    visible_faces: MeshVisibleFacesRegistry,
     boolean_provider: Option<BackendId>,
     section_provider: Option<BackendId>,
+    hidden_lines_provider: Option<BackendId>,
+    visible_faces_provider: Option<BackendId>,
     descriptor: IntegrationDescriptor,
 }
 
@@ -309,6 +367,8 @@ impl Application {
         Ok(ApplicationBuilder::new()
             .with_portable_boolean()?
             .with_portable_section()?
+            .with_portable_hidden_lines()
+            .with_portable_visible_faces()
             .build())
     }
 
@@ -502,5 +562,31 @@ impl Application {
             },
             source: Box::new(ApplicationErrorSource::Geometry(source)),
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn a_report_with_a_failure_is_not_a_success_in_every_arm() {
+        use axiolid_mesh_hidden_lines_contract::conformance::{
+            faces::{FaceConformanceFailure, FaceConformanceReport},
+            ConformanceFailure, ConformanceReport,
+        };
+
+        let mut lines = ConformanceReport::default();
+        lines
+            .failures
+            .push(ConformanceFailure::NonDeterministic { case: "x" });
+        let mut faces = FaceConformanceReport::default();
+        faces
+            .failures
+            .push(FaceConformanceFailure::NonDeterministic { case: "x" });
+        assert!(ProviderConformanceReport::MeshHiddenLines(Box::default()).is_success());
+        assert!(ProviderConformanceReport::MeshVisibleFaces(Box::default()).is_success());
+        assert!(!ProviderConformanceReport::MeshHiddenLines(Box::new(lines)).is_success());
+        assert!(!ProviderConformanceReport::MeshVisibleFaces(Box::new(faces)).is_success());
     }
 }

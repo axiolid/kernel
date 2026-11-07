@@ -4,6 +4,7 @@
 - **Date:** 2026-09-03
 - **Deciders:** Friedrich Schrödter
 - **Supersedes:** —
+- **Amended by:** [0105](./0105-drawings-join-the-discrete-and-application-bundles.md): the C ABI's scope includes drawings; C ABI symbols are never feature-gated.
 
 ## Context
 

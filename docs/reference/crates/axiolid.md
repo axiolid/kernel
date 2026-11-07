@@ -35,12 +35,12 @@ Default: none.
 | Feature | Enables |
 | --- | --- |
 | `advanced` | `discrete`, `parametric`, `heal` |
-| `application` | `discrete`, `dispatch-mesh-boolean`, `dispatch-mesh-section`, `portable-provider` |
+| `application` | `discrete`, `dispatch-mesh-boolean`, `dispatch-mesh-section`, `dispatch-mesh-hidden-lines`, `hidden-lines-provider`, `portable-provider` |
 | `brep` | `topology`, [`axiolid-brep`](./axiolid-brep) |
 | `contracts` | [`axiolid-contracts`](./axiolid-contracts) |
 | `cpu` | [`axiolid-backend-cpu`](./axiolid-backend-cpu) |
 | `curves` | `linear`, [`axiolid-curve`](./axiolid-curve) |
-| `discrete` | `integration`, `mesh`, `profiles`, `primitives`, `tessellation`, `spatial`, `ray-mesh`, `measure`, `mesh-boolean`, `mesh-section`, `generate`, `cpu` |
+| `discrete` | `integration`, `mesh`, `profiles`, `primitives`, `tessellation`, `spatial`, `ray-mesh`, `measure`, `mesh-boolean`, `mesh-section`, `mesh-hidden-lines`, `generate`, `cpu` |
 | `dispatch-mesh-boolean` | `mesh-boolean`, [`axiolid-dispatch`](./axiolid-dispatch), `axiolid-dispatch/mesh-boolean` |
 | `dispatch-mesh-hidden-lines` | `mesh-hidden-lines`, [`axiolid-dispatch`](./axiolid-dispatch), `axiolid-dispatch/mesh-hidden-lines` |
 | `dispatch-mesh-section` | `mesh-section`, [`axiolid-dispatch`](./axiolid-dispatch), `axiolid-dispatch/mesh-section` |

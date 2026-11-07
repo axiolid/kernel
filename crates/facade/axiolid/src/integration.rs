@@ -62,9 +62,12 @@ fn enabled_features() -> Vec<&'static str> {
     compiled_feature!(features, "mesh-contracts");
     compiled_feature!(features, "mesh-boolean");
     compiled_feature!(features, "mesh-section");
+    compiled_feature!(features, "mesh-hidden-lines");
     compiled_feature!(features, "graph-compile");
     compiled_feature!(features, "dispatch-mesh-boolean");
     compiled_feature!(features, "dispatch-mesh-section");
+    compiled_feature!(features, "dispatch-mesh-hidden-lines");
+    compiled_feature!(features, "hidden-lines-provider");
     compiled_feature!(features, "generate");
     compiled_feature!(features, "cpu");
     compiled_feature!(features, "parallel");

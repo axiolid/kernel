@@ -9,7 +9,27 @@ caret rule for `0.x` versions.
 
 ## [Unreleased]
 
+### Added
+
+- Hidden-line drawings and visible faces join the `discrete` (contract) and
+  `application` (dispatch and exact scalar providers) bundles (#371,
+  ADR 0105). `Application` gains `hidden_lines`, `audit_hidden_lines` and
+  `visible_faces`; `ApplicationBuilder` gains `with_portable_hidden_lines` and
+  `with_portable_visible_faces`, and `Application::portable()` selects both.
+  The descriptor advertises `MESH_HIDDEN_LINES` and `MESH_VISIBLE_FACES`
+  (`Profile2d`, `ToleranceBounded`). Each provider's conformance suite runs
+  once per process, on the first call that reaches it; a failed verdict
+  refuses the call.
+- `IntegrationDescriptor::enabled_features` reports `mesh-hidden-lines`,
+  `dispatch-mesh-hidden-lines` and `hidden-lines-provider`.
+
 ### Changed
+
+- **Breaking:** `ApplicationErrorSource` and `ProviderConformanceReport` are
+  `#[non_exhaustive]`. `ApplicationErrorSource` gains `HiddenLines` and
+  `ProviderConformance`; `ProviderConformanceReport` gains `MeshHiddenLines`
+  and `MeshVisibleFaces`. A `match` on either needs a wildcard arm (#371,
+  ADR 0105).
 
 - **Breaking:** requires `axiolid-overlay` 0.4, so `axiolid::overlay` carries
   `OverlayError` as `#[non_exhaustive]` with the new `HolesOverlap` and

@@ -71,13 +71,14 @@ PICK BY TASK -- narrowest feature that does the job:
     exact B-rep topology ............ "brep"
     tessellate exact -> mesh ........ "tessellation"
     point clouds to mesh ............ "pointcloud-provider"
-    hidden-line drawings (exact) .... "hidden-lines-provider"
+    hidden-line drawings (exact) .... "hidden-lines-provider" or "application"
     2D fields, morphology ........... "field-ops"
     mesh repair / healing ........... "heal"
 
 BUNDLES -- use when you want breadth over a minimal build:
     "standard" ... the pre-0.4 default: mesh + cpu + integration
-    "discrete" ... mesh stack: booleans, sections, measure, spatial, generate
+    "discrete" ... mesh stack: booleans, sections, hidden-line contracts,
+                   measure, spatial, generate
     "parametric" . exact stack: curves, surfaces, topology, NURBS
     "advanced" ... discrete + parametric + heal
     "full" ....... everything, including parallel/simd/gpu adapters
@@ -86,7 +87,7 @@ IMPORTANT -- features are ADDITIVE and imply their prerequisites, so name the
 capability you need, not its dependencies. "brep" already pulls surfaces,
 curves and linear; adding them by hand only widens your build.
 
-Operations that dispatch to a provider (booleans, sections) need BOTH a
+Operations that dispatch to a provider (booleans, sections, drawings) need BOTH a
 contract and a registered provider. "application" is the supported
 combination; "mesh-boolean" alone gives you the trait with nothing behind it.
 
@@ -311,7 +312,8 @@ pub mod mesh_section {
 ///
 /// The contracts and their types (ADR 0090, ADR 0094). The exact scalar
 /// providers arrive with the `hidden-lines-provider` feature, or a caller
-/// supplies its own.
+/// supplies its own. The contract is part of `discrete`; `application` adds
+/// the providers and `Application::hidden_lines` (ADR 0105).
 #[cfg(feature = "mesh-hidden-lines")]
 pub mod mesh_hidden_lines {
     pub use axiolid_mesh_hidden_lines_contract::*;

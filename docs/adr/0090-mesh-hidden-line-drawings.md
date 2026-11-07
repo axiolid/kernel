@@ -4,6 +4,7 @@
 - **Date:** 2026-10-28
 - **Deciders:** Friedrich Schrödter
 - **Supersedes:** —
+- **Amended by:** [0105](./0105-drawings-join-the-discrete-and-application-bundles.md): the contract joins `discrete`, the dispatch and providers join `application`.
 
 ## Context
 
@@ -41,9 +42,9 @@ decision; only the endpoints of output segments are rounded.
   variant it does not know to `Unknown`.
 - `axiolid-dispatch`, feature `mesh-hidden-lines`: `MeshHiddenLinesRegistry`.
 - `axiolid`: features `mesh-hidden-lines` and `dispatch-mesh-hidden-lines`,
-  following the point-cloud pattern. They are not part of the `discrete`,
-  `application` or `full` bundles: whether the application boundary and the
-  C ABI carry hidden lines is a maintainer decision for when a provider exists.
+  following the point-cloud pattern. They were first outside the `discrete`,
+  `application` and `full` bundles; ADR 0105 (#371) adds the contract to
+  `discrete` and the dispatch and providers to `application`.
 - A provider, `axiolid-hidden-lines` (`algorithm.discrete`,
   `discrete.hidden-lines`), arrives in a later stage. It is its own package
   rather than part of `axiolid-reference`, which would pull `axiolid-exact`
@@ -195,7 +196,7 @@ row C16 stays narrow.
 
 - A spatial index for candidates.
 - Oblique clip half-spaces with caps; coplanar faces of capped solids (#359).
-- Hidden lines in the application bundle and the C ABI.
+- Hidden lines in the C ABI (the application bundle: ADR 0105).
 - Exact B-rep and smooth-silhouette hidden-line removal.
 
 ## Relation to existing code

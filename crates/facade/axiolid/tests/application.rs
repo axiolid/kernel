@@ -246,3 +246,291 @@ fn section_request_reports_the_cut_of_a_solid_as_a_closed_region() {
         )])
     );
 }
+
+mod drawing {
+    use axiolid::application::{Application, ApplicationErrorSource};
+    use axiolid::contracts::{GeomError, Operation};
+    use axiolid::core::{Frame3, Point2};
+    use axiolid::mesh_hidden_lines::{
+        EdgeKind, EdgeSelection, FaceGroup, FaceSource, HiddenLineLimits, HiddenLineMesh,
+        HiddenLineRequest, MeshId, MeshRole, OrthographicView, RefusedMesh, Visibility,
+        VisibleFaceLimits, VisibleFaceRequest,
+    };
+
+    use super::*;
+
+    fn options() -> ExecutionOptions {
+        ExecutionOptions::new(Tolerance::new(1.0e-9, 1.0e-12).expect("valid tolerance"))
+    }
+
+    fn plan() -> OrthographicView {
+        OrthographicView::new(Frame3 {
+            origin: Point3::new(0.0, 0.0, 0.0),
+            x: Vec3::X,
+            y: Vec3::Y,
+            z: Vec3::Z,
+        })
+    }
+
+    fn lines_limits() -> HiddenLineLimits {
+        HiddenLineLimits::new(8, 1000, 1000, 100_000, 1000)
+    }
+
+    fn faces_limits() -> VisibleFaceLimits {
+        VisibleFaceLimits::new(8, 1000, 1000, 100_000, 100, 1000)
+    }
+
+    fn square(points: [(f64, f64); 4]) -> Vec<Point2> {
+        points.iter().map(|&(x, y)| Point2::new(x, y)).collect()
+    }
+
+    fn triangle() -> TriMesh {
+        TriMesh::new(
+            vec![
+                Point3::new(0.0, 0.0, 0.0),
+                Point3::new(1.0, 0.0, 0.0),
+                Point3::new(0.0, 1.0, 0.0),
+            ],
+            vec![0, 1, 2],
+        )
+    }
+
+    #[test]
+    fn the_plan_cube_draws_four_hidden_and_four_visible_silhouettes() {
+        let mesh = cube([0.0, 0.0, 0.0], [2.0, 2.0, 2.0]);
+        let meshes = [HiddenLineMesh::new(MeshId(7), MeshRole::Solid, &mesh)];
+        let request = HiddenLineRequest::new(
+            &meshes,
+            plan(),
+            EdgeSelection::new(Some(0.5)),
+            lines_limits(),
+        );
+        let outcome = Application::portable()
+            .expect("portable application")
+            .hidden_lines(&request, &options())
+            .expect("the cube draws");
+
+        let (h, v) = (Visibility::Hidden, Visibility::Visible);
+        let expected = [
+            ([0, 1], h, (0.0, 0.0), (2.0, 0.0)),
+            ([0, 3], h, (0.0, 0.0), (0.0, 2.0)),
+            ([1, 2], h, (2.0, 0.0), (2.0, 2.0)),
+            ([2, 3], h, (2.0, 2.0), (0.0, 2.0)),
+            ([4, 5], v, (0.0, 0.0), (2.0, 0.0)),
+            ([4, 7], v, (0.0, 0.0), (0.0, 2.0)),
+            ([5, 6], v, (2.0, 0.0), (2.0, 2.0)),
+            ([6, 7], v, (2.0, 2.0), (0.0, 2.0)),
+        ];
+        assert_eq!(outcome.segments.len(), expected.len());
+        for (segment, (vertices, visibility, start, end)) in outcome.segments.iter().zip(expected) {
+            assert_eq!(segment.source.mesh, MeshId(7));
+            assert_eq!(segment.source.vertices, vertices);
+            assert_eq!(segment.kind, EdgeKind::Silhouette);
+            assert_eq!(segment.visibility, visibility);
+            assert_eq!(segment.start, Point2::new(start.0, start.1));
+            assert_eq!(segment.end, Point2::new(end.0, end.1));
+        }
+        let evidence = outcome.evidence;
+        assert_eq!(evidence.selected_edges, 12);
+        assert_eq!(evidence.point_edges, 4);
+        assert_eq!(evidence.clipped_edges, 0);
+        assert_eq!(evidence.collapsed_segments, 0);
+        assert_eq!(evidence.visible_segments, 4);
+        assert_eq!(evidence.hidden_segments, 4);
+    }
+
+    #[test]
+    fn the_plan_cube_cut_by_a_near_plane_has_one_cap_region() {
+        let mesh = cube([0.0, 0.0, 0.0], [2.0, 2.0, 2.0]);
+        let meshes = [HiddenLineMesh::new(MeshId(7), MeshRole::Solid, &mesh)];
+        let request = VisibleFaceRequest::new(&meshes, plan().with_near(1.0), faces_limits());
+        let outcome = Application::portable()
+            .expect("portable application")
+            .visible_faces(&request, &options())
+            .expect("the cube cut draws");
+
+        assert_eq!(outcome.regions.len(), 1);
+        let region = &outcome.regions[0];
+        assert_eq!(region.source, FaceSource::Cap);
+        assert_eq!(
+            region.outer,
+            square([(0.0, 0.0), (2.0, 0.0), (2.0, 2.0), (0.0, 2.0)])
+        );
+        assert!(region.holes.is_empty());
+        assert!(region.triangles.is_empty());
+    }
+
+    #[test]
+    fn the_plan_cube_with_groups_has_one_region_of_its_top_group() {
+        let mesh = cube([0.0, 0.0, 0.0], [2.0, 2.0, 2.0]);
+        let groups: Vec<FaceGroup> = [0, 0, 2, 2, 4, 4, 6, 6, 8, 8, 10, 10]
+            .into_iter()
+            .map(FaceGroup)
+            .collect();
+        let meshes = [HiddenLineMesh::new(MeshId(7), MeshRole::Solid, &mesh).with_groups(&groups)];
+        let request = VisibleFaceRequest::new(&meshes, plan(), faces_limits());
+        let outcome = Application::portable()
+            .expect("portable application")
+            .visible_faces(&request, &options())
+            .expect("the cube draws");
+
+        assert_eq!(outcome.regions.len(), 1);
+        let region = &outcome.regions[0];
+        assert_eq!(region.source, FaceSource::Group(FaceGroup(2)));
+        assert_eq!(
+            region.outer,
+            square([(0.0, 0.0), (2.0, 0.0), (2.0, 2.0), (0.0, 2.0)])
+        );
+        assert!(region.holes.is_empty());
+        assert_eq!(region.triangles, [2, 3]);
+    }
+
+    #[test]
+    fn a_refused_mesh_keeps_its_id_in_the_error_source() {
+        let mesh = triangle();
+        let meshes = [HiddenLineMesh::new(MeshId(9), MeshRole::Solid, &mesh)];
+        let request = HiddenLineRequest::new(
+            &meshes,
+            plan(),
+            EdgeSelection::new(Some(0.5)),
+            lines_limits(),
+        );
+        let error = Application::portable()
+            .expect("portable application")
+            .hidden_lines(&request, &options())
+            .expect_err("a lone triangle is not a solid");
+
+        assert_eq!(error.context.operation, Operation::MeshHiddenLines);
+        assert_eq!(error.context.provider.as_str(), "scalar-hidden-lines");
+        let ApplicationErrorSource::HiddenLines(source) = error.source.as_ref() else {
+            panic!("expected a hidden-line refusal, got {:?}", error.source);
+        };
+        assert_eq!(source.mesh, Some(MeshId(9)));
+        assert!(matches!(source.error, GeomError::NotManifold(_)));
+    }
+
+    #[test]
+    fn a_refused_face_request_keeps_its_operation_provider_and_mesh() {
+        let mesh = triangle();
+        let meshes = [HiddenLineMesh::new(MeshId(9), MeshRole::Solid, &mesh)];
+        let request = VisibleFaceRequest::new(&meshes, plan(), faces_limits());
+        let error = Application::portable()
+            .expect("portable application")
+            .visible_faces(&request, &options())
+            .expect_err("a lone triangle is not a solid");
+
+        assert_eq!(error.context.operation, Operation::MeshVisibleFaces);
+        assert_eq!(error.context.provider.as_str(), "scalar-visible-faces");
+        let ApplicationErrorSource::HiddenLines(source) = error.source.as_ref() else {
+            panic!("expected a refusal, got {:?}", error.source);
+        };
+        assert_eq!(source.mesh, Some(MeshId(9)));
+        assert!(matches!(source.error, GeomError::NotManifold(_)));
+    }
+
+    #[test]
+    fn a_refused_audit_names_its_operation_and_provider() {
+        let mesh = triangle();
+        let meshes = [HiddenLineMesh::new(MeshId(9), MeshRole::Solid, &mesh)];
+        let request = HiddenLineRequest::new(
+            &meshes,
+            plan(),
+            EdgeSelection::new(Some(0.5)),
+            HiddenLineLimits::new(0, 1000, 1000, 100_000, 1000),
+        );
+        let error = Application::portable()
+            .expect("portable application")
+            .audit_hidden_lines(&request, &options())
+            .expect_err("the request exceeds its mesh limit");
+
+        assert_eq!(error.context.operation, Operation::MeshHiddenLines);
+        assert_eq!(error.context.provider.as_str(), "scalar-hidden-lines");
+    }
+
+    #[test]
+    fn the_audit_lists_every_refused_mesh_in_request_order() {
+        let solid = cube([0.0, 0.0, 0.0], [2.0, 2.0, 2.0]);
+        let lone = triangle();
+        let meshes = [
+            HiddenLineMesh::new(MeshId(1), MeshRole::Solid, &solid),
+            HiddenLineMesh::new(MeshId(9), MeshRole::Solid, &lone),
+        ];
+        let request = HiddenLineRequest::new(
+            &meshes,
+            plan(),
+            EdgeSelection::new(Some(0.5)),
+            lines_limits(),
+        );
+        let refused = Application::portable()
+            .expect("portable application")
+            .audit_hidden_lines(&request, &options())
+            .expect("the request itself is valid");
+
+        assert_eq!(refused.len(), 1);
+        assert_eq!(
+            refused[0],
+            RefusedMesh::new(MeshId(9), refused[0].error.clone())
+        );
+        assert!(matches!(refused[0].error, GeomError::NotManifold(_)));
+    }
+
+    #[test]
+    fn an_application_without_a_provider_refuses_as_unsupported() {
+        let mesh = cube([0.0, 0.0, 0.0], [2.0, 2.0, 2.0]);
+        let meshes = [HiddenLineMesh::new(MeshId(7), MeshRole::Solid, &mesh)];
+        let request = HiddenLineRequest::new(
+            &meshes,
+            plan(),
+            EdgeSelection::new(Some(0.5)),
+            lines_limits(),
+        );
+        let error = ApplicationBuilder::new()
+            .build()
+            .hidden_lines(&request, &options())
+            .expect_err("no provider is selected");
+
+        assert_eq!(error.context.provider.as_str(), "axiolid-application");
+        let ApplicationErrorSource::HiddenLines(source) = error.source.as_ref() else {
+            panic!("expected a hidden-line refusal, got {:?}", error.source);
+        };
+        assert!(matches!(
+            source.error,
+            GeomError::Unsupported { backend, .. } if backend.as_str() == "mesh-hidden-lines-registry"
+        ));
+    }
+
+    #[test]
+    fn the_descriptor_advertises_both_drawing_providers() {
+        let application = Application::portable().expect("portable application");
+        let descriptor = application.descriptor();
+        for (id, provider) in [
+            (capability_ids::MESH_HIDDEN_LINES, "scalar-hidden-lines"),
+            (capability_ids::MESH_VISIBLE_FACES, "scalar-visible-faces"),
+        ] {
+            let capability = descriptor
+                .require(CapabilityRequirement {
+                    id,
+                    output: Representation::Profile2d,
+                    exactness: Exactness::ToleranceBounded,
+                    deterministic: true,
+                })
+                .expect("drawing capability advertised");
+            assert_eq!(capability.provider.as_str(), provider);
+            assert_eq!(capability.exactness, Exactness::ToleranceBounded);
+            assert_eq!(capability.output, Representation::Profile2d);
+        }
+        for feature in [
+            "mesh-hidden-lines",
+            "dispatch-mesh-hidden-lines",
+            "hidden-lines-provider",
+        ] {
+            assert!(descriptor.enabled_features.contains(&feature), "{feature}");
+        }
+        let bare = ApplicationBuilder::new().build();
+        assert!(bare
+            .descriptor()
+            .capabilities
+            .iter()
+            .all(|capability| capability.id != capability_ids::MESH_HIDDEN_LINES));
+    }
+}

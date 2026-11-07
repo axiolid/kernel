@@ -33,12 +33,14 @@ dependencies = [
  "axiolid-core",
  "axiolid-curve",
  "axiolid-dispatch",
+ "axiolid-hidden-lines",
  "axiolid-linear",
  "axiolid-measure",
  "axiolid-mesh",
  "axiolid-mesh-boolean-boolmesh",
  "axiolid-mesh-boolean-contract",
  "axiolid-mesh-contracts",
+ "axiolid-mesh-hidden-lines-contract",
  "axiolid-mesh-section-contract",
  "axiolid-predicates",
  "axiolid-primitive",
@@ -159,6 +161,7 @@ dependencies = [
  "axiolid-mesh",
  "axiolid-mesh-boolean-contract",
  "axiolid-mesh-contracts",
+ "axiolid-mesh-hidden-lines-contract",
  "axiolid-mesh-section-contract",
 ]
 
@@ -197,6 +200,20 @@ dependencies = [
 [[package]]
 name = "axiolid-guarantees"
 version = "0.3.3"
+
+[[package]]
+name = "axiolid-hidden-lines"
+version = "0.1.3"
+dependencies = [
+ "axiolid-contracts",
+ "axiolid-core",
+ "axiolid-exact",
+ "axiolid-exact-arrangement",
+ "axiolid-guarantees",
+ "axiolid-mesh",
+ "axiolid-mesh-hidden-lines-contract",
+ "axiolid-spatial",
+]
 
 [[package]]
 name = "axiolid-linear"
@@ -245,6 +262,15 @@ dependencies = [
 [[package]]
 name = "axiolid-mesh-contracts"
 version = "0.3.3"
+dependencies = [
+ "axiolid-contracts",
+ "axiolid-core",
+ "axiolid-mesh",
+]
+
+[[package]]
+name = "axiolid-mesh-hidden-lines-contract"
+version = "0.1.4"
 dependencies = [
  "axiolid-contracts",
  "axiolid-core",

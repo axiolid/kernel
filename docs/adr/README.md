@@ -89,3 +89,4 @@ Package names and paths in older accepted records describe the tree at the time 
 | [0102](./0102-a-clip-is-cut-in-its-subjects-frame-and-a-difference-keeps-no-skin-within-rounding.md) | A clip is cut in its subject's frame, and a difference keeps no skin within rounding |
 | [0103](./0103-b-rep-faces-on-swept-and-ruled-surface-relations.md) | B-rep faces on swept and ruled surface relations |
 | [0104](./0104-a-regions-rings-lie-apart-and-nested.md) | A region's rings lie apart and nested |
+| [0105](./0105-drawings-join-the-discrete-and-application-bundles.md) | Drawings join the `discrete` and `application` bundles |
