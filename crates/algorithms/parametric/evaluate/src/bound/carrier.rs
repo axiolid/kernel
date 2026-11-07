@@ -9,7 +9,9 @@
 //! `|S_uv| <= s |slope|` and `S_vv = 0`, `s` being the frame's stretch.
 
 use axiolid_core::{Frame3, Scalar};
-use axiolid_curve::RuledCarrier;
+use axiolid_curve::{Carrier, RuledCarrier};
+
+use super::interval::{cos_iv, sin_iv, Iv};
 
 use super::{cos_range, frame_stretch3, max_abs_cos, max_abs_sin, SurfaceBounds};
 
@@ -76,4 +78,62 @@ pub(super) fn ruled(k: &RuledCarrier, v0: Scalar, v1: Scalar) -> SurfaceBounds {
         s * k.slope.abs(),
         0.0,
     )
+}
+
+// --- enclosures of a point --------------------------------------------------
+
+/// `a_0 + sum a_i b_i` of enclosures.
+fn sum(first: Iv, terms: &[(Iv, Iv)]) -> Iv {
+    terms.iter().fold(first, |acc, &(a, b)| acc.add(a.mul(b)))
+}
+
+/// The enclosure of an analytic carrier's point at `(u, v)`, the one a
+/// closed form gives in outward-rounded arithmetic; `None` for a B-spline
+/// carrier.
+pub(super) fn point_enclosure(carrier: &Carrier, u: Scalar, v: Scalar) -> Option<[Iv; 3]> {
+    let p = Iv::point;
+    let (cu, su) = (cos_iv(u, u), sin_iv(u, u));
+    let axes = |f: &Frame3| [f.x, f.y, f.z].map(|a| [a.x, a.y, a.z].map(p));
+    let origin = |f: &Frame3| [f.origin.x, f.origin.y, f.origin.z].map(p);
+    Some(match carrier {
+        Carrier::Plane(f) => {
+            let ([x, y, _], o) = (axes(f), origin(f));
+            core::array::from_fn(|k| sum(o[k], &[(p(u), x[k]), (p(v), y[k])]))
+        }
+        Carrier::Ruled(c) => {
+            let (ax, o) = (axes(&c.frame), origin(&c.frame));
+            let rx = p(c.x_radius).add(p(c.slope).mul(p(v)));
+            let ry = p(c.y_radius).add(p(c.slope).mul(p(v)));
+            core::array::from_fn(|k| {
+                sum(
+                    o[k],
+                    &[
+                        (ax[0][k], rx.mul(cu)),
+                        (ax[1][k], ry.mul(su)),
+                        (ax[2][k], p(v)),
+                    ],
+                )
+            })
+        }
+        Carrier::Sphere { frame, radius } => {
+            let (ax, o) = (axes(frame), origin(frame));
+            let (cv, sv) = (cos_iv(v, v), sin_iv(v, v));
+            let (rc, rs) = (p(*radius).mul(cv), p(*radius).mul(sv));
+            core::array::from_fn(|k| {
+                let ring = sum(Iv::point(0.0), &[(ax[0][k], cu), (ax[1][k], su)]);
+                sum(o[k], &[(ring, rc), (ax[2][k], rs)])
+            })
+        }
+        Carrier::Torus(t) => {
+            let (ax, o) = (axes(&t.frame), origin(&t.frame));
+            let (cv, sv) = (cos_iv(v, v), sin_iv(v, v));
+            let ring = p(t.major_radius).add(p(t.minor_radius).mul(cv));
+            let rs = p(t.minor_radius).mul(sv);
+            core::array::from_fn(|k| {
+                let dir = sum(Iv::point(0.0), &[(ax[0][k], cu), (ax[1][k], su)]);
+                sum(o[k], &[(dir, ring), (ax[2][k], rs)])
+            })
+        }
+        Carrier::Spline(_) => return None,
+    })
 }

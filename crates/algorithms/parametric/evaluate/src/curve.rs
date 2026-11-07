@@ -350,7 +350,9 @@ fn lifted_rates(l: &axiolid_curve::LiftedCurve2, t: Scalar) -> GeomResult<(Vec2,
 
 /// The section of two B-splines a lifted pcurve reads, when it reads one on
 /// either of its own surfaces, and whether that is the first.
-fn pair_side(l: &axiolid_curve::LiftedCurve2) -> Option<(&axiolid_curve::PairSection3, bool)> {
+pub(crate) fn pair_side(
+    l: &axiolid_curve::LiftedCurve2,
+) -> Option<(&axiolid_curve::PairSection3, bool)> {
     match l.curve.as_ref() {
         Curve3::PairSection(section) => section.side(&l.carrier).map(|first| (section, first)),
         _ => None,

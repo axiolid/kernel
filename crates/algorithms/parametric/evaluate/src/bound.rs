@@ -68,10 +68,12 @@ use crate::curve::span_in;
 use crate::nurbs::SplineAxis;
 
 mod carrier;
+mod continuation;
 mod graph;
 mod implicit;
 mod interval;
 mod intrinsic;
+mod lifted;
 mod offset;
 mod position_table;
 mod positions;
@@ -668,6 +670,10 @@ pub fn chord_bound2(curve: &Curve2, a: Scalar, b: Scalar) -> Option<Scalar> {
         Curve2::AngleGraph(g) => {
             let (lo, hi) = ordered(a, b);
             graph::angle_chord_bound(g, lo, hi).map(inflate)
+        }
+        Curve2::Lifted(l) => {
+            let (lo, hi) = ordered(a, b);
+            lifted::chord_bound(l, lo, hi).map(inflate)
         }
         _ => curve_derivative_bounds2(curve, a, b).map(|d| inflate(taylor(b - a, d.second))),
     }
