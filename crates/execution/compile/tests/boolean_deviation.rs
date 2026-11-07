@@ -28,10 +28,10 @@ use axiolid_brep::ExactBRep;
 use axiolid_brep_boolean::ToleranceDecisionKind;
 use axiolid_contracts::ExecutionOptions;
 use axiolid_core::{
-    BooleanOperator, Frame3, Plane3, Point2, Point3, Scalar, Tolerance, Transform2, Transform3,
-    Vec2, Vec3,
+    BooleanOperator, Frame3, Interval, Plane3, Point2, Point3, Scalar, Tolerance, Transform2,
+    Transform3, Vec2, Vec3,
 };
-use axiolid_curve::{Circle3, Curve3};
+use axiolid_curve::{Circle3, Curve2, Curve3, Line2};
 use axiolid_exact_compile_contract::ExactCompiler;
 use axiolid_measure::FaceDomain;
 use axiolid_mesh::TriMesh;
@@ -48,7 +48,10 @@ use axiolid_model::{
     GeometryGraph, GeometryGraphBuilder, GeometryNode, Instance, NodeId, SolidOperation,
 };
 use axiolid_primitive::HalfSpace;
-use axiolid_profile::{CircleProfile, Profile, RectangleProfile, SectionProfile};
+use axiolid_profile::{
+    CircleProfile, Contour, ContourProfile, Profile, ProfileSegment, RectangleProfile,
+    SectionProfile,
+};
 
 fn options(budget: Scalar) -> ExecutionOptions {
     ExecutionOptions::new(Tolerance::new(budget.min(1e-3), 1e-9).unwrap())
@@ -124,6 +127,28 @@ fn circle(radius: Scalar) -> Profile {
     Profile::Circle(CircleProfile {
         radius,
         thickness: None,
+    })
+}
+
+/// The closed polygon through `points`, as straight contour segments.
+fn polygon(points: &[(Scalar, Scalar)]) -> Profile {
+    let points: Vec<Point2> = points.iter().map(|&(x, y)| Point2::new(x, y)).collect();
+    let segments = (0..points.len())
+        .map(|i| {
+            let (from, to) = (points[i], points[(i + 1) % points.len()]);
+            ProfileSegment {
+                curve: Curve2::Line(Line2 {
+                    origin: from,
+                    direction: to - from,
+                }),
+                domain: Interval::UNIT,
+                same_sense: true,
+            }
+        })
+        .collect();
+    Profile::Contour(ContourProfile {
+        outer: Contour::new(segments),
+        holes: Vec::new(),
     })
 }
 
@@ -1274,4 +1299,32 @@ fn a_difference_that_severs_the_subject_stays_certified() {
     assert!(bound <= 1e-3, "{bound:e}");
     let reverse = mesh_to_exact(&report).expect("the other direction");
     assert!(reverse <= NEAR_ROUNDING, "{reverse:e}");
+}
+
+/// A partial revolution keeping its apex: the cone's wall loop leaves the
+/// apex along the pole line, a gap in parameters that is no gap on the
+/// surface (#379).
+#[test]
+fn a_box_minus_a_partial_cone_keeping_its_apex_is_certified() {
+    let options = options(1e-3);
+    let case = compile(
+        |g| {
+            let block = g.extrusion(rect(2.0, 2.0), 2.0);
+            let block = g.place(block, building());
+            let cone = g.revolution(
+                polygon(&[(0.0, 0.0), (0.5, 0.0), (0.0, 1.0)]),
+                Point3::ZERO,
+                Vec3::Y,
+                1.5 * PI,
+            );
+            let cone = g.place(
+                cone,
+                building() * Transform3::from_translation(Vec3::new(0.8, -0.3, 1.0)),
+            );
+            g.boolean(block, cone, BooleanOperator::Difference)
+        },
+        &options,
+    );
+    let (bound, _) = assert_measured("box minus partial cone", case, &options, 2.0);
+    assert!(bound <= 1e-3, "{bound:e}");
 }

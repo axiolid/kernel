@@ -1610,6 +1610,27 @@ fn distinct_steps(values: &mut Vec<Scalar>, start: Scalar, span: Scalar) -> Opti
     Some(cells)
 }
 
+/// Whether a trim jumps from `end` to `start` across a sphere pole or a cone
+/// apex: both are poles of `surface` (u does not move the point there) but
+/// not the same parameter point.
+fn across_pole(surface: &axiolid_surface::Surface, end: Point2, start: Point2) -> bool {
+    let pole = |p: Point2| match axiolid_reference::surface::partials(surface, p.x, p.y) {
+        Ok((du, dv)) => du.length() <= 1e-9 * (1.0 + dv.length()),
+        Err(_) => false,
+    };
+    end != start && pole(end) && pole(start)
+}
+
+/// The refusal for a face [`across_pole`] names. Tessellating it needs the
+/// pole row of samples, welded to the pole vertex: `TODO(#463)`.
+fn pole_refusal() -> GeomError {
+    GeomError::UnsupportedInput {
+        backend: crate::BACKEND_ID,
+        operation: axiolid_contracts::Operation::Tessellation,
+        input: "a curved B-rep face whose trim closes across a sphere pole or a cone apex",
+    }
+}
+
 /// Collect a curved face's boundary, sampling each edge exactly once across
 /// the whole shell.
 fn curved_boundary(
@@ -1653,6 +1674,9 @@ fn curved_boundary(
                     inversion::inverted_edge_use(state, ctx, use_, inverter, bound, previous_end)?;
                 let n = params.len() - 1;
                 if let (Some(end), Some(&start)) = (previous_end, params.first()) {
+                    if across_pole(surface, end, start) {
+                        return Err(pole_refusal());
+                    }
                     bound.gap(end, start, surface);
                 }
                 ring_first = ring_first.or_else(|| params.first().copied());
@@ -1715,6 +1739,9 @@ fn curved_boundary(
             let n = shared.len() - 1;
             bound.trim(&pcurve, &ts, &params);
             if let (Some(end), Some(&start)) = (previous_end, params.first()) {
+                if across_pole(surface, end, start) {
+                    return Err(pole_refusal());
+                }
                 bound.gap(end, start, surface);
             }
             ring_first = ring_first.or_else(|| params.first().copied());
@@ -1724,6 +1751,9 @@ fn curved_boundary(
             out.shared.extend(shared.into_iter().take(n));
         }
         if let (Some(end), Some(start)) = (previous_end, ring_first) {
+            if across_pole(surface, end, start) {
+                return Err(pole_refusal());
+            }
             bound.gap(end, start, surface);
         }
         if face_bound.orientation == Orientation::Reversed {

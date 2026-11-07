@@ -201,7 +201,9 @@
 //! surface family has no derivative bounds, whose pcurve family has no
 //! certified chord bound, or whose loops do not close in its parameters
 //! within the gap admitted above (a periodic face trimmed by two separate
-//! circles) is unbounded by name.
+//! circles) is unbounded by name. A loop that leaves a sphere's pole or a
+//! cone's apex at the height it reached it closes there, whatever the jump
+//! in u: every u names the same point (#379). A cone's box ends at its apex.
 //!
 //! The exact result is compiled at the node's own options, so under an
 //! instance it is the local solid and the mesh the local mesh; the
@@ -661,6 +663,15 @@ impl Patch for ExactFace<'_> {
     }
 }
 
+/// Whether `p` is a pole or apex of `surface`: the parameter u does not move
+/// the point there.
+fn at_pole(surface: &Surface, p: Point2) -> bool {
+    match axiolid_reference::surface::partials(surface, p.x, p.y) {
+        Ok((du, dv)) => du.length() <= 1e-9 * (1.0 + dv.length()),
+        Err(_) => false,
+    }
+}
+
 /// A face's domain in its surface parameters: the polygon of its loops'
 /// flattened pcurves, every exact boundary point within `slack` of it.
 struct Domain {
@@ -774,14 +785,34 @@ impl Domain {
                 })
                 .collect::<Result<_, &'static str>>()?;
             for k in 0..ends.len() {
-                let next = ends[(k + 1) % ends.len()].0;
-                gap = gap.max((ends[k].1 - next).length());
+                let (end, start) = (ends[k].1, ends[(k + 1) % ends.len()].0);
+                // A pole or apex is one point at every u: a loop that
+                // leaves one at the height it reached it closes there
+                // (#379).
+                if end.y == start.y && at_pole(surface, end) && at_pole(surface, start) {
+                    continue;
+                }
+                gap = gap.max((end - start).length());
             }
         }
         if gap > closing {
             return Err("boolean: an exact face's loops do not close in its parameters");
         }
-        Ok(Self::from_rings(&rings, delta, gap, scale, affine))
+        let mut domain = Self::from_rings(&rings, delta, gap, scale, affine);
+        // The slack grows the box past a cone's apex, where the cone has
+        // no bound (a negative radius); the surface ends there (#379).
+        if let Surface::Cone(cone) = surface {
+            let slope = cone.semi_angle.tan();
+            if slope != 0.0 {
+                let apex = -cone.radius / slope;
+                if slope < 0.0 {
+                    domain.hi.y = domain.hi.y.min(apex);
+                } else {
+                    domain.lo.y = domain.lo.y.max(apex);
+                }
+            }
+        }
+        Ok(domain)
     }
 
     /// The domain of `rings`, each exact boundary point within `delta` of

@@ -511,3 +511,34 @@ fn an_exact_boolean_closes_a_vertex_within_its_reading_not_beyond_the_chord_budg
     );
     assert!(tessellate_exact(&patch, TOLERANCE, 1e-3, 1e-3).is_err());
 }
+
+/// A face whose trim closes across a cone's apex needs the pole row of
+/// samples, which the tessellator does not build (`TODO(#463)`): it is
+/// refused by name, not left to run out of refinement budget.
+#[test]
+fn a_face_closing_across_an_apex_is_refused_by_name() {
+    use axiolid_profile::{Contour, ContourProfile, ProfileSegment};
+    let points = [(0.0, 0.0), (1.5, 0.0), (0.0, 2.0)].map(|(x, y)| Point2::new(x, y));
+    let segments = (0..3)
+        .map(|i| ProfileSegment {
+            curve: Curve2::Line(Line2 {
+                origin: points[i],
+                direction: points[(i + 1) % 3] - points[i],
+            }),
+            domain: Interval::UNIT,
+            same_sense: true,
+        })
+        .collect();
+    let profile = Profile::Contour(ContourProfile {
+        outer: Contour::new(segments),
+        holes: Vec::new(),
+    });
+    let cone =
+        revolve_profile_exact(&profile, Point3::ZERO, Vec3::Y, 1.5 * PI, TOLERANCE).unwrap();
+    match tessellate_exact(&cone, TOLERANCE, 1e-3, 0.0) {
+        Err(GeomError::UnsupportedInput { input, .. }) => {
+            assert!(input.contains("pole or a cone apex"), "{input}");
+        }
+        other => panic!("expected a refusal, got {other:?}"),
+    }
+}
