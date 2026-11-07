@@ -1416,3 +1416,242 @@ fn the_hole_containment_pairs_count_against_the_budget() {
         })
     ));
 }
+
+// ---- cut boundaries that pinch at a vertex (#373) ----------------------------
+
+/// A mesh whose vertices are shared by exact position.
+#[derive(Default)]
+struct Welded {
+    positions: Vec<Point3>,
+    indices: Vec<u32>,
+}
+
+impl Welded {
+    fn vertex(&mut self, [x, y, z]: [f64; 3]) -> u32 {
+        let point = Point3::new(x, y, z);
+        let index = self
+            .positions
+            .iter()
+            .position(|&known| known == point)
+            .unwrap_or_else(|| {
+                self.positions.push(point);
+                self.positions.len() - 1
+            });
+        u32::try_from(index).expect("small fixture")
+    }
+
+    /// Triangles fanned from the first point of a convex face,
+    /// counter-clockwise seen from outside.
+    fn fan(&mut self, face: &[[f64; 3]]) {
+        for k in 1..face.len() - 1 {
+            for corner in [face[0], face[k], face[k + 1]] {
+                let index = self.vertex(corner);
+                self.indices.push(index);
+            }
+        }
+    }
+
+    /// A pier from z = 1 to z = 2 over a convex counter-clockwise footprint,
+    /// its top shifted by `lean`.
+    fn leaning_pier(&mut self, footprint: &[(f64, f64)], lean: (f64, f64)) {
+        let foot = |(x, y): (f64, f64)| [x, y, 1.0];
+        let top = |(x, y): (f64, f64)| [x + lean.0, y + lean.1, 2.0];
+        for k in 0..footprint.len() {
+            let (p, q) = (footprint[k], footprint[(k + 1) % footprint.len()]);
+            self.fan(&[foot(p), foot(q), top(q), top(p)]);
+        }
+        let roof: Vec<[f64; 3]> = footprint.iter().map(|&p| top(p)).collect();
+        self.fan(&roof);
+    }
+
+    fn finish(self) -> TriMesh {
+        TriMesh::new(self.positions, self.indices)
+    }
+}
+
+fn at(p: (f64, f64), z: f64) -> [f64; 3] {
+    [p.0, p.1, z]
+}
+
+/// A plinth [0,2]^2 x [0,1] with piers on [0,1]^2 and [1,2]^2 that lean
+/// apart: at z = 1 they meet at (1,1) only. The plinth top is the other two
+/// unit squares; each side carries the midpoint of its top edge.
+fn piers_meeting_at_a_corner() -> TriMesh {
+    let mut mesh = Welded::default();
+    mesh.fan(&[
+        [0.0, 0.0, 0.0],
+        [0.0, 2.0, 0.0],
+        [2.0, 2.0, 0.0],
+        [2.0, 0.0, 0.0],
+    ]);
+    for [p, m, q] in [
+        [(0.0, 0.0), (1.0, 0.0), (2.0, 0.0)],
+        [(2.0, 0.0), (2.0, 1.0), (2.0, 2.0)],
+        [(2.0, 2.0), (1.0, 2.0), (0.0, 2.0)],
+        [(0.0, 2.0), (0.0, 1.0), (0.0, 0.0)],
+    ] {
+        mesh.fan(&[at(p, 0.0), at(q, 0.0), at(q, 1.0), at(m, 1.0), at(p, 1.0)]);
+    }
+    mesh.fan(&[
+        [1.0, 0.0, 1.0],
+        [2.0, 0.0, 1.0],
+        [2.0, 1.0, 1.0],
+        [1.0, 1.0, 1.0],
+    ]);
+    mesh.fan(&[
+        [0.0, 1.0, 1.0],
+        [1.0, 1.0, 1.0],
+        [1.0, 2.0, 1.0],
+        [0.0, 2.0, 1.0],
+    ]);
+    mesh.leaning_pier(
+        &[(0.0, 0.0), (1.0, 0.0), (1.0, 1.0), (0.0, 1.0)],
+        (-0.5, -0.5),
+    );
+    mesh.leaning_pier(
+        &[(1.0, 1.0), (2.0, 1.0), (2.0, 2.0), (1.0, 2.0)],
+        (0.5, 0.5),
+    );
+    mesh.finish()
+}
+
+/// A hexagonal plinth around the origin whose sectors from (2,0), (0,2) and
+/// (-2,-2) carry piers leaning away from it; the other three are its top.
+fn three_piers_at_one_vertex() -> TriMesh {
+    let outline = [
+        (2.0, 0.0),
+        (2.0, 2.0),
+        (0.0, 2.0),
+        (-2.0, 0.0),
+        (-2.0, -2.0),
+        (0.0, -2.0),
+    ];
+    let leans = [
+        Some((0.5, 0.25)),
+        None,
+        Some((-0.25, 0.5)),
+        None,
+        Some((-0.25, -0.5)),
+        None,
+    ];
+    let mut mesh = Welded::default();
+    let bottom: Vec<[f64; 3]> = outline.iter().rev().map(|&p| at(p, 0.0)).collect();
+    mesh.fan(&bottom);
+    for k in 0..6 {
+        let (p, q) = (outline[k], outline[(k + 1) % 6]);
+        mesh.fan(&[at(p, 0.0), at(q, 0.0), at(q, 1.0), at(p, 1.0)]);
+        match leans[k] {
+            Some(lean) => mesh.leaning_pier(&[(0.0, 0.0), p, q], lean),
+            None => mesh.fan(&[at((0.0, 0.0), 1.0), at(p, 1.0), at(q, 1.0)]),
+        }
+    }
+    mesh.finish()
+}
+
+/// A block [0,3]^2 x [0,2] with a pyramid void over the floor (1.5,0)
+/// (2.5,2) (0.5,2) at z = 1, apex (1.5,1.25,1.5); the wall y = 0 is fanned
+/// around (1.5,0,1), where the void touches it.
+fn block_with_a_void_touching_its_wall() -> TriMesh {
+    let (v, q, r, apex) = (
+        [1.5, 0.0, 1.0],
+        [2.5, 2.0, 1.0],
+        [0.5, 2.0, 1.0],
+        [1.5, 1.25, 1.5],
+    );
+    let wall = [
+        [0.0, 0.0, 0.0],
+        [3.0, 0.0, 0.0],
+        [3.0, 0.0, 2.0],
+        [0.0, 0.0, 2.0],
+    ];
+    let mut mesh = Welded::default();
+    for k in 0..4 {
+        mesh.fan(&[wall[k], wall[(k + 1) % 4], v]);
+    }
+    mesh.fan(&[
+        [3.0, 0.0, 0.0],
+        [3.0, 3.0, 0.0],
+        [3.0, 3.0, 2.0],
+        [3.0, 0.0, 2.0],
+    ]);
+    mesh.fan(&[
+        [3.0, 3.0, 0.0],
+        [0.0, 3.0, 0.0],
+        [0.0, 3.0, 2.0],
+        [3.0, 3.0, 2.0],
+    ]);
+    mesh.fan(&[
+        [0.0, 3.0, 0.0],
+        [0.0, 0.0, 0.0],
+        [0.0, 0.0, 2.0],
+        [0.0, 3.0, 2.0],
+    ]);
+    mesh.fan(&[
+        [0.0, 0.0, 0.0],
+        [0.0, 3.0, 0.0],
+        [3.0, 3.0, 0.0],
+        [3.0, 0.0, 0.0],
+    ]);
+    mesh.fan(&[
+        [0.0, 0.0, 2.0],
+        [3.0, 0.0, 2.0],
+        [3.0, 3.0, 2.0],
+        [0.0, 3.0, 2.0],
+    ]);
+    mesh.fan(&[v, q, r]);
+    mesh.fan(&[v, apex, q]);
+    mesh.fan(&[q, apex, r]);
+    mesh.fan(&[r, apex, v]);
+    mesh.finish()
+}
+
+/// Outer ring and hole lengths of each cut region.
+type Shape = Vec<(usize, Vec<usize>)>;
+
+fn cut_shape(section: &PlaneSection) -> Shape {
+    section
+        .cut_regions
+        .as_ref()
+        .expect("cut regions")
+        .iter()
+        .map(|region| {
+            (
+                region.outer.len(),
+                region.holes.iter().map(Vec::len).collect(),
+            )
+        })
+        .collect()
+}
+
+#[test]
+fn pinched_cuts_split_at_their_vertex_in_every_frame_and_rotated_mesh() {
+    // The exact values in the plan frame are conformance fixtures; here the
+    // pairing must not depend on the frame or on a binary64 rotation.
+    let cases: [(&str, TriMesh, Shape); 3] = [
+        (
+            "piers",
+            piers_meeting_at_a_corner(),
+            vec![(4, vec![]), (4, vec![])],
+        ),
+        (
+            "three piers",
+            three_piers_at_one_vertex(),
+            vec![(3, vec![]), (3, vec![]), (3, vec![])],
+        ),
+        (
+            "void",
+            block_with_a_void_touching_its_wall(),
+            vec![(5, vec![3])],
+        ),
+    ];
+    for (name, mesh, shape) in cases {
+        for k in 1..=200 {
+            let section = cut(&mesh, turned(k, 201, 1.0))
+                .unwrap_or_else(|error| panic!("{name}, frame {k}: {error:?}"));
+            assert_eq!(cut_shape(&section), shape, "{name}, frame {k}");
+            let section = cut(&turned_mesh(&mesh, k), horizontal(1.0))
+                .unwrap_or_else(|error| panic!("{name}, mesh {k}: {error:?}"));
+            assert_eq!(cut_shape(&section), shape, "{name}, mesh {k}");
+        }
+    }
+}

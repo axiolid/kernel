@@ -9,6 +9,17 @@ caret rule for `0.x` versions.
 
 ## [Unreleased]
 
+### Changed
+
+- `section_request` with cut regions no longer refuses a cut whose boundary
+  meets itself at a vertex (#373, ADR 0092 amendment): the edges are paired
+  there by exact angle and a ring that returns to a vertex is split, so
+  corners that touch give two regions and a hole touching its outer ring is a
+  hole that touches it. Still refused by name: two edges along one ray or a
+  chain the rings would part (`REFUSED_PINCHED_CUT_REGION`), edges that do not
+  alternate (`REFUSED_CROSSING_CUT_RINGS`); a `Both` ring that repeats a
+  vertex stays refused.
+
 ## [0.3.16] - 2026-11-03
 
 ### Added
