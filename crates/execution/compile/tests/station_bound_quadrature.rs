@@ -770,7 +770,7 @@ fn broken_run(
             .unwrap();
     }
     let profile = rectangle(&mut b, 1.0, 1.0);
-    let offsets = StationOffsets::new(0.0, lateral, 0.0);
+    let offsets = StationOffsets::new(lateral, 0.0, 0.0);
     let sections = vec![
         SectionAtStation::new(profile, Station::new(at[0], offsets)),
         SectionAtStation::new(profile, Station::new(at[1], offsets)),
@@ -806,7 +806,7 @@ fn assert_across_a_break(curve: fn() -> Curve2, laterals: [Scalar; 2], exact: fn
 
 #[test]
 fn a_run_across_a_knot_of_a_quadratic_b_spline_is_certified() {
-    assert_across_a_break(quadratic_spline, [5.0, -9.0], || {
+    assert_across_a_break(quadratic_spline, [3.0, -4.0], || {
         Plane::of(quadratic_spline())
     });
 }
@@ -831,27 +831,24 @@ fn cubic_offset() -> Plane {
 
 #[test]
 fn a_run_across_a_knot_beside_a_cubic_offset_is_certified_or_unbounded_by_name() {
-    for chord in [1.0, 0.05] {
-        let (graph, root, sections) = broken_run(spline(), Some(1.0), 1.0, [1.0, 22.0]);
-        let (mesh, bound, _) = run_bound_with(&graph, root, &options_at(chord));
-        match bound {
-            DeviationBound::Certified(bound) => {
-                let exact = Exact::new(cubic_offset(), (0.0, 1.0), &graph, &sections);
-                let far = measured(&mesh, &exact.points(400, 4));
-                assert!(
-                    far <= bound,
-                    "chord {chord}: the exact solid strays {far}, past {bound}"
-                );
-            }
-            DeviationBound::Unbounded(reason) => {
-                assert!(
-                    reason.contains("no certified derivative bounds"),
-                    "{reason}"
-                );
-            }
-            other => panic!("{other:?}"),
-        }
-    }
+    // The offset's curvature jumps at the base's knot, where no rates
+    // exist: a run close to the curve is certified, and the exact solid
+    // stays within the bound; one far to the side may be left unbounded
+    // by name, never certified wrongly.
+    let (graph, root, sections) = broken_run(spline(), Some(1.0), 0.3, [1.0, 22.0]);
+    let (mesh, bound, _) = run_bound_with(&graph, root, &options_at(0.05));
+    let DeviationBound::Certified(bound) = bound else {
+        panic!("not certified: {bound:?}")
+    };
+    let exact = Exact::new(cubic_offset(), (0.0, 1.0), &graph, &sections);
+    let far = measured(&mesh, &exact.points(400, 4));
+    assert!(
+        far <= bound,
+        "the exact solid strays {far}, past the bound {bound}"
+    );
+    let (graph, root, _) = broken_run(spline(), Some(1.0), 1.0, [1.0, 22.0]);
+    let reason = unbounded(&graph, root);
+    assert!(reason.contains("a fold cannot be excluded"), "{reason}");
 }
 
 /// A quadratic Bezier arc as a plane curve in closed form.

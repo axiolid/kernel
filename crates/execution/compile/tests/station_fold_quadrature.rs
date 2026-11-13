@@ -333,3 +333,60 @@ fn the_deck_offset_is_decided_exactly() {
     let (graph, root) = run(deck, 2.0, [0.2, 1.5]);
     certified(&mesh(&graph, root));
 }
+
+/// The ellipse of semi-axes 10 and 6 about `(30, 0)`, offset by 1.5 to its
+/// left (inward), as `IfcOffsetCurve2D` states it (axioval/engine).
+fn offset_ellipse(b: &mut GeometryGraphBuilder) -> NodeId {
+    let basis = b
+        .push_value(Curve2::Ellipse(Ellipse2 {
+            frame: Frame2 {
+                origin: Point2::new(30.0, 0.0),
+                x: Vec2::X,
+                y: Vec2::Y,
+            },
+            semi_axis_x: 10.0,
+            semi_axis_y: 6.0,
+        }))
+        .unwrap();
+    b.push(GeometryNode::CurveRelation(CurveRelation::Offset {
+        basis,
+        distance: 1.5,
+        reference_direction: None,
+    }))
+    .unwrap()
+}
+
+#[test]
+fn a_widening_section_along_an_inward_offset_of_an_ellipse_is_decided() {
+    // The offset's sharpest bend, at the major axis, has the radius
+    // `3.6 - 1.5 = 2.1`; a rectangle widening from 2 to 4 over stations 0
+    // to 5 reaches `a = 2` on the inner side at station 5, where the bend
+    // has eased: no fold, so the run is certified rather than unbounded.
+    let mut b = GeometryGraphBuilder::new();
+    let basis = offset_ellipse(&mut b);
+    let rectangle = |b: &mut GeometryGraphBuilder, x| {
+        b.push_value(Profile::Rectangle(RectangleProfile {
+            x,
+            y: 1.0,
+            thickness: None,
+            outer_radius: None,
+            inner_radius: None,
+        }))
+        .unwrap()
+    };
+    let (narrow, wide) = (rectangle(&mut b, 2.0), rectangle(&mut b, 4.0));
+    let root = b
+        .push(GeometryNode::SolidOperation(
+            SolidOperation::SectionsAtStations {
+                directrix: basis,
+                sections: vec![
+                    SectionAtStation::new(narrow, Station::at(0.0)),
+                    SectionAtStation::new(wide, Station::at(5.0)),
+                ],
+                frame: StationFrame::Section,
+            },
+        ))
+        .unwrap();
+    let graph = b.finish(vec![root]).unwrap();
+    certified(&mesh(&graph, root));
+}
