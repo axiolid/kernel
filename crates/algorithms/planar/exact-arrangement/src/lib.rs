@@ -17,6 +17,7 @@
 //! which side of a piece carries which label.
 
 mod arrangement;
+mod distance;
 mod faces;
 mod points;
 mod ratio;
@@ -28,6 +29,7 @@ pub use arrangement::{
     arrange, boxes_overlap, union_box, Arrangement, Crossing, PairBudget, Piece, PieceId, Segment,
     Vertex, VertexId, CROSSING_SCRATCH_BYTES, SPLIT_SCRATCH_BYTES,
 };
+pub use distance::Nearest;
 pub use faces::{faces, FaceId, Faces};
 pub use points::{ExactPoints, Location, PointId, RingBox};
 pub use ratio::round_ratio;

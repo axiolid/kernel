@@ -99,7 +99,7 @@ fn not_finite() -> GeomError {
     GeomError::Degenerate("an exact point is not finite".into())
 }
 
-fn undecided() -> GeomError {
+pub(crate) fn undecided() -> GeomError {
     GeomError::Degenerate("an exact sign could not be decided".into())
 }
 
@@ -134,7 +134,7 @@ fn difference<T: Arith>(a: &Homogeneous<T>, b: &Homogeneous<T>, axis: usize) -> 
     a[axis].mul(&b[2]).sub(&b[axis].mul(&a[2]))
 }
 
-fn ordering(sign: Sign) -> Ordering {
+pub(crate) fn ordering(sign: Sign) -> Ordering {
     match sign {
         Sign::Positive => Ordering::Greater,
         Sign::Negative => Ordering::Less,
