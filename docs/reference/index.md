@@ -24,7 +24,7 @@ Every page here is generated from the crate itself: its manifest, its crate docu
 | [`axiolid-fixtures`](./crates/axiolid-fixtures) | `representation.fixtures` | 0.3.3 | Shared adversarial and degenerate geometry fixtures with provenance |
 | [`axiolid-linear`](./crates/axiolid-linear) | `representation.atomic` | 0.3.5 | Format-neutral line, ray, segment, and polyline representations |
 | [`axiolid-mesh`](./crates/axiolid-mesh) | `representation.discrete` | 0.3.6 | Triangle meshes: the discrete representation every backend consumes. |
-| [`axiolid-model`](./crates/axiolid-model) | `representation.graph` | 0.3.18 | Format-neutral geometry item tree. The currency between a format reader and a kernel. |
+| [`axiolid-model`](./crates/axiolid-model) | `representation.graph` | 0.3.19 | Format-neutral geometry item tree. The currency between a format reader and a kernel. |
 | [`axiolid-pointcloud`](./crates/axiolid-pointcloud) | `representation.discrete` | 0.3.4 | Portable point-sampled geometry values with optional per-point channels. |
 | [`axiolid-primitive`](./crates/axiolid-primitive) | `representation.atomic` | 0.3.5 | Exact parametric primitive solids used as CSG leaves |
 | [`axiolid-profile`](./crates/axiolid-profile) | `representation.region` | 0.3.4 | Exact 2D profile representations for sweeps and sectioned solids |
@@ -43,7 +43,7 @@ Every page here is generated from the crate itself: its manifest, its crate docu
 | [`axiolid-mesh-compile-contract`](./crates/axiolid-mesh-compile-contract) | `contract.operation` | 0.3.6 | Portable graph-to-mesh compilation contract |
 | [`axiolid-mesh-contracts`](./crates/axiolid-mesh-contracts) | `contract.common.mesh` | 0.3.3 | Shared mesh admissibility contracts |
 | [`axiolid-mesh-hidden-lines-contract`](./crates/axiolid-mesh-hidden-lines-contract) | `contract.operation` | 0.1.5 | Portable hidden-line drawing request, result, and conformance contract for triangle meshes |
-| [`axiolid-mesh-section-contract`](./crates/axiolid-mesh-section-contract) | `contract.operation` | 0.3.8 | Portable mesh plane-section request, result, and evidence contract |
+| [`axiolid-mesh-section-contract`](./crates/axiolid-mesh-section-contract) | `contract.operation` | 0.3.9 | Portable mesh plane-section request, result, and evidence contract |
 | [`axiolid-pointcloud-reconstruction-contract`](./crates/axiolid-pointcloud-reconstruction-contract) | `contract.operation` | 0.3.4 | Portable pointcloud-to-surface reconstruction contract, evidence, and conformance suite. |
 | [`axiolid-tessellation-contract`](./crates/axiolid-tessellation-contract) | `contract.operation` | 0.3.4 | Curves, surfaces and B-reps to triangles under an explicit tolerance. |
 
@@ -56,7 +56,7 @@ Every page here is generated from the crate itself: its manifest, its crate docu
 | [`axiolid-brep-boolean`](./crates/axiolid-brep-boolean) | `algorithm.construction` | 0.1.15 | General exact B-rep booleans over analytic faces (ADR 0075) |
 | [`axiolid-collide`](./crates/axiolid-collide) | `algorithm.query` | 0.3.3 | Convex collision queries: separating axis, overlap, and separation distance |
 | [`axiolid-constraint2d`](./crates/axiolid-constraint2d) | `algorithm.planar` | 0.1.3 | Apollonius and tangent-circle constructions: circles tangent to three points, lines or circles in any combination |
-| [`axiolid-construct`](./crates/axiolid-construct) | `algorithm.construction` | 0.3.29 | Solid generation: profiles, lofts, sweeps, revolutions and half-space clipping |
+| [`axiolid-construct`](./crates/axiolid-construct) | `algorithm.construction` | 0.4.0 | Solid generation: profiles, lofts, sweeps, revolutions and half-space clipping |
 | [`axiolid-decimate`](./crates/axiolid-decimate) | `algorithm.discrete` | 0.3.4 | Edge-collapse mesh decimation with a bounded, reported deviation |
 | [`axiolid-decompose`](./crates/axiolid-decompose) | `algorithm.discrete` | 0.3.3 | Convex decomposition of a solid, exact or approximate and always labelled |
 | [`axiolid-evaluate`](./crates/axiolid-evaluate) | `algorithm.parametric` | 0.3.21 | Analytic and spline curve/surface evaluation, jets, and inversion |
@@ -68,17 +68,17 @@ Every page here is generated from the crate itself: its manifest, its crate docu
 | [`axiolid-inspect`](./crates/axiolid-inspect) | `algorithm.query` | 0.3.10 | Mesh queries: clearance, containment, ray casting, and genus |
 | [`axiolid-levelset`](./crates/axiolid-levelset) | `algorithm.sampled` | 0.3.3 | Level-set extraction: a closed manifold mesh from a sampled scalar field |
 | [`axiolid-linear-intersection`](./crates/axiolid-linear-intersection) | `algorithm.query` | 0.3.3 | Portable, deterministic intersections for linear geometry |
-| [`axiolid-measure`](./crates/axiolid-measure) | `algorithm.query` | 0.3.14 | Metric properties: area, volume, centroid, moments of inertia. |
+| [`axiolid-measure`](./crates/axiolid-measure) | `algorithm.query` | 0.3.15 | Metric properties: area, volume, centroid, moments of inertia. |
 | [`axiolid-minkowski`](./crates/axiolid-minkowski) | `algorithm.discrete` | 0.3.3 | Minkowski sum and difference of planar-faced solids |
 | [`axiolid-numeric`](./crates/axiolid-numeric) | `algorithm.numeric` | 0.1.4 | Numeric substrate: bracketed and polynomial root finding, adaptive quadrature, dense least squares, and minimisation, each with error estimates |
-| [`axiolid-nurbs`](./crates/axiolid-nurbs) | `algorithm.parametric` | 0.3.9 | General polynomial and rational B-spline analysis and transformation algorithms |
-| [`axiolid-overlay`](./crates/axiolid-overlay) | `algorithm.planar` | 0.3.22 | Deterministic validated planar overlay contract |
+| [`axiolid-nurbs`](./crates/axiolid-nurbs) | `algorithm.parametric` | 0.3.10 | General polynomial and rational B-spline analysis and transformation algorithms |
+| [`axiolid-overlay`](./crates/axiolid-overlay) | `algorithm.planar` | 0.4.0 | Deterministic validated planar overlay contract |
 | [`axiolid-predicates`](./crates/axiolid-predicates) | `algorithm.reference` | 0.3.5 | Certified exact-arithmetic geometric predicates |
-| [`axiolid-project`](./crates/axiolid-project) | `algorithm.planar` | 0.3.3 | Projection of triangle meshes onto a plane, and prism intersection |
+| [`axiolid-project`](./crates/axiolid-project) | `algorithm.planar` | 0.4.0 | Projection of triangle meshes onto a plane, and prism intersection |
 | [`axiolid-ray-mesh`](./crates/axiolid-ray-mesh) | `algorithm.query` | 0.4.2 | Narrow-phase ray/triangle-mesh nearest-hit intersection |
 | [`axiolid-reference`](./crates/axiolid-reference) | `algorithm.reference` | 0.3.17 | Portable scalar reference implementation and certified predicates |
 | [`axiolid-refine`](./crates/axiolid-refine) | `algorithm.discrete` | 0.3.4 | Mesh refinement, smoothing, isotropic remeshing, hole filling, fairing and subdivision surfaces |
-| [`axiolid-route`](./crates/axiolid-route) | `algorithm.planar` | 0.3.9 | Exact planar shortest path over a visibility graph |
+| [`axiolid-route`](./crates/axiolid-route) | `algorithm.planar` | 0.4.0 | Exact planar shortest path over a visibility graph |
 | [`axiolid-spatial`](./crates/axiolid-spatial) | `algorithm.query` | 0.3.6 | Acceleration structures: BVH and uniform point grid, and their queries; barycentric and mean-value coordinates. |
 | [`axiolid-tetrahedralize`](./crates/axiolid-tetrahedralize) | `algorithm.discrete` | 0.1.2 | Exact 3D Delaunay tetrahedralization with symbolic perturbation |
 | [`axiolid-triangulate`](./crates/axiolid-triangulate) | `algorithm.planar` | 0.3.7 | Constrained Delaunay triangulation with bounded quality refinement |
@@ -96,12 +96,12 @@ Every page here is generated from the crate itself: its manifest, its crate docu
 | --- | --- | --- | --- |
 | [`axiolid-backend-cpu`](./crates/axiolid-backend-cpu) | `execution.context` | 0.3.4 | Portable and runtime-optimized CPU execution context for Axiolid geometry |
 | [`axiolid-backend-gpu`](./crates/axiolid-backend-gpu) | `execution.context` | 0.3.3 | GPU executor adapter contract for batched Axiolid geometry |
-| [`axiolid-dispatch`](./crates/axiolid-dispatch) | `execution.dispatch` | 0.3.12 | Provider registration, ordering, fallback, and execution policy |
+| [`axiolid-dispatch`](./crates/axiolid-dispatch) | `execution.dispatch` | 0.3.13 | Provider registration, ordering, fallback, and execution policy |
 | [`axiolid-mesh-compile`](./crates/axiolid-mesh-compile) | `execution.orchestration` | 0.3.45 | Scalar reference MeshCompiler: profiles, extrusion, transforms, boolean dispatch. |
 
 ## Facade
 
 | Crate | Role | Latest release | Description |
 | --- | --- | --- | --- |
-| [`axiolid`](./crates/axiolid) | `facade` | 0.4.7 | Feature-gated facade for Axiolid's format-neutral geometry stack |
-| [`axiolid-capi`](./crates/axiolid-capi) | `facade.native-c` | 0.3.4 | Versioned, memory-safe C ABI for the Axiolid application facade. |
+| [`axiolid`](./crates/axiolid) | `facade` | 0.5.0 | Feature-gated facade for Axiolid's format-neutral geometry stack |
+| [`axiolid-capi`](./crates/axiolid-capi) | `facade.native-c` | 0.4.0 | Versioned, memory-safe C ABI for the Axiolid application facade. |

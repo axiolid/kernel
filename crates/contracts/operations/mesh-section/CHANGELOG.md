@@ -9,6 +9,8 @@ caret rule for `0.x` versions.
 
 ## [Unreleased]
 
+## [0.3.9] - 2026-11-13
+
 ### Added
 
 - Three conformance fixtures with a pinched cut boundary (piers meeting at a

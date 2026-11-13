@@ -8,8 +8,7 @@ Projection of triangle meshes onto a plane, and prism intersection.
 
 | | |
 | --- | --- |
-| Latest release | 0.3.3 (2026-11-07) |
-| On `main` | 0.4.0 (unreleased) |
+| Latest release | 0.4.0 (2026-11-13) |
 | crates.io | [`axiolid-project`](https://crates.io/crates/axiolid-project) |
 | Facade | [`axiolid`](./axiolid) feature `project` |
 | Layer | algorithms (`algorithm.planar`) |
@@ -28,11 +27,13 @@ Projection of triangle meshes onto a plane and intersection with prisms: the bri
 
 ## Changes
 
-Latest release, 0.3.3 (2026-11-07):
+Latest release, 0.4.0 (2026-11-13):
 
-### Added
+### Changed
 
-- The package now ships `LICENSE` and `LICENSE-COMMERCIAL` (symlinks to the
-  repository root), so the licence texts travel with the archive (#358).
+- **Breaking:** requires `axiolid-overlay` 0.4, whose `OverlayError` is
+  `#[non_exhaustive]` with the new `HolesOverlap` and `PolygonsOverlap`, and
+  whose `Region::new` refuses rings that cross into each other. `ProjectionError::Planar` carries that `OverlayError`, so a `match` on it needs a wildcard arm
+  (#448, ADR 0104).
 
 Full history: [`crates/algorithms/planar/project/CHANGELOG.md`](https://github.com/axiolid/kernel/blob/main/crates/algorithms/planar/project/CHANGELOG.md)

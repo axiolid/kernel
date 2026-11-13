@@ -9,6 +9,8 @@ caret rule for `0.x` versions.
 
 ## [Unreleased]
 
+## [0.4.0] - 2026-11-13
+
 ### Changed
 
 - **Breaking:** requires `axiolid-overlay` 0.4, whose `OverlayError` is

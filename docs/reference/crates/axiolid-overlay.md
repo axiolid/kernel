@@ -8,8 +8,7 @@ Deterministic validated planar overlay contract.
 
 | | |
 | --- | --- |
-| Latest release | 0.3.22 (2026-11-03) |
-| On `main` | 0.4.0 (unreleased) |
+| Latest release | 0.4.0 (2026-11-13) |
 | crates.io | [`axiolid-overlay`](https://crates.io/crates/axiolid-overlay) |
 | Facade | [`axiolid`](./axiolid) feature `overlay` |
 | Layer | algorithms (`algorithm.planar`) |
@@ -96,46 +95,84 @@ Validated, deterministic planar booleans (intersection, union, difference, xor) 
 
 ## Changes
 
-Latest release, 0.3.22 (2026-11-03):
-
-### Added
-
-- `check_arc_polygon_with` and `ArcCheckOptions::with_clearance` add an
-  opt-in clearance check: a pair of edges whose distance has a local minimum
-  strictly between zero and the given one away from their meeting points, or
-  that form an exact cusp (they meet and leave in the same direction), is an
-  `ArcPolygonDefect::Clearance`, naming both edges and a certified lower
-  bound on their distance; the neighbourhood of a meeting point at a nonzero
-  angle (a narrow wedge) is not reported. A certified box
-  bound drops far pairs, then exact signs over offset circles and segment
-  distances decide the rest; a pair the exact tier cannot decide is reported
-  with `undecided` set, never cleared. A non-finite or negative distance is
-  an `ArcPolygonDefect::InvalidClearance`. `check_arc_polygon` and the default
-  options are unchanged (`src/arc_clearance.rs`, #388, ADR 0095).
-  `scripts/probe_arc_clearance_mutants.py` lists the faults its tests must
-  catch.
-- `OverlayError` implements `Display` and `std::error::Error`, so it
-  formats without `{:?}` and converts into `Box<dyn Error>` (#354).
+Latest release, 0.4.0 (2026-11-13):
 
 ### Changed
 
-- `OverlayRefusal`'s message uses the wrapped `OverlayError`'s own wording,
-  and `Error::source` returns it (#354).
+- **Breaking:** `OverlayError` is `#[non_exhaustive]` and gains
+  `HolesOverlap` and `PolygonsOverlap`, which `Region::new` returns; a
+  `match` on it needs a wildcard arm. `HoleOutsideOuter` now also names a
+  hole that crosses its outer ring. `Region::translate` checks its result as
+  `Region::new` does, since rounding each vertex can turn a contact into a
+  crossing; `Region::sweep` moves its copy unchecked, since the copy only
+  feeds `union`, and returns what it did before (#448, ADR 0104).
 
 ### Fixed
 
-- `MorphologyMode::Fast` fills the notches between needles. Its chord
-  proposals reached only `t / 16` from the chord's line (0.0125 m for a
-  disc of radius 0.4 m, `t` 0.2 m), so a wall of needles 0.05 m deep kept
-  every notch and the sum kept its quadratic cost. Proposals now reach `t`.
-  A notch whose spanned vertices all project onto its chord, of length
-  `g`, also has the excess `sqrt(t^2 + g^2 / 4) - t`, which joins the
-  least of its depth and its gap bound; proved in `src/fill.rs`. Fast
-  still keeps a needle deeper than `t`: nothing proposes a chord over it.
-  The deviation and side promises are unchanged (`src/fill.rs`, #340,
-  ADR 0087). Results on #330's toothed rooms are bit for bit the same;
-  hole dilations take longer than before (see the research note).
-  `scripts/probe_fast_morphology_mutants.py` lists the faults its tests
-  must catch.
+- `MorphologyMode::Fast` fills a needle notch deeper than the disc. A wall of
+  needles 0.25 m deep under a disc of radius 0.4 m kept every notch, since no
+  chord was proposed over a notch deeper than `t`: #340's room with a column
+  and 124 such needles gave 562 corners, 500 needles 2,066, both as `Exact`. Proposals now also pass `t` over a needle no wider
+  than `needle_width(t, budget) = 2 sqrt(2 t budget + budget^2)` whose
+  vertices project inside its mouth, and across a vertex exactly on the chord.
+  The bound of a notch deeper than `t` is the widest of its pieces between the
+  vertices exactly on the chord, one needle's (2.5e-8 for a 2 cm fixture)
+  instead of the whole wall's (2.5e-4), and a deep chord over the budget is
+  split at its on-line vertex nearest the middle. The 124 needles give 68
+  corners for a dilation and 72 for an erosion, and the 2,002 and
+  10,002 corner walls of `benches/disc_erosion.rs` (`deep`) in 0.014 to
+  0.017 s and 0.07 s, where main takes 4.4 to 5.0 s at 2,002 corners. The side, the stated deviation and `Exact` are
+  unchanged, and the 30 cases of #330, #340 and #345 in that bench give the
+  same results bit for bit. A wall whose valleys are collinear only up to
+  rounding keeps them (#483). `src/fill.rs`, `src/cover.rs`, ADR 0087 (#428);
+  `scripts/probe_fast_morphology_mutants.py` lists the faults its tests must
+  catch.
+- `Region::new` refuses a polygon set whose rings cross into each other:
+  part of a hole outside its own outer ring (`HoleOutsideOuter`), two holes
+  of one polygon that cross, nest or repeat (`HolesOverlap`), and a point in
+  two polygons (`PolygonsOverlap`). It accepted them, and the operations read
+  such a set three ways: the fast morphology's notch fill took a hole's
+  needles beyond its outer ring for the set's boundary. On #345's fuzz seed
+  21351 (needles at y = 2.2955 past the outer ring's top edge at 2.1202)
+  `dilate_outer_with(0.9046, fast(1e-2))` left out (2.0172, 3.0256), 0.8993
+  from the region, with a stated deviation of 4.7e-3. The check is exact, with
+  no tolerance, on one arrangement of all rings. Rings may still touch at
+  points and share a stretch where their insides lie on opposite sides, which
+  settled outputs do. A region of one ring costs what it did. `Region::new` of
+  a floor of 100,000 corners with 200 holes takes 0.34 s instead of 0.083 s
+  (10,000 corners: 0.032 s instead of 0.007 s;
+  `benches/ring_validation.rs`, case `holes`). `overlay` and `union_soup`
+  operands are unchanged. `src/nesting.rs`;
+  `scripts/probe_region_nesting_mutants.py` lists the faults its tests must
+  catch (#448, ADR 0104).
+
+- The exact arrangement finds the carriers of a piece among the edges that
+  cover it, not among every edge sharing some stretch with its edge. An edge
+  that many others stand on cost the square of their number: 1,000 rooms
+  standing on one corridor edge took 2.2 s, 2,000 took 8.6 s and 4,000 took
+  35 s in `Region::new`, and a rectangle with 1,000 holes standing on its
+  bottom edge took 5.3 s, 2,000 took 19.7 s and 4,000 took 87 s. They now
+  take 0.05 s and 0.22 s (corridor, 1,000 and 4,000) and 0.05 s and 0.23 s
+  (holes). The arrangement is unchanged bit for bit
+  (`benches/ring_validation.rs`, cases `corridor` and `bays`, #448).
+
+- `MorphologyMode::Fast` fills the walls of a floor with sub-budget teeth
+  in bounded time and memory. On #345's 3 m floor (teeth 0.5 mm deep, 1 mm
+  budget) the chord over the room's corner, too deep for the budget, was
+  split at the corner, and the chord left, from the corner along the wall,
+  ended at a valley instead of a tip: not proved, it was split down to
+  single edges, so thousands of teeth stayed and the sum kept their
+  quadratic cost (an inner erosion by 1.4 m took 13 s and 0.86 GB at
+  10,000 corners, 71 s and 4.8 GB at 20,000, over 20 GB at 50,000). A chord
+  not proved is now tried without its start edge, its end edge, or both,
+  before it is split. The results are unchanged bit for bit, the excess is still
+  within the budget and reported, `Exact` is unchanged. Release, median of
+  5, inner erosion, r = 1.4 m: 0.078 s and 6 MB at 10,000 corners, 0.39 s
+  and 15 MB at 50,000, 0.77 s and 25 MB at 100,000, 1.57 s and 48 MB at
+  200,000, with the same for 1.49 m and 1.6 m
+  (`tools/benchmark/benches/disc_erosion.rs`, walls `floor`;
+  `docs/research/fast-morphology-on-toothed-floors.md`; `src/fill.rs`,
+  #345, ADR 0087). `scripts/probe_fast_morphology_mutants.py` lists the
+  faults its tests must catch.
 
 Full history: [`crates/algorithms/planar/overlay/CHANGELOG.md`](https://github.com/axiolid/kernel/blob/main/crates/algorithms/planar/overlay/CHANGELOG.md)

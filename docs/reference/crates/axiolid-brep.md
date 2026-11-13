@@ -8,7 +8,7 @@ Exact analytic B-rep result contracts over neutral topology.
 
 | | |
 | --- | --- |
-| Latest release | 0.3.7 (2026-11-07) |
+| Latest release | 0.3.7 (2026-11-13) |
 | crates.io | [`axiolid-brep`](https://crates.io/crates/axiolid-brep) |
 | Facade | [`axiolid`](./axiolid) feature `brep` |
 | Layer | representations (`representation.composed`) |
@@ -34,7 +34,7 @@ evaluate, intersect, tessellate or traverse geometry.
 
 ## Changes
 
-Latest release, 0.3.7 (2026-11-07):
+Latest release, 0.3.7 (2026-11-13):
 
 ### Added
 

@@ -8,6 +8,35 @@ Every publishable crate versions and publishes independently ([ADR 0067](/adr/00
 
 ## axiolid
 
+### 0.5.0 - 2026-11-13
+
+### Added
+
+- Hidden-line drawings and visible faces join the `discrete` (contract) and
+  `application` (dispatch and exact scalar providers) bundles (#371,
+  ADR 0105). `Application` gains `hidden_lines`, `audit_hidden_lines` and
+  `visible_faces`; `ApplicationBuilder` gains `with_portable_hidden_lines` and
+  `with_portable_visible_faces`, and `Application::portable()` selects both.
+  The descriptor advertises `MESH_HIDDEN_LINES` and `MESH_VISIBLE_FACES`
+  (`Profile2d`, `ToleranceBounded`). Each provider's conformance suite runs
+  once per process, on the first call that reaches it; a failed verdict
+  refuses the call.
+- `IntegrationDescriptor::enabled_features` reports `mesh-hidden-lines`,
+  `dispatch-mesh-hidden-lines` and `hidden-lines-provider`.
+
+### Changed
+
+- **Breaking:** `ApplicationErrorSource` and `ProviderConformanceReport` are
+  `#[non_exhaustive]`. `ApplicationErrorSource` gains `HiddenLines` and
+  `ProviderConformance`; `ProviderConformanceReport` gains `MeshHiddenLines`
+  and `MeshVisibleFaces`. A `match` on either needs a wildcard arm (#371,
+  ADR 0105).
+
+- **Breaking:** requires `axiolid-overlay` 0.4, so `axiolid::overlay` carries
+  `OverlayError` as `#[non_exhaustive]` with the new `HolesOverlap` and
+  `PolygonsOverlap`, and `Region::new` refuses rings that cross into each
+  other. A `match` on `OverlayError` needs a wildcard arm (#448, ADR 0104).
+
 ### 0.4.7 - 2026-11-03
 
 ### Added
@@ -179,7 +208,7 @@ Every publishable crate versions and publishes independently ([ADR 0067](/adr/00
 
 ## axiolid-brep
 
-### 0.3.7 - 2026-11-07
+### 0.3.7 - 2026-11-13
 
 ### Added
 
@@ -288,7 +317,7 @@ Every publishable crate versions and publishes independently ([ADR 0067](/adr/00
 
 ## axiolid-brep-boolean
 
-### 0.1.15 - 2026-11-07
+### 0.1.15 - 2026-11-13
 
 ### Added
 
@@ -768,6 +797,39 @@ Every publishable crate versions and publishes independently ([ADR 0067](/adr/00
 
 ## axiolid-capi
 
+### 0.4.0 - 2026-11-13
+
+### Changed
+
+- **Breaking for Rust callers only.** The public C-mirroring enums
+  `AxiolidStatus`, `AxiolidOperation`, `AxiolidRepresentation`,
+  `AxiolidExactness` and `AxiolidGeometryKind` gain variants (`MeshHiddenLines`,
+  `MeshVisibleFaces`, `HiddenLines`) and are now `#[non_exhaustive]`, so later
+  C-ABI-additive variants are no longer Rust breaks. The C ABI is unchanged
+  and additive (`abi_patch` 1).
+
+### Added
+
+- Visible faces through the C ABI (#386): `axiolid_v0_4_visible_faces` with
+  `AxiolidVisibleFaceLimits`; the result is read with
+  `axiolid_v0_4_visible_faces_counts`, `_copy` (regions, rings, points and
+  triangle indices as flat offset-indexed tables, nothing written unless
+  every capacity covers its count) and `_evidence`. `AxiolidFaceSource`
+  distinguishes group regions from near-plane caps, `AxiolidGeometryKind`
+  gains `VisibleFaces`, and the capability table lists `MeshVisibleFaces`.
+  Arguments, refusals and mesh ids behave as for hidden lines. Existing
+  symbols and layouts are unchanged.
+- Hidden lines through the C ABI (#473): `axiolid_v0_4_hidden_lines` with
+  `AxiolidView`, `AxiolidViewMesh` (roles, group modes including planar),
+  `AxiolidEdgeSelection` (including group boundaries) and
+  `AxiolidHiddenLineLimits`; the result is read with
+  `axiolid_v0_4_hidden_lines_count`, `_copy` and `_evidence`.
+  `axiolid_v0_4_context_last_error_mesh` returns the id of the input mesh a
+  refusal names. `AxiolidOperation` gains `MeshHiddenLines` and
+  `MeshVisibleFaces`, `AxiolidGeometryKind` gains `HiddenLines`, and the
+  capability table lists `MeshHiddenLines`. All arguments are validated at the
+  boundary. `abi_patch` is 1; existing symbols and layouts are unchanged.
+
 ### 0.3.4 - 2026-11-07
 
 ### Added
@@ -870,6 +932,103 @@ Every publishable crate versions and publishes independently ([ADR 0067](/adr/00
 
 
 ## axiolid-construct
+
+### 0.4.0 - 2026-11-13
+
+### Changed
+
+- **Breaking:** requires `axiolid-overlay` 0.4, whose `OverlayError` is
+  `#[non_exhaustive]` with the new `HolesOverlap` and `PolygonsOverlap`, and
+  whose `Region::new` refuses rings that cross into each other. `ProfileFinding::DegenerateRing` carries that `OverlayError`, so a `match` on it needs a wildcard arm
+  (#448, ADR 0104).
+- `revolve_arc_ring` refuses an axis origin with `z != 0` as "exact
+  revolution about an axis out of the profile plane" (#450); it used to
+  accept it unless the section touched the axis.
+- The exact revolution is built about the axis as given (#450). An axis
+  exactly along y (either sense) builds in place with the same geometry as before (the pcurves of a wall's loop are added in another order); any
+  other axis lying exactly in the profile plane (`z` zero in its direction and
+  origin) maps the section rigidly into the axis's own frame, revolves it
+  about +y there and places the solid back with `ExactBRep::transformed`,
+  composites, holes and partial turns included. A tilt of a milliradian was
+  silently snapped onto y within the tolerance, so a groove about an axis
+  tilted 1e-3 rad at radius 2 sat 2 mm from where it was asked for (the
+  mesh/exact comparison read a certified 4.5e-3 against a 1e-3 budget); it
+  is now exact, and a section the tilted axis puts on both sides is refused
+  as crossing it. An axis with a component out of the plane (a direction `z`
+  or an origin `z` other than exactly zero) is `UnsupportedInput` ("exact
+  revolution about an axis out of the profile plane"): its edges sweep
+  hyperboloids, so there is no tolerance band to offer; a zero or non-finite
+  axis is invalid input. `revolve_arc_ring` refuses an origin off the plane
+  the same way. In the axis's frame a vertex exactly on the axis is put on it
+  and a disc edge exactly perpendicular to it keeps equal heights; a vertex
+  the rotation's rounding cannot keep on its side, and an edge not exactly
+  perpendicular whose heights round equal, are refused by name.
+- An arc of a lowered contour evaluates `sin` and `cos` exactly at a quarter
+  turn (#379): a parameter within `2 * EPSILON * max(1, |t|)` of one (every
+  form a producer writes, `FRAC_PI_2`, `-PI / 2`, `1.5 * PI`,
+  `PI + FRAC_PI_2`, ...) puts the end of the arc at exactly `0` and `+-1`
+  in that coordinate, where it used to be up to `0.55 * t * EPSILON` off
+  (`0.18` at the quadrants of a turn or two). A ring that lowered before is
+  unchanged except at the arc's ends and at split vertices that land on a
+  quadrant, by less than the error of the point itself; a parameter 1e-12
+  from a quarter turn keeps its angle. The joint check reads the arc's radius
+  times `max(1, |t|)` in its scale, so an arc of a large parameter closed by
+  a line between its raw ends still lowers at `Tolerance::ZERO`. This makes an arc end on a revolution axis through its centre
+  exactly on it, which the exact revolution needs. A rounding gate like the
+  joint rule (#250), not reported.
+
+### Added
+
+- `revolve_profile_exact` and `revolve_arc_ring` revolve a full turn of a
+  profile that touches the axis (#379): along edges lying on it, at straight
+  edges ending on it exactly perpendicularly (a disc cap: a solid cylinder, a
+  stepped shaft), at any other straight edge ending on it (a cone up to its
+  apex: a cone, a bolt, a spinning top, a top with a cavity) and at an arc
+  ending on it with its circle centred on it (a sphere up to its pole: a
+  ball, a domed column, a hemisphere cap). An axis edge sweeps no face. A
+  vertex on the axis is admitted when one of its two edges lies on the axis;
+  the contact is classified with the exact `side_of_axis` sign, no
+  tolerance. An apex or pole is a vertex of the B-rep, not a degenerate edge:
+  the cone is framed at its apex with radius zero, the sphere on the axis at
+  the height equidistant from both arc ends, and the wall's loop leaves a gap
+  along the pole line in its parameters, which the boolean and the
+  deviation oracle close. Whether an arc is a sphere's meridian is decided
+  within `64 * EPSILON` of the largest magnitude it is computed from: its
+  coordinates, the axis's and, about an axis in another direction, the given
+  section's (a bulge cannot encode a quarter arc exactly, and a radius is a
+  difference of numbers of the axis's size); the sphere is placed exactly on
+  the axis, and the gate is not reported, as it only chooses between that
+  sphere and a refusal. A section crossing the axis, touching it at a vertex
+  with no edge along it (a pinch point), ending on it at an arc whose circle
+  is not centred on it (a lemon, an apple, an ogive nose: a spindle or horn
+  torus), at an arc with both ends on it or at an arc running across it stays
+  `UnsupportedInput` by name, as does a vertex within the tolerance of the
+  axis but not on it to the bit and an edge ending on the axis within the
+  tolerance of perpendicular to it but not exactly, and a straight edge so
+  near perpendicular that a cone's angle cannot carry its slope (below).
+  A semicircle (a bulge of exactly one) between two vertices on the axis is
+  split at its midpoint, as the lowering splits a half turn, and revolves to
+  a ball; another bulge between them is a lemon and is refused. A section
+  with several contacts (a cavity
+  along the axis) gives one solid per outermost piece with the nested pieces
+  as void shells, nested by the heights of every face's stations, poles
+  included; a solid inside a cavity is refused.
+
+### Fixed
+
+- A cone whose edge is nearly perpendicular to the axis was built with an
+  angle that does not carry its slope when the tolerance did not cover it
+  (#379): at `Tolerance::ZERO`, a frustum `[(1,0),(2,1e-12),(2,1),(1,1)]`
+  came back `Ok` with its pcurves 7e-5 off their curves, and the same for a
+  cone's apex edge. The exact revolution now refuses an edge whose
+  `rise * tan(angle)` differs from its radius change by more than the
+  tolerance or eight machine epsilons of its largest coordinate, whichever
+  is larger, as an edge so near perpendicular to the axis that a cone cannot
+  carry its slope.
+- `revolve_arc_ring` mirrored a section on the negative side of the axis
+  without walking it backwards, so its walls faced inward and its signed
+  volume was negative; the mirrored section is now walked the other way
+  round (#379).
 
 ### 0.3.29 - 2026-11-03
 
@@ -2474,6 +2633,26 @@ Every publishable crate versions and publishes independently ([ADR 0067](/adr/00
 
 ## axiolid-dispatch
 
+### 0.3.13 - 2026-11-13
+
+### Added
+
+- `MeshHiddenLinesRegistry` and `MeshVisibleFacesRegistry` route by
+  `supports_projection`: a provider that does not support the view's
+  projection is skipped, and a request no provider supports is `Unsupported`
+  before the topology audit. A perspective view needs a `near` below zero
+  (`InvalidInput` otherwise). `register_perspective_conformant` registers a
+  provider after the base suite and the perspective suite. `register_conformant`
+  of both registries also runs the perspective suite when the provider claims
+  perspective, so an unverified claim is refused (ADR 0107, #387).
+- `MeshVisibleFacesRegistry` accepts `FaceGroups::Planar`: it checks that a
+  region's group id is a triangle of the mesh and no later than any triangle
+  the region lists, and does not recompute the groups (ADR 0106, #384).
+- `MeshHiddenLinesRegistry` accepts `EdgeKind::GroupBoundary` segments only
+  when `EdgeSelection::group_boundary` is set, and then refuses a
+  `PerTriangle` group slice of the wrong length naming the mesh (ADR 0106,
+  #385).
+
 ### 0.3.12 - 2026-11-03
 
 ### Added
@@ -2612,7 +2791,7 @@ Every publishable crate versions and publishes independently ([ADR 0067](/adr/00
 
 ## axiolid-evaluate
 
-### 0.3.21 - 2026-11-07
+### 0.3.21 - 2026-11-13
 
 ### Added
 
@@ -3670,7 +3849,7 @@ Every publishable crate versions and publishes independently ([ADR 0067](/adr/00
 
 ## axiolid-hidden-lines
 
-### 0.1.4 - 2026-11-07
+### 0.1.4 - 2026-11-13
 
 ### Added
 
@@ -3681,6 +3860,19 @@ Every publishable crate versions and publishes independently ([ADR 0067](/adr/00
 - `ScalarHiddenLines` draws `EdgeKind::GroupBoundary` when
   `EdgeSelection::group_boundary` is set, resolving the groups only then;
   with it off the output is unchanged (ADR 0106, #385).
+
+- The hidden-line and visible-face providers refuse a perspective view by
+  name (`UnsupportedInput`, input `perspective view`) when called directly,
+  and do not claim it through `supports_projection` (ADR 0107, #387).
+
+### Changed
+
+- The providers' view-space vertices carry exact homogeneous coordinates
+  `[U, V, W, h]` with `h = 1` in an orthographic view, preparing perspective
+  (ADR 0107, #387). The drawings are bit for bit the same: the segment hash
+  of every `scenario/hidden-lines` case is unchanged, and the wall clock
+  there is unchanged (isometric and cut plan at 20x20 and 50x50 agree with
+  the previous commit within run-to-run noise).
 
 ### 0.1.3 - 2026-11-03
 
@@ -3781,7 +3973,7 @@ Every publishable crate versions and publishes independently ([ADR 0067](/adr/00
 
 ## axiolid-inspect
 
-### 0.3.10 - 2026-11-07
+### 0.3.10 - 2026-11-13
 
 ### Added
 
@@ -4016,6 +4208,57 @@ Every publishable crate versions and publishes independently ([ADR 0067](/adr/00
 
 
 ## axiolid-measure
+
+### 0.3.15 - 2026-11-13
+
+### Changed
+
+- `DistanceBounds::upper` (all distance and clearance queries, plan and body
+  variants) is at least the distance between the boundary points the
+  witnesses stand for, not their computed distance: it adds their evaluation
+  rounding, 16 ulps of each side's witness scale. A plan overlap still
+  reports `[0, 0]` (#439).
+
+### Fixed
+
+- At georeferenced coordinates `Clearance::Below` could be claimed within
+  about `1e-8` of a limit the distance does not go below (#439).
+- The exact Hausdorff lower bound takes off its witness's rounding (a face
+  charted from far away but lying near the origin raised it up to about
+  `1e-9` past the distance), and a point query's upper adds its nearest
+  point's (#439).
+- B-spline witnesses are padded by the de Boor evaluation's rounding, a
+  bound that counts the degrees and the weights' spread (#439). A B-spline
+  face whose weight ratio exceeds `1 / (64 L eps)` (`L` the sum of its
+  degrees, about `3.5e13` for a bilinear patch) is refused with
+  `ExactMeasureError::NonPlanarFace`, since that bound is first order.
+- The exact Hausdorff upper bound about a B-spline patch's witness adds the
+  distance from the witness to the centre of the patch's enclosing sphere
+  (the control net's box midpoint), which it left out and so could report an
+  upper bound below the distance (#459).
+- The exact boundary distance and Hausdorff distance carry rounding margins
+  derived from the magnitudes their numbers are computed from, in ulps of the
+  coordinates, instead of `1e-12` of them. At georeferenced coordinates
+  (450000, 5600000) the old margins left an interval about `1e-5` wide that
+  never closed to the accuracy asked; a search now settles at a floor of
+  128 ulps of its scale, about `3.2e-7` there and `6e-14` at unit scale, and
+  an accuracy below the floor is never reported as met (#318).
+- The distance search closes gaps along a planar face's normal on certified
+  foot witnesses (the foot of a witness on a planar face, the closest points
+  of two line edges) instead of waiting for patch centres to line up, and
+  the point queries of the Hausdorff search pop equal bounds first in, first
+  out (#318).
+- The margin for taking two boundary points as touching is 128 ulps of their
+  magnitudes, not `1e-12` of them: items of one body apart by more than that
+  are measured instead of refused as `ItemsNearlyShareFace`, and at unit scale
+  a `1e-13` gap is now a gap (#318).
+- The sphere and torus branches of a projected range carried no rounding pad
+  at all (#318).
+- The Hausdorff matched bound, a translate's re-charted surface and cone pole,
+  and the displacement gate use the same derived margins, and a plane,
+  cylinder or elliptical cylinder is Lipschitz by its axes rather than
+  `1 + |v|` times as steep, which had inflated the bound of patches charted
+  in world coordinates (#318).
 
 ### 0.3.14 - 2026-11-04
 
@@ -4702,7 +4945,7 @@ Every publishable crate versions and publishes independently ([ADR 0067](/adr/00
 
 ## axiolid-mesh-compile
 
-### 0.3.45 - 2026-11-07
+### 0.3.45 - 2026-11-13
 
 ### Added
 
@@ -6908,7 +7151,7 @@ Every publishable crate versions and publishes independently ([ADR 0067](/adr/00
 
 ## axiolid-mesh-hidden-lines-contract
 
-### 0.1.5 - 2026-11-07
+### 0.1.5 - 2026-11-13
 
 ### Added
 
@@ -6923,6 +7166,23 @@ Every publishable crate versions and publishes independently ([ADR 0067](/adr/00
   selected crease. With the selection off the groups stay ignored and the
   output is unchanged (ADR 0106, #385). Conformance gains the planar
   isometric cube and a two-group square sheet.
+
+- `ViewProjection` (`Orthographic`, the default, and `Perspective`), the
+  `View::projection` field, `View::perspective(frame,
+  near)` (refuses a `near` that is not finite and below zero) and a defaulted
+  `supports_projection` on `MeshHiddenLines` and `MeshVisibleFaces` that is
+  `true` for `Orthographic` only. Registries route by it, so a provider that
+  predates the field is never given a perspective view. The new
+  `conformance::perspective::PerspectiveConformanceSuite` infers the claim
+  from `supports_projection`: an unclaiming provider must refuse a perspective
+  request by name, and a claim fails closed until perspective fixtures exist
+  (ADR 0107, #387). No provider draws perspective yet.
+
+### Changed
+
+- `OrthographicView` is renamed `View`, because a view can now be
+  perspective. The old name stays as a deprecated type alias, so existing code
+  compiles with a deprecation warning (ADR 0107, #387).
 
 ### 0.1.4 - 2026-11-07
 
@@ -6994,6 +7254,21 @@ Every publishable crate versions and publishes independently ([ADR 0067](/adr/00
 
 
 ## axiolid-mesh-section-contract
+
+### 0.3.9 - 2026-11-13
+
+### Added
+
+- Three conformance fixtures with a pinched cut boundary (piers meeting at a
+  corner, three piers at one vertex, a block with a void touching its wall).
+  A provider may answer them with the split cut or with
+  `REFUSED_PINCHED_CUT_REGION` (#373).
+
+### Changed
+
+- The cut invariants document the pinch rule: rings are split where the
+  boundary meets itself at a vertex, so each region is one connected piece
+  written as simple rings that may touch (#373).
 
 ### 0.3.8 - 2026-11-07
 
@@ -7141,6 +7416,16 @@ Every publishable crate versions and publishes independently ([ADR 0067](/adr/00
 
 
 ## axiolid-model
+
+### 0.3.19 - 2026-11-13
+
+### Changed
+
+- `SurfaceRelation::Revolution` and `LinearExtrusion` document their
+  parameterisation: a revolution is `O + R_a(u) (c(v) - O)` with `u` the
+  right-handed angle about the normalised axis and `v` the swept curve's own
+  parameter, an extrusion is `c(u) + v d` with `v` in units of the
+  direction's length (#411, ADR 0103).
 
 ### 0.3.18 - 2026-11-03
 
@@ -7533,6 +7818,26 @@ Every publishable crate versions and publishes independently ([ADR 0067](/adr/00
 
 ## axiolid-nurbs
 
+### 0.3.10 - 2026-11-13
+
+### Added
+
+- `ExactCurveRefusal::Undecided`: the roots along a traced section could not
+  all be isolated with their multiplicity (a contact of order above eight,
+  one rounding hides, or the work budget ran out). It says nothing of
+  whether the curve meets the surface (#427).
+
+### Fixed
+
+- A traced section against a surface that touches it at a higher order (a
+  cylinder osculating the section, a plane tangent at its extreme) no longer
+  hangs. Roots are certified with their multiplicity up to order 8, where the
+  enclosures resolve it, by a Rolle chain on `det(grad F, grad H_j)`, the
+  derivatives of the second field along the curve. Higher orders, contacts
+  the enclosures cannot resolve (a flat stretch of a field next to crossings,
+  often at orders 7 and 8 on trigonometric fields) and over-budget cases
+  return `Undecided` instead of a guessed touch at the depth floor (#427).
+
 ### 0.3.9 - 2026-11-07
 
 ### Fixed
@@ -7817,6 +8122,86 @@ Every publishable crate versions and publishes independently ([ADR 0067](/adr/00
 
 
 ## axiolid-overlay
+
+### 0.4.0 - 2026-11-13
+
+### Changed
+
+- **Breaking:** `OverlayError` is `#[non_exhaustive]` and gains
+  `HolesOverlap` and `PolygonsOverlap`, which `Region::new` returns; a
+  `match` on it needs a wildcard arm. `HoleOutsideOuter` now also names a
+  hole that crosses its outer ring. `Region::translate` checks its result as
+  `Region::new` does, since rounding each vertex can turn a contact into a
+  crossing; `Region::sweep` moves its copy unchecked, since the copy only
+  feeds `union`, and returns what it did before (#448, ADR 0104).
+
+### Fixed
+
+- `MorphologyMode::Fast` fills a needle notch deeper than the disc. A wall of
+  needles 0.25 m deep under a disc of radius 0.4 m kept every notch, since no
+  chord was proposed over a notch deeper than `t`: #340's room with a column
+  and 124 such needles gave 562 corners, 500 needles 2,066, both as `Exact`. Proposals now also pass `t` over a needle no wider
+  than `needle_width(t, budget) = 2 sqrt(2 t budget + budget^2)` whose
+  vertices project inside its mouth, and across a vertex exactly on the chord.
+  The bound of a notch deeper than `t` is the widest of its pieces between the
+  vertices exactly on the chord, one needle's (2.5e-8 for a 2 cm fixture)
+  instead of the whole wall's (2.5e-4), and a deep chord over the budget is
+  split at its on-line vertex nearest the middle. The 124 needles give 68
+  corners for a dilation and 72 for an erosion, and the 2,002 and
+  10,002 corner walls of `benches/disc_erosion.rs` (`deep`) in 0.014 to
+  0.017 s and 0.07 s, where main takes 4.4 to 5.0 s at 2,002 corners. The side, the stated deviation and `Exact` are
+  unchanged, and the 30 cases of #330, #340 and #345 in that bench give the
+  same results bit for bit. A wall whose valleys are collinear only up to
+  rounding keeps them (#483). `src/fill.rs`, `src/cover.rs`, ADR 0087 (#428);
+  `scripts/probe_fast_morphology_mutants.py` lists the faults its tests must
+  catch.
+- `Region::new` refuses a polygon set whose rings cross into each other:
+  part of a hole outside its own outer ring (`HoleOutsideOuter`), two holes
+  of one polygon that cross, nest or repeat (`HolesOverlap`), and a point in
+  two polygons (`PolygonsOverlap`). It accepted them, and the operations read
+  such a set three ways: the fast morphology's notch fill took a hole's
+  needles beyond its outer ring for the set's boundary. On #345's fuzz seed
+  21351 (needles at y = 2.2955 past the outer ring's top edge at 2.1202)
+  `dilate_outer_with(0.9046, fast(1e-2))` left out (2.0172, 3.0256), 0.8993
+  from the region, with a stated deviation of 4.7e-3. The check is exact, with
+  no tolerance, on one arrangement of all rings. Rings may still touch at
+  points and share a stretch where their insides lie on opposite sides, which
+  settled outputs do. A region of one ring costs what it did. `Region::new` of
+  a floor of 100,000 corners with 200 holes takes 0.34 s instead of 0.083 s
+  (10,000 corners: 0.032 s instead of 0.007 s;
+  `benches/ring_validation.rs`, case `holes`). `overlay` and `union_soup`
+  operands are unchanged. `src/nesting.rs`;
+  `scripts/probe_region_nesting_mutants.py` lists the faults its tests must
+  catch (#448, ADR 0104).
+
+- The exact arrangement finds the carriers of a piece among the edges that
+  cover it, not among every edge sharing some stretch with its edge. An edge
+  that many others stand on cost the square of their number: 1,000 rooms
+  standing on one corridor edge took 2.2 s, 2,000 took 8.6 s and 4,000 took
+  35 s in `Region::new`, and a rectangle with 1,000 holes standing on its
+  bottom edge took 5.3 s, 2,000 took 19.7 s and 4,000 took 87 s. They now
+  take 0.05 s and 0.22 s (corridor, 1,000 and 4,000) and 0.05 s and 0.23 s
+  (holes). The arrangement is unchanged bit for bit
+  (`benches/ring_validation.rs`, cases `corridor` and `bays`, #448).
+
+- `MorphologyMode::Fast` fills the walls of a floor with sub-budget teeth
+  in bounded time and memory. On #345's 3 m floor (teeth 0.5 mm deep, 1 mm
+  budget) the chord over the room's corner, too deep for the budget, was
+  split at the corner, and the chord left, from the corner along the wall,
+  ended at a valley instead of a tip: not proved, it was split down to
+  single edges, so thousands of teeth stayed and the sum kept their
+  quadratic cost (an inner erosion by 1.4 m took 13 s and 0.86 GB at
+  10,000 corners, 71 s and 4.8 GB at 20,000, over 20 GB at 50,000). A chord
+  not proved is now tried without its start edge, its end edge, or both,
+  before it is split. The results are unchanged bit for bit, the excess is still
+  within the budget and reported, `Exact` is unchanged. Release, median of
+  5, inner erosion, r = 1.4 m: 0.078 s and 6 MB at 10,000 corners, 0.39 s
+  and 15 MB at 50,000, 0.77 s and 25 MB at 100,000, 1.57 s and 48 MB at
+  200,000, with the same for 1.49 m and 1.6 m
+  (`tools/benchmark/benches/disc_erosion.rs`, walls `floor`;
+  `docs/research/fast-morphology-on-toothed-floors.md`; `src/fill.rs`,
+  #345, ADR 0087). `scripts/probe_fast_morphology_mutants.py` lists the
+  faults its tests must catch.
 
 ### 0.3.22 - 2026-11-03
 
@@ -8804,6 +9189,15 @@ Every publishable crate versions and publishes independently ([ADR 0067](/adr/00
 
 ## axiolid-project
 
+### 0.4.0 - 2026-11-13
+
+### Changed
+
+- **Breaking:** requires `axiolid-overlay` 0.4, whose `OverlayError` is
+  `#[non_exhaustive]` with the new `HolesOverlap` and `PolygonsOverlap`, and
+  whose `Region::new` refuses rings that cross into each other. `ProjectionError::Planar` carries that `OverlayError`, so a `match` on it needs a wildcard arm
+  (#448, ADR 0104).
+
 ### 0.3.3 - 2026-11-07
 
 ### Added
@@ -8865,7 +9259,7 @@ Every publishable crate versions and publishes independently ([ADR 0067](/adr/00
 
 ## axiolid-reference
 
-### 0.3.17 - 2026-11-07
+### 0.3.17 - 2026-11-13
 
 ### Added
 
@@ -9162,6 +9556,15 @@ Every publishable crate versions and publishes independently ([ADR 0067](/adr/00
 
 
 ## axiolid-route
+
+### 0.4.0 - 2026-11-13
+
+### Changed
+
+- **Breaking:** requires `axiolid-overlay` 0.4, whose `OverlayError` is
+  `#[non_exhaustive]` with the new `HolesOverlap` and `PolygonsOverlap`, and
+  whose `Region::new` refuses rings that cross into each other. `skeleton` and `CostRegion::new` take overlay's `Polygon`, so a caller builds it with overlay 0.4
+  (#448, ADR 0104).
 
 ### 0.3.9 - 2026-11-07
 

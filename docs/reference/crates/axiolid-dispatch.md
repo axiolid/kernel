@@ -8,7 +8,7 @@ Provider registration, ordering, fallback, and execution policy.
 
 | | |
 | --- | --- |
-| Latest release | 0.3.12 (2026-11-03) |
+| Latest release | 0.3.13 (2026-11-13) |
 | crates.io | [`axiolid-dispatch`](https://crates.io/crates/axiolid-dispatch) |
 | Facade | [`axiolid`](./axiolid) feature `dispatch-mesh-boolean`, `dispatch-mesh-hidden-lines`, `dispatch-mesh-section`, `dispatch-pointcloud-reconstruction` |
 | Layer | execution (`execution.dispatch`) |
@@ -54,21 +54,24 @@ Default: none.
 
 ## Changes
 
-Latest release, 0.3.12 (2026-11-03):
+Latest release, 0.3.13 (2026-11-13):
 
 ### Added
 
-- `MeshVisibleFacesRegistry` (feature `mesh-hidden-lines`): registration,
-  conformance-gated registration, fallback on `Unsupported`/`Unavailable`
-  only, memory admission, and an outcome check (mesh provenance, rings,
-  ascending triangles of the region's group, caps only for a solid with a
-  near plane, order, limits and evidence). A group slice whose length is not
-  the triangle count is refused naming the mesh (ADR 0094, #383).
-
-### Changed
-
-- The shape, topology and memory checks that the hidden-line registry ran
-  moved into helpers shared with the visible-face registry; the refusals
-  are unchanged.
+- `MeshHiddenLinesRegistry` and `MeshVisibleFacesRegistry` route by
+  `supports_projection`: a provider that does not support the view's
+  projection is skipped, and a request no provider supports is `Unsupported`
+  before the topology audit. A perspective view needs a `near` below zero
+  (`InvalidInput` otherwise). `register_perspective_conformant` registers a
+  provider after the base suite and the perspective suite. `register_conformant`
+  of both registries also runs the perspective suite when the provider claims
+  perspective, so an unverified claim is refused (ADR 0107, #387).
+- `MeshVisibleFacesRegistry` accepts `FaceGroups::Planar`: it checks that a
+  region's group id is a triangle of the mesh and no later than any triangle
+  the region lists, and does not recompute the groups (ADR 0106, #384).
+- `MeshHiddenLinesRegistry` accepts `EdgeKind::GroupBoundary` segments only
+  when `EdgeSelection::group_boundary` is set, and then refuses a
+  `PerTriangle` group slice of the wrong length naming the mesh (ADR 0106,
+  #385).
 
 Full history: [`crates/execution/dispatch/CHANGELOG.md`](https://github.com/axiolid/kernel/blob/main/crates/execution/dispatch/CHANGELOG.md)

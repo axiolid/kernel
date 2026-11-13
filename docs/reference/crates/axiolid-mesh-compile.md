@@ -8,7 +8,7 @@ Scalar reference MeshCompiler: profiles, extrusion, transforms, boolean dispatch
 
 | | |
 | --- | --- |
-| Latest release | 0.3.45 (2026-11-07) |
+| Latest release | 0.3.45 (2026-11-13) |
 | crates.io | [`axiolid-mesh-compile`](https://crates.io/crates/axiolid-mesh-compile) |
 | Layer | execution (`execution.orchestration`) |
 | API documentation | [rustdoc](/api/rustdoc/axiolid_mesh_compile/index.html) · [docs.rs](https://docs.rs/axiolid-mesh-compile) |
@@ -118,7 +118,7 @@ owns graph traversal and dispatch; the construction algorithms themselves
 
 ## Changes
 
-Latest release, 0.3.45 (2026-11-07):
+Latest release, 0.3.45 (2026-11-13):
 
 ### Added
 

@@ -8,7 +8,7 @@ Mesh queries: clearance, containment, ray casting, and genus.
 
 | | |
 | --- | --- |
-| Latest release | 0.3.10 (2026-11-07) |
+| Latest release | 0.3.10 (2026-11-13) |
 | crates.io | [`axiolid-inspect`](https://crates.io/crates/axiolid-inspect) |
 | Layer | algorithms (`algorithm.query`) |
 | API documentation | [rustdoc](/api/rustdoc/axiolid_inspect/index.html) · [docs.rs](https://docs.rs/axiolid-inspect) |
@@ -30,7 +30,7 @@ Queries over triangle meshes: clearance between meshes, faces that nearly share 
 
 ## Changes
 
-Latest release, 0.3.10 (2026-11-07):
+Latest release, 0.3.10 (2026-11-13):
 
 ### Added
 

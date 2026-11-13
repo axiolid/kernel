@@ -9,6 +9,8 @@ caret rule for `0.x` versions.
 
 ## [Unreleased]
 
+## [0.3.19] - 2026-11-13
+
 ### Changed
 
 - `SurfaceRelation::Revolution` and `LinearExtrusion` document their

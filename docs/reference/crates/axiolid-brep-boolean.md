@@ -8,7 +8,7 @@ General exact B-rep booleans over analytic faces (ADR 0075).
 
 | | |
 | --- | --- |
-| Latest release | 0.1.15 (2026-11-07) |
+| Latest release | 0.1.15 (2026-11-13) |
 | crates.io | [`axiolid-brep-boolean`](https://crates.io/crates/axiolid-brep-boolean) |
 | Layer | algorithms (`algorithm.construction`) |
 | API documentation | [rustdoc](/api/rustdoc/axiolid_brep_boolean/index.html) · [docs.rs](https://docs.rs/axiolid-brep-boolean) |
@@ -51,7 +51,7 @@ results against them.
 
 ## Changes
 
-Latest release, 0.1.15 (2026-11-07):
+Latest release, 0.1.15 (2026-11-13):
 
 ### Added
 

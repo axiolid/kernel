@@ -8,7 +8,7 @@ Portable hidden-line drawing request, result, and conformance contract for trian
 
 | | |
 | --- | --- |
-| Latest release | 0.1.5 (2026-11-07) |
+| Latest release | 0.1.5 (2026-11-13) |
 | crates.io | [`axiolid-mesh-hidden-lines-contract`](https://crates.io/crates/axiolid-mesh-hidden-lines-contract) |
 | Facade | [`axiolid`](./axiolid) feature `mesh-hidden-lines` |
 | Layer | contracts (`contract.operation`) |
@@ -41,7 +41,7 @@ draws perspective yet.
 
 ## Changes
 
-Latest release, 0.1.5 (2026-11-07):
+Latest release, 0.1.5 (2026-11-13):
 
 ### Added
 
@@ -56,5 +56,22 @@ Latest release, 0.1.5 (2026-11-07):
   selected crease. With the selection off the groups stay ignored and the
   output is unchanged (ADR 0106, #385). Conformance gains the planar
   isometric cube and a two-group square sheet.
+
+- `ViewProjection` (`Orthographic`, the default, and `Perspective`), the
+  `View::projection` field, `View::perspective(frame,
+  near)` (refuses a `near` that is not finite and below zero) and a defaulted
+  `supports_projection` on `MeshHiddenLines` and `MeshVisibleFaces` that is
+  `true` for `Orthographic` only. Registries route by it, so a provider that
+  predates the field is never given a perspective view. The new
+  `conformance::perspective::PerspectiveConformanceSuite` infers the claim
+  from `supports_projection`: an unclaiming provider must refuse a perspective
+  request by name, and a claim fails closed until perspective fixtures exist
+  (ADR 0107, #387). No provider draws perspective yet.
+
+### Changed
+
+- `OrthographicView` is renamed `View`, because a view can now be
+  perspective. The old name stays as a deprecated type alias, so existing code
+  compiles with a deprecation warning (ADR 0107, #387).
 
 Full history: [`crates/contracts/operations/mesh-hidden-lines/CHANGELOG.md`](https://github.com/axiolid/kernel/blob/main/crates/contracts/operations/mesh-hidden-lines/CHANGELOG.md)

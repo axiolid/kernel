@@ -8,8 +8,7 @@ Solid generation: profiles, lofts, sweeps, revolutions and half-space clipping.
 
 | | |
 | --- | --- |
-| Latest release | 0.3.29 (2026-11-03) |
-| On `main` | 0.4.0 (unreleased) |
+| Latest release | 0.4.0 (2026-11-13) |
 | crates.io | [`axiolid-construct`](https://crates.io/crates/axiolid-construct) |
 | Facade | [`axiolid`](./axiolid) feature `generate` |
 | Layer | algorithms (`algorithm.construction`) |
@@ -74,81 +73,101 @@ dependencies, so the allowlist in `Cargo.toml` is what keeps it out.
 
 ## Changes
 
-Latest release, 0.3.29 (2026-11-03):
-
-### Added
-
-- `ExactProfileValidator::validate_with` and `validate_contours_with` take
-  `ArcCheckOptions`; with a clearance, segments of the lowered contour whose
-  distance has a local minimum below it away from their meeting points, or
-  that form an exact cusp, are a `ProfileFinding::Clearance` naming both
-  segments (a narrow wedge at a nonzero angle is not reported), with a certified lower
-  bound on their distance and an `undecided` flag for a pair the exact check
-  could not clear. `ValidateProfile::validate` and the extruder are unchanged
-  (#388, ADR 0095).
-
-- `profile::paired_profile_rings` and `PairedRings` (#361): profiles whose
-  rings pair segment for segment (lines, circular and elliptic arcs, matched
-  by ring and segment index after orientation, a derived profile's
-  transform applied after the snap) are flattened together, each segment
-  into one common number of equal parameter steps, with the deviation of
-  every section interpolated between them. A polyline or B-spline segment,
-  another family or a different segment structure returns `None`.
+Latest release, 0.4.0 (2026-11-13):
 
 ### Changed
 
-- `contour_to_arc_ring` and the profile validator lower `Curve2::Polyline`
-  contour segments exactly: one straight ring vertex per polyline vertex the
-  segment passes, stored points taken bit for bit, a domain outside
-  `[0, segments]` refused as degenerate rather than clamped. A contour now
-  needs two ring vertices, not two segments, so one closed polyline or one
-  full circle is a whole contour; the `TooFewSegments` message says so
-  (#389).
+- **Breaking:** requires `axiolid-overlay` 0.4, whose `OverlayError` is
+  `#[non_exhaustive]` with the new `HolesOverlap` and `PolygonsOverlap`, and
+  whose `Region::new` refuses rings that cross into each other. `ProfileFinding::DegenerateRing` carries that `OverlayError`, so a `match` on it needs a wildcard arm
+  (#448, ADR 0104).
+- `revolve_arc_ring` refuses an axis origin with `z != 0` as "exact
+  revolution about an axis out of the profile plane" (#450); it used to
+  accept it unless the section touched the axis.
+- The exact revolution is built about the axis as given (#450). An axis
+  exactly along y (either sense) builds in place with the same geometry as before (the pcurves of a wall's loop are added in another order); any
+  other axis lying exactly in the profile plane (`z` zero in its direction and
+  origin) maps the section rigidly into the axis's own frame, revolves it
+  about +y there and places the solid back with `ExactBRep::transformed`,
+  composites, holes and partial turns included. A tilt of a milliradian was
+  silently snapped onto y within the tolerance, so a groove about an axis
+  tilted 1e-3 rad at radius 2 sat 2 mm from where it was asked for (the
+  mesh/exact comparison read a certified 4.5e-3 against a 1e-3 budget); it
+  is now exact, and a section the tilted axis puts on both sides is refused
+  as crossing it. An axis with a component out of the plane (a direction `z`
+  or an origin `z` other than exactly zero) is `UnsupportedInput` ("exact
+  revolution about an axis out of the profile plane"): its edges sweep
+  hyperboloids, so there is no tolerance band to offer; a zero or non-finite
+  axis is invalid input. `revolve_arc_ring` refuses an origin off the plane
+  the same way. In the axis's frame a vertex exactly on the axis is put on it
+  and a disc edge exactly perpendicular to it keeps equal heights; a vertex
+  the rotation's rounding cannot keep on its side, and an edge not exactly
+  perpendicular whose heights round equal, are refused by name.
+- An arc of a lowered contour evaluates `sin` and `cos` exactly at a quarter
+  turn (#379): a parameter within `2 * EPSILON * max(1, |t|)` of one (every
+  form a producer writes, `FRAC_PI_2`, `-PI / 2`, `1.5 * PI`,
+  `PI + FRAC_PI_2`, ...) puts the end of the arc at exactly `0` and `+-1`
+  in that coordinate, where it used to be up to `0.55 * t * EPSILON` off
+  (`0.18` at the quadrants of a turn or two). A ring that lowered before is
+  unchanged except at the arc's ends and at split vertices that land on a
+  quadrant, by less than the error of the point itself; a parameter 1e-12
+  from a quarter turn keeps its angle. The joint check reads the arc's radius
+  times `max(1, |t|)` in its scale, so an arc of a large parameter closed by
+  a line between its raw ends still lowers at `Tolerance::ZERO`. This makes an arc end on a revolution axis through its centre
+  exactly on it, which the exact revolution needs. A rounding gate like the
+  joint rule (#250), not reported.
+
+### Added
+
+- `revolve_profile_exact` and `revolve_arc_ring` revolve a full turn of a
+  profile that touches the axis (#379): along edges lying on it, at straight
+  edges ending on it exactly perpendicularly (a disc cap: a solid cylinder, a
+  stepped shaft), at any other straight edge ending on it (a cone up to its
+  apex: a cone, a bolt, a spinning top, a top with a cavity) and at an arc
+  ending on it with its circle centred on it (a sphere up to its pole: a
+  ball, a domed column, a hemisphere cap). An axis edge sweeps no face. A
+  vertex on the axis is admitted when one of its two edges lies on the axis;
+  the contact is classified with the exact `side_of_axis` sign, no
+  tolerance. An apex or pole is a vertex of the B-rep, not a degenerate edge:
+  the cone is framed at its apex with radius zero, the sphere on the axis at
+  the height equidistant from both arc ends, and the wall's loop leaves a gap
+  along the pole line in its parameters, which the boolean and the
+  deviation oracle close. Whether an arc is a sphere's meridian is decided
+  within `64 * EPSILON` of the largest magnitude it is computed from: its
+  coordinates, the axis's and, about an axis in another direction, the given
+  section's (a bulge cannot encode a quarter arc exactly, and a radius is a
+  difference of numbers of the axis's size); the sphere is placed exactly on
+  the axis, and the gate is not reported, as it only chooses between that
+  sphere and a refusal. A section crossing the axis, touching it at a vertex
+  with no edge along it (a pinch point), ending on it at an arc whose circle
+  is not centred on it (a lemon, an apple, an ogive nose: a spindle or horn
+  torus), at an arc with both ends on it or at an arc running across it stays
+  `UnsupportedInput` by name, as does a vertex within the tolerance of the
+  axis but not on it to the bit and an edge ending on the axis within the
+  tolerance of perpendicular to it but not exactly, and a straight edge so
+  near perpendicular that a cone's angle cannot carry its slope (below).
+  A semicircle (a bulge of exactly one) between two vertices on the axis is
+  split at its midpoint, as the lowering splits a half turn, and revolves to
+  a ball; another bulge between them is a lemon and is refused. A section
+  with several contacts (a cavity
+  along the axis) gives one solid per outermost piece with the nested pieces
+  as void shells, nested by the heights of every face's stations, poles
+  included; a solid inside a cavity is refused.
 
 ### Fixed
 
-- `extrude_profile_exact` ran no profile check and built a solid from a
-  contour with a self-contact (a chord crossing an arc, a bow tie, a pinch),
-  a hole outside the outer contour, or holes that cross each other or the
-  outer contour, also as the member of a composite. It now runs the exact
-  arc polygon check on each contour (and on each composite member) and refuses
-  such a profile as `InvalidInput` naming the defects; a nesting the exact
-  check cannot decide is refused as `UnsupportedInput`. Valid profiles,
-  including those with an accepted isolated contact or an edge or arc below
-  the tolerance, extrude unchanged, and the lowering's own refusals keep their
-  error class (#401).
-- The mesh revolution (and the tapered one) treats a profile vertex within
-  `tolerance.linear()` of an in-plane axis as on it: it is projected onto the
-  axis and welded into one axis vertex, and the projection distance is taken
-  from the chord budget, so the reported bound stays within the budget. A
-  crescent whose two arcs meet on the axis at x of about 6e-17, or a vertex
-  1e-12 off a tilted axis, was classified strictly off it: a full turn meshed
-  a pinch with a tiny orbit instead of refusing it (fail-open), and a partial
-  turn left the vertex unwelded. A full turn now refuses the pinch by name (#367).
-  Behaviour that changes with it:
-  - A vertex on the far side of the axis within the tolerance is welded
-    rather than a crossing: `[(-0.5t, -1), (1, 0), (0, 1)]` over a half turn
-    was `InvalidInput` and is now meshed.
-  - A vertex close to the edge of the band can give `BudgetExceeded`, as the
-    projection leaves little budget for the turn; a distance within rounding
-    of the tolerance is refused by name.
-  - A ring that the projection flattens onto the axis (a hole whose vertices
-    all lie in the band, or an outer ring that does) is refused by name; it
-    would have vanished from the solid or left it empty.
-  - A tapered revolution with a vertex inside the band at one end and outside
-    it at the other is refused as touching at one end only.
-  - A tapered vertex on the axis at both ends is welded when its positions
-    along the axis agree within the tolerance (it was compared bitwise, which
-    a tilted axis almost never satisfied); the difference is charged to the
-    budget.
-
-- The caps of `extrude::extrude_profile` and of a loft avoid sliver triangles
-  (doubled area within the tolerance squared) whenever a triangulation
-  avoids them, and refuse by name a cap triangle that is both a sliver and
-  flat to rounding. A polyline profile with runs of collinear vertices left
-  cap triangles a few ulps off a line, which placement rounds to zero area
-  and `audit_mesh` reads as an open mesh (#415). A sliver that is not flat
-  (a fine chord's) is still meshed, as it is legitimate there.
-  `triangulate` and `triangulate_with` are unchanged.
+- A cone whose edge is nearly perpendicular to the axis was built with an
+  angle that does not carry its slope when the tolerance did not cover it
+  (#379): at `Tolerance::ZERO`, a frustum `[(1,0),(2,1e-12),(2,1),(1,1)]`
+  came back `Ok` with its pcurves 7e-5 off their curves, and the same for a
+  cone's apex edge. The exact revolution now refuses an edge whose
+  `rise * tan(angle)` differs from its radius change by more than the
+  tolerance or eight machine epsilons of its largest coordinate, whichever
+  is larger, as an edge so near perpendicular to the axis that a cone cannot
+  carry its slope.
+- `revolve_arc_ring` mirrored a section on the negative side of the axis
+  without walking it backwards, so its walls faced inward and its signed
+  volume was negative; the mirrored section is now walked the other way
+  round (#379).
 
 Full history: [`crates/algorithms/construction/construct/CHANGELOG.md`](https://github.com/axiolid/kernel/blob/main/crates/algorithms/construction/construct/CHANGELOG.md)

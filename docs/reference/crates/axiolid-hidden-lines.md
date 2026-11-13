@@ -8,7 +8,7 @@ Exact scalar hidden-line drawings of triangle meshes in orthographic views.
 
 | | |
 | --- | --- |
-| Latest release | 0.1.4 (2026-11-07) |
+| Latest release | 0.1.4 (2026-11-13) |
 | crates.io | [`axiolid-hidden-lines`](https://crates.io/crates/axiolid-hidden-lines) |
 | Facade | [`axiolid`](./axiolid) feature `hidden-lines-provider` |
 | Layer | algorithms (`algorithm.discrete`) |
@@ -62,7 +62,7 @@ evidence, never refused.
 
 ## Changes
 
-Latest release, 0.1.4 (2026-11-07):
+Latest release, 0.1.4 (2026-11-13):
 
 ### Added
 
@@ -73,5 +73,18 @@ Latest release, 0.1.4 (2026-11-07):
 - `ScalarHiddenLines` draws `EdgeKind::GroupBoundary` when
   `EdgeSelection::group_boundary` is set, resolving the groups only then;
   with it off the output is unchanged (ADR 0106, #385).
+
+- The hidden-line and visible-face providers refuse a perspective view by
+  name (`UnsupportedInput`, input `perspective view`) when called directly,
+  and do not claim it through `supports_projection` (ADR 0107, #387).
+
+### Changed
+
+- The providers' view-space vertices carry exact homogeneous coordinates
+  `[U, V, W, h]` with `h = 1` in an orthographic view, preparing perspective
+  (ADR 0107, #387). The drawings are bit for bit the same: the segment hash
+  of every `scenario/hidden-lines` case is unchanged, and the wall clock
+  there is unchanged (isometric and cut plan at 20x20 and 50x50 agree with
+  the previous commit within run-to-run noise).
 
 Full history: [`crates/algorithms/discrete/hidden-lines/CHANGELOG.md`](https://github.com/axiolid/kernel/blob/main/crates/algorithms/discrete/hidden-lines/CHANGELOG.md)

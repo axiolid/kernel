@@ -8,8 +8,7 @@ Versioned, memory-safe C ABI for the Axiolid application facade.
 
 | | |
 | --- | --- |
-| Latest release | 0.3.4 (2026-11-07) |
-| On `main` | 0.4.0 (unreleased) |
+| Latest release | 0.4.0 (2026-11-13) |
 | crates.io | [`axiolid-capi`](https://crates.io/crates/axiolid-capi) |
 | Layer | facade (`facade.native-c`) |
 | API documentation | [rustdoc](/api/rustdoc/axiolid_capi/index.html) · [docs.rs](https://docs.rs/axiolid-capi) |
@@ -32,11 +31,37 @@ the only Axiolid crate that contains `unsafe` code. See ADR 0040.
 
 ## Changes
 
-Latest release, 0.3.4 (2026-11-07):
+Latest release, 0.4.0 (2026-11-13):
+
+### Changed
+
+- **Breaking for Rust callers only.** The public C-mirroring enums
+  `AxiolidStatus`, `AxiolidOperation`, `AxiolidRepresentation`,
+  `AxiolidExactness` and `AxiolidGeometryKind` gain variants (`MeshHiddenLines`,
+  `MeshVisibleFaces`, `HiddenLines`) and are now `#[non_exhaustive]`, so later
+  C-ABI-additive variants are no longer Rust breaks. The C ABI is unchanged
+  and additive (`abi_patch` 1).
 
 ### Added
 
-- The package now ships `LICENSE` and `LICENSE-COMMERCIAL` (symlinks to the
-  repository root), so the licence texts travel with the archive (#358).
+- Visible faces through the C ABI (#386): `axiolid_v0_4_visible_faces` with
+  `AxiolidVisibleFaceLimits`; the result is read with
+  `axiolid_v0_4_visible_faces_counts`, `_copy` (regions, rings, points and
+  triangle indices as flat offset-indexed tables, nothing written unless
+  every capacity covers its count) and `_evidence`. `AxiolidFaceSource`
+  distinguishes group regions from near-plane caps, `AxiolidGeometryKind`
+  gains `VisibleFaces`, and the capability table lists `MeshVisibleFaces`.
+  Arguments, refusals and mesh ids behave as for hidden lines. Existing
+  symbols and layouts are unchanged.
+- Hidden lines through the C ABI (#473): `axiolid_v0_4_hidden_lines` with
+  `AxiolidView`, `AxiolidViewMesh` (roles, group modes including planar),
+  `AxiolidEdgeSelection` (including group boundaries) and
+  `AxiolidHiddenLineLimits`; the result is read with
+  `axiolid_v0_4_hidden_lines_count`, `_copy` and `_evidence`.
+  `axiolid_v0_4_context_last_error_mesh` returns the id of the input mesh a
+  refusal names. `AxiolidOperation` gains `MeshHiddenLines` and
+  `MeshVisibleFaces`, `AxiolidGeometryKind` gains `HiddenLines`, and the
+  capability table lists `MeshHiddenLines`. All arguments are validated at the
+  boundary. `abi_patch` is 1; existing symbols and layouts are unchanged.
 
 Full history: [`crates/facade/axiolid-capi/CHANGELOG.md`](https://github.com/axiolid/kernel/blob/main/crates/facade/axiolid-capi/CHANGELOG.md)

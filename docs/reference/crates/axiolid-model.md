@@ -8,7 +8,7 @@ Format-neutral geometry item tree. The currency between a format reader and a ke
 
 | | |
 | --- | --- |
-| Latest release | 0.3.18 (2026-11-03) |
+| Latest release | 0.3.19 (2026-11-13) |
 | crates.io | [`axiolid-model`](https://crates.io/crates/axiolid-model) |
 | Facade | [`axiolid`](./axiolid) feature `model` |
 | Layer | representations (`representation.graph`) |
@@ -54,21 +54,14 @@ Default: none.
 
 ## Changes
 
-Latest release, 0.3.18 (2026-11-03):
+Latest release, 0.3.19 (2026-11-13):
 
-### Added
+### Changed
 
-- `SurfaceRelation::Ruled { first, second }` and `RuledSide`: a surface
-  ruled between two sides, `p(u, v) = (1 - v) first(u) + v second(u)`. A
-  side is an atomic `Curve3` node over an oriented interval, or an apex
-  point. The builder refuses a non-finite or empty interval, a non-finite
-  apex, two apexes and the same curve over the same interval, with the new
-  `GraphError::InvalidRuledSurface { detail }`; a side that is no atomic
-  `Curve3` is an `InvalidReferenceType` (#402).
-- Wire format 1.5: only a graph holding a `Ruled` surface is labelled 1.5;
-  every other graph is written as before, and a 1.4 payload holding one is
-  refused as `UnknownKind` (#402).
-- The package now ships `LICENSE` and `LICENSE-COMMERCIAL` (symlinks to the
-  repository root), so the licence texts travel with the archive (#358).
+- `SurfaceRelation::Revolution` and `LinearExtrusion` document their
+  parameterisation: a revolution is `O + R_a(u) (c(v) - O)` with `u` the
+  right-handed angle about the normalised axis and `v` the swept curve's own
+  parameter, an extrusion is `c(u) + v d` with `v` in units of the
+  direction's length (#411, ADR 0103).
 
 Full history: [`crates/representations/modeling/graph/CHANGELOG.md`](https://github.com/axiolid/kernel/blob/main/crates/representations/modeling/graph/CHANGELOG.md)

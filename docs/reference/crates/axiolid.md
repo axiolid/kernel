@@ -8,8 +8,7 @@ Feature-gated facade for Axiolid's format-neutral geometry stack.
 
 | | |
 | --- | --- |
-| Latest release | 0.4.7 (2026-11-03) |
-| On `main` | 0.5.0 (unreleased) |
+| Latest release | 0.5.0 (2026-11-13) |
 | crates.io | [`axiolid`](https://crates.io/crates/axiolid) |
 | Layer | facade (`facade`) |
 | API documentation | [rustdoc](/api/rustdoc/axiolid/index.html) · [docs.rs](https://docs.rs/axiolid) |
@@ -133,14 +132,33 @@ Default: none.
 
 ## Changes
 
-Latest release, 0.4.7 (2026-11-03):
+Latest release, 0.5.0 (2026-11-13):
 
 ### Added
 
-- The package now ships `LICENSE` and `LICENSE-COMMERCIAL` (symlinks to the
-  repository root), so the licence texts travel with the archive (#358).
+- Hidden-line drawings and visible faces join the `discrete` (contract) and
+  `application` (dispatch and exact scalar providers) bundles (#371,
+  ADR 0105). `Application` gains `hidden_lines`, `audit_hidden_lines` and
+  `visible_faces`; `ApplicationBuilder` gains `with_portable_hidden_lines` and
+  `with_portable_visible_faces`, and `Application::portable()` selects both.
+  The descriptor advertises `MESH_HIDDEN_LINES` and `MESH_VISIBLE_FACES`
+  (`Profile2d`, `ToleranceBounded`). Each provider's conformance suite runs
+  once per process, on the first call that reaches it; a failed verdict
+  refuses the call.
+- `IntegrationDescriptor::enabled_features` reports `mesh-hidden-lines`,
+  `dispatch-mesh-hidden-lines` and `hidden-lines-provider`.
 
-- `mesh_hidden_lines` re-exports `ScalarVisibleFaces` under the
-  `hidden-lines-provider` feature (ADR 0094, #383).
+### Changed
+
+- **Breaking:** `ApplicationErrorSource` and `ProviderConformanceReport` are
+  `#[non_exhaustive]`. `ApplicationErrorSource` gains `HiddenLines` and
+  `ProviderConformance`; `ProviderConformanceReport` gains `MeshHiddenLines`
+  and `MeshVisibleFaces`. A `match` on either needs a wildcard arm (#371,
+  ADR 0105).
+
+- **Breaking:** requires `axiolid-overlay` 0.4, so `axiolid::overlay` carries
+  `OverlayError` as `#[non_exhaustive]` with the new `HolesOverlap` and
+  `PolygonsOverlap`, and `Region::new` refuses rings that cross into each
+  other. A `match` on `OverlayError` needs a wildcard arm (#448, ADR 0104).
 
 Full history: [`crates/facade/axiolid/CHANGELOG.md`](https://github.com/axiolid/kernel/blob/main/crates/facade/axiolid/CHANGELOG.md)

@@ -9,6 +9,8 @@ caret rule for `0.x` versions.
 
 ## [Unreleased]
 
+## [0.3.10] - 2026-11-13
+
 ### Added
 
 - `ExactCurveRefusal::Undecided`: the roots along a traced section could not

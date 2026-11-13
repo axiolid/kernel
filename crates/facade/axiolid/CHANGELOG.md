@@ -9,6 +9,8 @@ caret rule for `0.x` versions.
 
 ## [Unreleased]
 
+## [0.5.0] - 2026-11-13
+
 ### Added
 
 - Hidden-line drawings and visible faces join the `discrete` (contract) and

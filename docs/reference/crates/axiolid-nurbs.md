@@ -8,7 +8,7 @@ General polynomial and rational B-spline analysis and transformation algorithms.
 
 | | |
 | --- | --- |
-| Latest release | 0.3.9 (2026-11-07) |
+| Latest release | 0.3.10 (2026-11-13) |
 | crates.io | [`axiolid-nurbs`](https://crates.io/crates/axiolid-nurbs) |
 | Facade | [`axiolid`](./axiolid) feature `nurbs` |
 | Layer | algorithms (`algorithm.parametric`) |
@@ -42,14 +42,24 @@ it uses `axiolid-evaluate` for evaluation rather than reimplementing it.
 
 ## Changes
 
-Latest release, 0.3.9 (2026-11-07):
+Latest release, 0.3.10 (2026-11-13):
+
+### Added
+
+- `ExactCurveRefusal::Undecided`: the roots along a traced section could not
+  all be isolated with their multiplicity (a contact of order above eight,
+  one rounding hides, or the work budget ran out). It says nothing of
+  whether the curve meets the surface (#427).
 
 ### Fixed
 
-- A traced section against a surface that touches it reports the double root
-  once, with multiplicity 2, instead of the root plus two spurious sign
-  changes about 2.4e-8 either side: a stretch whose second derivative along
-  the curve is enclosed away from zero is settled by a Rolle certificate
-  before it is bisected (#397).
+- A traced section against a surface that touches it at a higher order (a
+  cylinder osculating the section, a plane tangent at its extreme) no longer
+  hangs. Roots are certified with their multiplicity up to order 8, where the
+  enclosures resolve it, by a Rolle chain on `det(grad F, grad H_j)`, the
+  derivatives of the second field along the curve. Higher orders, contacts
+  the enclosures cannot resolve (a flat stretch of a field next to crossings,
+  often at orders 7 and 8 on trigonometric fields) and over-budget cases
+  return `Undecided` instead of a guessed touch at the depth floor (#427).
 
 Full history: [`crates/algorithms/parametric/nurbs/CHANGELOG.md`](https://github.com/axiolid/kernel/blob/main/crates/algorithms/parametric/nurbs/CHANGELOG.md)

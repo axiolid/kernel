@@ -8,7 +8,7 @@ Portable mesh plane-section request, result, and evidence contract.
 
 | | |
 | --- | --- |
-| Latest release | 0.3.8 (2026-11-07) |
+| Latest release | 0.3.9 (2026-11-13) |
 | crates.io | [`axiolid-mesh-section-contract`](https://crates.io/crates/axiolid-mesh-section-contract) |
 | Facade | [`axiolid`](./axiolid) feature `mesh-section` |
 | Layer | contracts (`contract.operation`) |
@@ -39,11 +39,19 @@ where its material lies on both sides of the plane, as closed regions (ADR
 
 ## Changes
 
-Latest release, 0.3.8 (2026-11-07):
+Latest release, 0.3.9 (2026-11-13):
 
 ### Added
 
-- The package now ships `LICENSE` and `LICENSE-COMMERCIAL` (symlinks to the
-  repository root), so the licence texts travel with the archive (#358).
+- Three conformance fixtures with a pinched cut boundary (piers meeting at a
+  corner, three piers at one vertex, a block with a void touching its wall).
+  A provider may answer them with the split cut or with
+  `REFUSED_PINCHED_CUT_REGION` (#373).
+
+### Changed
+
+- The cut invariants document the pinch rule: rings are split where the
+  boundary meets itself at a vertex, so each region is one connected piece
+  written as simple rings that may touch (#373).
 
 Full history: [`crates/contracts/operations/mesh-section/CHANGELOG.md`](https://github.com/axiolid/kernel/blob/main/crates/contracts/operations/mesh-section/CHANGELOG.md)

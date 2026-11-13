@@ -4,8 +4,8 @@
       "description": "Feature-gated facade for Axiolid's format-neutral geometry stack",
       "layer": "facade",
       "path": "crates/facade/axiolid",
-      "released": "0.4.7",
-      "released_date": "2026-11-03",
+      "released": "0.5.0",
+      "released_date": "2026-11-13",
       "role": "facade",
       "version": "0.5.0"
     },
@@ -41,7 +41,7 @@
       "layer": "representations",
       "path": "crates/representations/brep",
       "released": "0.3.7",
-      "released_date": "2026-11-07",
+      "released_date": "2026-11-13",
       "role": "representation.composed",
       "version": "0.3.7"
     },
@@ -59,7 +59,7 @@
       "layer": "algorithms",
       "path": "crates/algorithms/construction/brep-boolean",
       "released": "0.1.15",
-      "released_date": "2026-11-07",
+      "released_date": "2026-11-13",
       "role": "algorithm.construction",
       "version": "0.1.15"
     },
@@ -67,8 +67,8 @@
       "description": "Versioned, memory-safe C ABI for the Axiolid application facade.",
       "layer": "facade",
       "path": "crates/facade/axiolid-capi",
-      "released": "0.3.4",
-      "released_date": "2026-11-07",
+      "released": "0.4.0",
+      "released_date": "2026-11-13",
       "role": "facade.native-c",
       "version": "0.4.0"
     },
@@ -94,8 +94,8 @@
       "description": "Solid generation: profiles, lofts, sweeps, revolutions and half-space clipping",
       "layer": "algorithms",
       "path": "crates/algorithms/construction/construct",
-      "released": "0.3.29",
-      "released_date": "2026-11-03",
+      "released": "0.4.0",
+      "released_date": "2026-11-13",
       "role": "algorithm.construction",
       "version": "0.4.0"
     },
@@ -157,17 +157,17 @@
       "description": "Provider registration, ordering, fallback, and execution policy",
       "layer": "execution",
       "path": "crates/execution/dispatch",
-      "released": "0.3.12",
-      "released_date": "2026-11-03",
+      "released": "0.3.13",
+      "released_date": "2026-11-13",
       "role": "execution.dispatch",
-      "version": "0.3.12"
+      "version": "0.3.13"
     },
     "axiolid-evaluate": {
       "description": "Analytic and spline curve/surface evaluation, jets, and inversion",
       "layer": "algorithms",
       "path": "crates/algorithms/parametric/evaluate",
       "released": "0.3.21",
-      "released_date": "2026-11-07",
+      "released_date": "2026-11-13",
       "role": "algorithm.parametric",
       "version": "0.3.21"
     },
@@ -248,7 +248,7 @@
       "layer": "algorithms",
       "path": "crates/algorithms/discrete/hidden-lines",
       "released": "0.1.4",
-      "released_date": "2026-11-07",
+      "released_date": "2026-11-13",
       "role": "algorithm.discrete",
       "version": "0.1.4"
     },
@@ -257,7 +257,7 @@
       "layer": "algorithms",
       "path": "crates/algorithms/query/inspect",
       "released": "0.3.10",
-      "released_date": "2026-11-07",
+      "released_date": "2026-11-13",
       "role": "algorithm.query",
       "version": "0.3.10"
     },
@@ -292,10 +292,10 @@
       "description": "Metric properties: area, volume, centroid, moments of inertia.",
       "layer": "algorithms",
       "path": "crates/algorithms/query/measure",
-      "released": "0.3.14",
-      "released_date": "2026-11-04",
+      "released": "0.3.15",
+      "released_date": "2026-11-13",
       "role": "algorithm.query",
-      "version": "0.3.14"
+      "version": "0.3.15"
     },
     "axiolid-mesh": {
       "description": "Triangle meshes: the discrete representation every backend consumes.",
@@ -329,7 +329,7 @@
       "layer": "execution",
       "path": "crates/execution/compile",
       "released": "0.3.45",
-      "released_date": "2026-11-07",
+      "released_date": "2026-11-13",
       "role": "execution.orchestration",
       "version": "0.3.45"
     },
@@ -356,7 +356,7 @@
       "layer": "contracts",
       "path": "crates/contracts/operations/mesh-hidden-lines",
       "released": "0.1.5",
-      "released_date": "2026-11-07",
+      "released_date": "2026-11-13",
       "role": "contract.operation",
       "version": "0.1.5"
     },
@@ -364,10 +364,10 @@
       "description": "Portable mesh plane-section request, result, and evidence contract",
       "layer": "contracts",
       "path": "crates/contracts/operations/mesh-section",
-      "released": "0.3.8",
-      "released_date": "2026-11-07",
+      "released": "0.3.9",
+      "released_date": "2026-11-13",
       "role": "contract.operation",
-      "version": "0.3.8"
+      "version": "0.3.9"
     },
     "axiolid-minkowski": {
       "description": "Minkowski sum and difference of planar-faced solids",
@@ -382,10 +382,10 @@
       "description": "Format-neutral geometry item tree. The currency between a format reader and a kernel.",
       "layer": "representations",
       "path": "crates/representations/modeling/graph",
-      "released": "0.3.18",
-      "released_date": "2026-11-03",
+      "released": "0.3.19",
+      "released_date": "2026-11-13",
       "role": "representation.graph",
-      "version": "0.3.18"
+      "version": "0.3.19"
     },
     "axiolid-numeric": {
       "description": "Numeric substrate: bracketed and polynomial root finding, adaptive quadrature, dense least squares, and minimisation, each with error estimates",
@@ -400,17 +400,17 @@
       "description": "General polynomial and rational B-spline analysis and transformation algorithms",
       "layer": "algorithms",
       "path": "crates/algorithms/parametric/nurbs",
-      "released": "0.3.9",
-      "released_date": "2026-11-07",
+      "released": "0.3.10",
+      "released_date": "2026-11-13",
       "role": "algorithm.parametric",
-      "version": "0.3.9"
+      "version": "0.3.10"
     },
     "axiolid-overlay": {
       "description": "Deterministic validated planar overlay contract",
       "layer": "algorithms",
       "path": "crates/algorithms/planar/overlay",
-      "released": "0.3.22",
-      "released_date": "2026-11-03",
+      "released": "0.4.0",
+      "released_date": "2026-11-13",
       "role": "algorithm.planar",
       "version": "0.4.0"
     },
@@ -472,8 +472,8 @@
       "description": "Projection of triangle meshes onto a plane, and prism intersection",
       "layer": "algorithms",
       "path": "crates/algorithms/planar/project",
-      "released": "0.3.3",
-      "released_date": "2026-11-07",
+      "released": "0.4.0",
+      "released_date": "2026-11-13",
       "role": "algorithm.planar",
       "version": "0.4.0"
     },
@@ -491,7 +491,7 @@
       "layer": "algorithms",
       "path": "crates/algorithms/reference",
       "released": "0.3.17",
-      "released_date": "2026-11-07",
+      "released_date": "2026-11-13",
       "role": "algorithm.reference",
       "version": "0.3.17"
     },
@@ -508,8 +508,8 @@
       "description": "Exact planar shortest path over a visibility graph",
       "layer": "algorithms",
       "path": "crates/algorithms/planar/route",
-      "released": "0.3.9",
-      "released_date": "2026-11-07",
+      "released": "0.4.0",
+      "released_date": "2026-11-13",
       "role": "algorithm.planar",
       "version": "0.4.0"
     },

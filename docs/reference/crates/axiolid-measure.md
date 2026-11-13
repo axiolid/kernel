@@ -8,7 +8,7 @@ Metric properties: area, volume, centroid, moments of inertia.
 
 | | |
 | --- | --- |
-| Latest release | 0.3.14 (2026-11-04) |
+| Latest release | 0.3.15 (2026-11-13) |
 | crates.io | [`axiolid-measure`](https://crates.io/crates/axiolid-measure) |
 | Facade | [`axiolid`](./axiolid) feature `measure` |
 | Layer | algorithms (`algorithm.query`) |
@@ -40,22 +40,55 @@ Default: none.
 
 ## Changes
 
-Latest release, 0.3.14 (2026-11-04):
+Latest release, 0.3.15 (2026-11-13):
 
-### Added
+### Changed
 
-- `cycle_volume_properties` measures the signed volume and centroid of a mesh
-  that is a closed oriented cycle (every edge used equally often in each
-  direction), such as shells that share an edge. It is bit-identical to
-  `volume_properties` on two-manifold input and refuses anything open with
-  `CycleVolumeError` (#416).
-- `select_by_normal` and `extent_along` select the faces of a mesh whose normal
-  lies in a `NormalCone` (the tolerance's angular part is slack on the
-  half-angle) and measure their area and their extent along a direction.
-  Selecting every face reproduces `surface_properties` area bit for bit
-  (#417).
+- `DistanceBounds::upper` (all distance and clearance queries, plan and body
+  variants) is at least the distance between the boundary points the
+  witnesses stand for, not their computed distance: it adds their evaluation
+  rounding, 16 ulps of each side's witness scale. A plan overlap still
+  reports `[0, 0]` (#439).
 
-- The package now ships `LICENSE` and `LICENSE-COMMERCIAL` (symlinks to the
-  repository root), so the licence texts travel with the archive (#358).
+### Fixed
+
+- At georeferenced coordinates `Clearance::Below` could be claimed within
+  about `1e-8` of a limit the distance does not go below (#439).
+- The exact Hausdorff lower bound takes off its witness's rounding (a face
+  charted from far away but lying near the origin raised it up to about
+  `1e-9` past the distance), and a point query's upper adds its nearest
+  point's (#439).
+- B-spline witnesses are padded by the de Boor evaluation's rounding, a
+  bound that counts the degrees and the weights' spread (#439). A B-spline
+  face whose weight ratio exceeds `1 / (64 L eps)` (`L` the sum of its
+  degrees, about `3.5e13` for a bilinear patch) is refused with
+  `ExactMeasureError::NonPlanarFace`, since that bound is first order.
+- The exact Hausdorff upper bound about a B-spline patch's witness adds the
+  distance from the witness to the centre of the patch's enclosing sphere
+  (the control net's box midpoint), which it left out and so could report an
+  upper bound below the distance (#459).
+- The exact boundary distance and Hausdorff distance carry rounding margins
+  derived from the magnitudes their numbers are computed from, in ulps of the
+  coordinates, instead of `1e-12` of them. At georeferenced coordinates
+  (450000, 5600000) the old margins left an interval about `1e-5` wide that
+  never closed to the accuracy asked; a search now settles at a floor of
+  128 ulps of its scale, about `3.2e-7` there and `6e-14` at unit scale, and
+  an accuracy below the floor is never reported as met (#318).
+- The distance search closes gaps along a planar face's normal on certified
+  foot witnesses (the foot of a witness on a planar face, the closest points
+  of two line edges) instead of waiting for patch centres to line up, and
+  the point queries of the Hausdorff search pop equal bounds first in, first
+  out (#318).
+- The margin for taking two boundary points as touching is 128 ulps of their
+  magnitudes, not `1e-12` of them: items of one body apart by more than that
+  are measured instead of refused as `ItemsNearlyShareFace`, and at unit scale
+  a `1e-13` gap is now a gap (#318).
+- The sphere and torus branches of a projected range carried no rounding pad
+  at all (#318).
+- The Hausdorff matched bound, a translate's re-charted surface and cone pole,
+  and the displacement gate use the same derived margins, and a plane,
+  cylinder or elliptical cylinder is Lipschitz by its axes rather than
+  `1 + |v|` times as steep, which had inflated the bound of patches charted
+  in world coordinates (#318).
 
 Full history: [`crates/algorithms/query/measure/CHANGELOG.md`](https://github.com/axiolid/kernel/blob/main/crates/algorithms/query/measure/CHANGELOG.md)

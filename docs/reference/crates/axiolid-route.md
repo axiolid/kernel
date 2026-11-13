@@ -8,8 +8,7 @@ Exact planar shortest path over a visibility graph.
 
 | | |
 | --- | --- |
-| Latest release | 0.3.9 (2026-11-07) |
-| On `main` | 0.4.0 (unreleased) |
+| Latest release | 0.4.0 (2026-11-13) |
 | crates.io | [`axiolid-route`](https://crates.io/crates/axiolid-route) |
 | Facade | [`axiolid`](./axiolid) feature `route` |
 | Layer | algorithms (`algorithm.planar`) |
@@ -31,11 +30,13 @@ Exact planar shortest paths over a visibility graph, plus distance maps, farthes
 
 ## Changes
 
-Latest release, 0.3.9 (2026-11-07):
+Latest release, 0.4.0 (2026-11-13):
 
-### Added
+### Changed
 
-- The package now ships `LICENSE` and `LICENSE-COMMERCIAL` (symlinks to the
-  repository root), so the licence texts travel with the archive (#358).
+- **Breaking:** requires `axiolid-overlay` 0.4, whose `OverlayError` is
+  `#[non_exhaustive]` with the new `HolesOverlap` and `PolygonsOverlap`, and
+  whose `Region::new` refuses rings that cross into each other. `skeleton` and `CostRegion::new` take overlay's `Polygon`, so a caller builds it with overlay 0.4
+  (#448, ADR 0104).
 
 Full history: [`crates/algorithms/planar/route/CHANGELOG.md`](https://github.com/axiolid/kernel/blob/main/crates/algorithms/planar/route/CHANGELOG.md)

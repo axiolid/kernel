@@ -8,7 +8,7 @@ Portable scalar reference implementation and certified predicates.
 
 | | |
 | --- | --- |
-| Latest release | 0.3.17 (2026-11-07) |
+| Latest release | 0.3.17 (2026-11-13) |
 | crates.io | [`axiolid-reference`](https://crates.io/crates/axiolid-reference) |
 | Facade | [`axiolid`](./axiolid) feature `portable-provider` |
 | Layer | algorithms (`algorithm.reference`) |
@@ -49,7 +49,7 @@ evaluation should depend on those directly.
 
 ## Changes
 
-Latest release, 0.3.17 (2026-11-07):
+Latest release, 0.3.17 (2026-11-13):
 
 ### Added
 

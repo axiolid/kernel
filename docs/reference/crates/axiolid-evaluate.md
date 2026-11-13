@@ -8,7 +8,7 @@ Analytic and spline curve/surface evaluation, jets, and inversion.
 
 | | |
 | --- | --- |
-| Latest release | 0.3.21 (2026-11-07) |
+| Latest release | 0.3.21 (2026-11-13) |
 | crates.io | [`axiolid-evaluate`](https://crates.io/crates/axiolid-evaluate) |
 | Facade | [`axiolid`](./axiolid) feature `evaluate` |
 | Layer | algorithms (`algorithm.parametric`) |
@@ -45,7 +45,7 @@ intrinsics, threading or feature gates.
 
 ## Changes
 
-Latest release, 0.3.21 (2026-11-07):
+Latest release, 0.3.21 (2026-11-13):
 
 ### Added
 

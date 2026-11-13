@@ -9,7 +9,21 @@ caret rule for `0.x` versions.
 
 ## [Unreleased]
 
+## [0.1.5] - 2026-11-13
+
 ### Added
+
+- `FaceGroups::Planar` and `HiddenLineMesh::with_planar_groups`: the groups are
+  the edge-connected components of triangles joined across an edge of exactly
+  two triangles with parallel, same-facing normals, decided exactly, each named
+  by its smallest triangle (ADR 0106, #384). Conformance gains the planar
+  isometric cube, a flat sheet and a fold.
+- `EdgeKind::GroupBoundary` and `EdgeSelection::group_boundary` (default
+  `false`) with `EdgeSelection::with_group_boundary`: an edge between two
+  triangles of different face groups that is neither a silhouette nor a
+  selected crease. With the selection off the groups stay ignored and the
+  output is unchanged (ADR 0106, #385). Conformance gains the planar
+  isometric cube and a two-group square sheet.
 
 - `ViewProjection` (`Orthographic`, the default, and `Perspective`), the
   `View::projection` field, `View::perspective(frame,
@@ -27,22 +41,6 @@ caret rule for `0.x` versions.
 - `OrthographicView` is renamed `View`, because a view can now be
   perspective. The old name stays as a deprecated type alias, so existing code
   compiles with a deprecation warning (ADR 0107, #387).
-
-## [0.1.5] - 2026-11-07
-
-### Added
-
-- `FaceGroups::Planar` and `HiddenLineMesh::with_planar_groups`: the groups are
-  the edge-connected components of triangles joined across an edge of exactly
-  two triangles with parallel, same-facing normals, decided exactly, each named
-  by its smallest triangle (ADR 0106, #384). Conformance gains the planar
-  isometric cube, a flat sheet and a fold.
-- `EdgeKind::GroupBoundary` and `EdgeSelection::group_boundary` (default
-  `false`) with `EdgeSelection::with_group_boundary`: an edge between two
-  triangles of different face groups that is neither a silhouette nor a
-  selected crease. With the selection off the groups stay ignored and the
-  output is unchanged (ADR 0106, #385). Conformance gains the planar
-  isometric cube and a two-group square sheet.
 
 ## [0.1.4] - 2026-11-07
 

@@ -9,6 +9,8 @@ caret rule for `0.x` versions.
 
 ## [Unreleased]
 
+## [0.3.15] - 2026-11-13
+
 ### Changed
 
 - `DistanceBounds::upper` (all distance and clearance queries, plan and body

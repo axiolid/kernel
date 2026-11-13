@@ -9,7 +9,17 @@ caret rule for `0.x` versions.
 
 ## [Unreleased]
 
+## [0.1.4] - 2026-11-13
+
 ### Added
+
+- `ScalarVisibleFaces` resolves `FaceGroups::Planar` exactly before labelling
+  (new `groups` module: union-find over edges of exactly two triangles with
+  parallel, same-facing normals, polled for cancellation, memory-budgeted;
+  ADR 0106, #384).
+- `ScalarHiddenLines` draws `EdgeKind::GroupBoundary` when
+  `EdgeSelection::group_boundary` is set, resolving the groups only then;
+  with it off the output is unchanged (ADR 0106, #385).
 
 - The hidden-line and visible-face providers refuse a perspective view by
   name (`UnsupportedInput`, input `perspective view`) when called directly,
@@ -23,18 +33,6 @@ caret rule for `0.x` versions.
   of every `scenario/hidden-lines` case is unchanged, and the wall clock
   there is unchanged (isometric and cut plan at 20x20 and 50x50 agree with
   the previous commit within run-to-run noise).
-
-## [0.1.4] - 2026-11-07
-
-### Added
-
-- `ScalarVisibleFaces` resolves `FaceGroups::Planar` exactly before labelling
-  (new `groups` module: union-find over edges of exactly two triangles with
-  parallel, same-facing normals, polled for cancellation, memory-budgeted;
-  ADR 0106, #384).
-- `ScalarHiddenLines` draws `EdgeKind::GroupBoundary` when
-  `EdgeSelection::group_boundary` is set, resolving the groups only then;
-  with it off the output is unchanged (ADR 0106, #385).
 
 ## [0.1.3] - 2026-11-03
 
