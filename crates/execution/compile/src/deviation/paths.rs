@@ -1142,6 +1142,11 @@ mod tests {
         let caps = radius * 2.0 * e1 / speed;
         let carried = tube_error(e0, charge, caps);
         assert!(carried >= e0 + charge && carried >= e0 + caps && carried > e0);
+        // Each term is the one carried where it is the larger.
+        assert_eq!(tube_error(e0, 0.0, caps), e0 + caps);
+        assert_eq!(tube_error(e0, charge, 0.0), e0 + charge);
+        assert_eq!(tube_error(e0, 2.0, 1.0), e0 + 2.0);
+        assert_eq!(tube_error(e0, 1.0, 2.0), e0 + 2.0);
     }
 
     /// Over an intrinsic plan the table's derivatives are exact closed forms:
