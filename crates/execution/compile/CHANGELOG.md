@@ -23,10 +23,26 @@ caret rule for `0.x` versions.
   edges' samples with its neighbours. Refused by name: a sample within the
   tolerance of the axis of revolution, of a ruled apex or on a collapsed
   ruling (`Degenerate`), off the surface with a certified floor, without
-  unique parameters (a surface covered twice, a closed swept B-spline's
-  seam, a fold), a line extruded along itself (`Degenerate`), and a search
-  past its work cap (`BudgetExceeded`). The refusal `an edge use without a
-  pcurve on a face over a surface relation` is gone.
+  unique parameters (a surface covered twice, an edge across a closed
+  swept B-spline's seam, a fold, generators turning about the sample), a
+  line extruded along itself (`Degenerate`), non-finite input or
+  arithmetic (`InvalidInput`), and a search past its work cap
+  (`BudgetExceeded`). The refusal `an edge use without a pcurve on a face
+  over a surface relation` is gone. Faces without pcurves report up to
+  about 2.3 times the budget on the fixtures measured, as atomic ones do,
+  and an edge whose surface's speed varies by orders of magnitude along it
+  (a ruling pivoting about a slow rim) is sampled finely throughout and can
+  run into the curved-face vertex budget (ADR 0110).
+
+### Changed
+
+- The arc length bound of an edge span without a pcurve, which sizes the
+  lens's box, is `|C'(m)| h + sup|C''| h^2 / 4` where that is below the
+  curve's speed bound times `h`. A conic's speed bound is its largest
+  semi-axis over any span, so an elliptic edge over its flat side was
+  sampled and refined far past its budget: an extruded 1.2 x 0.1 ellipse
+  over its vertex meshes in 4,096 triangles instead of 32,768. The bound is
+  only tightened, on atomic faces too (#454).
 ## [0.3.47] - 2026-11-14
 
 ### Changed
