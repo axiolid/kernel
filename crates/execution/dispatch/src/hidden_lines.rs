@@ -13,14 +13,14 @@ use axiolid_mesh_hidden_lines_contract::{
         },
         ConformanceFailure, ConformanceReport, ConformanceSuite,
     },
-    EdgeKind, HiddenLineError, HiddenLineOutcome, HiddenLineRequest, MeshHiddenLines, RefusedMesh,
-    ViewProjection, Visibility,
+    EdgeKind, HiddenLineError, HiddenLineOutcome, HiddenLineRequest, MeshHiddenLines, Occlusion,
+    RefusedMesh, ViewProjection, Visibility,
 };
 
 use crate::device::matches_device;
 use crate::view_checks::{
-    invalid, mesh_verdict, scratch_fits, source_totals, validate_meshes, validate_region,
-    validate_topology, validate_view, SharedLimits,
+    has_see_through, invalid, mesh_verdict, scratch_fits, source_totals, validate_meshes,
+    validate_region, validate_topology, validate_view, SharedLimits,
 };
 
 #[derive(Debug, Clone)]
@@ -180,12 +180,14 @@ impl MeshHiddenLinesRegistry {
         options.check_cancelled()?;
         validate_request_shape(request, options)?;
 
+        let see_through = has_see_through(request.meshes);
         let mut has_matching_provider = false;
         let mut has_budgeted_provider = false;
         for entry in &self.providers {
             let descriptor = entry.provider.descriptor();
             if matches_device(options.device(), descriptor.id, descriptor.target)
                 && entry.provider.supports_projection(request.view.projection)
+                && (!see_through || entry.provider.supports_occlusion(Occlusion::SeeThrough))
             {
                 has_matching_provider = true;
                 has_budgeted_provider |= scratch_fits(
@@ -215,6 +217,7 @@ impl MeshHiddenLinesRegistry {
             let descriptor = entry.provider.descriptor();
             if !matches_device(options.device(), descriptor.id, descriptor.target)
                 || !entry.provider.supports_projection(request.view.projection)
+                || (see_through && !entry.provider.supports_occlusion(Occlusion::SeeThrough))
                 || !scratch_fits(
                     entry.provider.scratch_requirement(),
                     request.meshes,

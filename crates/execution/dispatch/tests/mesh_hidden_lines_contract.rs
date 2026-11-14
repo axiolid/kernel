@@ -19,7 +19,7 @@ use axiolid_mesh::TriMesh;
 use axiolid_mesh_hidden_lines_contract::{
     EdgeKind, EdgeSelection, FaceGroup, HiddenLineError, HiddenLineEvidence, HiddenLineLimits,
     HiddenLineMesh, HiddenLineOutcome, HiddenLineRequest, HiddenLineSegment, MeshHiddenLines,
-    MeshId, MeshRole, SourceEdge, View, ViewProjection, Visibility,
+    MeshId, MeshRole, Occlusion, SourceEdge, View, ViewProjection, Visibility,
 };
 
 fn cube() -> TriMesh {
@@ -101,6 +101,7 @@ struct Recorder {
     scratch: ScratchRequirement,
     behaviour: Behaviour,
     perspective: bool,
+    see_through: bool,
 }
 
 impl Recorder {
@@ -111,7 +112,13 @@ impl Recorder {
             scratch: ScratchRequirement::None,
             behaviour,
             perspective: false,
+            see_through: false,
         }
+    }
+
+    fn claiming_see_through(mut self) -> Self {
+        self.see_through = true;
+        self
     }
 
     fn claiming_perspective(mut self) -> Self {
@@ -152,6 +159,10 @@ fn segment(mesh: MeshId, vertices: [u32; 2]) -> HiddenLineSegment {
 impl MeshHiddenLines for Recorder {
     fn supports_projection(&self, projection: ViewProjection) -> bool {
         projection == ViewProjection::Orthographic || self.perspective
+    }
+
+    fn supports_occlusion(&self, occlusion: Occlusion) -> bool {
+        occlusion == Occlusion::Opaque || self.see_through
     }
 
     fn scratch_requirement(&self) -> ScratchRequirement {
@@ -1314,4 +1325,96 @@ fn perspective_registration_also_runs_the_base_suite() {
         .iter()
         .all(|f| matches!(f, PerspectiveConformanceFailure::HiddenLinesBase(_))));
     assert_eq!(registry.providers().count(), 0);
+}
+
+/// One see-through triangle among the twelve of the cube.
+fn one_pane() -> [Occlusion; 12] {
+    let mut flags = [Occlusion::Opaque; 12];
+    flags[4] = Occlusion::SeeThrough;
+    flags
+}
+
+#[test]
+fn a_see_through_triangle_reaches_only_providers_that_claim_it() {
+    let (declining, claiming) = (counter(), counter());
+    let cube = cube();
+    let flags = one_pane();
+    let meshes = [
+        mesh(1, MeshRole::Solid, &cube),
+        mesh(2, MeshRole::Solid, &cube).with_occlusion(&flags),
+    ];
+    let request = HiddenLineRequest::new(&meshes, view(), selection(), limits());
+
+    // The higher-priority provider lets every triangle hide by default, so
+    // the registry must skip it rather than hand it the flags.
+    let mut registry = MeshHiddenLinesRegistry::new();
+    registry.register(1, Recorder::new("declines", &declining, well_behaved));
+    registry.register(
+        0,
+        Recorder::new("claims", &claiming, well_behaved).claiming_see_through(),
+    );
+    registry
+        .hidden_lines(&request, &options())
+        .expect("the claiming provider draws");
+    assert_eq!((calls_of(&declining), calls_of(&claiming)), (0, 1));
+
+    // Flags that are all opaque are no see-through request.
+    let opaque = [Occlusion::Opaque; 12];
+    let meshes = [mesh(1, MeshRole::Solid, &cube).with_occlusion(&opaque)];
+    let request = HiddenLineRequest::new(&meshes, view(), selection(), limits());
+    registry.hidden_lines(&request, &options()).expect("draws");
+    assert_eq!((calls_of(&declining), calls_of(&claiming)), (1, 1));
+}
+
+#[test]
+fn a_see_through_triangle_without_a_claiming_provider_is_unsupported() {
+    let calls = counter();
+    let cube = cube();
+    let flags = one_pane();
+    let meshes = [mesh(1, MeshRole::Solid, &cube).with_occlusion(&flags)];
+    let request = HiddenLineRequest::new(&meshes, view(), selection(), limits());
+    let error = registry(&calls, well_behaved)
+        .hidden_lines(&request, &options())
+        .expect_err("no provider honours see-through triangles");
+    assert_eq!(calls_of(&calls), 0);
+    assert_eq!(error.mesh, None);
+    assert!(matches!(
+        error.error,
+        GeomError::Unsupported {
+            operation: Operation::MeshHiddenLines,
+            ..
+        }
+    ));
+}
+
+#[test]
+fn an_occlusion_slice_of_the_wrong_length_names_the_mesh() {
+    let (good, cube) = (cube(), cube());
+    let short = [Occlusion::SeeThrough; 4];
+    let opaque_long = [Occlusion::Opaque; 13];
+    for flags in [&short[..], &opaque_long[..]] {
+        let meshes = [
+            mesh(1, MeshRole::Solid, &good),
+            mesh(2, MeshRole::Solid, &cube).with_occlusion(flags),
+        ];
+        let request = HiddenLineRequest::new(&meshes, view(), selection(), limits());
+        let calls = counter();
+        let mut registry = MeshHiddenLinesRegistry::new();
+        registry.register(
+            0,
+            Recorder::new("claims", &calls, well_behaved).claiming_see_through(),
+        );
+        let error = registry
+            .hidden_lines(&request, &options())
+            .expect_err("a wrong occlusion slice");
+        assert_eq!(error.mesh, Some(MeshId(2)));
+        assert!(
+            matches!(&error.error, GeomError::InvalidInput(detail) if detail.contains("occlusion")),
+            "{error:?}"
+        );
+        assert_eq!(calls_of(&calls), 0);
+        let refused = registry.audit(&request, &options()).unwrap();
+        assert_eq!(audit_ids(&refused), [MeshId(2)]);
+        assert_eq!(refused[0].error, error.error);
+    }
 }

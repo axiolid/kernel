@@ -18,14 +18,14 @@ use axiolid_mesh_hidden_lines_contract::{
             PerspectiveConformanceSuite,
         },
     },
-    FaceGroups, FaceSource, HiddenLineError, HiddenLineMesh, MeshRole, MeshVisibleFaces,
-    ViewProjection, VisibleFaceOutcome, VisibleFaceRequest,
+    FaceGroups, FaceSource, HiddenLineError, HiddenLineMesh, MeshRole, MeshVisibleFaces, Occlusion,
+    TriangleOcclusion, ViewProjection, VisibleFaceOutcome, VisibleFaceRequest,
 };
 
 use crate::device::matches_device;
 use crate::view_checks::{
-    scratch_fits, validate_group_lengths, validate_meshes, validate_region, validate_topology,
-    validate_view, SharedLimits,
+    has_see_through, scratch_fits, validate_group_lengths, validate_meshes, validate_region,
+    validate_topology, validate_view, SharedLimits,
 };
 
 const LABEL: &str = "visible-face";
@@ -143,12 +143,14 @@ impl MeshVisibleFacesRegistry {
         options.check_cancelled()?;
         validate_request_shape(request, options)?;
 
+        let see_through = has_see_through(request.meshes);
         let mut has_matching_provider = false;
         let mut has_budgeted_provider = false;
         for entry in &self.providers {
             let descriptor = entry.provider.descriptor();
             if matches_device(options.device(), descriptor.id, descriptor.target)
                 && entry.provider.supports_projection(request.view.projection)
+                && (!see_through || entry.provider.supports_occlusion(Occlusion::SeeThrough))
             {
                 has_matching_provider = true;
                 has_budgeted_provider |= scratch_fits(
@@ -168,12 +170,14 @@ impl MeshVisibleFacesRegistry {
         // The allocating topology audit happens only after at least one provider
         // and the audit itself have been admitted by the memory budget.
         validate_topology(request.meshes, None, options)?;
+        validate_uniform_groups(request.meshes)?;
 
         let mut last_retryable = None;
         for entry in &self.providers {
             let descriptor = entry.provider.descriptor();
             if !matches_device(options.device(), descriptor.id, descriptor.target)
                 || !entry.provider.supports_projection(request.view.projection)
+                || (see_through && !entry.provider.supports_occlusion(Occlusion::SeeThrough))
                 || !scratch_fits(
                     entry.provider.scratch_requirement(),
                     request.meshes,
@@ -248,6 +252,47 @@ fn validate_request_shape(
     validate_view(&request.view, options.tolerance().angular(), LABEL)?;
     validate_region(request.region, LABEL)?;
     validate_group_lengths(request.meshes, LABEL)?;
+    Ok(())
+}
+
+/// Every face group of a mesh with see-through triangles must be all opaque
+/// or all see-through (ADR 0111), so a region's source says whether it
+/// occludes. `Planar` groups cannot mix: the provider derives them per
+/// occlusion. Allocating; called after the memory budget admitted the audit.
+fn validate_uniform_groups(meshes: &[HiddenLineMesh<'_>]) -> Result<(), HiddenLineError> {
+    for entry in meshes {
+        let TriangleOcclusion::PerTriangle(flags) = entry.occlusion else {
+            continue;
+        };
+        if !entry.occlusion.has_see_through()
+            || !matches!(
+                entry.groups,
+                FaceGroups::Single | FaceGroups::PerTriangle(_)
+            )
+        {
+            continue;
+        }
+        let mut pairs = Vec::new();
+        pairs
+            .try_reserve(flags.len())
+            .map_err(|_| GeomError::BudgetExceeded { resource: "memory" })?;
+        pairs.extend(
+            flags.iter().enumerate().map(|(triangle, &flag)| {
+                (entry.groups.of(triangle), flag == Occlusion::SeeThrough)
+            }),
+        );
+        pairs.sort_unstable();
+        pairs.dedup();
+        if let Some(pair) = pairs.windows(2).find(|pair| pair[0].0 == pair[1].0) {
+            return Err(HiddenLineError::mesh(
+                entry.id,
+                GeomError::InvalidInput(format!(
+                    "face group {} mixes see-through and opaque triangles",
+                    pair[0].0 .0
+                )),
+            ));
+        }
+    }
     Ok(())
 }
 

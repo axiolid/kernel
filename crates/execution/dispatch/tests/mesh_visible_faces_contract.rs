@@ -20,7 +20,7 @@ use axiolid_dispatch::MeshVisibleFacesRegistry;
 use axiolid_mesh::TriMesh;
 use axiolid_mesh_hidden_lines_contract::{
     FaceGroup, FaceSource, HiddenLineError, HiddenLineMesh, MeshId, MeshRole, MeshVisibleFaces,
-    View, ViewProjection, VisibleFaceEvidence, VisibleFaceLimits, VisibleFaceOutcome,
+    Occlusion, View, ViewProjection, VisibleFaceEvidence, VisibleFaceLimits, VisibleFaceOutcome,
     VisibleFaceRequest, VisibleRegion,
 };
 
@@ -100,6 +100,7 @@ struct Recorder {
     scratch: ScratchRequirement,
     behaviour: Behaviour,
     perspective: bool,
+    see_through: bool,
 }
 
 impl Recorder {
@@ -110,7 +111,13 @@ impl Recorder {
             scratch: ScratchRequirement::None,
             behaviour,
             perspective: false,
+            see_through: false,
         }
+    }
+
+    fn claiming_see_through(mut self) -> Self {
+        self.see_through = true;
+        self
     }
 
     fn claiming_perspective(mut self) -> Self {
@@ -157,6 +164,10 @@ fn base_outcome(request: &VisibleFaceRequest<'_>) -> VisibleFaceOutcome {
 impl MeshVisibleFaces for Recorder {
     fn supports_projection(&self, projection: ViewProjection) -> bool {
         projection == ViewProjection::Orthographic || self.perspective
+    }
+
+    fn supports_occlusion(&self, occlusion: Occlusion) -> bool {
+        occlusion == Occlusion::Opaque || self.see_through
     }
 
     fn scratch_requirement(&self) -> ScratchRequirement {
@@ -1179,4 +1190,144 @@ fn perspective_registration_also_runs_the_base_suite() {
         .iter()
         .all(|f| matches!(f, PerspectiveConformanceFailure::VisibleFacesBase(_))));
     assert_eq!(registry.providers().count(), 0);
+}
+
+/// A registry whose only provider claims see-through triangles.
+fn see_through_registry(
+    calls: &Arc<AtomicUsize>,
+    behaviour: Behaviour,
+) -> MeshVisibleFacesRegistry {
+    let mut registry = MeshVisibleFacesRegistry::new();
+    registry.register(
+        0,
+        Recorder::new("claims", calls, behaviour).claiming_see_through(),
+    );
+    registry
+}
+
+#[test]
+fn a_see_through_triangle_reaches_only_providers_that_claim_it() {
+    let (declining, claiming) = (counter(), counter());
+    let cube = cube();
+    let flags = [Occlusion::SeeThrough; 12];
+    let meshes = [
+        mesh(1, MeshRole::Solid, &cube),
+        mesh(2, MeshRole::Solid, &cube).with_occlusion(&flags),
+    ];
+    let request = VisibleFaceRequest::new(&meshes, view(), limits());
+    let mut registry = MeshVisibleFacesRegistry::new();
+    registry.register(1, Recorder::new("declines", &declining, well_behaved));
+    registry.register(
+        0,
+        Recorder::new("claims", &claiming, well_behaved).claiming_see_through(),
+    );
+    registry
+        .visible_faces(&request, &options())
+        .expect("the claiming provider answers");
+    assert_eq!((calls_of(&declining), calls_of(&claiming)), (0, 1));
+
+    // Flags that are all opaque are no see-through request.
+    let opaque = [Occlusion::Opaque; 12];
+    let meshes = [mesh(1, MeshRole::Solid, &cube).with_occlusion(&opaque)];
+    let request = VisibleFaceRequest::new(&meshes, view(), limits());
+    registry
+        .visible_faces(&request, &options())
+        .expect("answers");
+    assert_eq!((calls_of(&declining), calls_of(&claiming)), (1, 1));
+}
+
+#[test]
+fn a_see_through_triangle_without_a_claiming_provider_is_unsupported() {
+    let calls = counter();
+    let cube = cube();
+    let flags = [Occlusion::SeeThrough; 12];
+    let meshes = [mesh(1, MeshRole::Solid, &cube).with_occlusion(&flags)];
+    let request = VisibleFaceRequest::new(&meshes, view(), limits());
+    let error = registry(&calls, well_behaved)
+        .visible_faces(&request, &options())
+        .expect_err("no provider honours see-through triangles");
+    assert_eq!(calls_of(&calls), 0);
+    assert_eq!(error.mesh, None);
+    assert!(matches!(
+        error.error,
+        GeomError::Unsupported {
+            operation: Operation::MeshVisibleFaces,
+            ..
+        }
+    ));
+}
+
+#[test]
+fn an_occlusion_slice_of_the_wrong_length_names_the_mesh() {
+    let (good, cube) = (cube(), cube());
+    let short = [Occlusion::SeeThrough; 4];
+    let opaque_long = [Occlusion::Opaque; 13];
+    for flags in [&short[..], &opaque_long[..]] {
+        let meshes = [
+            mesh(1, MeshRole::Solid, &good),
+            mesh(2, MeshRole::Solid, &cube).with_occlusion(flags),
+        ];
+        let request = VisibleFaceRequest::new(&meshes, view(), limits());
+        let calls = counter();
+        let error = see_through_registry(&calls, well_behaved)
+            .visible_faces(&request, &options())
+            .expect_err("a wrong occlusion slice");
+        assert_eq!(error.mesh, Some(MeshId(2)));
+        assert!(
+            matches!(&error.error, GeomError::InvalidInput(detail) if detail.contains("occlusion")),
+            "{error:?}"
+        );
+        assert_eq!(calls_of(&calls), 0);
+    }
+}
+
+#[test]
+fn a_face_group_that_mixes_occlusion_names_the_mesh() {
+    let (good, cube) = (cube(), cube());
+    let mut flags = [Occlusion::Opaque; 12];
+    flags[4] = Occlusion::SeeThrough;
+    // The top face (triangles 2 and 3) in a group of its own.
+    let mut groups = [FaceGroup(0); 12];
+    groups[2] = FaceGroup(1);
+    groups[3] = FaceGroup(1);
+    let mut top = [Occlusion::Opaque; 12];
+    top[2] = Occlusion::SeeThrough;
+    top[3] = Occlusion::SeeThrough;
+    let mixed_single = mesh(2, MeshRole::Solid, &cube).with_occlusion(&flags);
+    let mixed_groups = mesh(2, MeshRole::Solid, &cube)
+        .with_groups(&groups)
+        .with_occlusion(&flags);
+    for mixed in [mixed_single, mixed_groups] {
+        let meshes = [mesh(1, MeshRole::Solid, &good), mixed];
+        let request = VisibleFaceRequest::new(&meshes, view(), limits());
+        let calls = counter();
+        let error = see_through_registry(&calls, well_behaved)
+            .visible_faces(&request, &options())
+            .expect_err("a mixed face group");
+        assert_eq!(error.mesh, Some(MeshId(2)));
+        assert!(
+            matches!(&error.error, GeomError::InvalidInput(detail) if detail.contains("mixes")),
+            "{error:?}"
+        );
+        assert_eq!(calls_of(&calls), 0);
+    }
+
+    // A see-through group of its own is accepted, and planar groups are the
+    // provider's to split.
+    let calls = counter();
+    for uniform in [
+        mesh(2, MeshRole::Solid, &cube)
+            .with_groups(&groups)
+            .with_occlusion(&top),
+        mesh(2, MeshRole::Solid, &cube)
+            .with_planar_groups()
+            .with_occlusion(&flags),
+    ] {
+        let meshes = [mesh(1, MeshRole::Solid, &good), uniform];
+        let request = VisibleFaceRequest::new(&meshes, view(), limits());
+        see_through_registry(&calls, well_behaved)
+            .visible_faces(&request, &options())
+            .expect("uniform groups");
+    }
+    assert_eq!(calls_of(&calls), 2);
 }

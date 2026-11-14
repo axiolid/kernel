@@ -42,6 +42,9 @@ caret rule for `0.x` versions.
   the span of each non-skipped side counts as in front without the nearer-than
   test, while the near plane still has to be reached and the point still has
   to be strictly beyond it (ADR 0107, #387).
+- The providers refuse a request with a see-through triangle by name
+  (`UnsupportedInput`, input `see-through triangles`) and keep
+  `supports_occlusion` at its default (ADR 0111, #496).
 
 ## [0.1.4] - 2026-11-13
 

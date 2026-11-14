@@ -2,7 +2,7 @@
 
 use axiolid_contracts::{
     Backend, BackendDescriptor, BackendId, CancellationGranularity, ExecutionOptions,
-    ExecutionTarget, GeomError, ScratchRequirement,
+    ExecutionTarget, GeomError, Operation, ScratchRequirement,
 };
 use axiolid_mesh_hidden_lines_contract::{
     HiddenLineError, HiddenLineEvidence, HiddenLineOutcome, HiddenLineRequest, HiddenLineSegment,
@@ -15,6 +15,7 @@ use crate::groups::resolve_groups;
 use crate::occlusion::{resolve, Resolved, Scene, Work};
 use crate::output::endpoint;
 use crate::prepare::{prepare, Prepared, ResourceNames, SharedLimits};
+use crate::view::require_opaque;
 
 /// Portable exact hidden-line provider for orthographic and perspective views.
 ///
@@ -76,6 +77,7 @@ impl MeshHiddenLines for ScalarHiddenLines {
         request: &HiddenLineRequest<'_>,
         options: &ExecutionOptions,
     ) -> Result<HiddenLineOutcome, HiddenLineError> {
+        require_opaque(request.meshes, Self::ID, Operation::MeshHiddenLines)?;
         draw(BroadPhase::Tree, request, options)
     }
 }
@@ -285,6 +287,11 @@ impl MeshHiddenLines for ScanHiddenLines {
         request: &HiddenLineRequest<'_>,
         options: &ExecutionOptions,
     ) -> Result<HiddenLineOutcome, HiddenLineError> {
+        require_opaque(
+            request.meshes,
+            self.descriptor().id,
+            Operation::MeshHiddenLines,
+        )?;
         draw(BroadPhase::Scan, request, options)
     }
 }

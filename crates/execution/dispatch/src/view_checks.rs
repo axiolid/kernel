@@ -11,7 +11,7 @@ use axiolid_contracts::{ExecutionOptions, GeomError, ScratchRequirement};
 use axiolid_core::Aabb2;
 use axiolid_mesh::{audit_mesh_scratch_bytes, try_audit_mesh};
 use axiolid_mesh_hidden_lines_contract::{
-    FaceGroups, HiddenLineError, HiddenLineMesh, MeshRole, View, ViewProjection,
+    FaceGroups, HiddenLineError, HiddenLineMesh, MeshRole, TriangleOcclusion, View, ViewProjection,
 };
 
 use crate::frame::validate_frame;
@@ -43,7 +43,24 @@ pub(crate) fn group_length_fault(entry: &HiddenLineMesh<'_>, label: &str) -> Opt
     }
 }
 
-/// A `PerTriangle` group slice must have one id per triangle.
+/// The fault of a `PerTriangle` occlusion slice that does not have one flag
+/// per triangle (ADR 0111). The flags are always read, whatever the
+/// operation.
+pub(crate) fn occlusion_length_fault(entry: &HiddenLineMesh<'_>) -> Option<GeomError> {
+    match entry.occlusion {
+        TriangleOcclusion::PerTriangle(flags) if flags.len() != entry.mesh.triangle_count() => {
+            Some(GeomError::InvalidInput(format!(
+                "{} occlusion flag(s) for {} triangle(s)",
+                flags.len(),
+                entry.mesh.triangle_count()
+            )))
+        }
+        _ => None,
+    }
+}
+
+/// A `PerTriangle` group slice must have one id per triangle, and a
+/// `PerTriangle` occlusion slice one flag per triangle.
 pub(crate) fn validate_group_lengths(
     meshes: &[HiddenLineMesh<'_>],
     label: &str,
@@ -52,8 +69,17 @@ pub(crate) fn validate_group_lengths(
         if let Some(error) = group_length_fault(entry, label) {
             return Err(HiddenLineError::mesh(entry.id, error));
         }
+        if let Some(error) = occlusion_length_fault(entry) {
+            return Err(HiddenLineError::mesh(entry.id, error));
+        }
     }
     Ok(())
+}
+
+/// Whether any mesh of the request holds a see-through triangle, which only a
+/// provider that claims `Occlusion::SeeThrough` is given (ADR 0111).
+pub(crate) fn has_see_through(meshes: &[HiddenLineMesh<'_>]) -> bool {
+    meshes.iter().any(|entry| entry.occlusion.has_see_through())
 }
 
 pub(crate) fn invalid(detail: impl Into<String>) -> HiddenLineError {
@@ -190,7 +216,8 @@ pub(crate) fn validate_topology(
 
 /// Why one mesh is refused, or `None` when it passes the audit. `groups`
 /// names the operation when the mesh's face groups are read, so a short
-/// `PerTriangle` slice is a fault of the mesh. Shared by the
+/// `PerTriangle` slice is a fault of the mesh; a short occlusion slice always
+/// is. Shared by the
 /// registries' `validate_topology` and the hidden-line registry's `audit`, so
 /// both give the same verdict per mesh.
 pub(crate) fn mesh_verdict(
@@ -199,6 +226,9 @@ pub(crate) fn mesh_verdict(
     options: &ExecutionOptions,
 ) -> Result<Option<GeomError>, HiddenLineError> {
     if let Some(fault) = groups.and_then(|label| group_length_fault(entry, label)) {
+        return Ok(Some(fault));
+    }
+    if let Some(fault) = occlusion_length_fault(entry) {
         return Ok(Some(fault));
     }
     let health = try_audit_mesh(entry.mesh, options.tolerance())

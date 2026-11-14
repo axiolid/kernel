@@ -9,6 +9,17 @@ caret rule for `0.x` versions.
 
 ## [Unreleased]
 
+### Added
+
+- `MeshHiddenLinesRegistry` and `MeshVisibleFacesRegistry` route by
+  `supports_occlusion`: a request with a see-through triangle skips every
+  provider that does not claim `Occlusion::SeeThrough` and is `Unsupported`
+  when none does, before the topology audit. A `PerTriangle` occlusion slice
+  whose length differs from the triangle count is `InvalidInput` naming the
+  mesh, in `hidden_lines`, `audit` and `visible_faces`, and a visible-face
+  group that mixes see-through and opaque triangles is `InvalidInput` naming
+  the mesh (ADR 0111, #496).
+
 ## [0.3.13] - 2026-11-13
 
 ### Added
