@@ -9,6 +9,8 @@ caret rule for `0.x` versions.
 
 ## [Unreleased]
 
+## [0.4.1] - 2026-11-14
+
 ### Added
 
 - `free_faces`, `free_faces_within`, `FreeFaces` (with `locate`), `FreeSpaceInput`,

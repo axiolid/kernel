@@ -3668,6 +3668,17 @@ Every publishable crate versions and publishes independently ([ADR 0067](/adr/00
 
 ## axiolid-exact-arrangement
 
+### 0.1.2 - 2026-11-14
+
+### Added
+
+- `faces`, `Faces` and `FaceId` (#490, ADR 0109): the face on each side of every piece of
+  an arrangement, nested components included, numbered from the unbounded face 0; with `V`
+  vertices, `E` pieces and `C` components the count satisfies `V - E + F = 1 + C`.
+- `Nearest` and, on `ExactPoints`, `nearest_on_segment`, `foot`, `compare_distance` and
+  `compare_line_distance`: exact distance predicates with no square root, decided through
+  the interval tier and `Dyadic`.
+
 ### 0.1.1 - 2026-11-07
 
 ### Added
@@ -8276,6 +8287,19 @@ Every publishable crate versions and publishes independently ([ADR 0067](/adr/00
 
 
 ## axiolid-overlay
+
+### 0.4.1 - 2026-11-14
+
+### Added
+
+- `free_faces`, `free_faces_within`, `FreeFaces` (with `locate`), `FreeSpaceInput`,
+  `FreeFace`, `FreeRing`, `Bridge`, `PieceSource`, `FaceLocation`, `FreeFaceEvidence`,
+  `FreeFacesError` and `BarrierDefect` (#490, ADR 0109): the bounded faces of the plane
+  that obstacle polygons and open-segment barriers leave free, with the inputs each ring
+  edge lies on. Gaps narrower than a closing width are closed by reported bridges, never
+  by moving an input; a free region narrower than the width is a closed gap, returned
+  apart. Rings are snap-rounded and certified as the visible faces are. Depends on
+  `axiolid-exact-arrangement` now.
 
 ### 0.4.0 - 2026-11-13
 

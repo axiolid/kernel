@@ -9,6 +9,8 @@ caret rule for `0.x` versions.
 
 ## [Unreleased]
 
+## [0.1.2] - 2026-11-14
+
 ### Added
 
 - `faces`, `Faces` and `FaceId` (#490, ADR 0109): the face on each side of every piece of

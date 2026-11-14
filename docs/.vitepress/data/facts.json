@@ -184,10 +184,10 @@
       "description": "Exact arrangement of straight segments on rational points, with face tracing",
       "layer": "algorithms",
       "path": "crates/algorithms/planar/exact-arrangement",
-      "released": "0.1.1",
-      "released_date": "2026-11-07",
+      "released": "0.1.2",
+      "released_date": "2026-11-14",
       "role": "algorithm.planar",
-      "version": "0.1.1"
+      "version": "0.1.2"
     },
     "axiolid-exact-compile-contract": {
       "description": "Portable graph-to-exact-B-rep compilation contract",
@@ -409,10 +409,10 @@
       "description": "Deterministic validated planar overlay contract",
       "layer": "algorithms",
       "path": "crates/algorithms/planar/overlay",
-      "released": "0.4.0",
-      "released_date": "2026-11-13",
+      "released": "0.4.1",
+      "released_date": "2026-11-14",
       "role": "algorithm.planar",
-      "version": "0.4.0"
+      "version": "0.4.1"
     },
     "axiolid-pointcloud": {
       "description": "Portable point-sampled geometry values with optional per-point channels.",

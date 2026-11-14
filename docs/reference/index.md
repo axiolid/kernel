@@ -61,7 +61,7 @@ Every page here is generated from the crate itself: its manifest, its crate docu
 | [`axiolid-decompose`](./crates/axiolid-decompose) | `algorithm.discrete` | 0.3.3 | Convex decomposition of a solid, exact or approximate and always labelled |
 | [`axiolid-evaluate`](./crates/axiolid-evaluate) | `algorithm.parametric` | 0.3.22 | Analytic and spline curve/surface evaluation, jets, and inversion |
 | [`axiolid-exact`](./crates/axiolid-exact) | `algorithm.reference` | 0.1.4 | Filtered exact arithmetic: interval filter, dyadic big integers, a + b*sqrt(c) |
-| [`axiolid-exact-arrangement`](./crates/axiolid-exact-arrangement) | `algorithm.planar` | 0.1.1 | Exact arrangement of straight segments on rational points, with face tracing |
+| [`axiolid-exact-arrangement`](./crates/axiolid-exact-arrangement) | `algorithm.planar` | 0.1.2 | Exact arrangement of straight segments on rational points, with face tracing |
 | [`axiolid-field-ops`](./crates/axiolid-field-ops) | `algorithm.sampled` | 0.3.4 | Sampling, morphology, clearance, and navigation over Axiolid layered fields. |
 | [`axiolid-heal`](./crates/axiolid-heal) | `algorithm.repair` | 0.3.4 | Explicit diagnosis and opt-in repair contracts for dirty geometry |
 | [`axiolid-hidden-lines`](./crates/axiolid-hidden-lines) | `algorithm.discrete` | 0.1.5 | Exact scalar hidden-line drawings of triangle meshes in orthographic and perspective views, and visible face regions in orthographic views |
@@ -72,7 +72,7 @@ Every page here is generated from the crate itself: its manifest, its crate docu
 | [`axiolid-minkowski`](./crates/axiolid-minkowski) | `algorithm.discrete` | 0.3.3 | Minkowski sum and difference of planar-faced solids |
 | [`axiolid-numeric`](./crates/axiolid-numeric) | `algorithm.numeric` | 0.1.4 | Numeric substrate: bracketed and polynomial root finding, adaptive quadrature, dense least squares, and minimisation, each with error estimates |
 | [`axiolid-nurbs`](./crates/axiolid-nurbs) | `algorithm.parametric` | 0.3.10 | General polynomial and rational B-spline analysis and transformation algorithms |
-| [`axiolid-overlay`](./crates/axiolid-overlay) | `algorithm.planar` | 0.4.0 | Deterministic validated planar overlay contract |
+| [`axiolid-overlay`](./crates/axiolid-overlay) | `algorithm.planar` | 0.4.1 | Deterministic validated planar overlay contract |
 | [`axiolid-predicates`](./crates/axiolid-predicates) | `algorithm.reference` | 0.3.5 | Certified exact-arithmetic geometric predicates |
 | [`axiolid-project`](./crates/axiolid-project) | `algorithm.planar` | 0.4.0 | Projection of triangle meshes onto a plane, and prism intersection |
 | [`axiolid-ray-mesh`](./crates/axiolid-ray-mesh) | `algorithm.query` | 0.4.2 | Narrow-phase ray/triangle-mesh nearest-hit intersection |

@@ -8,7 +8,7 @@ Exact arrangement of straight segments on rational points, with face tracing.
 
 | | |
 | --- | --- |
-| Latest release | 0.1.1 (2026-11-07) |
+| Latest release | 0.1.2 (2026-11-14) |
 | crates.io | [`axiolid-exact-arrangement`](https://crates.io/crates/axiolid-exact-arrangement) |
 | Layer | algorithms (`algorithm.planar`) |
 | API documentation | [rustdoc](/api/rustdoc/axiolid_exact_arrangement/index.html) · [docs.rs](https://docs.rs/axiolid-exact-arrangement) |
@@ -29,20 +29,15 @@ It is the shared source of truth for those signs: the plane section of `axiolid-
 
 ## Changes
 
-Latest release, 0.1.1 (2026-11-07):
+Latest release, 0.1.2 (2026-11-14):
 
 ### Added
 
-- `snap_round`, `Snapped`, `ClassBoundary`, `HOT_POINT_SCRATCH_BYTES` and
-  `FRAGMENT_SCRATCH_BYTES` (ADR 0100, #410): snap rounding of straight,
-  pairwise interior-disjoint edges to the binary64 tensor grid. Each edge is
-  routed through the centre of every hot cell it meets, in order, decided
-  exactly (half-open cells, ties to even); the fragments are arranged and a
-  crossing left among them is refused. `Snapped` carries the displacement
-  bound in the maximum norm and the number of rerouted edges, and
-  `Snapped::class_boundary` nets a class's chain per fragment so that parts
-  of zero width cancel.
-- `check_winding`, which refuses a traced class that winds more than once
-  at some point, and `ExactPoints::frame_sign`.
+- `faces`, `Faces` and `FaceId` (#490, ADR 0109): the face on each side of every piece of
+  an arrangement, nested components included, numbered from the unbounded face 0; with `V`
+  vertices, `E` pieces and `C` components the count satisfies `V - E + F = 1 + C`.
+- `Nearest` and, on `ExactPoints`, `nearest_on_segment`, `foot`, `compare_distance` and
+  `compare_line_distance`: exact distance predicates with no square root, decided through
+  the interval tier and `Dyadic`.
 
 Full history: [`crates/algorithms/planar/exact-arrangement/CHANGELOG.md`](https://github.com/axiolid/kernel/blob/main/crates/algorithms/planar/exact-arrangement/CHANGELOG.md)
