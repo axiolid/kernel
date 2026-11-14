@@ -64,8 +64,11 @@ impl MeshHiddenLines for ScalarHiddenLines {
         CancellationGranularity::Incremental
     }
 
-    fn supports_projection(&self, _projection: ViewProjection) -> bool {
-        true
+    fn supports_projection(&self, projection: ViewProjection) -> bool {
+        matches!(
+            projection,
+            ViewProjection::Orthographic | ViewProjection::Perspective
+        )
     }
 
     fn hidden_lines(
@@ -270,8 +273,11 @@ impl MeshHiddenLines for ScanHiddenLines {
         CancellationGranularity::Incremental
     }
 
-    fn supports_projection(&self, _projection: ViewProjection) -> bool {
-        true
+    fn supports_projection(&self, projection: ViewProjection) -> bool {
+        matches!(
+            projection,
+            ViewProjection::Orthographic | ViewProjection::Perspective
+        )
     }
 
     fn hidden_lines(
