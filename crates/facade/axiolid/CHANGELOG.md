@@ -19,6 +19,11 @@ caret rule for `0.x` versions.
   whose view is perspective; a failure refuses the call as the case
   `perspective claim` of the hidden-line report. Visible faces still refuse a
   perspective view (`Unsupported`).
+- `Application::hidden_lines` and `visible_faces` honour see-through
+  triangles (`HiddenLineMesh::with_occlusion`): both portable providers claim
+  them (ADR 0111, #496). Each claim has its own conformance suite, run once
+  per process and only by a call with a see-through triangle; a failure
+  refuses the call as the case `see-through claim` of the provider's report.
 
 ## [0.5.0] - 2026-11-13
 

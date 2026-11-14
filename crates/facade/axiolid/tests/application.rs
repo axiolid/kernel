@@ -252,9 +252,9 @@ mod drawing {
     use axiolid::contracts::{GeomError, Operation};
     use axiolid::core::{Frame3, Point2};
     use axiolid::mesh_hidden_lines::{
-        EdgeKind, EdgeSelection, FaceGroup, FaceSource, HiddenLineLimits, HiddenLineMesh,
-        HiddenLineRequest, MeshId, MeshRole, RefusedMesh, View, Visibility, VisibleFaceLimits,
-        VisibleFaceRequest,
+        BehindSurface, EdgeKind, EdgeSelection, FaceGroup, FaceSource, HiddenLineLimits,
+        HiddenLineMesh, HiddenLineRequest, MeshId, MeshRole, Occlusion, RefusedMesh, View,
+        Visibility, VisibleFaceLimits, VisibleFaceRequest,
     };
 
     use super::*;
@@ -282,6 +282,102 @@ mod drawing {
 
     fn square(points: [(f64, f64); 4]) -> Vec<Point2> {
         points.iter().map(|&(x, y)| Point2::new(x, y)).collect()
+    }
+
+    /// A horizontal rectangle at height `z`.
+    fn rectangle(x0: f64, y0: f64, x1: f64, y1: f64, z: f64) -> TriMesh {
+        TriMesh::new(
+            vec![
+                Point3::new(x0, y0, z),
+                Point3::new(x1, y0, z),
+                Point3::new(x1, y1, z),
+                Point3::new(x0, y1, z),
+            ],
+            vec![0, 1, 2, 0, 2, 3],
+        )
+    }
+
+    #[test]
+    fn a_pane_over_a_floor_is_seen_through_by_the_lines_beneath_it() {
+        // The floor [0,4]^2 at z = 0 and the see-through pane [1,3] x [1,5]
+        // at z = 1: the floor's edge y = 4 is seen through the pane from
+        // x = 3 to x = 1 and plain elsewhere (ADR 0111).
+        let (floor, pane) = (
+            rectangle(0.0, 0.0, 4.0, 4.0, 0.0),
+            rectangle(1.0, 1.0, 3.0, 5.0, 1.0),
+        );
+        let glass = [Occlusion::SeeThrough; 2];
+        let meshes = [
+            HiddenLineMesh::new(MeshId(1), MeshRole::Sheet, &floor),
+            HiddenLineMesh::new(MeshId(2), MeshRole::Sheet, &pane).with_occlusion(&glass),
+        ];
+        let request =
+            HiddenLineRequest::new(&meshes, plan(), EdgeSelection::new(None), lines_limits());
+        let outcome = Application::portable()
+            .expect("portable application")
+            .hidden_lines(&request, &options())
+            .expect("the pane draws");
+        let pieces: Vec<_> = outcome
+            .segments
+            .iter()
+            .filter(|s| s.source.mesh == MeshId(1) && s.source.vertices == [2, 3])
+            .map(|s| (s.visibility, s.seen_through, s.start.x, s.end.x))
+            .collect();
+        let v = Visibility::Visible;
+        assert_eq!(
+            pieces,
+            [(v, 0, 4.0, 3.0), (v, 1, 3.0, 1.0), (v, 0, 1.0, 0.0)]
+        );
+        assert_eq!(outcome.evidence.see_through_triangles, 2);
+        assert_eq!(outcome.evidence.seen_through_segments, 1);
+    }
+
+    #[test]
+    fn a_pane_over_a_box_lists_the_box_behind_it() {
+        let (block, pane) = (
+            cube([0.0, 0.0, 0.0], [4.0, 4.0, 1.0]),
+            rectangle(1.0, 1.0, 3.0, 5.0, 2.0),
+        );
+        let glass = [Occlusion::SeeThrough; 2];
+        let meshes = [
+            HiddenLineMesh::new(MeshId(1), MeshRole::Solid, &block),
+            HiddenLineMesh::new(MeshId(2), MeshRole::Sheet, &pane).with_occlusion(&glass),
+        ];
+        let application = Application::portable().expect("portable application");
+        // Nothing may be listed until the caller allows it.
+        let refused = VisibleFaceRequest::new(&meshes, plan(), faces_limits());
+        let error = application
+            .visible_faces(&refused, &options())
+            .expect_err("no behind surface allowed");
+        let ApplicationErrorSource::HiddenLines(source) = *error.source else {
+            panic!("a drawing refusal");
+        };
+        assert_eq!(
+            source.error,
+            GeomError::BudgetExceeded {
+                resource: "visible-face behind surfaces"
+            }
+        );
+        let request =
+            VisibleFaceRequest::new(&meshes, plan(), faces_limits().with_max_behind_surfaces(4));
+        let outcome = application
+            .visible_faces(&request, &options())
+            .expect("the pane resolves");
+        let stacks: Vec<_> = outcome
+            .regions
+            .iter()
+            .map(|r| (r.mesh, r.behind.clone()))
+            .collect();
+        let box_top = BehindSurface::new(MeshId(1), FaceSource::Group(FaceGroup(0)), 1);
+        assert_eq!(
+            stacks,
+            [
+                (MeshId(1), vec![]),
+                (MeshId(2), vec![box_top]),
+                (MeshId(2), vec![])
+            ]
+        );
+        assert_eq!(outcome.evidence.behind_surfaces, 1);
     }
 
     fn triangle() -> TriMesh {

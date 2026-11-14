@@ -11,7 +11,9 @@ step). The portable providers pass their suites, so the check never fires in
 a test; that is why `verified` is generic and tested directly (its mutant
 below), and the call sites are two lines each. The same holds for the
 perspective verdict consulted by a perspective call; its fold into a report
-is tested directly (`perspective_report`).
+is tested directly (`perspective_report`), and for the see-through verdicts
+consulted by a call with a see-through triangle (`see_through_report`,
+`see_through_faces_report`, ADR 0111).
 """
 import probe_lib
 
@@ -78,6 +80,18 @@ MUTANTS = [
     ('a failed perspective suite is folded under another case', DRAWING,
      '        folded.failures.push(ConformanceFailure::ReturnedError {\n            case: "perspective claim",',
      '        folded.failures.push(ConformanceFailure::ReturnedError {\n            case: "perspective",', [LIB_TEST]),
+    ('a failed see-through line suite is folded into a success', DRAWING,
+     '        (!report.is_success()).then(|| ConformanceFailure::ReturnedError {',
+     '        (false && !report.is_success()).then(|| ConformanceFailure::ReturnedError {', [LIB_TEST]),
+    ('a failed see-through face suite is folded into a success', DRAWING,
+     '        (!report.is_success()).then(|| FaceConformanceFailure::ReturnedError {',
+     '        (false && !report.is_success()).then(|| FaceConformanceFailure::ReturnedError {', [LIB_TEST]),
+    ('a failed see-through line suite is folded under another case', DRAWING,
+     '        (!report.is_success()).then(|| ConformanceFailure::ReturnedError {\n            case: "see-through claim",',
+     '        (!report.is_success()).then(|| ConformanceFailure::ReturnedError {\n            case: "see-through",', [LIB_TEST]),
+    ('a failed see-through face suite is folded under another case', DRAWING,
+     '        (!report.is_success()).then(|| FaceConformanceFailure::ReturnedError {\n            case: "see-through claim",',
+     '        (!report.is_success()).then(|| FaceConformanceFailure::ReturnedError {\n            case: "see-through",', [LIB_TEST]),
     ('enabled features omit the provider', INTEGRATION,
      '    compiled_feature!(features, "hidden-lines-provider");\n', '', [INTEGRATION_TEST]),
 ]

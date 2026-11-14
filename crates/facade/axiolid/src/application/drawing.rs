@@ -12,7 +12,9 @@
 //! claim has its own suite, run once and only by a call whose view is
 //! perspective, so an orthographic call never pays for it; a failure is
 //! folded into the same refusal as the case `perspective claim`, as the
-//! dispatch registry does.
+//! dispatch registry does. Both providers claim see-through triangles (ADR
+//! 0111) in the same way: that suite runs once and only by a call with a
+//! see-through triangle, and a failure is the case `see-through claim`.
 
 use std::sync::OnceLock;
 
@@ -22,13 +24,14 @@ use axiolid_contracts::{
 };
 use axiolid_hidden_lines::{ScalarHiddenLines, ScalarVisibleFaces};
 use axiolid_mesh_hidden_lines_contract::conformance::{
-    faces::FaceConformanceSuite,
+    faces::{FaceConformanceFailure, FaceConformanceReport, FaceConformanceSuite},
     perspective::{PerspectiveConformanceReport, PerspectiveConformanceSuite},
+    see_through::{SeeThroughConformanceReport, SeeThroughConformanceSuite},
     ConformanceFailure, ConformanceReport, ConformanceSuite,
 };
 use axiolid_mesh_hidden_lines_contract::{
-    HiddenLineError, HiddenLineOutcome, HiddenLineRequest, RefusedMesh, ViewProjection,
-    VisibleFaceOutcome, VisibleFaceRequest,
+    HiddenLineError, HiddenLineMesh, HiddenLineOutcome, HiddenLineRequest, RefusedMesh,
+    ViewProjection, VisibleFaceOutcome, VisibleFaceRequest,
 };
 
 use super::{
@@ -80,6 +83,61 @@ fn visible_faces_verdict() -> Result<(), &'static ProviderConformanceReport> {
             &ScalarVisibleFaces::new(),
         )))
     })
+}
+
+/// Whether a request holds a see-through triangle (ADR 0111).
+fn has_see_through(meshes: &[HiddenLineMesh<'_>]) -> bool {
+    meshes.iter().any(|entry| entry.occlusion.has_see_through())
+}
+
+/// The hidden-line provider's verdict on its see-through claim.
+fn see_through_hidden_lines_verdict() -> Result<(), &'static ProviderConformanceReport> {
+    static CELL: Verdict = OnceLock::new();
+    verified(&CELL, || {
+        see_through_report(SeeThroughConformanceSuite::run(&ScalarHiddenLines::new()))
+    })
+}
+
+/// The visible-face provider's verdict on its see-through claim.
+fn see_through_visible_faces_verdict() -> Result<(), &'static ProviderConformanceReport> {
+    static CELL: Verdict = OnceLock::new();
+    verified(&CELL, || {
+        see_through_faces_report(SeeThroughConformanceSuite::run_faces(
+            &ScalarVisibleFaces::new(),
+        ))
+    })
+}
+
+/// The refusal a failed see-through suite is folded into: the case
+/// `see-through claim`, as `register_conformant` reports it.
+fn see_through_error(report: &SeeThroughConformanceReport) -> HiddenLineError {
+    HiddenLineError::request(GeomError::InvalidInput(format!(
+        "see-through suite: {report}"
+    )))
+}
+
+/// A see-through suite report as a hidden-line report.
+fn see_through_report(report: SeeThroughConformanceReport) -> ProviderConformanceReport {
+    let mut folded = ConformanceReport::default();
+    folded.failures.extend(
+        (!report.is_success()).then(|| ConformanceFailure::ReturnedError {
+            case: "see-through claim",
+            error: see_through_error(&report),
+        }),
+    );
+    ProviderConformanceReport::MeshHiddenLines(Box::new(folded))
+}
+
+/// A see-through suite report as a visible-face report.
+fn see_through_faces_report(report: SeeThroughConformanceReport) -> ProviderConformanceReport {
+    let mut folded = FaceConformanceReport::default();
+    folded.failures.extend(
+        (!report.is_success()).then(|| FaceConformanceFailure::ReturnedError {
+            case: "see-through claim",
+            error: see_through_error(&report),
+        }),
+    );
+    ProviderConformanceReport::MeshVisibleFaces(Box::new(folded))
 }
 
 /// Run `run` the first time `cell` is asked and keep its verdict.
@@ -182,6 +240,11 @@ impl Application {
                     conformance_error(Operation::MeshHiddenLines, provider, options, report)
                 })?;
             }
+            if has_see_through(request.meshes) {
+                see_through_hidden_lines_verdict().map_err(|report| {
+                    conformance_error(Operation::MeshHiddenLines, provider, options, report)
+                })?;
+            }
         }
         self.hidden_lines
             .hidden_lines(request, options)
@@ -225,6 +288,11 @@ impl Application {
             visible_faces_verdict().map_err(|report| {
                 conformance_error(Operation::MeshVisibleFaces, provider, options, report)
             })?;
+            if has_see_through(request.meshes) {
+                see_through_visible_faces_verdict().map_err(|report| {
+                    conformance_error(Operation::MeshVisibleFaces, provider, options, report)
+                })?;
+            }
         }
         self.visible_faces
             .visible_faces(request, options)
@@ -321,6 +389,43 @@ mod tests {
         let passed =
             perspective_report(PerspectiveConformanceSuite::run(&ScalarHiddenLines::new()));
         assert!(passed.is_success());
+    }
+
+    #[test]
+    fn a_failed_see_through_suite_is_folded_into_each_report() {
+        use axiolid_mesh_hidden_lines_contract::conformance::see_through::SeeThroughConformanceFailure;
+
+        let failure = SeeThroughConformanceFailure::NotNeutral { case: "probe" };
+        let mut lines = SeeThroughConformanceSuite::run(&ScalarHiddenLines::new());
+        assert!(lines.is_success(), "the shipped provider passes: {lines}");
+        assert!(see_through_report(lines.clone()).is_success());
+        lines.failures.push(failure.clone());
+        let ProviderConformanceReport::MeshHiddenLines(report) = see_through_report(lines) else {
+            panic!("a hidden-line report");
+        };
+        assert!(matches!(
+            report.failures[..],
+            [ConformanceFailure::ReturnedError {
+                case: "see-through claim",
+                ..
+            }]
+        ));
+
+        let mut faces = SeeThroughConformanceSuite::run_faces(&ScalarVisibleFaces::new());
+        assert!(faces.is_success(), "the shipped provider passes: {faces}");
+        assert!(see_through_faces_report(faces.clone()).is_success());
+        faces.failures.push(failure);
+        let ProviderConformanceReport::MeshVisibleFaces(report) = see_through_faces_report(faces)
+        else {
+            panic!("a visible-face report");
+        };
+        assert!(matches!(
+            report.failures[..],
+            [FaceConformanceFailure::ReturnedError {
+                case: "see-through claim",
+                ..
+            }]
+        ));
     }
 
     #[test]
