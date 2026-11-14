@@ -296,6 +296,64 @@ mod drawing {
     }
 
     #[test]
+    fn a_perspective_cube_draws_its_front_ring_visible_and_the_rest_hidden() {
+        // The box [-1,1]^2 x [-4,-2] seen from the eye at the origin: the
+        // front ring projects to +-1/2 and the back ring to +-1/4.
+        let mesh = cube([-1.0, -1.0, -4.0], [1.0, 1.0, -2.0]);
+        let meshes = [HiddenLineMesh::new(MeshId(7), MeshRole::Solid, &mesh)];
+        let view = View::perspective(
+            Frame3 {
+                origin: Point3::new(0.0, 0.0, 0.0),
+                x: Vec3::X,
+                y: Vec3::Y,
+                z: Vec3::Z,
+            },
+            -1.0,
+        )
+        .expect("a negative near");
+        let request =
+            HiddenLineRequest::new(&meshes, view, EdgeSelection::new(Some(0.5)), lines_limits());
+        let application = Application::portable().expect("portable application");
+        let outcome = application
+            .hidden_lines(&request, &options())
+            .expect("the perspective cube draws");
+        assert_eq!(outcome.view, view);
+        let count = |visibility| {
+            outcome
+                .segments
+                .iter()
+                .filter(|s| s.visibility == visibility)
+                .count()
+        };
+        assert_eq!(
+            (count(Visibility::Visible), count(Visibility::Hidden)),
+            (4, 8)
+        );
+        for segment in outcome
+            .segments
+            .iter()
+            .filter(|s| s.visibility == Visibility::Visible)
+        {
+            for p in [segment.start, segment.end] {
+                assert_eq!((p.x.abs(), p.y.abs()), (0.5, 0.5));
+            }
+        }
+
+        // Visible faces still refuse perspective, by routing.
+        let faces = VisibleFaceRequest::new(&meshes, view, faces_limits());
+        let error = application
+            .visible_faces(&faces, &options())
+            .expect_err("no visible-face provider draws perspective");
+        let ApplicationErrorSource::HiddenLines(source) = *error.source else {
+            panic!("a drawing refusal");
+        };
+        assert!(
+            matches!(source.error, GeomError::Unsupported { .. }),
+            "{source}"
+        );
+    }
+
+    #[test]
     fn the_plan_cube_draws_four_hidden_and_four_visible_silhouettes() {
         let mesh = cube([0.0, 0.0, 0.0], [2.0, 2.0, 2.0]);
         let meshes = [HiddenLineMesh::new(MeshId(7), MeshRole::Solid, &mesh)];

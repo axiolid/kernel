@@ -7,20 +7,28 @@
 //! and the C ABI builds an application per context). A provider that fails
 //! its suite refuses every call with
 //! [`ApplicationErrorSource::ProviderConformance`]; there is no output.
+//!
+//! The hidden-line provider also claims perspective views (ADR 0107). That
+//! claim has its own suite, run once and only by a call whose view is
+//! perspective, so an orthographic call never pays for it; a failure is
+//! folded into the same refusal as the case `perspective claim`, as the
+//! dispatch registry does.
 
 use std::sync::OnceLock;
 
 use axiolid_contracts::{
-    capability_ids, BackendId, CapabilityDescriptor, Exactness, ExecutionOptions,
+    capability_ids, BackendId, CapabilityDescriptor, Exactness, ExecutionOptions, GeomError,
     IntegrationDescriptor, Operation, Representation,
 };
 use axiolid_hidden_lines::{ScalarHiddenLines, ScalarVisibleFaces};
 use axiolid_mesh_hidden_lines_contract::conformance::{
-    faces::FaceConformanceSuite, ConformanceSuite,
+    faces::FaceConformanceSuite,
+    perspective::{PerspectiveConformanceReport, PerspectiveConformanceSuite},
+    ConformanceFailure, ConformanceReport, ConformanceSuite,
 };
 use axiolid_mesh_hidden_lines_contract::{
-    HiddenLineError, HiddenLineOutcome, HiddenLineRequest, RefusedMesh, VisibleFaceOutcome,
-    VisibleFaceRequest,
+    HiddenLineError, HiddenLineOutcome, HiddenLineRequest, RefusedMesh, ViewProjection,
+    VisibleFaceOutcome, VisibleFaceRequest,
 };
 
 use super::{
@@ -38,6 +46,30 @@ fn hidden_lines_verdict() -> Result<(), &'static ProviderConformanceReport> {
             &ScalarHiddenLines::new(),
         )))
     })
+}
+
+/// The hidden-line provider's verdict on its perspective claim.
+fn perspective_hidden_lines_verdict() -> Result<(), &'static ProviderConformanceReport> {
+    static CELL: Verdict = OnceLock::new();
+    verified(&CELL, || {
+        perspective_report(PerspectiveConformanceSuite::run(&ScalarHiddenLines::new()))
+    })
+}
+
+/// A perspective suite report as a hidden-line report: a failure is the
+/// case `perspective claim`, as `register_conformant` of the dispatch
+/// registry reports it.
+fn perspective_report(report: PerspectiveConformanceReport) -> ProviderConformanceReport {
+    let mut folded = ConformanceReport::default();
+    if !report.is_success() {
+        folded.failures.push(ConformanceFailure::ReturnedError {
+            case: "perspective claim",
+            error: HiddenLineError::request(GeomError::InvalidInput(format!(
+                "perspective suite: {report}"
+            ))),
+        });
+    }
+    ProviderConformanceReport::MeshHiddenLines(Box::new(folded))
 }
 
 /// The visible-face provider's verdict, tied to its suite.
@@ -145,6 +177,11 @@ impl Application {
             hidden_lines_verdict().map_err(|report| {
                 conformance_error(Operation::MeshHiddenLines, provider, options, report)
             })?;
+            if request.view.projection == ViewProjection::Perspective {
+                perspective_hidden_lines_verdict().map_err(|report| {
+                    conformance_error(Operation::MeshHiddenLines, provider, options, report)
+                })?;
+            }
         }
         self.hidden_lines
             .hidden_lines(request, options)
@@ -256,6 +293,34 @@ mod tests {
             assert!(!report.is_success());
         }
         assert_eq!(runs.get(), 1);
+    }
+
+    #[test]
+    fn a_failed_perspective_suite_is_folded_into_a_hidden_line_report() {
+        use axiolid_mesh_hidden_lines_contract::conformance::perspective::PerspectiveConformanceFailure;
+
+        let mut failed = PerspectiveConformanceSuite::run(&ScalarHiddenLines::new());
+        assert!(failed.is_success(), "the shipped provider passes: {failed}");
+        failed
+            .failures
+            .push(PerspectiveConformanceFailure::ClaimUnverifiable {
+                operation: "hidden lines",
+            });
+        let folded = perspective_report(failed);
+        assert!(!folded.is_success());
+        let ProviderConformanceReport::MeshHiddenLines(report) = folded else {
+            panic!("a hidden-line report");
+        };
+        assert!(matches!(
+            report.failures[..],
+            [ConformanceFailure::ReturnedError {
+                case: "perspective claim",
+                ..
+            }]
+        ));
+        let passed =
+            perspective_report(PerspectiveConformanceSuite::run(&ScalarHiddenLines::new()));
+        assert!(passed.is_success());
     }
 
     #[test]

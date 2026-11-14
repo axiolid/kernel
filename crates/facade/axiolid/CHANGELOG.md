@@ -9,6 +9,15 @@ caret rule for `0.x` versions.
 
 ## [Unreleased]
 
+### Added
+
+- `Application::hidden_lines` draws perspective views: the portable
+  hidden-line provider claims them (ADR 0107, #387). The perspective claim
+  has its own conformance suite, run once per process and only by a call
+  whose view is perspective; a failure refuses the call as the case
+  `perspective claim` of the hidden-line report. Visible faces still refuse a
+  perspective view (`Unsupported`).
+
 ## [0.5.0] - 2026-11-13
 
 ### Added

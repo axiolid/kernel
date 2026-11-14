@@ -9,7 +9,9 @@ Not observable, and so not a mutant: removing the verdict check in
 `Application::hidden_lines` / `visible_faces` (the `verified(..).map_err(..)?`
 step). The portable providers pass their suites, so the check never fires in
 a test; that is why `verified` is generic and tested directly (its mutant
-below), and the call sites are two lines each.
+below), and the call sites are two lines each. The same holds for the
+perspective verdict consulted by a perspective call; its fold into a report
+is tested directly (`perspective_report`).
 """
 import probe_lib
 
@@ -70,6 +72,12 @@ MUTANTS = [
     ('line report always a success', APPLICATION,
      '            Self::MeshHiddenLines(report) => report.is_success(),',
      '            Self::MeshHiddenLines(_) => true,', [LIB_TEST]),
+    ('a failed perspective suite is folded into a success', DRAWING,
+     '    if !report.is_success() {\n        folded.failures.push(ConformanceFailure::ReturnedError {',
+     '    if false && !report.is_success() {\n        folded.failures.push(ConformanceFailure::ReturnedError {', [LIB_TEST]),
+    ('a failed perspective suite is folded under another case', DRAWING,
+     '        folded.failures.push(ConformanceFailure::ReturnedError {\n            case: "perspective claim",',
+     '        folded.failures.push(ConformanceFailure::ReturnedError {\n            case: "perspective",', [LIB_TEST]),
     ('enabled features omit the provider', INTEGRATION,
      '    compiled_feature!(features, "hidden-lines-provider");\n', '', [INTEGRATION_TEST]),
 ]
