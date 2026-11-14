@@ -1478,6 +1478,83 @@ mod tests {
         assert!(radius + v * semi_angle.tan() >= 0.0);
     }
 
+    /// I6 against dense closed-form sampling: every surface point between
+    /// a small circle's last span into a sphere's north pole and the
+    /// meridian the span is meshed along (its end takes its neighbour's
+    /// `u`), closed by the pole row, lies within the span's term of the
+    /// mesh chord. The circles are tilted from a meridian by `alpha`, so
+    /// their preimage swings in `u` as they reach the pole. The term needs
+    /// its chord bound: the rest of it falls short of a measured point. (On
+    /// a sphere no lens point lies farther from the chord than the edge
+    /// does, as every curve on it bends at least as much as its meridians;
+    /// the meridian term is what the argument needs on any other support.)
+    #[test]
+    fn a_span_into_a_pole_bounds_its_lens_along_the_meridians() {
+        let radius = 1.0;
+        let sphere = Surface::Sphere(axiolid_surface::Sphere {
+            frame: axiolid_core::Frame3 {
+                origin: Vec3::ZERO,
+                x: Vec3::X,
+                y: Vec3::Y,
+                z: Vec3::Z,
+            },
+            radius,
+        });
+        let bound = FaceBound::new(Support::Surface(&sphere));
+        let north = Vec3::Z * radius;
+        let segment = |p: Vec3, a: Vec3, b: Vec3| {
+            let d = b - a;
+            let t = ((p - a).dot(d) / d.dot(d)).clamp(0.0, 1.0);
+            (p - (a + d * t)).length()
+        };
+        let invert = |p: Vec3| Point2::new(p.y.atan2(p.x), (p.z / radius).clamp(-1.0, 1.0).asin());
+        let pole_v = core::f64::consts::FRAC_PI_2;
+        let mut beyond_chord = false;
+        for alpha in [0.1_f64, 0.4, 0.8, 1.2] {
+            // The circle through the pole in the plane of normal `n`.
+            let n = Vec3::new(alpha.sin(), 0.0, alpha.cos());
+            let centre = n * n.dot(north);
+            let rho = (radius * radius - centre.length_squared()).sqrt();
+            let e1 = (north - centre).normalize();
+            let e2 = n.cross(e1);
+            let circle = |theta: Scalar| centre + (e1 * theta.cos() + e2 * theta.sin()) * rho;
+            for h in [0.2, 0.05] {
+                let arc = rho * h;
+                let start = circle(h);
+                let at = invert(start);
+                let span = SpanBound {
+                    chord: rho * (1.0 - (0.5 * h).cos()),
+                    arc,
+                };
+                let term = bound.pole_span(at, pole_v, &span, 0.0).unwrap();
+                let mut measured: Scalar = 0.0;
+                for i in 0..=200 {
+                    let mut uv = invert(circle(h * (1.0 - i as Scalar / 200.0)));
+                    if i == 200 {
+                        uv = Point2::new(at.x, pole_v);
+                    }
+                    let u = localized_parameter(at.x, uv.x, Some(core::f64::consts::TAU));
+                    for j in 0..=40 {
+                        let t = j as Scalar / 40.0;
+                        let q = axiolid_reference::surface::evaluate(
+                            &sphere,
+                            at.x + (u - at.x) * t,
+                            uv.y,
+                        )
+                        .unwrap();
+                        measured = measured.max(segment(q, start, north));
+                    }
+                }
+                assert!(
+                    measured <= term,
+                    "alpha {alpha}, h {h}: {measured:e} above {term:e}"
+                );
+                beyond_chord |= measured > term - span.chord;
+            }
+        }
+        assert!(beyond_chord, "the chord bound is never needed");
+    }
+
     /// The certified search proves the B-spline parameters unique to a
     /// coarse resolution; the polish brings them to rounding.
     #[test]

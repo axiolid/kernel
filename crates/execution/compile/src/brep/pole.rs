@@ -790,6 +790,67 @@ mod tests {
         }
     }
 
+    /// A fan's corners off the surface (a far corner, the pole vertex) widen
+    /// its bound by their offsets, which the measured deviation needs.
+    #[test]
+    fn a_fan_bound_holds_its_corners_off_the_surface() {
+        let (surface, pole_v) = surfaces()[0].clone();
+        let support = Support::Surface(&surface);
+        let (u0, du, dv) = (0.3, 0.2, 0.075);
+        let (a, b) = (Point2::new(u0, pole_v), Point2::new(u0 + du, pole_v));
+        let (d, c) = (
+            Point2::new(u0, pole_v - dv),
+            Point2::new(u0 + du, pole_v - dv),
+        );
+        for (corner, lift) in [(0, 0.01), (2, 0.004)] {
+            let mut positions = vec![
+                at(&surface, d.x, d.y),
+                at(&surface, c.x, c.y),
+                at(&surface, a.x, a.y),
+            ];
+            positions[corner] += Vec3::new(0.3, -0.2, 0.9).normalize() * lift;
+            let mesh = TriMesh {
+                positions,
+                indices: Vec::new(),
+                normals: None,
+                attributes: Vec::new(),
+            };
+            let vertex = |uv: Point2, mesh: u32| SurfaceVertex {
+                uv,
+                mesh,
+                local: mesh,
+            };
+            let fan = SurfaceTriangle {
+                vertices: [vertex(a, 2), vertex(d, 0), vertex(c, 1)],
+                boundary: [false; 3],
+                depth: 0,
+                fan: Some(Fan {
+                    corner: 0,
+                    other: b,
+                }),
+            };
+            let terms = FaceBound::new(support)
+                .fan(&mesh, support, &fan)
+                .unwrap()
+                .unwrap();
+            let triangle = [2, 0, 1].map(|i| mesh.positions[i]);
+            let mut measured: Scalar = 0.0;
+            for i in 0..=60 {
+                for j in 0..=60 {
+                    let (s, t) = (i as Scalar / 60.0, j as Scalar / 60.0);
+                    let p = at(&surface, u0 + du * s, pole_v - dv * t);
+                    measured = measured.max(distance(p, triangle));
+                }
+            }
+            let q = terms.along + terms.rest;
+            assert!(measured <= q, "corner {corner}: {measured:e} above {q:e}");
+            assert!(
+                measured > q - lift,
+                "corner {corner}: the offset is not needed, {measured:e} against {q:e}"
+            );
+        }
+    }
+
     /// A pole row whose cells' term across the row misses the budget is
     /// demoted, all of it, to the nominal triangles (I7), which are still
     /// bounded, and certified, by the triangle bound (I8); with a budget it

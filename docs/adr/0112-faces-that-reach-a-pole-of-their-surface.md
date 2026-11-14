@@ -237,8 +237,13 @@ Hausdorff lower bounds, both within the bound):
 
 The fan bound (I7) is also checked cell by cell against a dense sample of
 the surface over quads next to a sphere's pole and a cone's apex, from
-1.6 by 0.6 down to 0.05 by 0.4 in parameters (`brep::pole` unit tests),
-and quarters as the quad halves.
+1.6 by 0.6 down to 0.05 by 0.4 in parameters, with corners lifted off the
+surface too (`brep::pole` unit tests), and quarters as the quad halves.
+The span term (I6) is checked the same way over the lens of circles tilted
+0.1 to 1.2 radians from a meridian into a sphere's pole
+(`brep::inversion` unit tests): the chord bound is needed there, the
+meridian term is not, since at a smooth pole every curve bends at least as
+much as the meridians beside it; it stays because the argument needs it.
 
 **Negative / costs**
 

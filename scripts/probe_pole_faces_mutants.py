@@ -22,6 +22,22 @@ Not listed, as equivalent at test resolution:
   fixture the pole is also an end of the support's range of `v` (a
   sphere's latitudes, a cone's apex, a profile's domain), which clamps it
   the same.
+- the meridian term `dvv dv^2 / 8` left out of a span into a pole (the
+  argument needs it, no measurement can show it): it is zero on a cone and
+  along a ruled surface's rulings, and at a smooth pole of a surface of
+  revolution both principal curvatures are the profile's, so a curve into
+  the pole bends at least as much as the meridians beside it and no point
+  between them lies farther from the mesh chord than the edge itself does,
+  which the chord bound covers. The unit test
+  `a_span_into_a_pole_bounds_its_lens_along_the_meridians` measures this
+  on tilted circles into a sphere's pole and kills the chord bound left
+  out instead.
+
+First run: 12 / 15. The survivors were the chord bound and the meridian
+term of a span into a pole, and the fans' corner offsets: no fixture's
+pole span dominated its face's bound, and every fixture's vertices lie on
+the surface. Unit tests against dense sampling of a span's lens and of a
+fan with lifted corners were added, and the meridian term is listed above.
 """
 import probe_lib
 
@@ -58,9 +74,6 @@ MUTANTS = [
     ("pole_span without span.chord", I,
      "        let near = span.chord + offset;\n",
      "        let near = offset;\n"),
-    ("pole_span without the dvv term", I,
-     "                Some(near + self.meridian_spread(at.x, (at.y, pole_v), true, span.arc)?)\n",
-     "                Some(near + 0.0 * self.meridian_spread(at.x, (at.y, pole_v), true, span.arc)?)\n"),
     ("a span across a pole bounded along the meridians", I,
      "        if clear.is_nan() || clear <= arc {\n",
      "        if false {\n"),
