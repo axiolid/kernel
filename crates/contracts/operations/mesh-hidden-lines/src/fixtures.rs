@@ -9,20 +9,22 @@ use axiolid_core::{Aabb2, Frame3, Point2, Point3, Vec3};
 use axiolid_mesh::TriMesh;
 
 use crate::{
-    EdgeKind, EdgeSelection, FaceGroup, HiddenLineLimits, MeshId, MeshRole, SourceEdge, View,
-    Visibility,
+    EdgeKind, EdgeSelection, FaceGroup, HiddenLineLimits, MeshId, MeshRole, Occlusion, SourceEdge,
+    View, Visibility,
 };
 
 /// One mesh of a scene. An empty `groups` with `planar` unset leaves the
 /// groups at their default; `groups` are sent `PerTriangle` and `planar`
 /// sends `FaceGroups::Planar`. Only a request that selects group boundaries
-/// reads them.
+/// reads them. An empty `occlusion` sends no flags; otherwise it is sent
+/// `PerTriangle`.
 pub(crate) struct Fixture {
     pub id: MeshId,
     pub role: MeshRole,
     pub mesh: TriMesh,
     pub groups: Vec<FaceGroup>,
     pub planar: bool,
+    pub occlusion: Vec<Occlusion>,
 }
 
 impl Fixture {
@@ -30,15 +32,37 @@ impl Fixture {
         self.groups = groups.iter().map(|&g| FaceGroup(g)).collect();
         self
     }
+
+    /// Every triangle see-through.
+    fn see_through(mut self) -> Self {
+        self.occlusion = vec![Occlusion::SeeThrough; self.mesh.triangle_count()];
+        self
+    }
+
+    /// The same mesh with every triangle reversed; triangle order, groups and
+    /// flags are kept.
+    pub(crate) fn flipped(&self) -> Self {
+        Self {
+            id: self.id,
+            role: self.role,
+            mesh: reversed(&self.mesh),
+            groups: self.groups.clone(),
+            planar: self.planar,
+            occlusion: self.occlusion.clone(),
+        }
+    }
 }
 
-/// Expected count and total length of the segments of one kind and visibility.
-/// A kind and visibility without a row must have no segments.
+/// Expected count and total length of the segments of one kind, visibility
+/// and `seen_through` count. A kind and visibility without a row must have no
+/// segments; the base suite sums the rows of one kind and visibility, the
+/// see-through suite also checks each count.
 pub(crate) struct Row {
     pub kind: EdgeKind,
     pub visibility: Visibility,
     pub count: usize,
     pub length: f64,
+    pub seen_through: u32,
 }
 
 /// One expected piece of a source edge.
@@ -46,6 +70,7 @@ pub(crate) struct Piece {
     pub visibility: Visibility,
     pub start: [f64; 2],
     pub end: [f64; 2],
+    pub seen_through: u32,
 }
 
 /// The expected pieces of one source edge, in order.
@@ -222,6 +247,7 @@ fn solid(id: u64, mesh: TriMesh) -> Fixture {
         mesh,
         groups: Vec::new(),
         planar: false,
+        occlusion: Vec::new(),
     }
 }
 
@@ -232,6 +258,7 @@ fn sheet(id: u64, mesh: TriMesh) -> Fixture {
         mesh,
         groups: Vec::new(),
         planar: false,
+        occlusion: Vec::new(),
     }
 }
 
@@ -247,6 +274,17 @@ fn piece(visibility: Visibility, start: [f64; 2], end: [f64; 2]) -> Piece {
         visibility,
         start,
         end,
+        seen_through: 0,
+    }
+}
+
+/// A visible piece behind `seen_through` see-through triangles.
+fn seen(seen_through: u32, start: [f64; 2], end: [f64; 2]) -> Piece {
+    Piece {
+        visibility: Visibility::Visible,
+        start,
+        end,
+        seen_through,
     }
 }
 
@@ -256,6 +294,18 @@ fn row(kind: EdgeKind, visibility: Visibility, count: usize, length: f64) -> Row
         visibility,
         count,
         length,
+        seen_through: 0,
+    }
+}
+
+/// Visible segments of one kind behind `seen_through` see-through triangles.
+fn seen_row(kind: EdgeKind, seen_through: u32, count: usize, length: f64) -> Row {
+    Row {
+        kind,
+        visibility: Visibility::Visible,
+        count,
+        length,
+        seen_through,
     }
 }
 
@@ -773,6 +823,7 @@ pub(crate) fn cases() -> Vec<Case> {
                     mesh: capped_outer(),
                     groups: Vec::new(),
                     planar: false,
+                    occlusion: Vec::new(),
                 },
                 solid(2, capped_inner()),
             ],
@@ -1289,6 +1340,347 @@ pub(crate) fn perspective_refusals() -> Vec<Refusal> {
         .collect()
 }
 
+// --- see-through triangles (ADR 0111) ----------------------------------------
+
+/// The floor of the see-through scenes: the square `[0,4]^2` at `z = 0`.
+fn floor() -> Fixture {
+    sheet(1, sheet_quad(0.0, 0.0, 4.0, 4.0, 0.0))
+}
+
+/// A see-through pane over `[1,3] x [1,5]` at `z = 1`. Its diagonal runs
+/// from `(1,1)` to `(3,5)`, the line `y = 2x - 1`.
+fn pane() -> Fixture {
+    sheet(2, sheet_quad(1.0, 1.0, 3.0, 5.0, 1.0)).see_through()
+}
+
+/// A second pane over `[2,5] x [3,6]` at `z = 2`, above the first. Its
+/// diagonal is the line `y = x + 1`.
+fn upper_pane() -> Fixture {
+    sheet(3, sheet_quad(2.0, 3.0, 5.0, 6.0, 2.0)).see_through()
+}
+
+fn see_through_case(name: &'static str, meshes: Vec<Fixture>, view: View, expect: Expect) -> Case {
+    let mut case = case(name, meshes, view, EdgeSelection::new(None), expect);
+    case.orientation_independent = true;
+    case
+}
+
+/// The drawings a provider that claims `Occlusion::SeeThrough` must
+/// reproduce, in plan view unless named perspective. A see-through triangle
+/// counts at a point when its plane is strictly in front and its image holds
+/// the point shifted by `(ε, ε²)`.
+pub(crate) fn see_through_cases() -> Vec<Case> {
+    use EdgeKind::{Boundary, Silhouette};
+    use Visibility::{Hidden, Visible};
+
+    let mut cases = Vec::new();
+
+    // The pane over the floor. The floor's top edge y = 4 runs under the
+    // pane from x = 3 to x = 1 (1 < 4 < 5): one pane triangle there (the
+    // pane's diagonal crosses it at x = 5/2, where the shifted point lies in
+    // one triangle only). The pane's own edges are at its depth and count
+    // nothing; the floor is behind them. Visible, uncounted: the floor's
+    // other three edges (3 x 4), the two outer pieces of its top edge (1 + 1)
+    // and the pane's four edges (2 + 4 + 2 + 4): 9 segments, length 26.
+    // Counted once: the middle of the top edge, length 2.
+    cases.push(see_through_case(
+        "pane over a floor",
+        vec![floor(), pane()],
+        plan(plan_frame()),
+        Expect {
+            rows: Some(vec![
+                row(Boundary, Visible, 9, 26.0),
+                seen_row(Boundary, 1, 1, 2.0),
+            ]),
+            edges: vec![EdgePieces {
+                edge: edge(1, 2, 3),
+                kind: Boundary,
+                pieces: vec![
+                    piece(Visible, [4.0, 4.0], [3.0, 4.0]),
+                    seen(1, [3.0, 4.0], [1.0, 4.0]),
+                    piece(Visible, [1.0, 4.0], [0.0, 4.0]),
+                ],
+            }],
+            selected_edges: Some(8),
+            point_edges: Some(0),
+            clipped_edges: Some(0),
+        },
+    ));
+
+    // A second pane over [2,5] x [3,6] above the first. On the floor's top
+    // edge (y = 4) it covers x in [2,4], so from x = 4 the counts are 1
+    // (upper only), 2 (both, x in [2,3]), 1 (lower only), 0. The upper
+    // pane's diagonal y = x + 1 crosses that edge at x = 3, where the lower
+    // pane ends; the shifted point lies in one upper triangle on either side,
+    // so the change at x = 3 is the lower pane's alone. The floor's right
+    // edge x = 4 is under the upper pane for y in [3,4]. The lower pane's top
+    // edge y = 5 is under the upper pane for x in [2,3], and its right edge
+    // x = 3 for y in [3,5] (the upper diagonal crosses it at y = 4, again
+    // one triangle on either side).
+    cases.push(see_through_case(
+        "two panes over a floor",
+        vec![floor(), pane(), upper_pane()],
+        plan(plan_frame()),
+        Expect {
+            edges: vec![
+                EdgePieces {
+                    edge: edge(1, 2, 3),
+                    kind: Boundary,
+                    pieces: vec![
+                        seen(1, [4.0, 4.0], [3.0, 4.0]),
+                        seen(2, [3.0, 4.0], [2.0, 4.0]),
+                        seen(1, [2.0, 4.0], [1.0, 4.0]),
+                        piece(Visible, [1.0, 4.0], [0.0, 4.0]),
+                    ],
+                },
+                EdgePieces {
+                    edge: edge(1, 1, 2),
+                    kind: Boundary,
+                    pieces: vec![
+                        piece(Visible, [4.0, 0.0], [4.0, 3.0]),
+                        seen(1, [4.0, 3.0], [4.0, 4.0]),
+                    ],
+                },
+                EdgePieces {
+                    edge: edge(2, 2, 3),
+                    kind: Boundary,
+                    pieces: vec![
+                        seen(1, [3.0, 5.0], [2.0, 5.0]),
+                        piece(Visible, [2.0, 5.0], [1.0, 5.0]),
+                    ],
+                },
+                EdgePieces {
+                    edge: edge(2, 1, 2),
+                    kind: Boundary,
+                    pieces: vec![
+                        piece(Visible, [3.0, 1.0], [3.0, 3.0]),
+                        seen(1, [3.0, 3.0], [3.0, 5.0]),
+                    ],
+                },
+            ],
+            selected_edges: Some(12),
+            ..Expect::default()
+        },
+    ));
+
+    // The same with the upper pane opaque: it hides the floor's top edge for
+    // x in [2,4] in one piece (a hidden piece is not split by the lower
+    // pane), and the lower pane's top edge for x in [2,3].
+    let mut opaque_upper = upper_pane();
+    opaque_upper.occlusion.clear();
+    cases.push(see_through_case(
+        "pane under an opaque sheet",
+        vec![floor(), pane(), opaque_upper],
+        plan(plan_frame()),
+        Expect {
+            edges: vec![
+                EdgePieces {
+                    edge: edge(1, 2, 3),
+                    kind: Boundary,
+                    pieces: vec![
+                        piece(Hidden, [4.0, 4.0], [2.0, 4.0]),
+                        seen(1, [2.0, 4.0], [1.0, 4.0]),
+                        piece(Visible, [1.0, 4.0], [0.0, 4.0]),
+                    ],
+                },
+                EdgePieces {
+                    edge: edge(2, 2, 3),
+                    kind: Boundary,
+                    pieces: vec![
+                        piece(Hidden, [3.0, 5.0], [2.0, 5.0]),
+                        piece(Visible, [2.0, 5.0], [1.0, 5.0]),
+                    ],
+                },
+            ],
+            ..Expect::default()
+        },
+    ));
+
+    // A see-through box [1,3] x [1,5] x [1,2] over the floor: over the
+    // floor's top edge its top and bottom faces both lie in front (count 2);
+    // its four side faces are seen edge-on and count nothing.
+    cases.push(see_through_case(
+        "see-through box over a floor",
+        vec![
+            floor(),
+            solid(2, box_mesh([1.0, 1.0, 1.0], [3.0, 5.0, 2.0])).see_through(),
+        ],
+        plan(plan_frame()),
+        Expect {
+            edges: vec![EdgePieces {
+                edge: edge(1, 2, 3),
+                kind: Boundary,
+                pieces: vec![
+                    piece(Visible, [4.0, 4.0], [3.0, 4.0]),
+                    seen(2, [3.0, 4.0], [1.0, 4.0]),
+                    piece(Visible, [1.0, 4.0], [0.0, 4.0]),
+                ],
+            }],
+            ..Expect::default()
+        },
+    ));
+
+    // Edges under the pane's border. The sheet [1,3] x [0,4] has its left
+    // edge on the pane's left border x = 1, where the shifted point
+    // (1 + ε, y + ε²) is inside the pane from y = 1 on; its right edge on
+    // the pane's right border x = 3, where the shifted point is outside; and
+    // its top edge y = 4 inside the pane. Visible, uncounted: the bottom edge
+    // (2), the right edge (4), the left edge below y = 1 (1) and the pane's
+    // four edges (12): 7 segments, length 19. Counted once: the left edge
+    // above y = 1 (3) and the top edge (2): 2 segments, length 5.
+    cases.push(see_through_case(
+        "edges under a pane's border",
+        vec![sheet(1, sheet_quad(1.0, 0.0, 3.0, 4.0, 0.0)), pane()],
+        plan(plan_frame()),
+        Expect {
+            rows: Some(vec![
+                row(Boundary, Visible, 7, 19.0),
+                seen_row(Boundary, 1, 2, 5.0),
+            ]),
+            edges: vec![
+                EdgePieces {
+                    edge: edge(1, 0, 3),
+                    kind: Boundary,
+                    pieces: vec![
+                        piece(Visible, [1.0, 0.0], [1.0, 1.0]),
+                        seen(1, [1.0, 1.0], [1.0, 4.0]),
+                    ],
+                },
+                EdgePieces {
+                    edge: edge(1, 1, 2),
+                    kind: Boundary,
+                    pieces: vec![piece(Visible, [3.0, 0.0], [3.0, 4.0])],
+                },
+                EdgePieces {
+                    edge: edge(1, 2, 3),
+                    kind: Boundary,
+                    pieces: vec![seen(1, [3.0, 4.0], [1.0, 4.0])],
+                },
+            ],
+            selected_edges: Some(8),
+            point_edges: Some(0),
+            clipped_edges: Some(0),
+        },
+    ));
+
+    // An edge right under the pane's diagonal: the triangle (1,1), (4,0),
+    // (3,5) has its edge from (1,1) to (3,5) on the line y = 2x - 1. The
+    // shifted point (x + ε, 2x - 1 + ε²) lies below the diagonal, in the
+    // pane's lower triangle only, so the count is 1, not 2. The other two
+    // edges leave the pane at once (y < 1 and x > 3).
+    cases.push(see_through_case(
+        "edge under a pane's diagonal",
+        vec![
+            sheet(
+                1,
+                soup(
+                    vec![
+                        Point3::new(1.0, 1.0, 0.0),
+                        Point3::new(4.0, 0.0, 0.0),
+                        Point3::new(3.0, 5.0, 0.0),
+                    ],
+                    vec![0, 1, 2],
+                ),
+            ),
+            pane(),
+        ],
+        plan(plan_frame()),
+        Expect {
+            edges: vec![
+                EdgePieces {
+                    edge: edge(1, 0, 2),
+                    kind: Boundary,
+                    pieces: vec![seen(1, [1.0, 1.0], [3.0, 5.0])],
+                },
+                EdgePieces {
+                    edge: edge(1, 0, 1),
+                    kind: Boundary,
+                    pieces: vec![piece(Visible, [1.0, 1.0], [4.0, 0.0])],
+                },
+                EdgePieces {
+                    edge: edge(1, 1, 2),
+                    kind: Boundary,
+                    pieces: vec![piece(Visible, [4.0, 0.0], [3.0, 5.0])],
+                },
+            ],
+            ..Expect::default()
+        },
+    ));
+
+    // A see-through box [1,3]^2 x [1,4] cut by the near plane z = 2 over the
+    // floor [0,4] x [0,2]. The cap is decided from all of the solid's
+    // triangles whatever their flags, and it occludes: the floor's top edge
+    // y = 2 is hidden under it for x in [1,3].
+    cases.push(see_through_case(
+        "cap of a see-through solid",
+        vec![
+            sheet(1, sheet_quad(0.0, 0.0, 4.0, 2.0, 0.0)),
+            solid(2, box_mesh([1.0, 1.0, 1.0], [3.0, 3.0, 4.0])).see_through(),
+        ],
+        plan(plan_frame()).with_near(2.0),
+        Expect {
+            edges: vec![EdgePieces {
+                edge: edge(1, 2, 3),
+                kind: Boundary,
+                pieces: vec![
+                    piece(Visible, [4.0, 2.0], [3.0, 2.0]),
+                    piece(Hidden, [3.0, 2.0], [1.0, 2.0]),
+                    piece(Visible, [1.0, 2.0], [0.0, 2.0]),
+                ],
+            }],
+            ..Expect::default()
+        },
+    ));
+
+    // The perspective slab of "perspective slab hides part of an edge", now
+    // see-through. For the wall edge's image points (x, 1/2) with
+    // 1/3 < x < 1/2 the eye ray (x t, t/2, -t) enters the slab through its
+    // face x = 1 (at t = 1/x, between 2 and 3) and leaves through its face
+    // z = -3 (at t = 3, where x t lies in (1, 3/2)): two faces in front.
+    // Below x = 1/3 the ray passes beside the slab.
+    cases.push(see_through_case(
+        "perspective see-through slab",
+        vec![
+            solid(1, box_mesh([-3.0, -3.0, -9.0], [3.0, 3.0, -6.0])),
+            solid(2, box_mesh([1.0, -4.0, -3.0], [2.0, 4.0, -2.0])).see_through(),
+        ],
+        eye(-1.0),
+        Expect {
+            edges: vec![EdgePieces {
+                edge: edge(1, 6, 7),
+                kind: Silhouette,
+                pieces: vec![
+                    seen(2, [0.5, 0.5], [1.0 / 3.0, 0.5]),
+                    piece(Visible, [1.0 / 3.0, 0.5], [-0.5, 0.5]),
+                ],
+            }],
+            ..Expect::default()
+        },
+    ));
+
+    cases
+}
+
+/// The base cases a see-through claim must draw unchanged when every
+/// triangle is flagged opaque.
+pub(crate) const NEUTRAL_CASES: [&str; 3] =
+    ["isometric cube", "near cap of a solid", "box behind box"];
+
+/// The see-through requests a provider that claims them must refuse.
+pub(crate) fn see_through_refusals() -> Vec<Refusal> {
+    let mut short = pane();
+    short.occlusion.truncate(1);
+    vec![Refusal {
+        name: "occlusion flags shorter than the triangles",
+        meshes: vec![floor(), short],
+        view: plan(plan_frame()),
+        edges: EdgeSelection::new(None),
+        limits: limits(),
+        accepts: |e| matches!(e, GeomError::InvalidInput(_)),
+        mesh: Some(MeshId(2)),
+    }]
+}
+
 #[cfg(test)]
 mod tests {
     use axiolid_core::Tolerance;
@@ -1558,6 +1950,68 @@ mod tests {
             }
         }
         assert_eq!(names.len(), 26);
+    }
+
+    #[test]
+    fn see_through_cases_are_well_formed_and_their_rows_add_up() {
+        let mut names = std::collections::BTreeSet::new();
+        for case in see_through_cases() {
+            assert!(names.insert(case.name), "duplicate case {}", case.name);
+            assert!(case.orientation_independent, "{}", case.name);
+            assert!(
+                case.meshes
+                    .iter()
+                    .any(|m| m.occlusion.contains(&Occlusion::SeeThrough)),
+                "{}",
+                case.name
+            );
+            for fixture in &case.meshes {
+                let health = audit_mesh(&fixture.mesh, Tolerance::ZERO);
+                assert_eq!(health.degenerate_triangles, 0, "{}", case.name);
+                assert_eq!(health.non_manifold_edges, 0, "{}", case.name);
+                assert_eq!(health.inconsistent_winding_edges, 0, "{}", case.name);
+                if fixture.role == MeshRole::Solid {
+                    assert!(health.is_closed_two_manifold(), "{}", case.name);
+                }
+                assert!(
+                    fixture.occlusion.is_empty()
+                        || fixture.occlusion.len() == fixture.mesh.triangle_count(),
+                    "{}",
+                    case.name
+                );
+            }
+            for pieces in &case.expect.edges {
+                for p in &pieces.pieces {
+                    assert_ne!(p.start, p.end);
+                    assert!(p.visibility == Visibility::Visible || p.seen_through == 0);
+                }
+            }
+            // With rows, every selected edge is a plan boundary edge drawn
+            // whole and unclipped, so the rows add up to the outlines.
+            if let Some(rows) = &case.expect.rows {
+                let outlines: f64 = case
+                    .meshes
+                    .iter()
+                    .map(|m| {
+                        let p = &m.mesh.positions;
+                        2.0 * ((p[1].x - p[0].x) + (p[3].y - p[0].y))
+                    })
+                    .sum();
+                let total: f64 = rows.iter().map(|r| r.length).sum();
+                assert!((total - outlines).abs() < EPS, "{}", case.name);
+            }
+        }
+        assert_eq!(names.len(), 8);
+        for name in NEUTRAL_CASES {
+            assert!(cases().iter().any(|c| c.name == name), "{name}");
+        }
+        for refusal in see_through_refusals() {
+            assert_eq!(refusal.meshes[1].id, refusal.mesh.expect("names a mesh"));
+            assert_ne!(
+                refusal.meshes[1].occlusion.len(),
+                refusal.meshes[1].mesh.triangle_count()
+            );
+        }
     }
 
     #[test]

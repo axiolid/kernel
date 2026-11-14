@@ -10,11 +10,12 @@ use core::fmt;
 
 pub mod faces;
 pub mod perspective;
+pub mod see_through;
 
 use axiolid_contracts::ExecutionOptions;
 use axiolid_core::{Point2, Tolerance};
 
-use crate::fixtures::{cases, refusals, reversed, Case, Fixture, Piece, LENGTH_TOLERANCE};
+use crate::fixtures::{cases, refusals, Case, Fixture, Piece, LENGTH_TOLERANCE};
 use crate::{
     EdgeKind, HiddenLineError, HiddenLineMesh, HiddenLineOutcome, HiddenLineRequest,
     MeshHiddenLines, MeshId, SourceEdge, Visibility,
@@ -157,9 +158,12 @@ impl ConformanceSuite {
     }
 }
 
-/// The request mesh of a fixture, with its groups.
+/// The request mesh of a fixture, with its groups and occlusion flags.
 fn mesh_of(f: &Fixture) -> HiddenLineMesh<'_> {
-    let mesh = HiddenLineMesh::new(f.id, f.role, &f.mesh);
+    let mut mesh = HiddenLineMesh::new(f.id, f.role, &f.mesh);
+    if !f.occlusion.is_empty() {
+        mesh = mesh.with_occlusion(&f.occlusion);
+    }
     if f.planar {
         mesh.with_planar_groups()
     } else if f.groups.is_empty() {
@@ -190,17 +194,7 @@ fn check_orientation(
     expected: &HiddenLineOutcome,
     options: &ExecutionOptions,
 ) {
-    let flipped: Vec<Fixture> = case
-        .meshes
-        .iter()
-        .map(|f| Fixture {
-            id: f.id,
-            role: f.role,
-            mesh: reversed(&f.mesh),
-            groups: f.groups.clone(),
-            planar: f.planar,
-        })
-        .collect();
+    let flipped: Vec<Fixture> = case.meshes.iter().map(Fixture::flipped).collect();
     match draw(provider, case, &flipped, options) {
         Ok(outcome) if same_drawing(&outcome, expected) => {}
         Ok(_) => report
@@ -267,8 +261,8 @@ fn check_outcome(report: &mut ConformanceReport, case: &Case, outcome: &HiddenLi
             for visibility in [Visibility::Visible, Visibility::Hidden] {
                 let (want_count, want_length) = rows
                     .iter()
-                    .find(|r| r.kind == kind && r.visibility == visibility)
-                    .map_or((0, 0.0), |r| (r.count, r.length));
+                    .filter(|r| r.kind == kind && r.visibility == visibility)
+                    .fold((0, 0.0), |(n, sum), r| (n + r.count, sum + r.length));
                 let picked = outcome
                     .segments
                     .iter()

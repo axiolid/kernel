@@ -22,7 +22,7 @@ use axiolid_core::Tolerance;
 use super::faces::FaceConformanceFailure;
 use super::{check_outcome, draw, mesh_of, same_drawing, ConformanceFailure, ConformanceReport};
 use crate::fixtures::{
-    box_mesh, limits, perspective_cases, perspective_refusals, plan_frame, reversed, Fixture,
+    box_mesh, limits, perspective_cases, perspective_refusals, plan_frame, Fixture,
 };
 use crate::{
     EdgeSelection, HiddenLineError, HiddenLineMesh, HiddenLineRequest, MeshHiddenLines, MeshId,
@@ -177,17 +177,7 @@ fn claimed_failures(provider: &dyn MeshHiddenLines) -> Vec<ConformanceFailure> {
                         .push(ConformanceFailure::NonDeterministic { case: case.name });
                 }
                 if case.orientation_independent {
-                    let flipped: Vec<Fixture> = case
-                        .meshes
-                        .iter()
-                        .map(|f| Fixture {
-                            id: f.id,
-                            role: f.role,
-                            mesh: reversed(&f.mesh),
-                            groups: f.groups.clone(),
-                            planar: f.planar,
-                        })
-                        .collect();
+                    let flipped: Vec<Fixture> = case.meshes.iter().map(Fixture::flipped).collect();
                     match draw(provider, &case, &flipped, &options) {
                         Ok(outcome) if same_drawing(&outcome, &a) => {}
                         Ok(_) => report

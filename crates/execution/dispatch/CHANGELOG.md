@@ -19,6 +19,10 @@ caret rule for `0.x` versions.
   mesh, in `hidden_lines`, `audit` and `visible_faces`, and a visible-face
   group that mixes see-through and opaque triangles is `InvalidInput` naming
   the mesh (ADR 0111, #496).
+- `register_conformant` of both registries also runs the see-through suite
+  when the provider claims `Occlusion::SeeThrough`, and reports a failure as a
+  `ReturnedError` of the case `see-through claim`, so an unverified claim is
+  refused (ADR 0111, #496).
 
 ## [0.3.13] - 2026-11-13
 

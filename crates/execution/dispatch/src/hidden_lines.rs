@@ -11,6 +11,7 @@ use axiolid_mesh_hidden_lines_contract::{
             PerspectiveConformanceFailure, PerspectiveConformanceReport,
             PerspectiveConformanceSuite,
         },
+        see_through::SeeThroughConformanceSuite,
         ConformanceFailure, ConformanceReport, ConformanceSuite,
     },
     EdgeKind, HiddenLineError, HiddenLineOutcome, HiddenLineRequest, MeshHiddenLines, Occlusion,
@@ -64,7 +65,10 @@ impl MeshHiddenLinesRegistry {
     /// A provider that claims perspective views (`supports_projection`) is
     /// also run through the perspective suite, and a failure of it is
     /// reported as a `ReturnedError` of the case `perspective claim`, so a
-    /// claim is never routed to unverified (ADR 0107).
+    /// claim is never routed to unverified (ADR 0107). A provider that claims
+    /// see-through triangles (`supports_occlusion`) is run through the
+    /// see-through suite in the same way, as the case `see-through claim`
+    /// (ADR 0111).
     pub fn register_conformant<P>(
         &mut self,
         priority: i32,
@@ -81,6 +85,17 @@ impl MeshHiddenLinesRegistry {
                     case: "perspective claim",
                     error: HiddenLineError::request(GeomError::InvalidInput(format!(
                         "perspective suite: {perspective}"
+                    ))),
+                });
+            }
+        }
+        if provider.supports_occlusion(Occlusion::SeeThrough) {
+            let see_through = SeeThroughConformanceSuite::run(&provider);
+            if !see_through.is_success() {
+                report.failures.push(ConformanceFailure::ReturnedError {
+                    case: "see-through claim",
+                    error: HiddenLineError::request(GeomError::InvalidInput(format!(
+                        "see-through suite: {see_through}"
                     ))),
                 });
             }

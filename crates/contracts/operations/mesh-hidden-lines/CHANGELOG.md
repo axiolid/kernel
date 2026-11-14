@@ -38,6 +38,17 @@ caret rule for `0.x` versions.
   `supports_occlusion` that is `true` for `Opaque` only, so a registry never
   gives a see-through triangle to a provider that predates it. A request
   without a see-through flag is answered exactly as before.
+- `conformance::see_through::SeeThroughConformanceSuite` (`run`, `run_faces`)
+  with its report and failure types infers the see-through claim from
+  `supports_occlusion`: an unclaiming provider must refuse a see-through
+  request by name; a hidden-line claim must draw eight fixtures (panes over a
+  floor and over each other, a pane under an opaque sheet, a see-through box,
+  edges under a pane's border and diagonal, the occluding cap of a cut
+  see-through solid, and a see-through slab in perspective when that is
+  claimed too) with their `seen_through` counts and evidence, refuse a short
+  occlusion slice naming the mesh, and draw three base scenes flagged all
+  opaque as without flags. A visible-face claim fails closed with
+  `ClaimUnverifiable` until its fixtures land (ADR 0111, #496).
 
 ## [0.1.5] - 2026-11-13
 

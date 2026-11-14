@@ -646,7 +646,11 @@ mod tests {
         assert_eq!(Occlusion::default(), Occlusion::Opaque);
         assert!(!m.occlusion.has_see_through());
         assert_eq!(m.occlusion.see_through_count(), 0);
-        let flags = [Occlusion::Opaque, Occlusion::SeeThrough, Occlusion::SeeThrough];
+        let flags = [
+            Occlusion::Opaque,
+            Occlusion::SeeThrough,
+            Occlusion::SeeThrough,
+        ];
         let m = m.with_occlusion(&flags);
         assert_eq!(m.occlusion, TriangleOcclusion::PerTriangle(&flags));
         assert!(m.occlusion.has_see_through());
