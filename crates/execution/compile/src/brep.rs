@@ -116,9 +116,14 @@
 //!   takes its parameters from its shared 3D samples inverted onto the
 //!   surface, and its lens is bounded as [`inversion`] describes (#310).
 //!
-//! A triangle the mesh drops because two of its corners share a vertex (a
-//! pole) still covers its parameter triangle; its bound counts only if the
-//! segment it collapses to is an edge of the face's emitted triangles.
+//! A face reaching a pole of its surface (a sphere's poles, a cone's apex,
+//! a revolution's profile on its axis, a ruled apex) closes its ring there
+//! with a row of samples welded to the pole's vertex, and a grid's pole row
+//! is meshed in fans bounded over their whole quads ([`pole`], #463, ADR
+//! 0112). A triangle the mesh drops because two of its corners share a
+//! vertex (a pole) still covers its parameter triangle; its bound counts
+//! only if the segment it collapses to is an edge of the face's emitted
+//! triangles.
 //! For a rational B-spline the interpolation coefficients come from its
 //! homogeneous numerator and weight, not from the quotient rule
 //! ([`axiolid_reference::bound::SurfaceBounds::interpolation`]); both sets
@@ -129,6 +134,7 @@
 //! a trim edge is sampled until its certified chord bound fits, both up to
 //! caps beyond which the bound is reported as it stands.
 
+use self::pole::{fan_rows, pole_ring, split_fan, Fan, UseSamples};
 use self::support::{Support, SupportOracle};
 use axiolid_contracts::{GeomError, GeomResult};
 use axiolid_core::{Point2, Scalar, Vec3};
@@ -148,6 +154,7 @@ use crate::weld::EdgeSplits;
 mod edges;
 mod inversion;
 mod locate;
+mod pole;
 mod support;
 mod trim;
 mod view;
@@ -1014,13 +1021,7 @@ fn seed_grid_vertices(
     let mut lookup: HashMap<(usize, usize), SurfaceVertex> =
         HashMap::with_capacity(boundary.uv.len());
     for (position, p) in boundary.uv.iter().enumerate() {
-        let iu = ((p.x - patch.u_start) / patch.du).round();
-        let iv = ((p.y - patch.v_start) / patch.dv).round();
-        if iu < 0.0 || iv < 0.0 {
-            continue;
-        }
-        let (iu, iv) = (iu as usize, iv as usize);
-        if iu <= patch.nu && iv <= patch.nv {
+        if let (Some(iu), Some(iv)) = (patch.index(p.x, 0), patch.index(p.y, 1)) {
             let current = SurfaceVertex {
                 uv: *p,
                 mesh: boundary.shared[position],
@@ -1048,8 +1049,7 @@ fn seed_grid_vertices(
                 grid.push(existing);
                 continue;
             }
-            let u = patch.u_start + patch.du * iu as Scalar;
-            let v = patch.v_start + patch.dv * iv as Scalar;
+            let (u, v) = (patch.coordinate(iu, 0), patch.coordinate(iv, 1));
             let uv = Point2::new(u, v);
             let point = surface.evaluate(u, v)?;
             let mesh = state.push_face_position(point)?;
@@ -1220,6 +1220,10 @@ struct SurfaceTriangle {
     /// segments are immutable during support-surface interior refinement.
     boundary: [bool; 3],
     depth: u8,
+    /// A fan into a pole (#463): the corner at the pole and the other
+    /// pole corner of its parameter quad, with which the fan is bounded and
+    /// split ([`Fan`]); `None` for a nominal triangle.
+    fan: Option<Fan>,
 }
 
 const MAX_CURVED_EDGE_SEGMENTS: usize = 4_096;
@@ -1477,6 +1481,9 @@ struct GridPatch {
     v_start: Scalar,
     du: Scalar,
     dv: Scalar,
+    /// The lattice's coordinates along `u` and `v` where they are not
+    /// uniform: a ring with a pole row only (#463).
+    lattice: Option<(Vec<Scalar>, Vec<Scalar>)>,
 }
 
 /// Recognise a boundary as a rectangular patch, or decline.
@@ -1525,8 +1532,36 @@ fn recognise_grid(boundary: &CurvedBoundary) -> Option<GridPatch> {
             vs.push(p.y);
         }
     }
-    let nu = distinct_steps(&mut us, u_min, u_span)?;
-    let nv = distinct_steps(&mut vs, v_min, v_span)?;
+    let (mut u_lattice, mut v_lattice) = (us.clone(), vs.clone());
+    let uniform = distinct_steps(&mut us, u_min, u_span)
+        .zip(distinct_steps(&mut vs, v_min, v_span))
+        .filter(|&(nu, nv)| nu > 0 && nv > 0)
+        .map(|(nu, nv)| GridPatch {
+            nu,
+            nv,
+            u_start: u_min,
+            v_start: v_min,
+            du: u_span / nu as Scalar,
+            dv: v_span / nv as Scalar,
+            lattice: None,
+        })
+        .filter(|patch| ordered_grid_perimeter(boundary, patch));
+    if uniform.is_some() || !has_pole_row(boundary) {
+        return uniform;
+    }
+    // A ring with a pole row (#463): its rows copy their rim's `u` and its
+    // meridians share their samples' `v`, a lattice however unevenly the
+    // edges were sampled.
+    let distinct = |values: &mut Vec<Scalar>, span: Scalar| {
+        values.sort_by(Scalar::total_cmp);
+        values.dedup_by(|a, b| (*a - *b).abs() <= span * 1e-9);
+    };
+    distinct(&mut u_lattice, u_span);
+    distinct(&mut v_lattice, v_span);
+    let (nu, nv) = (
+        u_lattice.len().checked_sub(1)?,
+        v_lattice.len().checked_sub(1)?,
+    );
     if nu == 0 || nv == 0 {
         return None;
     }
@@ -1537,11 +1572,56 @@ fn recognise_grid(boundary: &CurvedBoundary) -> Option<GridPatch> {
         v_start: v_min,
         du: u_span / nu as Scalar,
         dv: v_span / nv as Scalar,
+        lattice: Some((u_lattice, v_lattice)),
     };
-    if !ordered_grid_perimeter(boundary, &patch) {
-        return None;
+    ordered_grid_perimeter(boundary, &patch).then_some(patch)
+}
+
+/// Whether two consecutive samples of the boundary are one vertex at two
+/// parameter points: a pole row (#463).
+fn has_pole_row(boundary: &CurvedBoundary) -> bool {
+    let n = boundary.uv.len();
+    (0..n).any(|i| {
+        let j = (i + 1) % n;
+        boundary.shared[i] == boundary.shared[j] && boundary.uv[i] != boundary.uv[j]
+    })
+}
+
+impl GridPatch {
+    /// The lattice index of `value` along `u` (`axis` 0) or `v` (1).
+    fn index(&self, value: Scalar, axis: usize) -> Option<usize> {
+        let (start, step, cells) = if axis == 0 {
+            (self.u_start, self.du, self.nu)
+        } else {
+            (self.v_start, self.dv, self.nv)
+        };
+        let Some((us, vs)) = &self.lattice else {
+            return grid_lattice_index(value, start, step, cells);
+        };
+        let lattice = if axis == 0 { us } else { vs };
+        let span = lattice[cells] - lattice[0];
+        let at = lattice.partition_point(|&c| c < value);
+        [at.checked_sub(1), Some(at)]
+            .into_iter()
+            .flatten()
+            .filter(|&i| i <= cells)
+            .min_by(|&i, &j| {
+                (lattice[i] - value)
+                    .abs()
+                    .total_cmp(&(lattice[j] - value).abs())
+            })
+            .filter(|&i| (lattice[i] - value).abs() <= span * 1e-9)
     }
-    Some(patch)
+
+    /// The lattice coordinate `i` along `u` (`axis` 0) or `v` (1).
+    fn coordinate(&self, i: usize, axis: usize) -> Scalar {
+        match (&self.lattice, axis) {
+            (Some((us, _)), 0) => us[i],
+            (Some((_, vs)), _) => vs[i],
+            (None, 0) => self.u_start + self.du * i as Scalar,
+            (None, _) => self.v_start + self.dv * i as Scalar,
+        }
+    }
 }
 
 fn grid_lattice_index(value: Scalar, start: Scalar, step: Scalar, cells: usize) -> Option<usize> {
@@ -1569,10 +1649,10 @@ fn ordered_grid_perimeter(boundary: &CurvedBoundary, patch: &GridPatch) -> bool 
     }
     let mut keys = Vec::with_capacity(expected);
     for point in &boundary.uv {
-        let Some(i) = grid_lattice_index(point.x, patch.u_start, patch.du, patch.nu) else {
+        let Some(i) = patch.index(point.x, 0) else {
             return false;
         };
-        let Some(j) = grid_lattice_index(point.y, patch.v_start, patch.dv, patch.nv) else {
+        let Some(j) = patch.index(point.y, 1) else {
             return false;
         };
         if i != 0 && i != patch.nu && j != 0 && j != patch.nv {
@@ -1610,31 +1690,6 @@ fn distinct_steps(values: &mut Vec<Scalar>, start: Scalar, span: Scalar) -> Opti
     Some(cells)
 }
 
-/// Whether a trim jumps from `end` to `start` across a sphere pole or a cone
-/// apex: both are poles of `surface` (u does not move the point there) but
-/// not the same parameter point.
-fn across_pole(support: Support<'_>, end: Point2, start: Point2) -> bool {
-    // A surface relation has no poles of its own.
-    let Some(surface) = support.atomic() else {
-        return false;
-    };
-    let pole = |p: Point2| match axiolid_reference::surface::partials(surface, p.x, p.y) {
-        Ok((du, dv)) => du.length() <= 1e-9 * (1.0 + dv.length()),
-        Err(_) => false,
-    };
-    end != start && pole(end) && pole(start)
-}
-
-/// The refusal for a face [`across_pole`] names. Tessellating it needs the
-/// pole row of samples, welded to the pole vertex: `TODO(#463)`.
-fn pole_refusal() -> GeomError {
-    GeomError::UnsupportedInput {
-        backend: crate::BACKEND_ID,
-        operation: axiolid_contracts::Operation::Tessellation,
-        input: "a curved B-rep face whose trim closes across a sphere pole or a cone apex",
-    }
-}
-
 /// Collect a curved face's boundary, sampling each edge exactly once across
 /// the whole shell.
 fn curved_boundary(
@@ -1654,16 +1709,16 @@ fn curved_boundary(
     let mut rings: Vec<CurvedRing> = Vec::with_capacity(face.bounds.len());
     // Built at the first edge use without a pcurve (#310).
     let mut inverter: Option<inversion::SurfaceInverter<'_>> = None;
+    let tau = ctx.tolerance.linear();
     for face_bound in &face.bounds {
         let ring_start = out.uv.len();
         let wire = brep
             .loops()
             .get(face_bound.loop_id.index())
             .ok_or_else(|| GeomError::InvalidInput("loop missing".to_string()))?;
-        // The previous pcurve's end and the ring's first start, for the
-        // gaps between consecutive pcurves (#232).
+        let mut uses: Vec<UseSamples> = Vec::with_capacity(wire.edges.len());
+        // The previous use's end, where an inverted edge is aligned.
         let mut previous_end: Option<Point2> = None;
-        let mut ring_first: Option<Point2> = None;
         for use_ in &wire.edges {
             let Some(pcurve) = use_.pcurve else {
                 // No pcurve: the edge's shared 3D samples are inverted onto
@@ -1674,19 +1729,15 @@ fn curved_boundary(
                         inverter.insert(inversion::SurfaceInverter::new(surface, ctx.tolerance)?)
                     }
                 };
-                let (params, shared) =
+                let (params, shared, at_pole) =
                     inversion::inverted_edge_use(state, ctx, use_, inverter, bound, previous_end)?;
-                let n = params.len() - 1;
-                if let (Some(end), Some(&start)) = (previous_end, params.first()) {
-                    if across_pole(surface, end, start) {
-                        return Err(pole_refusal());
-                    }
-                    bound.gap(end, start, surface);
-                }
-                ring_first = ring_first.or_else(|| params.first().copied());
                 previous_end = params.last().copied();
-                out.uv.extend(params.into_iter().take(n));
-                out.shared.extend(shared.into_iter().take(n));
+                uses.push(UseSamples {
+                    params,
+                    shared,
+                    pcurve: false,
+                    at_pole,
+                });
                 continue;
             };
             let (params, ts, shared) = match state.edge_samples.get(&use_.edge) {
@@ -1740,26 +1791,24 @@ fn curved_boundary(
                     (params, uniform_times(&pcurve, n), shared)
                 }
             };
-            let n = shared.len() - 1;
             bound.trim(&pcurve, &ts, &params);
-            if let (Some(end), Some(&start)) = (previous_end, params.first()) {
-                if across_pole(surface, end, start) {
-                    return Err(pole_refusal());
-                }
-                bound.gap(end, start, surface);
-            }
-            ring_first = ring_first.or_else(|| params.first().copied());
-            previous_end = params.last().copied();
-            // The next edge contributes this edge's final junction.
-            out.uv.extend(params.into_iter().take(n));
-            out.shared.extend(shared.into_iter().take(n));
+            let ends = [params[0], params[params.len() - 1]];
+            previous_end = Some(ends[1]);
+            uses.push(UseSamples {
+                params,
+                shared,
+                pcurve: true,
+                at_pole: ends.map(|p| surface.is_pole(p, tau)),
+            });
         }
-        if let (Some(end), Some(start)) = (previous_end, ring_first) {
-            if across_pole(surface, end, start) {
-                return Err(pole_refusal());
-            }
-            bound.gap(end, start, surface);
+        if uses.is_empty() {
+            return Err(GeomError::Degenerate(
+                "curved bound has fewer than three samples".to_owned(),
+            ));
         }
+        let (uv, shared) = pole_ring(state, ctx, surface, bound, uses, face_bound.outer)?;
+        out.uv.extend(uv);
+        out.shared.extend(shared);
         if face_bound.orientation == Orientation::Reversed {
             out.uv[ring_start..].reverse();
             out.shared[ring_start..].reverse();
@@ -1903,12 +1952,35 @@ fn append_curved_face(
             let columns = patch.nu + 1;
             let capacity = patch.nu.saturating_mul(patch.nv).saturating_mul(2);
             let mut triangles = Vec::with_capacity(capacity);
+            let cell = |iv: usize, iu: usize| {
+                [
+                    grid[iv * columns + iu],
+                    grid[iv * columns + iu + 1],
+                    grid[(iv + 1) * columns + iu + 1],
+                    grid[(iv + 1) * columns + iu],
+                ]
+            };
+            // A pole row's cells are one fan each (#463), unless the row is
+            // demoted to the nominal triangles.
+            let fans = fan_rows(
+                (state.mesh, state.chord_error),
+                surface,
+                bound,
+                &patch,
+                cell,
+                &boundary_edges,
+            )?;
             for iv in 0..patch.nv {
                 for iu in 0..patch.nu {
-                    let a = grid[iv * columns + iu];
-                    let b = grid[iv * columns + iu + 1];
-                    let c = grid[(iv + 1) * columns + iu + 1];
-                    let d = grid[(iv + 1) * columns + iu];
+                    if let Some(fan) = (iv == 0)
+                        .then_some(fans[0].as_ref())
+                        .flatten()
+                        .or_else(|| (iv + 1 == patch.nv).then_some(fans[1].as_ref()).flatten())
+                    {
+                        triangles.push(fan[iu]);
+                        continue;
+                    }
+                    let [a, b, c, d] = cell(iv, iu);
                     triangles.push(surface_triangle([a, b, d], &boundary_edges));
                     triangles.push(surface_triangle([b, c, d], &boundary_edges));
                 }
@@ -1953,6 +2025,18 @@ fn append_curved_face(
             })
         };
         let vertices = [vertex(t[0])?, vertex(t[1])?, vertex(t[2])?];
+        // Three samples of one pole's rows span no surface but cover their
+        // parameter triangle: the triangulation is wrong (#463).
+        let [a, b, c] = vertices.map(|vertex| vertex.uv);
+        if vertices
+            .iter()
+            .all(|vertex| vertex.mesh == vertices[0].mesh)
+            && (b - a).perp_dot(c - a) != 0.0
+        {
+            return Err(GeomError::Degenerate(
+                "a curved face's triangulation spans three samples of one pole".to_owned(),
+            ));
+        }
         triangles.push(SurfaceTriangle {
             vertices,
             boundary: [
@@ -1961,6 +2045,7 @@ fn append_curved_face(
                 boundary_edges.contains(&local_edge_key(vertices[2], vertices[0])),
             ],
             depth: 0,
+            fan: None,
         });
     }
 
@@ -1996,6 +2081,7 @@ fn surface_triangle(
             boundary_edges.contains(&local_edge_key(vertices[2], vertices[0])),
         ],
         depth: 0,
+        fan: None,
     }
 }
 
@@ -2087,6 +2173,34 @@ fn refine_pass(
         let mut centroid_failures = Vec::with_capacity(triangles.len());
         let mut pending = Vec::with_capacity(triangles.len());
         for triangle in triangles {
+            if let Some(fan) = triangle.fan {
+                // A fan is steered by its bound alone, which no measurement
+                // exceeds: its far edge is split while the term along the
+                // row could still bring the bound within the budget, and
+                // its meridians are never split (#463).
+                let mut self_mask = 0_u8;
+                let limit = if certified {
+                    CERTIFIED_DEPTH
+                } else {
+                    MAX_REFINEMENT_DEPTH - 1
+                };
+                let opposite = fan.opposite();
+                if triangle.depth < limit && !triangle.boundary[opposite] {
+                    if let Some(terms) = bound.fan(state.mesh, surface, &triangle)? {
+                        if terms.along + terms.rest > state.chord_error
+                            && terms.rest < state.chord_error
+                        {
+                            let (a, b) = triangle_edge(triangle.vertices, opposite);
+                            requested_edges.insert(local_edge_key(a, b));
+                            self_mask = 1 << opposite;
+                        }
+                    }
+                }
+                self_masks.push(self_mask);
+                centroid_failures.push(false);
+                pending.push(triangle);
+                continue;
+            }
             let (edge_errors, centroid_error) =
                 curved_triangle_errors(state.mesh, surface, triangle.vertices)?;
             let mut self_mask = 0_u8;
@@ -2107,9 +2221,7 @@ fn refine_pass(
                 && triangle.depth < CERTIFIED_DEPTH
                 && state.face_local_vertices < CERTIFIED_FACE_VERTICES
             {
-                if let Some(certified) =
-                    bound.triangle_bound(state.mesh, surface, triangle.vertices)?
-                {
+                if let Some(certified) = bound.triangle_bound(state.mesh, surface, &triangle)? {
                     if certified > state.chord_error {
                         if let Some(edge) = bound.widest_free_edge(&triangle) {
                             let (a, b) = triangle_edge(triangle.vertices, edge);
@@ -2152,7 +2264,21 @@ fn refine_pass(
                 });
             }
             changed = true;
-            if mask == 0 {
+            if let Some(fan) = triangle.fan {
+                if mask != 1 << fan.opposite() {
+                    return Err(GeomError::Degenerate(
+                        "a curved face's refinement split a meridian into a pole".to_owned(),
+                    ));
+                }
+                split_fan(
+                    state,
+                    surface,
+                    triangle,
+                    &mut midpoint_cache,
+                    &mut next_local,
+                    &mut next,
+                )?;
+            } else if mask == 0 {
                 split_at_centroid(state, surface, triangle, &mut next_local, &mut next)?;
             } else {
                 split_requested_edges(
@@ -2226,16 +2352,19 @@ fn split_at_centroid(
             vertices: [a, b, center],
             boundary: [triangle.boundary[0], false, false],
             depth,
+            fan: None,
         },
         SurfaceTriangle {
             vertices: [b, c, center],
             boundary: [triangle.boundary[1], false, false],
             depth,
+            fan: None,
         },
         SurfaceTriangle {
             vertices: [c, a, center],
             boundary: [triangle.boundary[2], false, false],
             depth,
+            fan: None,
         },
     ]);
     Ok(())
@@ -2279,6 +2408,7 @@ fn split_requested_edges(
         vertices,
         boundary,
         depth,
+        fan: None,
     };
     match mask {
         1 => {
@@ -2734,6 +2864,14 @@ impl<'s> FaceBound<'s> {
         // Keyed by vertex AND parameters: a seam vertex has two occurrences.
         let mut offsets: HashMap<(u32, u64, u64), Scalar> = HashMap::new();
         for triangle in triangles {
+            if triangle.fan.is_some() {
+                let Some(terms) = self.fan(mesh, surface, triangle)? else {
+                    self.unbounded("surface has no derivative bound over a triangle");
+                    return Ok(());
+                };
+                self.interior = self.interior.max(terms.along + terms.rest);
+                continue;
+            }
             let [a, b, c] = triangle.vertices.map(|vertex| vertex.mesh);
             if a == b || b == c || c == a {
                 let pair = if a == b { (b, c) } else { (a, b) };
@@ -2838,16 +2976,23 @@ impl<'s> FaceBound<'s> {
     }
 
     /// One triangle's bound while the face is refined: interpolation plus
-    /// its corners' distance off the surface; `None` when unbounded.
+    /// its corners' distance off the surface, or a fan's [`Self::fan`]
+    /// bound; `None` when unbounded.
     fn triangle_bound(
         &self,
         mesh: &TriMesh,
         surface: Support<'_>,
-        vertices: [SurfaceVertex; 3],
+        triangle: &SurfaceTriangle,
     ) -> GeomResult<Option<Scalar>> {
         if self.unbounded.is_some() {
             return Ok(None);
         }
+        if triangle.fan.is_some() {
+            return Ok(self
+                .fan(mesh, surface, triangle)?
+                .map(|terms| terms.along + terms.rest));
+        }
+        let vertices = triangle.vertices;
         let mut offset: Scalar = 0.0;
         for vertex in vertices {
             let exact = surface.evaluate(vertex.uv.x, vertex.uv.y)?;
@@ -3114,11 +3259,13 @@ mod tests {
                 vertices: [vertex(0), vertex(1), vertex(2)],
                 boundary: [false; 3],
                 depth: 0,
+                fan: None,
             },
             SurfaceTriangle {
                 vertices: [vertex(1), vertex(0), vertex(3)],
                 boundary: [false; 3],
                 depth: 0,
+                fan: None,
             },
         ];
 
@@ -3440,6 +3587,7 @@ mod tests {
             vertices: [vertex(0), vertex(1), vertex(2)],
             boundary: [false; 3],
             depth: 0,
+            fan: None,
         };
         let mut bound = FaceBound::new(Support::Surface(&surface));
         bound

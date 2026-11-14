@@ -1019,8 +1019,11 @@ fn polygon_face(
     compile(builder, brep)
 }
 
+/// Edges ending at a ruled surface's apex close the face there with a pole
+/// row (#463, ADR 0112): the apex is not inverted, its `v` is the apex's
+/// side and its `u` the neighbouring sample's.
 #[test]
-fn an_edge_into_a_ruled_apex_is_refused_at_the_apex() {
+fn an_edge_into_a_ruled_apex_closes_at_the_apex() {
     let apex = Point3::new(0.0, 0.0, 1.0);
     let support = |b: &mut GeometryGraphBuilder| {
         let curve = push_curve3(b, horizontal_circle(0.0, 0.0, 0.0, 1.0));
@@ -1043,7 +1046,29 @@ fn an_edge_into_a_ruled_apex_is_refused_at_the_apex() {
         &corners,
         vec![Some(horizontal_circle(0.0, 0.0, 0.0, 1.0)), None, None],
     );
-    honest("into the apex", result, &[], &[Outcome::Refused(APEX)]);
+    let mut samples = Vec::new();
+    for i in 0..=60 {
+        for j in 0..=30 {
+            let (s, v) = (i as Scalar / 60.0, j as Scalar / 30.0);
+            samples.push(rim(0.2 + s) * (1.0 - v) + apex * v);
+        }
+    }
+    honest("into the apex", result, &samples, &[Outcome::Certified]);
+    // An edge through the apex, a corner of its polyline there, still has
+    // a sample at it that is no end of the edge: refused by name.
+    let through = [rim(0.2), apex, rim(1.2)];
+    let result = polygon_face(
+        &support,
+        &[rim(0.2), rim(1.2)],
+        vec![
+            Some(horizontal_circle(0.0, 0.0, 0.0, 1.0)),
+            Some(Curve3::Polyline(axiolid_curve::Polyline3 {
+                points: through.iter().rev().copied().collect(),
+                closed: false,
+            })),
+        ],
+    );
+    honest("through the apex", result, &[], &[Outcome::Refused(APEX)]);
 }
 
 #[test]

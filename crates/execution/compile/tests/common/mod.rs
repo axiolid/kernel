@@ -138,9 +138,21 @@ pub type Compiled = (TriMesh, MeshClosure, DeviationReport);
 pub fn compile(mut builder: GeometryGraphBuilder, brep: BRep<NodeId>) -> GeomResult<Compiled> {
     let root = builder.push(GeometryNode::BRep(brep)).unwrap();
     let graph = builder.finish(vec![root]).unwrap();
-    let (outcome, report) = ReferenceMeshCompiler::new(BoolmeshBoolean::new())
-        .compile_mesh_with_deviation(&graph, root, &options())?;
+    let start = std::time::Instant::now();
+    let compiled = ReferenceMeshCompiler::new(BoolmeshBoolean::new()).compile_mesh_with_deviation(
+        &graph,
+        root,
+        &options(),
+    );
+    LAST_COMPILE.set(start.elapsed());
+    let (outcome, report) = compiled?;
     Ok((outcome.mesh, outcome.closure, report))
+}
+
+std::thread_local! {
+    /// How long this thread's last `compile` took, for a test's report.
+    pub static LAST_COMPILE: std::cell::Cell<std::time::Duration> =
+        const { std::cell::Cell::new(std::time::Duration::ZERO) };
 }
 
 /// A closed solid, the way an exchange format with pcurves writes it: the
@@ -909,4 +921,249 @@ pub fn unit_sheet<'a>(
         window: None,
         hole: None,
     }
+}
+
+// --- faces reaching a pole (#463) ---------------------------------------------
+
+/// A face over the parameter rectangle `u` by `v` whose bottom (`v.0`), top
+/// (`v.1`) or both are a pole of its surface: the corners there are one
+/// vertex, and the face has no edge along the pole (ADR 0059). Its edges
+/// run as a `Sheet`'s, bottom, right, top and left, each from the lower
+/// corner, the top and the left used reversed; a `seam` face is a full
+/// turn, its right and left one edge, its bottom and top closed rims.
+pub struct PoleSheet<'a> {
+    pub u: (Scalar, Scalar),
+    pub v: (Scalar, Scalar),
+    /// The surface point, read at the corners only.
+    pub point: &'a dyn Fn(Scalar, Scalar) -> Point3,
+    /// Whether the bottom and the top are poles.
+    pub poles: [bool; 2],
+    /// The edges' 3D curves, bottom, right, top, left; `None` for a straight
+    /// one. A pole's entry and a seam's left are not read.
+    pub curves: [Option<Curve3>; 4],
+    pub pcurves: bool,
+    pub seam: bool,
+}
+
+/// The face of `sheet` on `support` in `brep`, with its rims, bottom and
+/// top, where they are edges.
+pub fn pole_face(
+    builder: &mut GeometryGraphBuilder,
+    brep: &mut BRep<NodeId>,
+    support: NodeId,
+    sheet: &PoleSheet<'_>,
+) -> (
+    axiolid_topology::FaceId,
+    [Option<axiolid_topology::EdgeId>; 2],
+) {
+    let ((u0, u1), (v0, v1)) = (sheet.u, sheet.v);
+    let mut vertex = |u, v| {
+        brep.add_vertex(Vertex {
+            position: (sheet.point)(u, v),
+        })
+    };
+    let bottom_left = vertex(u0, v0);
+    let bottom_right = if sheet.poles[0] || sheet.seam {
+        bottom_left
+    } else {
+        vertex(u1, v0)
+    };
+    let top_left = vertex(u0, v1);
+    let top_right = if sheet.poles[1] || sheet.seam {
+        top_left
+    } else {
+        vertex(u1, v1)
+    };
+    let mut pc = |points: &[(Scalar, Scalar)]| {
+        sheet.pcurves.then(|| {
+            builder
+                .push(GeometryNode::Curve2(polyline(points)))
+                .unwrap()
+        })
+    };
+    let pcurves = [
+        pc(&[(u0, v0), (u1, v0)]),
+        pc(&[(u1, v0), (u1, v1)]),
+        pc(&[(u1, v1), (u0, v1)]),
+        pc(&[(u0, v1), (u0, v0)]),
+    ];
+    let mut edge = |start, end, curve: &Option<Curve3>| {
+        let curve = curve
+            .clone()
+            .map(|c| builder.push(GeometryNode::Curve3(c)).unwrap());
+        brep.add_edge(Edge { start, end, curve })
+    };
+    let bottom = (!sheet.poles[0]).then(|| edge(bottom_left, bottom_right, &sheet.curves[0]));
+    let right = edge(bottom_right, top_right, &sheet.curves[1]);
+    let top = (!sheet.poles[1]).then(|| edge(top_left, top_right, &sheet.curves[2]));
+    let left = if sheet.seam {
+        right
+    } else {
+        edge(bottom_left, top_left, &sheet.curves[3])
+    };
+    let mut uses = Vec::new();
+    let mut add = |edge: Option<axiolid_topology::EdgeId>, orientation, pcurve| {
+        if let Some(edge) = edge {
+            uses.push(EdgeUse {
+                edge,
+                orientation,
+                pcurve,
+            });
+        }
+    };
+    add(bottom, Orientation::Forward, pcurves[0]);
+    add(Some(right), Orientation::Forward, pcurves[1]);
+    add(top, Orientation::Reversed, pcurves[2]);
+    add(Some(left), Orientation::Reversed, pcurves[3]);
+    let loop_id = brep.add_loop(Loop { edges: uses });
+    let face = brep.add_face(Face {
+        surface: Some(support),
+        bounds: vec![FaceBound {
+            loop_id,
+            orientation: Orientation::Forward,
+            outer: true,
+        }],
+        orientation: Orientation::Forward,
+    });
+    (face, [bottom, top])
+}
+
+/// The open sheet of one face reaching a pole.
+pub fn open_pole_sheet(support: Support<'_>, sheet: &PoleSheet<'_>) -> GeomResult<Compiled> {
+    let mut builder = GeometryGraphBuilder::new();
+    let mut brep: BRep<NodeId> = BRep::default();
+    let support = support(&mut builder);
+    let (face, _) = pole_face(&mut builder, &mut brep, support, sheet);
+    brep.add_shell(Shell {
+        faces: vec![(face, Orientation::Forward)],
+        closed: false,
+    });
+    compile(builder, brep)
+}
+
+/// A solid of revolution about the `z` axis: a full turn of `sheet` from
+/// `u = 0`, its rims horizontal circles about the axis, each closed by a
+/// planar disc (the floor at the bottom, the lid at the top) as
+/// `closed_wall`'s are; a pole closes itself.
+pub fn pole_solid(support: Support<'_>, sheet: &PoleSheet<'_>) -> GeomResult<Compiled> {
+    let mut builder = GeometryGraphBuilder::new();
+    let mut brep: BRep<NodeId> = BRep::default();
+    let wall_support = support(&mut builder);
+    let (wall, rims) = pole_face(&mut builder, &mut brep, wall_support, sheet);
+    let mut faces = vec![wall];
+    for (side, rim) in rims.into_iter().enumerate() {
+        let Some(rim) = rim else {
+            continue;
+        };
+        let at = (sheet.point)(0.0, if side == 0 { sheet.v.0 } else { sheet.v.1 });
+        let lid = side == 1;
+        let plane = atomic(
+            &mut builder,
+            Surface::Plane(Plane {
+                frame: frame_at(at.z),
+            }),
+        );
+        let circle = builder
+            .push(GeometryNode::Curve2(cap_circle(at.x, lid)))
+            .unwrap();
+        let orientation = if lid {
+            Orientation::Forward
+        } else {
+            Orientation::Reversed
+        };
+        let loop_id = brep.add_loop(Loop {
+            edges: vec![EdgeUse {
+                edge: rim,
+                orientation,
+                pcurve: sheet.pcurves.then_some(circle),
+            }],
+        });
+        faces.push(brep.add_face(Face {
+            surface: Some(plane),
+            bounds: vec![FaceBound {
+                loop_id,
+                orientation: Orientation::Forward,
+                outer: true,
+            }],
+            orientation,
+        }));
+    }
+    let shell = brep.add_shell(Shell {
+        faces: faces
+            .into_iter()
+            .map(|face| (face, Orientation::Forward))
+            .collect(),
+        closed: true,
+    });
+    brep.add_solid(Solid {
+        outer: shell,
+        voids: Vec::new(),
+    });
+    compile(builder, brep)
+}
+
+/// The semicircle of `radius` from the south pole to the north pole of the
+/// sphere about the origin, over `x >= 0` in the `x`-`z` plane, as a
+/// rational quadratic B-spline on `[0, 1]`, the equator at `1/2`.
+pub fn meridian_arc(radius: Scalar) -> Curve3 {
+    let w = core::f64::consts::FRAC_1_SQRT_2;
+    Curve3::BSpline(BSplineCurve3 {
+        degree: 2,
+        control_points: vec![
+            Point3::new(0.0, 0.0, -radius),
+            Point3::new(radius, 0.0, -radius),
+            Point3::new(radius, 0.0, 0.0),
+            Point3::new(radius, 0.0, radius),
+            Point3::new(0.0, 0.0, radius),
+        ],
+        knots: vec![0.0, 0.5, 1.0],
+        multiplicities: vec![3, 2, 3],
+        weights: Some(vec![1.0, w, 1.0, w, 1.0]),
+        closed: false,
+        self_intersect: None,
+        knot_spec: KnotSpec::Unspecified,
+    })
+}
+
+/// A sphere's point at longitude `u` and latitude `v`.
+pub fn sphere_point(radius: Scalar, u: Scalar, v: Scalar) -> Point3 {
+    Point3::new(
+        radius * v.cos() * u.cos(),
+        radius * v.cos() * u.sin(),
+        radius * v.sin(),
+    )
+}
+
+/// The farthest a dense sample of `point` over `[0, 1]^2`, and the given
+/// extra points, lies from the mesh, which must be within `bound`.
+pub fn assert_samples_within(
+    name: &str,
+    mesh: &TriMesh,
+    point: &dyn Fn(Scalar, Scalar) -> Point3,
+    extra: &[Point3],
+    bound: Scalar,
+) -> Scalar {
+    let mut samples = extra.to_vec();
+    let (n, m) = (181, 61);
+    for i in 0..=n {
+        for j in 0..=m {
+            samples.push(point(
+                (i as Scalar + 0.37) / (n as Scalar + 0.74),
+                (j as Scalar + 0.41) / (m as Scalar + 0.82),
+            ));
+        }
+    }
+    for k in 0..=400 {
+        let t = k as Scalar / 400.0;
+        for s in [0.0, 1.0] {
+            samples.push(point(t, s));
+            samples.push(point(s, t));
+        }
+    }
+    let worst = farthest(mesh, &samples);
+    assert!(
+        worst <= bound * (1.0 + 1e-9),
+        "{name}: a surface point lies {worst:e} from the mesh, above the reported {bound:e}"
+    );
+    worst
 }

@@ -512,32 +512,138 @@ fn an_exact_boolean_closes_a_vertex_within_its_reading_not_beyond_the_chord_budg
     assert!(tessellate_exact(&patch, TOLERANCE, 1e-3, 1e-3).is_err());
 }
 
-/// A face whose trim closes across a cone's apex needs the pole row of
-/// samples, which the tessellator does not build (`TODO(#463)`): it is
-/// refused by name, not left to run out of refinement budget.
-#[test]
-fn a_face_closing_across_an_apex_is_refused_by_name() {
+/// A closed contour of straight segments and arcs.
+fn contour(segments: Vec<(Curve2, Interval)>) -> Profile {
     use axiolid_profile::{Contour, ContourProfile, ProfileSegment};
-    let points = [(0.0, 0.0), (1.5, 0.0), (0.0, 2.0)].map(|(x, y)| Point2::new(x, y));
-    let segments = (0..3)
-        .map(|i| ProfileSegment {
-            curve: Curve2::Line(Line2 {
-                origin: points[i],
-                direction: points[(i + 1) % 3] - points[i],
-            }),
-            domain: Interval::UNIT,
+    let segments = segments
+        .into_iter()
+        .map(|(curve, domain)| ProfileSegment {
+            curve,
+            domain,
             same_sense: true,
         })
         .collect();
-    let profile = Profile::Contour(ContourProfile {
+    Profile::Contour(ContourProfile {
         outer: Contour::new(segments),
         holes: Vec::new(),
-    });
-    let cone = revolve_profile_exact(&profile, Point3::ZERO, Vec3::Y, 1.5 * PI, TOLERANCE).unwrap();
-    match tessellate_exact(&cone, TOLERANCE, 1e-3, 0.0) {
-        Err(GeomError::UnsupportedInput { input, .. }) => {
-            assert!(input.contains("pole or a cone apex"), "{input}");
+    })
+}
+
+fn segment(from: Point2, to: Point2) -> (Curve2, Interval) {
+    (
+        Curve2::Line(Line2 {
+            origin: from,
+            direction: to - from,
+        }),
+        Interval::UNIT,
+    )
+}
+
+/// The mesh edges used other than once each way.
+fn open_edges(mesh: &TriMesh) -> Vec<(u32, u32)> {
+    let mut directed = std::collections::HashMap::new();
+    for t in mesh.indices.as_chunks::<3>().0 {
+        for (x, y) in [(t[0], t[1]), (t[1], t[2]), (t[2], t[0])] {
+            *directed.entry((x, y)).or_insert(0) += 1;
         }
-        other => panic!("expected a refusal, got {other:?}"),
+    }
+    let mut open: Vec<(u32, u32)> = directed
+        .iter()
+        .filter(|&(&(x, y), &n)| n != 1 || directed.get(&(y, x)) != Some(&1))
+        .map(|(&edge, _)| edge)
+        .collect();
+    open.sort_unstable();
+    open
+}
+
+/// #463's own cases: a face reaching the axis it turns about, at a cone's
+/// apex or a sphere's poles, closes with a row of samples welded to the
+/// pole's vertex, to a solid within the certified bound.
+#[test]
+fn faces_reaching_an_apex_or_a_pole_are_solids_within_their_bound() {
+    let corners = [(0.0, 0.0), (1.5, 0.0), (0.0, 2.0)].map(|(x, y)| Point2::new(x, y));
+    let cone = contour(
+        (0..3)
+            .map(|i| segment(corners[i], corners[(i + 1) % 3]))
+            .collect(),
+    );
+    let half_disc = contour(vec![
+        (
+            Curve2::Circle(axiolid_curve::Circle2 {
+                frame: axiolid_core::Frame2 {
+                    origin: Point2::ZERO,
+                    x: Vec2::X,
+                    y: Vec2::Y,
+                },
+                radius: 1.2,
+            }),
+            Interval::new(-FRAC_PI_2, FRAC_PI_2),
+        ),
+        segment(Point2::new(0.0, 1.2), Point2::new(0.0, -1.2)),
+    ]);
+    for (name, profile, volume) in [
+        ("cone", &cone, PI * 1.5 * 1.5 * 2.0 / 3.0),
+        ("sphere", &half_disc, 4.0 / 3.0 * PI * 1.2_f64.powi(3)),
+    ] {
+        let exact = revolve_profile_exact(profile, Point3::ZERO, Vec3::Y, 2.0 * PI, TOLERANCE)
+            .unwrap_or_else(|e| panic!("{name}: {e}"));
+        let start = std::time::Instant::now();
+        let (mesh, deviation) = mesh_of(&exact, 1e-3);
+        let elapsed = start.elapsed();
+        let bound = deviation.bound().expect("a certified bound");
+        assert!(bound <= 1e-3, "{name}: bound {bound:e} above the budget");
+        let area = exact_properties(&exact, TOLERANCE).unwrap().area;
+        let got = mesh_volume(&mesh);
+        eprintln!(
+            "{name}: {} triangles, {elapsed:.2?}, certified {bound:e}, volume off by {:e}",
+            mesh.indices.len() / 3,
+            (got - volume).abs()
+        );
+        assert!(
+            (got - volume).abs() <= bound * area,
+            "{name}: volume {got} against {volume}, bound {bound:e}"
+        );
+        assert_within_bound(&exact, &mesh, &deviation);
+    }
+}
+
+/// Three quarters of the cone mesh within the certified bound, the wall
+/// closing on its apex row and its two cut faces. The base, a sector
+/// bounded by straight and curved edges, is laid against the wall's rim
+/// the wrong way round, as a three-quarter cylinder's is, with no pole: a
+/// defect of partial turns, not of poles. Every open edge lies in the base.
+#[test]
+fn three_quarters_of_a_cone_close_at_their_apex() {
+    let corners = [(0.0, 0.0), (1.5, 0.0), (0.0, 2.0)].map(|(x, y)| Point2::new(x, y));
+    let cone = contour(
+        (0..3)
+            .map(|i| segment(corners[i], corners[(i + 1) % 3]))
+            .collect(),
+    );
+    let square = [(0.0, 0.0), (1.5, 0.0), (1.5, 2.0), (0.0, 2.0)].map(|(x, y)| Point2::new(x, y));
+    let cylinder = contour(
+        (0..4)
+            .map(|i| segment(square[i], square[(i + 1) % 4]))
+            .collect(),
+    );
+    for (name, profile) in [("cone", &cone), ("cylinder", &cylinder)] {
+        let exact = revolve_profile_exact(profile, Point3::ZERO, Vec3::Y, 1.5 * PI, TOLERANCE)
+            .unwrap_or_else(|e| panic!("{name}: {e}"));
+        let (mesh, _, deviation) = tessellate_exact(&exact, TOLERANCE, 1e-3, 0.0)
+            .unwrap_or_else(|e| panic!("{name}: {e}"));
+        let bound = deviation.bound().expect("a certified bound");
+        assert!(bound <= 1e-3, "{name}: bound {bound:e} above the budget");
+        let open = open_edges(&mesh);
+        assert!(
+            !open.is_empty(),
+            "{name}: the base closes now: assert a solid"
+        );
+        for (x, y) in open {
+            let (p, q) = (mesh.positions[x as usize], mesh.positions[y as usize]);
+            assert!(
+                p.y == 0.0 && q.y == 0.0,
+                "{name}: open off the base, {p} {q}"
+            );
+        }
     }
 }

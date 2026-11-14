@@ -60,7 +60,11 @@
 //! Refused by name, before any search: a sample within `tau` of the axis
 //! of revolution or of a ruled surface's apex, where every `u` names the
 //! point, and after it, a sample on a ruling shorter than `tau`, where
-//! every `v` does (#463 owns those poles). A sample that leaves the surface
+//! every `v` does (#502 owns the collapsed ruling). An edge's end at the
+//! axis or the apex is not inverted: [`RelationInverter::pole`] names the
+//! pole's `v` there (it is `None` exactly where `invert` raises no pole
+//! refusal), and the tessellator takes `u` from the edge's neighbouring
+//! sample (#463, ADR 0112). A sample that leaves the surface
 //! is refused with a certified lower bound on its distance. A cover that
 //! needs more than [`RELATION_COVER_WORK`] evaluations, as on a profile
 //! running along the extrusion direction, is refused as over budget. An
@@ -276,15 +280,60 @@ impl<'g> RelationInverter<'g> {
 
     /// The parameters `(u, v)` naming `point`, or a refusal by name.
     pub(crate) fn invert(&self, point: Point3) -> GeomResult<Point2> {
-        if !point.is_finite() {
-            return Err(GeomError::InvalidInput(
-                "an edge sample to invert onto a surface relation is not finite".to_owned(),
-            ));
-        }
+        finite_sample(point)?;
         let probe = self.probe(point)?;
+        self.locate(&probe, false)
+    }
+
+    /// The `v` of the pole within `tau` of `point` (#463, ADR 0112): `None`
+    /// exactly where [`Self::invert`] raises no pole refusal (R1, R2), the
+    /// pole's `v` where `point` is within `tau` of a pole, and that refusal
+    /// otherwise (a point on the axis away from the surface). A ruled
+    /// apex's `v` is its side, 0 or 1. A revolution's is located by the
+    /// same certified search along the profile as [`Self::invert`] runs,
+    /// with the angle, which does not move the point there, left out: the
+    /// cover, one connected minimiser, the spread and the residual at `u =
+    /// 0` all hold as they do for any sample.
+    pub(crate) fn pole(&self, point: Point3) -> GeomResult<Option<Scalar>> {
+        finite_sample(point)?;
+        let refusal = match self.probe(point) {
+            Ok(_) => return Ok(None),
+            Err(refusal) => refusal,
+        };
+        match &self.surface {
+            RelationSurface::Ruled { sides } => {
+                for (v, side) in sides.iter().enumerate() {
+                    if let Side::Apex(apex) = side {
+                        if (point - *apex).length() <= self.tau {
+                            return Ok(Some(v as Scalar));
+                        }
+                    }
+                }
+                Err(refusal)
+            }
+            RelationSurface::Revolution { origin, axis, .. } => {
+                let p = point - *origin;
+                let height = p.dot(*axis);
+                let perp = p - *axis * height;
+                let probe = Probe {
+                    point,
+                    perp,
+                    rho: perp.length(),
+                    height,
+                };
+                Ok(Some(self.locate(&probe, true)?.y))
+            }
+            RelationSurface::Extrusion { .. } => Err(refusal),
+        }
+    }
+
+    /// The parameters of a probed sample; at a pole of a revolution, `u` is
+    /// left at 0, where every `u` names the point.
+    fn locate(&self, probe: &Probe, at_pole: bool) -> GeomResult<Point2> {
+        let point = probe.point;
         let (bracket, seeds, mut work) = match &self.sweep {
             Sweep::ExtrudedLine { origin, direction } => {
-                return self.invert_plane(&probe, *origin, *direction);
+                return self.invert_plane(probe, *origin, *direction);
             }
             Sweep::Fixed(bracket, cells) => {
                 let seeds = cells
@@ -294,14 +343,14 @@ impl<'g> RelationInverter<'g> {
                         b: cell.b,
                         speed: cell.speed,
                         second: cell.second,
-                        distance: self.distance(&probe, cell.generator),
+                        distance: self.distance(probe, cell.generator),
                     })
                     .collect();
                 (*bracket, seeds, cells.len())
             }
             Sweep::RevolvedLine { origin, direction } => {
                 let bracket = self
-                    .line_bracket(&probe, *origin, *direction)?
+                    .line_bracket(probe, *origin, *direction)?
                     .map_err(|floor| self.off_surface(floor))?;
                 let speed = direction.length() * (1.0 + ROUNDING);
                 let seeds = cut(bracket)
@@ -312,23 +361,23 @@ impl<'g> RelationInverter<'g> {
                             b,
                             speed,
                             second: 0.0,
-                            distance: self.distance(&probe, middle),
+                            distance: self.distance(probe, middle),
                         })
                     })
                     .collect::<GeomResult<Vec<_>>>()?;
                 (bracket, seeds, COARSE_CELLS)
             }
         };
-        let (kept, floor) = self.cover(&probe, seeds, &mut work)?;
+        let (kept, floor) = self.cover(probe, seeds, &mut work)?;
         if kept.is_empty() {
             return Err(self.off_surface(floor));
         }
         let (start, piece) = unique_piece(&kept, bracket).ok_or_else(|| self.ambiguous())?;
-        let t = self.polish(&probe, start, piece)?;
+        let t = self.polish(probe, start, piece)?;
         // Every generator over the piece passes within the slack of the
         // sample. Where `S(t', o*)` moves further than `tau` over it, the
         // sample does not fix `t`.
-        let (moving, turning) = self.spread(&probe, t, piece)?;
+        let (moving, turning) = self.spread(probe, t, piece)?;
         if moving + turning > self.tau {
             return Err(if turning > moving {
                 self.turning()
@@ -341,7 +390,11 @@ impl<'g> RelationInverter<'g> {
         } else {
             t
         };
-        let uv = self.complete(&probe, t)?;
+        let uv = if at_pole {
+            Point2::new(0.0, t)
+        } else {
+            self.complete(probe, t)?
+        };
         let off = (self.surface.evaluate(uv.x, uv.y)? - point).length();
         if !off.is_finite() {
             return Err(non_finite());
@@ -576,6 +629,8 @@ impl<'g> RelationInverter<'g> {
                 let (a, b) = (sides[0].at(t)?, sides[1].at(t)?);
                 let d = b - a;
                 let length = d.length();
+                // TODO(#502): a collapsed ruling needs a column of samples,
+                // as a pole needs a row.
                 if length.is_nan() || length <= self.tau {
                     return Err(GeomError::Degenerate(
                         "an edge without a p-curve runs into a collapsed ruling of its ruled \
@@ -831,6 +886,16 @@ fn no_speed_bound(surface: &RelationSurface<'_>) -> GeomError {
         "the swept curve of a {} has no certified speed bound",
         surface.family()
     ))
+}
+
+/// A sample that is not finite is refused before anything reads it.
+fn finite_sample(point: Point3) -> GeomResult<()> {
+    if !point.is_finite() {
+        return Err(GeomError::InvalidInput(
+            "an edge sample to invert onto a surface relation is not finite".to_owned(),
+        ));
+    }
+    Ok(())
 }
 
 /// Arithmetic on finite input that came to no finite number: refused, not
@@ -1394,6 +1459,91 @@ mod tests {
             text.contains("runs into a collapsed ruling of its ruled surface"),
             "{text}"
         );
+    }
+
+    /// `pole` is `None` exactly where `invert` raises no pole refusal (R1,
+    /// R2), and the pole's `v` where the point is within `tau` of it.
+    fn assert_pole(
+        name: &str,
+        inverter: &RelationInverter<'_>,
+        point: Point3,
+        want: Option<Scalar>,
+    ) {
+        let pole = inverter.pole(point);
+        let at_pole = match inverter.invert(point) {
+            Ok(_) => false,
+            Err(error) => {
+                let text = message(error);
+                text.contains("runs into the axis") || text.contains("runs into the apex")
+            }
+        };
+        assert_eq!(
+            !matches!(pole, Ok(None)),
+            at_pole,
+            "{name}: pole {pole:?}, refused at a pole {at_pole}"
+        );
+        if let Some(want) = want {
+            let got = pole.unwrap().unwrap();
+            assert!((got - want).abs() <= 1e-6, "{name}: v {got} for {want}");
+        }
+    }
+
+    /// Points on, within and beyond `tau` of each pole, and on the axis
+    /// away from the surface.
+    #[test]
+    fn a_pole_is_named_exactly_where_a_sample_is_refused_there() {
+        let (graph, ids) = graph_of(vec![
+            line(Point3::ZERO, Vec3::new(0.2, 0.0, 1.0)),
+            circle(Point3::ZERO, Vec3::X, Vec3::Z, 0.3),
+            open_cubic(),
+        ]);
+        let off = |k: Scalar| Vec3::new(0.6, 0.8, 0.0) * (k * TAU_TEST);
+        // A cone by revolution, its apex at t = 0.
+        let cone = RelationSurface::revolution(&graph, ids[0], Point3::ZERO, Vec3::Z).unwrap();
+        let inverter = RelationInverter::new(cone, tolerance()).unwrap();
+        assert_pole("cone apex", &inverter, Point3::ZERO, Some(0.0));
+        assert_pole("near the apex", &inverter, Point3::ZERO + off(0.5), None);
+        assert_pole(
+            "beyond the apex",
+            &inverter,
+            cone.evaluate(0.3, 0.02).unwrap(),
+            None,
+        );
+        assert_pole(
+            "on the axis, off",
+            &inverter,
+            Point3::new(0.0, 0.0, 0.5),
+            None,
+        );
+        assert!(inverter.pole(Point3::new(0.0, 0.0, 0.5)).is_err());
+        // A sphere by revolution, its poles at t = pi/2 and 3 pi/2.
+        let sphere = RelationSurface::revolution(&graph, ids[1], Point3::ZERO, Vec3::Z).unwrap();
+        let inverter = RelationInverter::new(sphere, tolerance()).unwrap();
+        for (z, t) in [(0.3, FRAC_PI_2), (-0.3, 3.0 * FRAC_PI_2)] {
+            let pole = Point3::new(0.0, 0.0, z);
+            assert_pole("sphere pole", &inverter, pole, Some(t));
+            assert_pole("near the pole", &inverter, pole + off(0.7), None);
+            assert_pole("beyond it", &inverter, pole + off(1.5), None);
+        }
+        // A ruled surface with an apex as its second side.
+        let apex = Point3::new(0.0, 0.0, 2.0);
+        let ruled = RelationSurface::ruled(
+            &graph,
+            &RuledSide::Curve {
+                curve: ids[2],
+                interval: Interval {
+                    start: 0.0,
+                    end: 1.0,
+                },
+            },
+            &RuledSide::Apex(apex),
+        )
+        .unwrap();
+        let inverter = RelationInverter::new(ruled, tolerance()).unwrap();
+        assert_pole("ruled apex", &inverter, apex, Some(1.0));
+        assert_pole("near the apex", &inverter, apex + off(0.9), Some(1.0));
+        let toward = ruled.evaluate(0.4, 1.0 - 2e-3).unwrap();
+        assert_pole("beyond the apex", &inverter, toward, None);
     }
 
     #[test]

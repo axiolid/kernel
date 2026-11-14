@@ -24,10 +24,17 @@
 //!   relation inverts by the certified search along its swept parameter
 //!   ([`RelationInverter`], #454, ADR 0110), with the same refusals; every
 //!   step below applies to it as to an atomic face.
-//! - A sample at a cone's apex or a sphere's pole, where every `u` names
-//!   the point, is refused by name, as is a sample within the linear
-//!   tolerance of it, and so is one on a relation's axis of revolution,
-//!   ruled apex or collapsed ruling.
+//! - An edge may end at a pole: a cone's apex, a sphere's pole, a
+//!   revolution's profile on its axis or a ruled apex, where every `u`
+//!   names the point (#463, ADR 0112). That end is not inverted:
+//!   [`SurfaceInverter::pole`] reads its `v`, and it takes the `u` of its
+//!   neighbouring sample on the edge, so the edge's last span runs along a
+//!   meridian (a ruling) in parameters. An edge with one span between two
+//!   poles is sampled again until it has two. Any other sample at, or
+//!   within the linear tolerance of, a pole is refused by name (the edge
+//!   runs through the pole; the producer splits it at the pole's vertex),
+//!   and so is one on a collapsed ruling. A span into a pole is halved
+//!   only while its middle stays off the pole.
 //! - Periodic parameters are unwrapped along the ring by continuity. That
 //!   reading is unambiguous only while consecutive samples turn less than a
 //!   quarter period, so a new edge is sampled until they do; an edge whose
@@ -55,6 +62,40 @@
 //!   Each vertex's distance from the surface at its inverted parameters is
 //!   added by the triangle bound as for any vertex. A new edge is sampled
 //!   until `d + e` fits the budget, where that is cheap.
+//! - Near a pole the lens cannot be had: `|S_u|` vanishes there, so the
+//!   scaled box reaches the pole and `sigma` is not positive. A span into a
+//!   pole, and a span near one whose lens fails, are bounded along the
+//!   meridians instead (#463, ADR 0112). The span's parameter chord is a
+//!   segment; its preimage runs from one end to the other (into the pole
+//!   row's point `(u*, v_pole)` for a span into a pole, where the pole row
+//!   closes the region). Take a point of the region between them and the
+//!   meridian (`u` fixed) through it: within the region it is a segment
+//!   whose two ends lie on the preimage, on the parameter chord or, for a
+//!   span into a pole, on the pole row. Their surface points are edge
+//!   points, within `d` of the mesh chord; points of the chord's image,
+//!   within `e` of it; or the exact pole, within `o`, the pole vertex's
+//!   distance from `S(u_neighbour, v_pole)`, of the chord's end. Distance
+//!   to a segment is convex, so the 3D chord between the two ends is within
+//!   the larger of those of the mesh chord, and the meridian arc between
+//!   them is within `|S_vv| dv^2 / 8` of its chord, `dv` the segment's
+//!   length in `v`. On a support turning about its pole, `S_u` is
+//!   orthogonal to `S_v` and `|S_v|` does not depend on `u`, so the edge's
+//!   `v` moves at most `|C'| / s` per unit of its parameter, `s` a lower
+//!   bound on `|S_v|` over a box of every `u` holding the preimage: the
+//!   preimage's `v` stays within `L / s` of its start, `L` the span's
+//!   length, and `dv <= |v_b - v_a| + L / s`. The box is grown as the
+//!   lens's is, clamped to the support's range of `v` and, for a span into
+//!   a pole, to its side of the pole. The term is `d + o + dvv dv^2 / 8`
+//!   into a pole and `d + e + dvv dv^2 / 8` near one; on a ruled surface's
+//!   straight rulings `S_vv = 0` and it is `d + o` or `d + e`. No quarter
+//!   turn is needed: the meridians bound the region however far the
+//!   preimage swings in `u` as it reaches the pole. A span near a pole is
+//!   bounded this way only where its ends show it off the poles (their
+//!   distances from them sum to more than its length), so no span is
+//!   bounded across a pole it passes; where `s` cannot be shown positive
+//!   or the box is not smooth (a tangent break of the profile, #498), the
+//!   face is unbounded by name ("the surface is not certifiably regular
+//!   along an edge into a pole").
 //! - The certified B-spline search proves uniqueness to a coarse parameter
 //!   resolution; Gauss-Newton then sharpens the parameters inside the
 //!   proven enclosure, and the residual left reaches the report as above.
@@ -70,7 +111,7 @@
 //! samples; its 3D chord bound is then known only for a straight edge, and a
 //! curved one is reported unbounded by name.
 
-use super::support::Support;
+use super::support::{PoleKind, Support};
 use super::view::Pcurve;
 use crate::surface_relation::RelationInverter;
 use axiolid_contracts::{GeomError, GeomResult};
@@ -135,6 +176,17 @@ impl<'s> SurfaceInverter<'s> {
         match &self.target {
             Target::Atomic(inverter) => inverter.invert(point),
             Target::Relation(inverter) => inverter.invert(point),
+        }
+    }
+
+    /// The `v` of the pole within the linear tolerance of `point` (#463):
+    /// `None` exactly where [`Self::invert`] raises no pole refusal (R1,
+    /// R2, "cone apex", "sphere pole"); where it raises one, the pole's `v`,
+    /// or that refusal when `point` is near the axis but not near a pole.
+    pub(super) fn pole(&self, point: Vec3) -> GeomResult<Option<Scalar>> {
+        match &self.target {
+            Target::Atomic(inverter) => inverter.pole(point),
+            Target::Relation(inverter) => inverter.pole(point),
         }
     }
 
@@ -348,6 +400,53 @@ impl<'s> AtomicInverter<'s> {
         )
     }
 
+    /// See [`SurfaceInverter::pole`]: a sphere's pole is at `v = +-pi/2` by
+    /// the side of the centre the point lies on, a cone's apex where its
+    /// radius `r + v tan(a)` vanishes (moved by an ulp or two to where it
+    /// is not negative, which its evaluator refuses).
+    fn pole(&self, point: Vec3) -> GeomResult<Option<Scalar>> {
+        let Err(refusal) = self.check_singularity(point) else {
+            return Ok(None);
+        };
+        let v = match self.surface {
+            Surface::Sphere(sphere) => {
+                let axis = sphere.frame.z.normalize_or_zero();
+                if (point - sphere.frame.origin).dot(axis) >= 0.0 {
+                    core::f64::consts::FRAC_PI_2
+                } else {
+                    -core::f64::consts::FRAC_PI_2
+                }
+            }
+            Surface::Cone(cone) => {
+                let slope = cone.semi_angle.tan();
+                if !(slope.is_finite() && slope != 0.0) {
+                    return Err(refusal);
+                }
+                let mut v = -cone.radius / slope;
+                for _ in 0..4 {
+                    if cone.radius + v * slope >= 0.0 {
+                        break;
+                    }
+                    v = if slope > 0.0 {
+                        v.next_up()
+                    } else {
+                        v.next_down()
+                    };
+                }
+                v
+            }
+            _ => return Err(refusal),
+        };
+        let Ok(at) = axiolid_reference::surface::evaluate(self.surface, 0.0, v) else {
+            return Err(refusal);
+        };
+        let off = (at - point).length();
+        if off.is_nan() || off > self.tolerance.linear() {
+            return Err(refusal);
+        }
+        Ok(Some(v))
+    }
+
     /// Refuse a point at, or within the linear tolerance of, a cone's apex
     /// or a sphere's pole: every `u` names it, so the boundary's parameters
     /// there are not determined by the point.
@@ -508,25 +607,56 @@ impl FaceBound<'_> {
 
     /// The trim terms of one edge use without a pcurve: per span, the
     /// edge's chord bound plus [`Self::chord_image`] of its parameter chord
-    /// plus the lens between the two (the module notes give the argument).
-    pub(super) fn inverted_edge(&mut self, spans: &[SpanBound], params: &[Point2]) {
+    /// plus the lens between the two (the module notes give the argument);
+    /// a span into a pole (`at_pole`, at the first and the last sample) is
+    /// bounded by [`Self::pole_span`] instead.
+    pub(super) fn inverted_edge(
+        &mut self,
+        spans: &[SpanBound],
+        params: &[Point2],
+        points: &[Vec3],
+        at_pole: [bool; 2],
+    ) -> GeomResult<()> {
         if self.unbounded.is_some() {
-            return;
+            return Ok(());
         }
-        for (span, ends) in spans.iter().zip(params.windows(2)) {
+        for (i, (span, ends)) in spans.iter().zip(params.windows(2)).enumerate() {
+            if let Some((at, pole_v, pole)) = pole_side(i, params, points, at_pole) {
+                let offset = (self.surface.evaluate(at.x, pole_v)? - pole).length();
+                let Some(term) = self.pole_span(at, pole_v, span, offset) else {
+                    self.unbounded(
+                        "the surface is not certifiably regular along an edge into a pole",
+                    );
+                    return Ok(());
+                };
+                self.trim = self.trim.max(term);
+                continue;
+            }
             let Some(image) = self.chord_image(ends[0], ends[1]) else {
                 self.unbounded("surface has no derivative bound over an edge chord");
-                return;
+                return Ok(());
             };
             let near = span.chord + image;
-            let Some(lens) = self.lens(ends[0], ends[1], span.arc, near) else {
+            let Some(term) = self
+                .lens(ends[0], ends[1], span.arc, near)
+                .map(|lens| near + lens)
+                .or_else(|| {
+                    self.meridian_lens(
+                        (ends[0], ends[1]),
+                        (points[i], points[i + 1]),
+                        span.arc,
+                        near,
+                    )
+                })
+            else {
                 self.unbounded(
                     "the surface is not certifiably invertible along an edge without a pcurve",
                 );
-                return;
+                return Ok(());
             };
-            self.trim = self.trim.max(near + lens);
+            self.trim = self.trim.max(term);
         }
+        Ok(())
     }
 
     /// The lens term of one span, or `None` when the surface cannot be
@@ -595,6 +725,115 @@ impl FaceBound<'_> {
     }
 }
 
+impl FaceBound<'_> {
+    /// The trim term of a span from the sample at `at` into a pole at `v =
+    /// pole_v`, the end's `u` taken from `at` (#463, ADR 0112):
+    /// `span.chord + offset + dvv dv^2 / 8`, `offset` how far the pole
+    /// vertex lies from `S(at.u, pole_v)`. `None` where the surface cannot
+    /// be shown regular along the span. The module notes give the argument.
+    pub(super) fn pole_span(
+        &self,
+        at: Point2,
+        pole_v: Scalar,
+        span: &SpanBound,
+        offset: Scalar,
+    ) -> Option<Scalar> {
+        let near = span.chord + offset;
+        match self.surface.pole_kind()? {
+            // Rulings are straight: `S_vv = 0`.
+            PoleKind::Apex => Some(near),
+            PoleKind::Rotational => {
+                Some(near + self.meridian_spread(at.x, (at.y, pole_v), true, span.arc)?)
+            }
+        }
+    }
+
+    /// The term of a span of a support with poles by its meridians, for a
+    /// span whose [`Self::lens`] cannot be had (near a pole, where `|S_u|`
+    /// vanishes): `near`, the span's chord bound plus the image of its
+    /// parameter chord, plus `dvv dv^2 / 8` on a rotational support and
+    /// nothing along a ruled surface's straight rulings. A meridian through
+    /// a lens point leaves the lens at two points on the edge's preimage or
+    /// on the parameter chord, each within `near` of the mesh chord, and the
+    /// module notes give the rest of the argument. The span's ends `pa` and
+    /// `pb` must show the edge off the poles over it (a span through a pole
+    /// is refused where a sample lands at it, never bounded across it).
+    /// `None` off a support with poles or where it cannot be shown regular.
+    fn meridian_lens(
+        &self,
+        (a, b): (Point2, Point2),
+        (pa, pb): (Vec3, Vec3),
+        arc: Scalar,
+        near: Scalar,
+    ) -> Option<Scalar> {
+        let clear = self.surface.pole_distance(pa)? + self.surface.pole_distance(pb)?;
+        if clear.is_nan() || clear <= arc {
+            return None;
+        }
+        match self.surface.pole_kind()? {
+            PoleKind::Apex => Some(near),
+            PoleKind::Rotational => {
+                Some(near + self.meridian_spread(0.5 * (a.x + b.x), (a.y, b.y), false, arc)?)
+            }
+        }
+    }
+
+    /// `dvv dv^2 / 8` for an edge span of 3D length at most `arc` from `v =
+    /// from` to `v = to` of a rotational support, `u` near `at_u`:
+    /// `dv = |to - from| + arc / s`, `s` a lower bound on `|S_v|` over a
+    /// box of every `u` that holds the span's preimage, `dvv` the bound on
+    /// `|S_vv|` there. The box stays in the support's [`Support::v_range`], and on
+    /// `from`'s side of `to` when `to` is a pole, which the span reaches at
+    /// its end only. `None` where `s` cannot be shown positive or the box
+    /// has no smooth bound.
+    fn meridian_spread(
+        &self,
+        at_u: Scalar,
+        (from, to): (Scalar, Scalar),
+        pole: bool,
+        arc: Scalar,
+    ) -> Option<Scalar> {
+        let oracle = self.oracle.as_ref()?;
+        let period = self.surface.periods().0?;
+        let (v_lo, v_hi) = (from.min(to), from.max(to));
+        let middle = 0.5 * (v_lo + v_hi);
+        // `|S_v|` does not depend on `u` on a rotational support.
+        let speed = self.surface.partials(at_u, middle).ok()?.1.length();
+        if !(speed > 0.0 && speed.is_finite()) {
+            return None;
+        }
+        let (mut v0, mut v1) = self.surface.v_range();
+        if pole {
+            if from <= to {
+                v1 = v1.min(to);
+            } else {
+                v0 = v0.max(to);
+            }
+        }
+        let u = (at_u - 0.5 * period, at_u + 0.5 * period);
+        let mut sigma = 0.5 * speed;
+        for _ in 0..LENS_ATTEMPTS {
+            if sigma.is_nan() || sigma <= 0.0 {
+                return None;
+            }
+            let reach = arc / sigma;
+            let (lo, hi) = ((v_lo - reach).max(v0), (v_hi + reach).min(v1));
+            let bounds = oracle.bounds(u, (lo, hi))?;
+            if !bounds.smooth {
+                return None;
+            }
+            let on_box = speed - bounds.dvv * (middle - lo).max(hi - middle);
+            if on_box >= sigma {
+                let dv = (v_hi - v_lo) + reach;
+                let spread = 0.125 * bounds.dvv * dv * dv;
+                return spread.is_finite().then_some(spread);
+            }
+            sigma = on_box;
+        }
+        None
+    }
+}
+
 /// Tries at growing the lens box until the preimage provably stays in it.
 const LENS_ATTEMPTS: usize = 4;
 
@@ -616,8 +855,9 @@ pub(super) fn parameter_domain(surface: &Surface) -> ((Scalar, Scalar), (Scalar,
 }
 
 /// The parameters and 3D points of one edge use with no p-curve, in the
-/// use's direction, both endpoints included, and the mesh indices of the
-/// points, shared with every face that uses the edge.
+/// use's direction, both endpoints included, the mesh indices of the
+/// points, shared with every face that uses the edge, and whether its first
+/// and its last sample are a pole of the surface (#463).
 pub(super) fn inverted_edge_use(
     state: &mut CurvedMeshState<'_>,
     ctx: &FaceContext<'_>,
@@ -625,7 +865,7 @@ pub(super) fn inverted_edge_use(
     inverter: &SurfaceInverter<'_>,
     bound: &mut FaceBound<'_>,
     previous_end: Option<Point2>,
-) -> GeomResult<(Vec<Point2>, Vec<u32>)> {
+) -> GeomResult<(Vec<Point2>, Vec<u32>, [bool; 2])> {
     let edge = ctx
         .brep
         .edges()
@@ -637,17 +877,36 @@ pub(super) fn inverted_edge_use(
         (edge.end, edge.start)
     };
     let trace = edge_trace(ctx, edge)?;
-    let (points, mut params, spans) = match state.edge_samples.get(&use_.edge) {
+    let (points, mut params, spans, at_pole) = match state.edge_samples.get(&use_.edge) {
         Some(cached) => {
             let (indices, spans) = cached.in_direction(use_.orientation);
             let points: Vec<Vec3> = indices
                 .iter()
                 .map(|&index| state.mesh.positions[index as usize])
                 .collect();
+            let last = points.len().checked_sub(1).ok_or_else(|| {
+                GeomError::Degenerate("curved edge needs both endpoint samples".to_owned())
+            })?;
+            // An end at a pole is not inverted: only its `v` is read (#463).
+            let poles = [inverter.pole(points[0])?, inverter.pole(points[last])?];
+            let at_pole = poles.map(|pole| pole.is_some());
+            if last == 1 && at_pole == [true, true] {
+                return Err(GeomError::Degenerate(
+                    "an edge without a p-curve runs from a pole to a pole in one span: no end \
+                     has a neighbouring sample to take its u from"
+                        .to_owned(),
+                ));
+            }
             let mut params = points
                 .iter()
-                .map(|&point| inverter.invert(point))
+                .enumerate()
+                .map(|(k, &point)| match (k, poles) {
+                    (0, [Some(v), _]) => Ok(Point2::new(0.0, v)),
+                    (k, [_, Some(v)]) if k == last => Ok(Point2::new(0.0, v)),
+                    _ => inverter.invert(point),
+                })
                 .collect::<GeomResult<Vec<_>>>()?;
+            pole_ends(&mut params, at_pole);
             unwrap(inverter, &mut params);
             if !turns_within_quarter(inverter, &params) {
                 return Err(singular_between_samples());
@@ -664,7 +923,7 @@ pub(super) fn inverted_edge_use(
                     .collect()),
                 Err(reason) => Err(reason),
             };
-            (points, params, spans)
+            (points, params, spans, at_pole)
         }
         None => {
             let (mut points, mut params, spans, _) =
@@ -677,7 +936,12 @@ pub(super) fn inverted_edge_use(
                     spans.reverse();
                 }
             }
-            (points, params, spans)
+            let ends = [points[0], points[points.len() - 1]];
+            let at_pole = [
+                inverter.pole(ends[0])?.is_some(),
+                inverter.pole(ends[1])?.is_some(),
+            ];
+            (points, params, spans, at_pole)
         }
     };
     let n = points.len().checked_sub(1).ok_or_else(|| {
@@ -687,7 +951,7 @@ pub(super) fn inverted_edge_use(
     align(inverter, &mut params, previous_end);
     inverter.check_spline_parameters(&params, &points)?;
     match &spans {
-        Ok(spans) => bound.inverted_edge(spans, &params),
+        Ok(spans) => bound.inverted_edge(spans, &params, &points, at_pole)?,
         Err(reason) => bound.unbounded(reason),
     }
     let shared = edge_samples(
@@ -699,7 +963,7 @@ pub(super) fn inverted_edge_use(
         &points,
         spans,
     )?;
-    Ok((params, shared))
+    Ok((params, shared, at_pole))
 }
 
 /// Why a curved edge sampled through a pcurve has no span bounds on its 3D
@@ -779,10 +1043,19 @@ pub(super) fn sample_edge(
         .iter()
         .map(|&s| trace.at(s))
         .collect::<GeomResult<Vec<_>>>()?;
+    // The edge's ends may lie at a pole, where only `v` is read (#463).
+    let last = corners.len() - 1;
+    let poles = [inverter.pole(corners[0])?, inverter.pole(corners[last])?];
     let corner_params = corners
         .iter()
-        .map(|&point| inverter.invert(point))
+        .enumerate()
+        .map(|(k, &point)| match (k, poles) {
+            (0, [Some(v), _]) => Ok(Point2::new(0.0, v)),
+            (k, [_, Some(v)]) if k == last => Ok(Point2::new(0.0, v)),
+            _ => inverter.invert(point),
+        })
         .collect::<GeomResult<Vec<_>>>()?;
+    let at_pole = poles.map(|pole| pole.is_some());
     // Each piece's points and their raw parameters, both ends included.
     let mut pieces: Vec<Piece> = (0..ends.len() - 1)
         .map(|k| Piece {
@@ -798,6 +1071,7 @@ pub(super) fn sample_edge(
         let counts: Vec<usize> = pieces.iter().map(Piece::spans).collect();
         let fractions = piece_fractions(breaks, &counts);
         let (points, mut params) = joined(&pieces);
+        pole_ends(&mut params, at_pole);
         unwrap(inverter, &mut params);
         let spans = spans_of(trace, &fractions, &points);
         // The new midpoints, at the odd fractions of the doubled sampling, so
@@ -817,21 +1091,45 @@ pub(super) fn sample_edge(
             }
             midpoint_failed[k] = measured > budget;
             let quarter = turns_within_quarter(inverter, &params[offset..=offset + n]);
+            // One span between two poles has no neighbour to take `u` from.
+            let lone = n == 1 && counts.len() == 1 && at_pole == [true, true];
             let mut fits = false;
-            if !midpoint_failed[k] && quarter {
+            if !midpoint_failed[k] && quarter && !lone {
                 basic[k].get_or_insert(n);
                 let certified = spans.as_ref().and_then(|spans| {
                     (offset..offset + n)
                         .map(|i| {
+                            if let Some((at, pole_v, pole)) =
+                                pole_side(i, &params, &points, at_pole)
+                            {
+                                let offset =
+                                    (bound.surface.evaluate(at.x, pole_v).ok()? - pole).length();
+                                // Not shown regular yet: split as the lens is.
+                                return Some(
+                                    bound
+                                        .pole_span(at, pole_v, &spans[i], offset)
+                                        .unwrap_or(Scalar::INFINITY),
+                                );
+                            }
                             let (a, b) = (params[i], params[i + 1]);
                             let near = spans[i].chord + bound.chord_image(a, b)?;
                             // A span too long to show the surface invertible
                             // along it is split like one that misses the
                             // budget.
-                            let lens = bound
-                                .lens(a, b, spans[i].arc, near)
-                                .unwrap_or(Scalar::INFINITY);
-                            Some(near + lens)
+                            Some(
+                                bound
+                                    .lens(a, b, spans[i].arc, near)
+                                    .map(|lens| near + lens)
+                                    .or_else(|| {
+                                        bound.meridian_lens(
+                                            (a, b),
+                                            (points[i], points[i + 1]),
+                                            spans[i].arc,
+                                            near,
+                                        )
+                                    })
+                                    .unwrap_or(Scalar::INFINITY),
+                            )
                         })
                         .try_fold(0.0, |worst: Scalar, term| term.map(|t| worst.max(t)))
                 });
@@ -847,7 +1145,27 @@ pub(super) fn sample_edge(
             return Ok((points, params, spans, counts));
         }
         let added: usize = unfinished.iter().map(|&k| counts[k]).sum();
-        if points.len() - 1 + added > MAX_CURVED_EDGE_SEGMENTS {
+        let mut start = 0;
+        let mut starts = Vec::with_capacity(counts.len());
+        for &n in &counts {
+            starts.push(start);
+            start += n;
+        }
+        // A span into a pole is halved until its middle would lie within
+        // the tolerance of the pole, where it names no `u` (#463): the edge
+        // is then as fine as it can be sampled.
+        let last_piece = counts.len() - 1;
+        let mut crowded = false;
+        for &k in &unfinished {
+            let ends = [
+                (k == 0 && at_pole[0]).then(|| mids[starts[k]]),
+                (k == last_piece && at_pole[1]).then(|| mids[starts[k] + counts[k] - 1]),
+            ];
+            for mid in ends.into_iter().flatten() {
+                crowded |= !matches!(inverter.pole(mid), Ok(None));
+            }
+        }
+        if crowded || points.len() - 1 + added > MAX_CURVED_EDGE_SEGMENTS {
             // Out of segments: each unfinished piece falls back to its
             // coarsest passing sampling, or the edge is refused.
             for &k in &unfinished {
@@ -864,21 +1182,48 @@ pub(super) fn sample_edge(
             let counts: Vec<usize> = pieces.iter().map(Piece::spans).collect();
             let fractions = piece_fractions(breaks, &counts);
             let (points, mut params) = joined(&pieces);
+            pole_ends(&mut params, at_pole);
             unwrap(inverter, &mut params);
             let spans = spans_of(trace, &fractions, &points);
             return Ok((points, params, spans, counts));
         }
         // Halve every span of the unfinished pieces, inverting only the new
         // midpoints.
-        let mut start = 0;
-        let mut starts = Vec::with_capacity(counts.len());
-        for &n in &counts {
-            starts.push(start);
-            start += n;
-        }
         for &k in &unfinished {
             pieces[k].halve(&mids[starts[k]..starts[k] + counts[k]], inverter)?;
         }
+    }
+}
+
+/// Give an edge's end at a pole the `u` of its neighbouring sample (#463):
+/// every `u` names the pole, and the neighbour's runs along the meridian
+/// (or ruling) the edge's last span is bounded along. Run after the
+/// samples are joined and before they are unwrapped.
+fn pole_ends(params: &mut [Point2], at_pole: [bool; 2]) {
+    let n = params.len() - 1;
+    if at_pole[0] {
+        params[0].x = params[1].x;
+    }
+    if at_pole[1] {
+        params[n].x = params[n - 1].x;
+    }
+}
+
+/// The neighbouring sample's parameters, the pole's `v` and the pole's
+/// point, when span `i` of an edge ends at a pole.
+fn pole_side(
+    i: usize,
+    params: &[Point2],
+    points: &[Vec3],
+    at_pole: [bool; 2],
+) -> Option<(Point2, Scalar, Vec3)> {
+    let n = params.len() - 1;
+    if i == 0 && at_pole[0] {
+        Some((params[1], params[0].y, points[0]))
+    } else if i + 1 == n && at_pole[1] {
+        Some((params[n - 1], params[n].y, points[n]))
+    } else {
+        None
     }
 }
 
@@ -1075,6 +1420,62 @@ mod tests {
         assert!(turns_within_quarter(&inverter, &turn(0.99 * quarter)));
         assert!(!turns_within_quarter(&inverter, &turn(1.01 * quarter)));
         assert!(!turns_within_quarter(&inverter, &turn(-1.01 * quarter)));
+    }
+
+    /// `pole` is `None` exactly where `invert` raises no "cone apex" or
+    /// "sphere pole" refusal, and the pole's `v` within the tolerance of it.
+    #[test]
+    fn a_pole_is_named_exactly_where_a_sample_is_refused_there() {
+        let frame = axiolid_core::Frame3 {
+            origin: Vec3::new(0.2, -0.1, 0.3),
+            x: Vec3::X,
+            y: Vec3::Y,
+            z: Vec3::Z,
+        };
+        let tau = Tolerance::MILLIMETRE.linear();
+        let check =
+            |name: &str, inverter: &SurfaceInverter<'_>, point: Vec3, want: Option<Scalar>| {
+                let pole = inverter.pole(point);
+                let at_pole = matches!(inverter.invert(point), Err(GeomError::Degenerate(text))
+                if text.contains("cone apex") || text.contains("sphere pole"));
+                assert_eq!(!matches!(pole, Ok(None)), at_pole, "{name}: {pole:?}");
+                if let Some(want) = want {
+                    assert_eq!(pole.unwrap(), Some(want), "{name}");
+                }
+            };
+        let off = |k: Scalar| Vec3::new(0.6, 0.8, 0.0) * (k * tau);
+        let sphere = Surface::Sphere(axiolid_surface::Sphere { frame, radius: 0.5 });
+        let inverter =
+            SurfaceInverter::new(Support::Surface(&sphere), Tolerance::MILLIMETRE).unwrap();
+        for (z, v) in [
+            (0.5, core::f64::consts::FRAC_PI_2),
+            (-0.5, -core::f64::consts::FRAC_PI_2),
+        ] {
+            let pole = frame.origin + Vec3::Z * z;
+            check("sphere pole", &inverter, pole, Some(v));
+            check("near the pole", &inverter, pole + off(0.6), Some(v));
+            check("beyond it", &inverter, pole + off(1.5), None);
+        }
+        check("the centre", &inverter, frame.origin, None);
+        assert!(inverter.pole(frame.origin).is_err());
+
+        let (radius, semi_angle) = (0.4, -0.4_f64);
+        let cone = Surface::Cone(axiolid_surface::Cone {
+            frame,
+            radius,
+            semi_angle,
+        });
+        let inverter =
+            SurfaceInverter::new(Support::Surface(&cone), Tolerance::MILLIMETRE).unwrap();
+        let apex_v = -radius / semi_angle.tan();
+        let apex = frame.origin + Vec3::Z * apex_v;
+        check("cone apex", &inverter, apex, Some(apex_v));
+        check("near the apex", &inverter, apex + off(0.6), None);
+        check("beyond it", &inverter, apex + off(1.5), None);
+        check("on the axis, off", &inverter, frame.origin, None);
+        assert!(inverter.pole(frame.origin).is_err());
+        let v = inverter.pole(apex).unwrap().unwrap();
+        assert!(radius + v * semi_angle.tan() >= 0.0);
     }
 
     /// The certified search proves the B-spline parameters unique to a

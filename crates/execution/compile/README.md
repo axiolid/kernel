@@ -29,6 +29,16 @@ cargo add axiolid-mesh-compile
 - The caller always supplies the tolerance through `ExecutionOptions`;
   there is no built-in default. Without an explicit chord budget, curves are
   flattened to the linear tolerance.
+- A curved B-rep face may reach a pole of its surface (a sphere's pole, a
+  cone's apex, a revolution's profile on its axis, a ruled apex) at a
+  vertex, with no edge along the pole line (ADR 0059, ADR 0112). Between
+  two poles the face's pcurves name the side of the meridians it covers,
+  and producers must place them so: of a sphere's two halves between the
+  meridians at `u = 0` and `u = pi`, the second runs from `pi` to `2 pi`,
+  not back to `0`. A face between two poles without pcurves is meshed only
+  when it is a full turn (one seam), and refused by name otherwise. An
+  edge must end at a pole, not run through it: split it at the pole's
+  vertex.
 - Read volume through `CompileOutcome::solid_mesh`: a surface model can
   compile to a closed mesh without bounding a solid.
   A mesh is reported `MeshClosure::Solid` only when it is a closed,

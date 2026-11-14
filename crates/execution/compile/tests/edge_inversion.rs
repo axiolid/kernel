@@ -593,11 +593,11 @@ fn an_edge_off_its_bspline_face_is_refused_by_name() {
 }
 
 /// A whole cone up to its apex, bounded by its base circle and one ruling
-/// used once each way. At the apex every `u` names the point, so the
-/// ruling's parameters there are not determined: refused by name, never
-/// guessed.
+/// used once each way (#463, ADR 0112). The ruling's end at the apex is not
+/// inverted: its `v` is the apex's and its `u` the neighbouring sample's,
+/// and the ring closes with a row welded to the apex, one fan per rim span.
 #[test]
-fn an_edge_through_a_cone_apex_is_refused() {
+fn an_edge_into_a_cone_apex_closes_at_the_apex() {
     let (radius, semi_angle) = (0.4, -0.4_f64);
     let surface = Surface::Cone(Cone {
         frame: frame_at(0.0),
@@ -613,9 +613,45 @@ fn an_edge_through_a_cone_apex_is_refused() {
     face.use_edge(rim, Orientation::Forward);
     face.use_edge(ruling, Orientation::Forward);
     face.use_edge(ruling, Orientation::Reversed);
+    let (mesh, report) = face
+        .compile(&surface, &options(1e-3))
+        .expect("an edge into the apex closes there");
+    let samples = surface_samples(&surface, (0.0, TAU), (0.0, apex_height), 120);
+    assert_bounded("cone to its apex", &mesh, &samples, &report, 20.0);
+    // The rim's samples and the apex, one fan each.
+    assert_eq!(mesh.indices.len() / 3, mesh.positions.len() - 1);
+}
+
+/// An edge whose sample lies at a cone's apex without being an end of it
+/// (a polyline cornered there) runs through the apex, where every `u` names
+/// the point: refused by name, never guessed.
+#[test]
+fn an_edge_through_a_cone_apex_is_refused() {
+    let (radius, semi_angle) = (0.4, -0.4_f64);
+    let surface = Surface::Cone(Cone {
+        frame: frame_at(0.0),
+        radius,
+        semi_angle,
+    });
+    let apex_height = -radius / semi_angle.tan();
+    let (east, north) = (Point3::new(radius, 0.0, 0.0), Point3::new(0.0, radius, 0.0));
+    let mut face = OneFace::new();
+    let [e, n] = [east, north].map(|p| face.vertex(p));
+    let quarter = Curve3::Circle(Circle3 {
+        frame: frame_at(0.0),
+        radius,
+    });
+    let over = Curve3::Polyline(axiolid_curve::Polyline3 {
+        points: vec![north, Point3::new(0.0, 0.0, apex_height), east],
+        closed: false,
+    });
+    let rim = face.edge(e, n, Some(quarter));
+    let back = face.edge(n, e, Some(over));
+    face.use_edge(rim, Orientation::Forward);
+    face.use_edge(back, Orientation::Forward);
     let error = face
         .compile(&surface, &options(1e-3))
-        .expect_err("an edge into the apex has no parameters there");
+        .expect_err("an edge through the apex has no parameters there");
     assert!(
         matches!(&error, GeomError::Degenerate(reason) if reason.contains("cone apex")),
         "got {error:?}"
