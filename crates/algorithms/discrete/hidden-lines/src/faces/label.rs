@@ -747,6 +747,17 @@ mod tests {
         assert_eq!(stacks, [vec![(3, GROUP, 1), (2, GROUP, 2)]]);
         let (_, stacks, _) = stacked(&scene, (0.25, 0.25), (0.5, 0.25));
         assert_eq!(stacks, [vec![(3, GROUP, 1), (1, GROUP, 2), (0, GROUP, 3)]]);
+        // The nearer occluder met first: the farther one is not listed.
+        let (_, stacks, _) = stacked(
+            &[
+                (1.0, 1.0, 3.0, 3.0, 1.0, false),
+                FLOOR,
+                (0.0, 0.0, 4.0, 4.0, 2.0, true),
+            ],
+            (2.0, 2.0),
+            (2.5, 2.0),
+        );
+        assert_eq!(stacks, [vec![(0, GROUP, 1)]]);
     }
 
     #[test]

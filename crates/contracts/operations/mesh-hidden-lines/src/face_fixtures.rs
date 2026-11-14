@@ -1162,19 +1162,21 @@ fn see_through_tie() -> FaceCase {
 /// A see-through sheet over the whole floor with an opaque sheet
 /// `[1,3]^2` between them: the stack stops at the first opaque surface, so
 /// the middle lists the opaque sheet only and the rest the floor only. The
-/// floor and the opaque sheet are frontmost nowhere.
+/// floor and the opaque sheet are frontmost nowhere. The opaque sheet comes
+/// first in the request, so a provider meets the nearer occluder before the
+/// farther one.
 fn stack_stops_at_an_occluder() -> FaceCase {
     see_through_case(
         "a stack stops at an opaque sheet",
         vec![
-            floor(),
-            sheet(2, sheet_quad(1.0, 1.0, 3.0, 3.0, 1.0)),
+            sheet(1, sheet_quad(1.0, 1.0, 3.0, 3.0, 1.0)),
+            sheet(2, sheet_quad(0.0, 0.0, 4.0, 4.0, 0.0)),
             sheet(3, sheet_quad(0.0, 0.0, 4.0, 4.0, 2.0)).see_through(),
         ],
         plan(),
         vec![
-            seen(square_with_hole(3, &[0, 1]), &[(1, G0, 1)]),
-            seen(middle(3, G0, &[0, 1]), &[(2, G0, 1)]),
+            seen(square_with_hole(3, &[0, 1]), &[(2, G0, 1)]),
+            seen(middle(3, G0, &[0, 1]), &[(1, G0, 1)]),
         ],
     )
 }

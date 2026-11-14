@@ -1523,3 +1523,32 @@ fn see_through_counts_are_validated() {
         GeomError::BackendContractViolation { .. }
     ));
 }
+
+#[test]
+fn routing_by_occlusion_comes_before_the_topology_audit() {
+    // An inconsistently wound sheet with a see-through triangle: with no
+    // provider that claims see-through triangles the answer is Unsupported,
+    // not the mesh refusal.
+    let calls = counter();
+    let bad = TriMesh::new(
+        vec![Vec3::ZERO, Vec3::X, Vec3::Y, Vec3::new(1.0, 1.0, 0.0)],
+        vec![0, 1, 2, 0, 1, 3],
+    );
+    let flags = [Occlusion::SeeThrough, Occlusion::Opaque];
+    let meshes = [mesh(1, MeshRole::Sheet, &bad).with_occlusion(&flags)];
+    let request = HiddenLineRequest::new(&meshes, view(), selection(), limits());
+    let error = registry(&calls, well_behaved)
+        .hidden_lines(&request, &options())
+        .expect_err("unsupported");
+    assert_eq!(calls_of(&calls), 0);
+    assert!(
+        matches!(
+            error.error,
+            GeomError::Unsupported {
+                operation: Operation::MeshHiddenLines,
+                ..
+            }
+        ),
+        "{error}"
+    );
+}

@@ -674,6 +674,46 @@ mod tests {
         }
     }
 
+    /// A provider that keeps every default.
+    #[derive(Debug)]
+    struct Plain;
+
+    impl Backend for Plain {
+        fn descriptor(&self) -> BackendDescriptor {
+            BackendDescriptor::new(BackendId::new("plain"), ExecutionTarget::PortableCpu)
+        }
+    }
+
+    impl MeshHiddenLines for Plain {
+        fn hidden_lines(
+            &self,
+            _request: &HiddenLineRequest<'_>,
+            _options: &ExecutionOptions,
+        ) -> Result<HiddenLineOutcome, HiddenLineError> {
+            Err(GeomError::InvalidInput("not called".into()).into())
+        }
+    }
+
+    impl MeshVisibleFaces for Plain {
+        fn visible_faces(
+            &self,
+            _request: &VisibleFaceRequest<'_>,
+            _options: &ExecutionOptions,
+        ) -> Result<VisibleFaceOutcome, HiddenLineError> {
+            Err(GeomError::InvalidInput("not called".into()).into())
+        }
+    }
+
+    #[test]
+    fn the_default_claims_opaque_triangles_only() {
+        let lines: &dyn MeshHiddenLines = &Plain;
+        let faces: &dyn MeshVisibleFaces = &Plain;
+        assert!(lines.supports_occlusion(Occlusion::Opaque));
+        assert!(!lines.supports_occlusion(Occlusion::SeeThrough));
+        assert!(faces.supports_occlusion(Occlusion::Opaque));
+        assert!(!faces.supports_occlusion(Occlusion::SeeThrough));
+    }
+
     fn both(probe: &Probe) -> [SeeThroughConformanceReport; 2] {
         [
             SeeThroughConformanceSuite::run(probe),
