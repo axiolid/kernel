@@ -162,8 +162,8 @@ MUTANTS = [
      "                return Err(GeomError::InvalidInput(\"mutant\".into()))\n"
      "            }"),
     ("M3 a region is scheduled as a dependency", COMPILER,
-     "                    vec![same(clip.subject)]",
-     "                    vec![same(clip.subject), same(clip.tool)]"),
+     "                    vec![EvalKey::new(clip.subject, budget.shrunk(factor))]",
+     "                    vec![EvalKey::new(clip.subject, budget.shrunk(factor)), same(clip.tool)]"),
     ("M4 a region of several leaves is left out of the subject's frame", COMPILER,
      "        // Each leaf of a region (#326) is placed in the subject's frame; one\n",
      "        if clip.leaves.len() > 1 {\n"

@@ -51,8 +51,8 @@ def edits(*changes):
 SIMILAR = (FRAME, "        && is_similarity(t)\n", "        && true\n")
 FALLBACK = (
     COMPILER,
-    "            if let Ok(Some(built)) = self.boolean_in_shared_frame(\n                graph,\n                (left, right),\n                operator,\n                options,\n                budget,\n                (cache, regions),\n            ) {",
-    "            if let Some(built) = self.boolean_in_shared_frame(\n                graph,\n                (left, right),\n                operator,\n                options,\n                budget,\n                (cache, regions),\n            )? {",
+    "            if let Ok(Some(built)) = self.boolean_in_shared_frame(\n                graph,\n                (left, right),\n                operator,\n                options,\n                (budget, (subject_budget, tool_budget)),\n                (cache, regions),\n            ) {",
+    "            if let Some(built) = self.boolean_in_shared_frame(\n                graph,\n                (left, right),\n                operator,\n                options,\n                (budget, (subject_budget, tool_budget)),\n                (cache, regions),\n            )? {",
 )
 GUARD = (
     COMPILER,

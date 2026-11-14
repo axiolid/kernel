@@ -17,6 +17,7 @@ use axiolid_mesh_compile_contract::{
 use axiolid_model::{GeometryGraph, GeometryNode, NodeId, SolidOperation};
 
 use crate::half_space_boundary::PrismAxis;
+use crate::section_angle::Factors;
 
 use axiolid_construct::extrude::extrude_profile;
 use axiolid_construct::profile::profile_rings;
@@ -120,6 +121,9 @@ struct EvalKey {
     /// boolean's snap reaches the rounding of the coordinates its result is
     /// placed at, so a source placed near and far compiles once per scale.
     placed_bits: u64,
+    /// How far the booleans above shrunk the chord (#380): part of the key
+    /// because it decides how far the node's own operands are shrunk.
+    shrink_bits: u64,
 }
 
 /// The evaluation budgets that vary per node: the tolerance, and the chord
@@ -127,12 +131,15 @@ struct EvalKey {
 /// through an instance transform. And the placed coordinate scale a
 /// boolean's snap reaches (#312, [`crate::snap::placed_scale`]): `0` where
 /// nothing places the node, else the world coordinate magnitude its
-/// placement adds, in the node's own units.
+/// placement adds, in the node's own units. And how far the chord has been
+/// shrunk below what the node's frame calls for by the booleans above it
+/// (#380): `1` for none, the least factor of any of them else.
 #[derive(Debug, Clone, Copy, PartialEq)]
 struct Budget {
     tolerance: Tolerance,
     chord: Scalar,
     placed: Scalar,
+    shrink: Scalar,
 }
 
 impl Budget {
@@ -142,6 +149,27 @@ impl Budget {
             tolerance,
             chord: options.chord_error().unwrap_or(tolerance.linear()),
             placed: 0.0,
+            shrink: 1.0,
+        }
+    }
+
+    /// The budget a curved operand of a boolean is meshed at (#380,
+    /// [`crate::section_angle`]): the chord is `factor` times what the frame
+    /// calls for, and no less. An operand that is itself a boolean already
+    /// carries the shrink of the booleans above it, and its own operands
+    /// are shrunk only by what it adds beyond that, so a leaf's chord is
+    /// the least factor of the booleans it sits in, not their product (a
+    /// wall less a row of openings would otherwise shrink by the factor
+    /// to the power of the openings). The tolerance and the placed scale
+    /// are the boolean's own.
+    fn shrunk(self, factor: Scalar) -> Self {
+        if factor >= self.shrink {
+            return self;
+        }
+        Self {
+            chord: self.chord * (factor / self.shrink),
+            shrink: factor,
+            ..self
         }
     }
 }
@@ -155,6 +183,7 @@ impl EvalKey {
             angular_bits: bits(budget.tolerance.angular()),
             chord_bits: bits(budget.chord),
             placed_bits: bits(budget.placed),
+            shrink_bits: bits(budget.shrink),
         }
     }
 
@@ -163,6 +192,7 @@ impl EvalKey {
             tolerance: self.tolerance(),
             chord: Scalar::from_bits(self.chord_bits),
             placed: Scalar::from_bits(self.placed_bits),
+            shrink: Scalar::from_bits(self.shrink_bits),
         }
     }
 
@@ -598,12 +628,15 @@ impl<B: MeshBoolean> ReferenceMeshCompiler<B> {
     /// Only mesh-producing dependencies are listed. A profile referenced by an
     /// extrusion is consumed as 2D data, not as a mesh, so it is deliberately
     /// absent: compiling it standalone would be meaningless.
+    ///
+    /// The operands of a boolean are meshed at their chord budgets: the
+    /// boolean's, shrunk by `factors` (#380, [`Budget::shrunk`]).
     fn mesh_dependencies(
         &self,
         graph: &GeometryGraph,
         regions: &Regions<'_>,
         node: &GeometryNode,
-        key: EvalKey,
+        (key, factors): (EvalKey, Factors),
     ) -> GeomResult<Vec<EvalKey>> {
         let budget = key.budget();
         let same = |id| EvalKey::new(id, budget);
@@ -626,13 +659,21 @@ impl<B: MeshBoolean> ReferenceMeshCompiler<B> {
             }) => {
                 if let Some(clip) = clip_of(graph, regions, (*left, *right), *operator)? {
                     // The region is built from its subject in `build_boolean`.
-                    vec![same(clip.subject)]
+                    let factor = if clip.subject == *left {
+                        factors.left
+                    } else {
+                        factors.right
+                    };
+                    vec![EvalKey::new(clip.subject, budget.shrunk(factor))]
                 } else if regions.has(*left) || regions.has(*right) {
                     // A region has no mesh of its own: `build_boolean` refuses
                     // the boolean by name (#326).
                     Vec::new()
                 } else {
-                    vec![same(*left), same(*right)]
+                    vec![
+                        EvalKey::new(*left, budget.shrunk(factors.left)),
+                        EvalKey::new(*right, budget.shrunk(factors.right)),
+                    ]
                 }
             }
             _ => Vec::new(),
@@ -659,6 +700,11 @@ impl<B: MeshBoolean> ReferenceMeshCompiler<B> {
         // placement (#405), read once: the retry and the build see one.
         let mut accuracies: std::collections::HashMap<EvalKey, PlacementAccuracy> =
             std::collections::HashMap::new();
+        // The chord factors of each boolean's operands (#380), read once
+        // from the graph: the dependencies and the build see one.
+        let mut factors: std::collections::HashMap<EvalKey, Factors> =
+            std::collections::HashMap::new();
+        let mut leaves = crate::section_angle::LeafCache::new();
         while let Some(step) = stack.pop() {
             match step {
                 Step::Enter(key) => {
@@ -666,11 +712,24 @@ impl<B: MeshBoolean> ReferenceMeshCompiler<B> {
                         continue;
                     }
                     let node = self.node(graph, key.id)?;
+                    let factor = match node {
+                        GeometryNode::SolidOperation(SolidOperation::Boolean { .. }) => {
+                            *factors.entry(key).or_insert_with(|| {
+                                crate::section_angle::operand_factors(
+                                    graph,
+                                    key.id,
+                                    &options.clone().with_tolerance(key.tolerance()),
+                                    &mut leaves,
+                                )
+                            })
+                        }
+                        _ => Factors::ONE,
+                    };
                     let deps = self.mesh_dependencies(
                         graph,
                         &Regions::new(graph, &cache.regions),
                         node,
-                        key,
+                        (key, factor),
                     )?;
                     // Exit runs after every dependency, so push it first.
                     stack.push(Step::Exit(key));
@@ -725,6 +784,7 @@ impl<B: MeshBoolean> ReferenceMeshCompiler<B> {
                     let built = self.build(
                         graph,
                         (key, room, accuracy),
+                        factors.get(&key).copied().unwrap_or(Factors::ONE),
                         &local_options,
                         (cache, &Regions::new(graph, &cache.regions)),
                         (measure, root),
@@ -788,11 +848,13 @@ impl<B: MeshBoolean> ReferenceMeshCompiler<B> {
     /// `room` is the room an instance's source was re-meshed with for its
     /// placement's rounding (#295), `0` for the initial one, and `accuracy`
     /// how far a node placed at a station lies from its exact placement
-    /// (#405).
+    /// (#405). `factors` are those of a boolean's operands, as
+    /// `mesh_dependencies` meshed them (#380).
     fn build(
         &self,
         graph: &GeometryGraph,
         (key, room, accuracy): (EvalKey, Scalar, Option<PlacementAccuracy>),
+        factors: Factors,
         options: &ExecutionOptions,
         (cache, regions): (&Cache, &Regions<'_>),
         (measure, root): (Measure<'_>, NodeId),
@@ -884,7 +946,7 @@ impl<B: MeshBoolean> ReferenceMeshCompiler<B> {
                 let (built, decided) = self.build_boolean(
                     graph,
                     (id, (*left, *right)),
-                    *operator,
+                    (*operator, factors),
                     options,
                     budget,
                     (cache, regions, root),
@@ -1058,6 +1120,15 @@ impl<B: MeshBoolean> ReferenceMeshCompiler<B> {
     /// tool or nothing, as built, with no deviation of a cut. A skin the
     /// subject has pending passes through to the root of its chain.
     ///
+    /// The operands are meshed at the boolean's chord budget shrunk by their
+    /// `factors` (#380, [`crate::section_angle`], [`Budget::shrunk`]): a
+    /// curved operand meets a plane of the other obliquely, which moves the
+    /// cut of the flattened faces by their sag over the sine of the angle,
+    /// so its chord shrinks by that sine. The cut itself, the snap and the
+    /// tolerance keep the boolean's own `budget`. The factors come from the
+    /// graph on every compile, so the mesh never depends on a report being
+    /// asked for.
+    ///
     /// A boolean the world-frame mesh cut cannot settle is decided by the
     /// exact compiler (#391, #423, [`crate::referee`]): when faces of its operands
     /// nearly share a plane within the linear tolerance, or when the cut is
@@ -1069,7 +1140,7 @@ impl<B: MeshBoolean> ReferenceMeshCompiler<B> {
         &self,
         graph: &GeometryGraph,
         (id, (left, right)): (NodeId, (NodeId, NodeId)),
-        operator: axiolid_core::BooleanOperator,
+        (operator, factors): (axiolid_core::BooleanOperator, Factors),
         options: &ExecutionOptions,
         budget: Budget,
         (cache, regions, root): (&Cache, &Regions<'_>, NodeId),
@@ -1081,16 +1152,25 @@ impl<B: MeshBoolean> ReferenceMeshCompiler<B> {
         if clip.is_none() && (regions.has(left) || regions.has(right)) {
             return Err(unsupported_input(UNCLIPPED_HALF_SPACE));
         }
+        let (subject_factor, tool_factor) = match &clip {
+            Some(clip) if clip.subject != left => (factors.right, factors.left),
+            _ => (factors.left, factors.right),
+        };
         let (left, right) = clip
             .as_ref()
             .map_or((left, right), |clip| (clip.subject, clip.tool));
-        let subject = self.cached(cache, left, budget)?;
+        // The operands, as `mesh_dependencies` meshed them (#380): the
+        // boolean's chord shrunk by their factors. The cut itself keeps the
+        // boolean's own budget.
+        let (subject_budget, tool_budget) =
+            (budget.shrunk(subject_factor), budget.shrunk(tool_factor));
+        let subject = self.cached(cache, left, subject_budget)?;
         refuse_surface_operand(subject, "subject")?;
         // Any other tool is a node of its own, built before this one.
         let built_tool = match &clip {
             Some(_) => None,
             None => {
-                let built = self.cached(cache, right, budget)?;
+                let built = self.cached(cache, right, tool_budget)?;
                 refuse_surface_operand(built, "tool")?;
                 Some(built)
             }
@@ -1108,7 +1188,7 @@ impl<B: MeshBoolean> ReferenceMeshCompiler<B> {
                 (left, right),
                 operator,
                 options,
-                budget,
+                (budget, (subject_budget, tool_budget)),
                 (cache, regions),
             ) {
                 return Ok((built, Decided::Mesh));
@@ -1121,7 +1201,7 @@ impl<B: MeshBoolean> ReferenceMeshCompiler<B> {
                 (left, right),
                 operator,
                 options,
-                budget,
+                (budget, subject_budget),
                 (cache, regions),
             ) {
                 return Ok((built, Decided::Mesh));
@@ -1321,16 +1401,17 @@ impl<B: MeshBoolean> ReferenceMeshCompiler<B> {
         (left, right): (NodeId, NodeId),
         operator: axiolid_core::BooleanOperator,
         options: &ExecutionOptions,
-        budget: Budget,
+        (budget, (subject_budget, tool_budget)): (Budget, (Budget, Budget)),
         (cache, regions): (&Cache, &Regions<'_>),
     ) -> GeomResult<Option<Built>> {
         if clip_of(graph, regions, (left, right), operator)?.is_some() {
             return Ok(None);
         }
-        let Some((subject_frame, subject)) = self.frame_of(graph, left, budget, cache)? else {
+        let Some((subject_frame, subject)) = self.frame_of(graph, left, subject_budget, cache)?
+        else {
             return Ok(None);
         };
-        let Some((tool_frame, tool)) = self.frame_of(graph, right, budget, cache)? else {
+        let Some((tool_frame, tool)) = self.frame_of(graph, right, tool_budget, cache)? else {
             return Ok(None);
         };
         if !crate::frame::shared_linear(subject_frame, tool_frame) {
@@ -1360,7 +1441,7 @@ impl<B: MeshBoolean> ReferenceMeshCompiler<B> {
             &shifted
         };
         let local_budget = instance_local_budget(subject_frame, budget, 0.0)?;
-        let tool_budget = instance_local_budget(tool_frame, budget, 0.0)?;
+        let tool_local = instance_local_budget(tool_frame, budget, 0.0)?;
         let local_options = local_options(options, local_budget)?;
         let local = self
             .boolean_of(
@@ -1368,7 +1449,7 @@ impl<B: MeshBoolean> ReferenceMeshCompiler<B> {
                 (&tool.mesh, Some(&tool.fates), Some(&tool.deviation)),
                 operator,
                 &local_options,
-                local_budget.placed.max(tool_budget.placed),
+                local_budget.placed.max(tool_local.placed),
             )
             .map_err(CutRefusal::into_error)?;
         // A skin within rounding is the world cut's to decide (#400).
@@ -1418,13 +1499,13 @@ impl<B: MeshBoolean> ReferenceMeshCompiler<B> {
         (left, right): (NodeId, NodeId),
         operator: axiolid_core::BooleanOperator,
         options: &ExecutionOptions,
-        budget: Budget,
+        (budget, subject_budget): (Budget, Budget),
         (cache, regions): (&Cache, &Regions<'_>),
     ) -> GeomResult<Option<Built>> {
         let Some(clip) = clip_of(graph, regions, (left, right), operator)? else {
             return Ok(None);
         };
-        let Some((frame, subject)) = self.frame_of(graph, left, budget, cache)? else {
+        let Some((frame, subject)) = self.frame_of(graph, left, subject_budget, cache)? else {
             return Ok(None);
         };
         // Each leaf of a region (#326) is placed in the subject's frame; one
@@ -2126,6 +2207,8 @@ fn instance_local_budget(
         placed: crate::snap::placed_scale(transform, budget.placed).ok_or_else(|| {
             GeomError::InvalidInput("instance translation has no finite magnitude".into())
         })?,
+        // A ratio: the source's chord is shrunk as far as the instance's.
+        shrink: budget.shrink,
     })
 }
 
@@ -2814,4 +2897,36 @@ fn chain_linear(graph: &GeometryGraph, id: NodeId, outer: Transform3) -> Option<
         source = next.source;
     }
     Some(composed)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn budget() -> Budget {
+        Budget::of(&ExecutionOptions::new(Tolerance::new(1e-3, 1e-9).unwrap()))
+    }
+
+    #[test]
+    fn a_factor_of_one_leaves_the_budget_bit_for_bit() {
+        let budget = budget();
+        assert_eq!(budget.shrunk(1.0), budget);
+    }
+
+    #[test]
+    fn nested_factors_shrink_to_the_least_not_their_product() {
+        // A leaf under booleans that each ask for a half and a quarter is
+        // meshed at a quarter, whichever order the booleans nest in.
+        let base = budget();
+        let half = base.shrunk(0.5);
+        assert_eq!((half.chord, half.shrink), (0.5 * base.chord, 0.5));
+        // A boolean asking for less than what it already carries adds
+        // nothing, and one asking for more shrinks by the difference.
+        assert_eq!(half.shrunk(0.75), half);
+        assert_eq!(half.shrunk(0.5), half);
+        let quarter = half.shrunk(0.25);
+        assert_eq!((quarter.chord, quarter.shrink), (0.25 * base.chord, 0.25));
+        assert_eq!(base.shrunk(0.25).shrunk(0.5), base.shrunk(0.25));
+        assert_eq!(base.shrunk(0.25), quarter);
+    }
 }

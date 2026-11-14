@@ -21,7 +21,7 @@
 //! name.
 
 use std::collections::HashMap;
-use std::f64::consts::{FRAC_PI_2, PI};
+use std::f64::consts::{FRAC_PI_2, FRAC_PI_3, PI};
 use std::time::Instant;
 
 use axiolid_brep::ExactBRep;
@@ -44,6 +44,7 @@ use axiolid_mesh_compile::{
     DeviationBound, DeviationContribution, DeviationPath, DeviationReport, ReferenceExactCompiler,
     ReferenceMeshCompiler,
 };
+use axiolid_mesh_compile_contract::MeshCompiler;
 use axiolid_model::{
     GeometryGraph, GeometryGraphBuilder, GeometryNode, Instance, NodeId, SolidOperation,
 };
@@ -645,21 +646,20 @@ fn a_filleted_i_beam_with_a_hole_touching_its_flange_is_certified_against_its_ex
     assert!(bound <= 2.0 * budget, "{bound}");
 }
 
+fn slab_with_a_round_shaft(g: &mut Graph) -> NodeId {
+    let slab = g.extrusion(rect(4.0, 3.0), 0.25);
+    let slab = g.place(slab, building());
+    let shaft = g.extrusion(circle(0.3), 0.75);
+    let local = Transform3::from_translation(Vec3::new(-1.0, 0.4, -0.25));
+    let shaft = g.place(shaft, building() * local);
+    g.boolean(slab, shaft, BooleanOperator::Difference)
+}
+
 #[test]
 fn a_slab_with_a_round_shaft_is_certified_against_its_exact_result() {
     let budget = 1e-3;
     let options = options(budget);
-    let case = compile(
-        |g| {
-            let slab = g.extrusion(rect(4.0, 3.0), 0.25);
-            let slab = g.place(slab, building());
-            let shaft = g.extrusion(circle(0.3), 0.75);
-            let local = Transform3::from_translation(Vec3::new(-1.0, 0.4, -0.25));
-            let shaft = g.place(shaft, building() * local);
-            g.boolean(slab, shaft, BooleanOperator::Difference)
-        },
-        &options,
-    );
+    let case = compile(slab_with_a_round_shaft, &options);
     assert_measured("slab, round shaft", case, &options, 2.0);
 }
 
@@ -914,9 +914,9 @@ fn box_and_bent_tube(g: &mut Graph, operator: BooleanOperator, up: bool) -> Node
 }
 
 /// The certified bound, measured against exact samples; `limit` times the
-/// budget at most. TODO(#380): the intersection's cut of faceted operands
-/// meeting a face obliquely lands beyond the budget (1.02e-3 at 1e-3), so
-/// it is allowed 1.1x until the mesh boolean's cut is tightened.
+/// budget at most. The tube meets the box's face obliquely, at 27 degrees
+/// at the least: it is meshed finer by that angle's sine (#380), which keeps
+/// the cut of the faceted operands within the budget.
 fn assert_bent_tube(operator: BooleanOperator, up: bool, limit: Scalar, name: &str) {
     let options = options(1e-3);
     let case = compile(|g| box_and_bent_tube(g, operator, up), &options);
@@ -958,9 +958,152 @@ fn a_box_intersected_with_a_quarter_turn_revolution_is_certified() {
     assert_bent_tube(
         BooleanOperator::Intersection,
         true,
-        1.1,
+        1.0,
         "box intersect tube",
     );
+}
+
+/// A mesh's positions and indices, bit for bit.
+fn bits(mesh: &TriMesh) -> (Vec<[u64; 3]>, &[u32]) {
+    (
+        mesh.positions
+            .iter()
+            .map(|p| [p.x, p.y, p.z].map(Scalar::to_bits))
+            .collect(),
+        &mesh.indices,
+    )
+}
+
+/// The FNV-1a hash of a mesh's position bits and indices.
+fn hash(mesh: &TriMesh) -> u64 {
+    let mut hash: u64 = 0xcbf29ce484222325;
+    let mut eat = |word: u64| {
+        for byte in word.to_le_bytes() {
+            hash ^= u64::from(byte);
+            hash = hash.wrapping_mul(0x100000001b3);
+        }
+    };
+    for p in &mesh.positions {
+        for v in [p.x, p.y, p.z] {
+            eat(v.to_bits());
+        }
+    }
+    mesh.indices.iter().for_each(|&i| eat(u64::from(i)));
+    hash
+}
+
+#[test]
+fn booleans_with_no_oblique_curved_pair_are_meshed_as_before() {
+    // A cylinder square to the faces it meets (a window, a shaft, a column
+    // on a box), or tangent to one (#243), has no section angle to shrink
+    // its chord by: the meshes are bit for bit those made before #380, whose
+    // hashes these are. They were taken on x86-64 Linux; a platform whose
+    // `sin` and `cos` round differently takes its own.
+    type Build = fn(&mut Graph) -> NodeId;
+    let cases: [(&str, Scalar, Build, u64); 8] = [
+        (
+            "window wall",
+            1e-2,
+            wall_with_round_window,
+            0x091bc3631fdd0938,
+        ),
+        (
+            "window wall",
+            1e-3,
+            wall_with_round_window,
+            0xb8bb4087044a0b89,
+        ),
+        (
+            "slab shaft",
+            1e-3,
+            slab_with_a_round_shaft,
+            0xa19d13d473f21552,
+        ),
+        (
+            "column union box",
+            1e-3,
+            |g| column_and_box(g, BooleanOperator::Union),
+            0x66d0a26d4d460335,
+        ),
+        (
+            "column intersect box",
+            1e-3,
+            |g| column_and_box(g, BooleanOperator::Intersection),
+            0x9ea87c7c11bfaa94,
+        ),
+        (
+            "I-beam holes",
+            1e-3,
+            beam_with_round_holes,
+            0x5e77e7cd7bc9b41c,
+        ),
+        (
+            "I-beam, tangent hole",
+            1e-3,
+            beam_with_a_hole_touching_its_flange,
+            0xcac09009cae9ab55,
+        ),
+        (
+            "I-beam, tangent hole, fillets",
+            1e-3,
+            filleted_beam_with_a_hole_touching_its_flange,
+            0xec6ea55f5fc8dd8a,
+        ),
+    ];
+    for (name, budget, build, expected) in cases {
+        let options = options(budget);
+        let (_, _, mesh, ..) = compile(build, &options);
+        let got = hash(&mesh);
+        assert_eq!(got, expected, "{name} at {budget}: {got:#018x}");
+    }
+}
+
+#[test]
+fn the_mesh_does_not_depend_on_the_report() {
+    // The operands' chords come from the graph on every compile (#380): a
+    // report asked for never changes the mesh.
+    let options = options(1e-3);
+    let mut g = Graph(GeometryGraphBuilder::new());
+    let root = box_and_bent_tube(&mut g, BooleanOperator::Intersection, true);
+    let graph = g.0.finish(vec![root]).expect("a valid graph");
+    let compiler = ReferenceMeshCompiler::new(BoolmeshBoolean::new());
+    let plain = compiler
+        .compile_mesh(&graph, root, &options)
+        .expect("the body compiles");
+    let reported = compiler
+        .compile_mesh_reported(&graph, root, &options)
+        .expect("the body compiles");
+    let (measured, _) = compiler
+        .compile_mesh_with_deviation(&graph, root, &options)
+        .expect("the body compiles");
+    assert_eq!(bits(&plain), bits(&reported.mesh));
+    assert_eq!(bits(&plain), bits(&measured.mesh));
+}
+
+#[test]
+fn a_column_clipped_by_an_oblique_roof_is_certified() {
+    // A column of radius 0.2 under a roof plane whose normal leans 60
+    // degrees from its axis: the column's surface meets the plane at 30
+    // degrees along the section, and is meshed at half the chord (#380).
+    let budget = 1e-3;
+    let options = options(budget);
+    let case = compile(
+        |g| {
+            let column = g.extrusion(circle(0.2), 3.0);
+            let tilt = FRAC_PI_3;
+            let roof = g.push(GeometryNode::HalfSpace(HalfSpace {
+                boundary: Plane3 {
+                    origin: Point3::new(0.0, 0.0, 2.0),
+                    normal: Vec3::new(tilt.sin(), 0.0, tilt.cos()),
+                },
+                agreement: true,
+            }));
+            g.boolean(column, roof, BooleanOperator::Difference)
+        },
+        &options,
+    );
+    let (bound, _) = assert_measured("column, oblique roof", case, &options, 2.0);
+    assert!(bound <= budget, "{bound}");
 }
 
 #[test]

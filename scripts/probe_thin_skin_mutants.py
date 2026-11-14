@@ -142,8 +142,8 @@ MUTANTS = [
      '    let rounded = if bits & mask == 0 {',
      '    let rounded = if true {', [PLACED]),
     ('a boolean reads its operands unplaced', COMPILER,
-     '        let subject = self.cached(cache, left, budget)?;',
-     '        let subject = self.cached(cache, left, Budget { placed: 0.0, ..budget })?;',
+     '        let subject = self.cached(cache, left, subject_budget)?;',
+     '        let subject = self.cached(cache, left, Budget { placed: 0.0, ..subject_budget })?;',
      [PLACED]),
     # Landing: exactly, on exactly axis-aligned faces, a face whole.
     ('a face axis-aligned only within rounding is landed on', SNAP,

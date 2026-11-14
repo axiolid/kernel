@@ -1006,3 +1006,117 @@ exactly since #378; the gaps were the region as a tool and the empty operand.
   `tests/turned_clip.rs` (a pending skin under an empty tool), the unit tests
   of `empty.rs` and `deviation::boolean`; probe
   `scripts/probe_half_space_region_mutants.py`.
+
+## Amendment 2026-11-14: a curved operand meshed by its section angle (#380)
+
+The mesh cut of two faceted operands moves the cut by the operands' chord
+sag over the sine of the angle their surfaces meet at, so a boolean whose
+curved operand meets a plane of the other obliquely landed beyond its chord
+budget with both operands meshed to it. The box `0.4 x 0.5 x 6` intersected
+with the quarter-turn bent tube of #378 (radius `0.1`, bend radius `1`)
+reported 1.0216e-3 against 1e-3 (measured 1.0116e-3, 792 triangles), and a
+column of radius `0.2` clipped by a roof plane whose normal leans 60 degrees
+from its axis 1.93e-3 (124 triangles); `tests/boolean_deviation.rs` allowed
+the first 1.1 times its budget under `TODO(#380)`.
+
+- **Decision.** A curved operand's chord is its boolean's times `s`, the
+  sine of the smallest angle at which it meets a **plane** face of the other
+  operand along their section (`section_angle.rs`). `s` comes from a closed
+  form for a plane against a cylinder, cone, sphere or torus, over the
+  curved face's parameter box where that matters (a cylinder's or cone's
+  axial range, a torus's angle about its axis). For the bent tube the plane
+  `x = -0.2` meets the torus where `cos(psi)` lies between 8/11 and 8/9, so
+  the least sine is `sqrt(17) / 9 = 0.4581` at 27.3 degrees, and the tube is
+  meshed at `117 / 256 = 0.457` of the chord; the box is unchanged.
+- **On every compile.** The factors depend on the graph alone, so the mesh
+  does not depend on whether a deviation report was asked for. Meshing finer
+  only when a report missed its budget was rejected for that reason, as was
+  cutting against the exact operands (a second boolean path), and a sampled
+  minimum angle (a sample can miss the minimum, and the closed forms are
+  exact).
+- **Which faces.** The surfaces are those of the operands' **leaves**,
+  compiled exactly in their own frames (never the exact boolean) and placed
+  by the chain of instances above them, and the planes of half-space leaves
+  (of a bounded half-space the plane only). A pair is read only where the
+  faces' enclosing balls (a Taylor bound over the parameter box) meet. A
+  boolean whose operands are certainly planar (instances, booleans and
+  collections of half-spaces, meshes, blocks and extrusions of straight
+  profiles) is read from the graph alone, with no exact compile, so the
+  common wall with rectangular openings pays nothing. A leaf the exact
+  compiler refuses or a chain that is not rigid contributes nothing and
+  never refuses the compile.
+- **The value.** `s` is the least over the pairs, floored at 1/4 (a grazing
+  contact would otherwise refine without limit: at most four times the
+  triangles on a doubly curved operand, two on a singly curved one), and
+  rounded down to a multiple of 1/256 after crediting `1e-9` of rounding, so
+  frame-equivalent constructions get bit-identical chords and share cache
+  keys (a plane square to an axis reads `1 - 1e-16` in a rotated frame and
+  must stay `1`). The window wall, the slab shaft and openings, the gable
+  wall, the column united with or intersected with a box and the I-beams
+  keep `s = 1`: their meshes are bit-identical (checked by hash).
+- **Nested booleans shrink to the least, not the product.** The factor of
+  an operand that is itself a boolean shrinks everything beneath it, and the
+  inner boolean computes its own factors again. Multiplying them would mesh
+  a wall less a row of openings at the product of its factors (`0.55^5` for
+  the five openings of `tests/curved_wall_openings.rs`, whose bound then
+  read 1.0000080e-3 against 1e-3). It is not needed: each cut moves by its
+  sag over its own sine, and a leaf meshed at `c min(f_k)` has a sag at most
+  `c f_k` for every enclosing cut `k`, so every cut meets its own budget with
+  the least alone; the product only shrinks further. The evaluation budget
+  carries how far it has been shrunk (`Budget::shrink`, part of the
+  evaluation key), and a boolean shrinks its operands only by what it adds
+  beyond that (`Budget::shrunk`). Where three cuts meet at one corner the
+  displacements of the faces meeting there add, which neither rule bounds:
+  the report measures it.
+- **A graze within the tolerance is no section.** A plane that only touches
+  the surface, or reaches into it by no more than the cut's linear tolerance (`radius (1 - cos)`, the plane's distance from
+  touching, with the cylinder's, the sphere's or the torus's minor radius,
+  or the cone's mean normal radius), contributes nothing. At the floor the
+  I-beam's hole tangent to its flange (#243) refused as a pinch ("the
+  operands meet tangentially") where the coarser mesh left a skin within
+  rounding that the exact referee decides (#400, ADR 0102): refining a
+  contact within the tolerance turns the decision into a refusal. A sine
+  alone is no test: a designed tangent placed at UTM coordinates
+  (`T = 3.6e5, 5.8e6, 120`) reads a sine of `sqrt(2 |T| eps / r)`, a few
+  thousandths, after the placement's rounding, and a first version that cut
+  off at `1e-6` refused 10 of 12 turns of that beam where the compiler
+  before #380 refused 5 (`tests/far_placed_beam.rs`: 1, 0, 1 and 5 of 12 at
+  12.5 m, a few hundred metres, a kilometre and UTM, and no more now). A
+  grazing section just inside the surface (a plane at 0.99 of the radius,
+  s = 0.14, 1 mm deep at a micrometre tolerance) keeps the floor.
+- **The torus reads its minor angle too.** The closed form takes the face's
+  range about the tube as well as about the axis: a plane tangent to the
+  tube on a part the face lacks (`R = 1`, `r = 0.25`, a face over `[-pi/2,
+  pi/2]`, a tangent at `phi = 1.75`) meets the face at 0.178, not 0, and is
+  a pair. The ends of the minor angle are candidates beside the roots, the
+  turns at `c = +-1` and the ends about the axis, each counted where it lies
+  in the face.
+- **An accuracy measure, not a certificate.** The boolean's report still
+  measures. Pairs without a closed form (two curved faces: a pipe tee, a
+  torus against a cylinder), elliptical cylinders, B-splines and authored
+  meshes get no shrink and can still miss the budget, and a contact grazing
+  below 14.5 degrees (the floor) can too; the report says so where it does.
+  Those are #380's follow-up. The cut itself, the snap and the tolerance keep
+  the boolean's own budget; only the operands are meshed finer. The
+  parameter box of a face is the hull of its pcurves' ends, middles and
+  quarter points, as the deviation search sizes its domains: approximate,
+  which suits a heuristic. The leaves are compiled once per node and
+  tolerance for the whole compile, and each boolean reads the faces under
+  its operands again, so a row of `n` nested booleans reads `O(n^2)` faces:
+  a plate of 64 round openings in nested differences compiles in 14.4 s with
+  the factors and 15.9 s without (the cuts themselves are quadratic), so the
+  walk is not measurable and is not cached per node. The balls are coarse: a wedge opening's far
+  chord plane, which never touches the curved wall, still meets the wall's
+  cylinder over its infinite extent and its face's ball, so that wall is
+  meshed finer (0.55) than it needs. That costs triangles, not accuracy.
+- **Measured.** The bent tube's intersection reports 9.9992e-4 (2212
+  triangles), the roof-clipped column 9.996e-4 (252). Meshes of booleans with
+  a curved operand against a box (a ball, a cone, the bent pipe, a revolution
+  united with a box) have a few percent to three times the triangles; the
+  tests that assert their bounds hold unchanged.
+- **Tests and probe.** `section_angle::tests` (the closed forms against the
+  issue's numbers and against a sweep of the surface with explicit normals,
+  the factors of the fixtures, placement invariance), `tests/boolean_deviation.rs`
+  (the intersection within 1.0 times its budget, the oblique column, and the
+  mesh not depending on the report); probe
+  `scripts/probe_section_angle_mutants.py`.
