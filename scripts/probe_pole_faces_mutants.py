@@ -22,16 +22,16 @@ Not listed, as equivalent at test resolution:
   fixture the pole is also an end of the support's range of `v` (a
   sphere's latitudes, a cone's apex, a profile's domain), which clamps it
   the same.
-- the meridian term `dvv dv^2 / 8` left out of a span into a pole (the
-  argument needs it, no measurement can show it): it is zero on a cone and
-  along a ruled surface's rulings, and at a smooth pole of a surface of
-  revolution both principal curvatures are the profile's, so a curve into
-  the pole bends at least as much as the meridians beside it and no point
-  between them lies farther from the mesh chord than the edge itself does,
-  which the chord bound covers. The unit test
-  `a_span_into_a_pole_bounds_its_lens_along_the_meridians` measures this
-  on tilted circles into a sphere's pole and kills the chord bound left
-  out instead.
+- the meridian term `dvv dv^2 / 8` left out of a span into a pole
+  (`pole_span`), and the meridian spread left out of a span near one
+  (`meridian_lens`): the argument needs them, no measurement shows them.
+  They are zero on a cone and along a ruled surface's rulings. On tilted
+  circles into a sphere's pole and on spans near and into the pole of the
+  canopy's curved profile (`brep::inversion` unit tests) the farthest
+  points measured are the edge's own: 2.21e-3 against the chord bound
+  2.23e-3 into the canopy's pole, 6.7e-3 against `d + e` = 1.8e-2 near
+  it, so either term left out still bounds every sample. Those tests kill
+  the chord bound left out instead.
 
 First run: 12 / 15. The survivors were the chord bound and the meridian
 term of a span into a pole, and the fans' corner offsets: no fixture's
@@ -81,6 +81,9 @@ MUTANTS = [
     ("closure row reversed", P,
      "        if us.windows(2).all(|w| w[1] > w[0]) != (start.x > end.x) {\n",
      "        if us.windows(2).all(|w| w[1] > w[0]) == (start.x > end.x) {\n"),
+    ("a full turn read from two distinct edges", P,
+     "        if k != 2 || !one_seam(&chains[0], &chains[1]) {\n",
+     "        if k != 2 {\n"),
     ("P2 replaced by the positive lune", P,
      "    if k >= 2 && !chains.iter().all(|chain| chain.anchored) {\n",
      "    if false {\n"),

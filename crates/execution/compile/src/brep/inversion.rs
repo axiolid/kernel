@@ -1081,6 +1081,9 @@ pub(super) fn sample_edge(
         let mut mids = Vec::with_capacity(points.len() - 1);
         let mut unfinished: Vec<usize> = Vec::new();
         let mut midpoint_failed = vec![false; pieces.len()];
+        // The pieces whose current sampling meets the midpoint and
+        // quarter-turn tests.
+        let mut passed = vec![false; pieces.len()];
         let mut offset = 0;
         for (k, &n) in counts.iter().enumerate() {
             let mut measured: Scalar = 0.0;
@@ -1095,6 +1098,7 @@ pub(super) fn sample_edge(
             let lone = n == 1 && counts.len() == 1 && at_pole == [true, true];
             let mut fits = false;
             if !midpoint_failed[k] && quarter && !lone {
+                passed[k] = true;
                 basic[k].get_or_insert(n);
                 let certified = spans.as_ref().and_then(|spans| {
                     (offset..offset + n)
@@ -1167,8 +1171,13 @@ pub(super) fn sample_edge(
         }
         if crowded || points.len() - 1 + added > MAX_CURVED_EDGE_SEGMENTS {
             // Out of segments: each unfinished piece falls back to its
-            // coarsest passing sampling, or the edge is refused.
+            // coarsest passing sampling, or the edge is refused. Crowded
+            // against a pole, a piece whose sampling passes keeps it: it is
+            // as fine as the pole lets it be, and its terms the smallest.
             for &k in &unfinished {
+                if crowded && passed[k] {
+                    continue;
+                }
                 let Some(coarse) = basic[k] else {
                     if midpoint_failed[k] {
                         return Err(GeomError::BudgetExceeded {
@@ -1553,6 +1562,121 @@ mod tests {
             }
         }
         assert!(beyond_chord, "the chord bound is never needed");
+    }
+
+    /// The bound along the meridians against dense closed-form sampling on
+    /// a curved profile, the canopy's cubic from the axis to the axis
+    /// turned about it: a span near the top pole oblique to the meridians
+    /// (its preimage bowed away from its parameter chord), and a span into
+    /// the pole whose preimage swings in `u`. Every surface point between
+    /// the preimage and the chord (and the pole row) lies within the term
+    /// of the mesh chord. The meridian term is not what holds it here
+    /// either: the farthest points measured are the edge's own (6.7e-3
+    /// against `d + e` = 1.8e-2 near the pole, 2.21e-3 against `d` =
+    /// 2.23e-3 into it, for the widest spans), so leaving the term out
+    /// shows in no sample; the argument needs it.
+    #[test]
+    fn a_span_near_a_curved_profile_s_pole_is_bounded_along_the_meridians() {
+        use axiolid_model::{GeometryGraphBuilder, GeometryNode, SurfaceRelation};
+        let profile = axiolid_curve::Curve3::BSpline(axiolid_curve::BSplineCurve3 {
+            degree: 3,
+            control_points: vec![
+                Vec3::ZERO,
+                Vec3::new(0.6, 0.0, 0.1),
+                Vec3::new(0.5, 0.0, 0.9),
+                Vec3::new(0.0, 0.0, 1.0),
+            ],
+            knots: vec![0.0, 1.0],
+            multiplicities: vec![4, 4],
+            weights: None,
+            closed: false,
+            self_intersect: None,
+            knot_spec: axiolid_curve::KnotSpec::Unspecified,
+        });
+        let mut builder = GeometryGraphBuilder::new();
+        let curve = builder.push(GeometryNode::Curve3(profile)).unwrap();
+        let graph = builder.finish(vec![curve]).unwrap();
+        let surface = crate::surface_relation::RelationSurface::revolution(
+            &graph,
+            curve,
+            Vec3::ZERO,
+            Vec3::Z,
+        )
+        .unwrap();
+        let node = SurfaceRelation::LinearExtrusion {
+            swept_curve: curve,
+            direction: Vec3::Z,
+        };
+        let support = Support::Relation {
+            node: &node,
+            surface,
+        };
+        let bound = FaceBound::new(support);
+        let at = |p: Point2| surface.evaluate(p.x, p.y).unwrap();
+        let segment = |p: Vec3, a: Vec3, b: Vec3| {
+            let d = b - a;
+            let t = ((p - a).dot(d) / d.dot(d)).clamp(0.0, 1.0);
+            (p - (a + d * t)).length()
+        };
+        // The edge's chord bound and length, read densely and widened.
+        let measure = |path: &dyn Fn(Scalar) -> Point2| {
+            let (pa, pb) = (at(path(0.0)), at(path(1.0)));
+            let (mut chord, mut arc): (Scalar, Scalar) = (0.0, 0.0);
+            let mut previous = pa;
+            for i in 1..=2000 {
+                let p = at(path(i as Scalar / 2000.0));
+                chord = chord.max(segment(p, pa, pb));
+                arc += (p - previous).length();
+                previous = p;
+            }
+            SpanBound {
+                chord: chord * 1.01,
+                arc: arc * 1.01,
+            }
+        };
+        for (du, bow) in [(0.4, 0.01), (0.2, 0.005), (0.1, 0.0025)] {
+            // Near the pole, oblique to the meridians.
+            let (a, b) = (Point2::new(0.2, 0.9), Point2::new(0.2 + du, 0.93));
+            let chord = move |s: Scalar| a + (b - a) * s;
+            let path = move |s: Scalar| {
+                chord(s) + Point2::new(0.0, bow * (core::f64::consts::PI * s).sin())
+            };
+            let span = measure(&path);
+            let near = span.chord + bound.chord_image(a, b).unwrap();
+            let (pa, pb) = (at(a), at(b));
+            let term = bound
+                .meridian_lens((a, b), (pa, pb), span.arc, near)
+                .unwrap();
+            let mut measured: Scalar = 0.0;
+            for i in 0..=200 {
+                let s = i as Scalar / 200.0;
+                for j in 0..=40 {
+                    let t = j as Scalar / 40.0;
+                    let q = at(chord(s) + (path(s) - chord(s)) * t);
+                    measured = measured.max(segment(q, pa, pb));
+                }
+            }
+            assert!(measured <= term, "near, {du}: {measured:e} above {term:e}");
+            // Into the pole at `v = 1`, from `v = 0.95`, sweeping `du` in
+            // `u` as it goes; meshed along the meridian at its start.
+            let start = Point2::new(0.3, 1.0 - 0.05 * (du / 0.8).min(1.0));
+            let path =
+                move |s: Scalar| Point2::new(start.x + du * s * s, start.y + (1.0 - start.y) * s);
+            let span = measure(&path);
+            let pole = at(Point2::new(start.x, 1.0));
+            let term = bound.pole_span(start, 1.0, &span, 0.0).unwrap();
+            let x1 = at(start);
+            let mut measured: Scalar = 0.0;
+            for i in 0..=200 {
+                let p = path(i as Scalar / 200.0);
+                for j in 0..=40 {
+                    let t = j as Scalar / 40.0;
+                    let q = at(Point2::new(start.x + (p.x - start.x) * t, p.y));
+                    measured = measured.max(segment(q, x1, pole));
+                }
+            }
+            assert!(measured <= term, "into, {du}: {measured:e} above {term:e}");
+        }
     }
 
     /// The certified search proves the B-spline parameters unique to a
