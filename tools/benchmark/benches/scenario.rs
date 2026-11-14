@@ -21,8 +21,9 @@ use axiolid_hidden_lines::{
 };
 use axiolid_mesh::TriMesh;
 use axiolid_mesh_hidden_lines_contract::{
-    EdgeSelection, HiddenLineLimits, HiddenLineMesh, HiddenLineRequest, MeshHiddenLines, MeshId,
-    MeshRole, MeshVisibleFaces, View, Visibility, VisibleFaceLimits, VisibleFaceRequest,
+    EdgeSelection, HiddenLineLimits, HiddenLineMesh, HiddenLineRequest, HiddenLineSegment,
+    MeshHiddenLines, MeshId, MeshRole, MeshVisibleFaces, Occlusion, View, Visibility,
+    VisibleFaceLimits, VisibleFaceOutcome, VisibleFaceRequest, VisibleRegion,
 };
 use criterion::{criterion_group, criterion_main, BenchmarkId, Criterion, Throughput};
 use std::hint::black_box;
@@ -154,6 +155,71 @@ fn hidden_line_box(min: [f64; 3], max: [f64; 3]) -> TriMesh {
     )
 }
 
+/// The text a drawing's hash is taken over: each segment's `Debug` form as it
+/// was before `seen_through` existed (ADR 0111), with the count appended
+/// only when it is not zero, so the hash of an opaque scene stays comparable
+/// across that change.
+fn segments_text(segments: &[HiddenLineSegment]) -> String {
+    let texts: Vec<String> = segments
+        .iter()
+        .map(|s| {
+            let seen = if s.seen_through > 0 {
+                format!(", seen_through: {}", s.seen_through)
+            } else {
+                String::new()
+            };
+            format!(
+                "HiddenLineSegment {{ source: {:?}, kind: {:?}, visibility: {:?}, start: {:?}, end: {:?}{seen} }}",
+                s.source, s.kind, s.visibility, s.start, s.end
+            )
+        })
+        .collect();
+    format!("[{}]", texts.join(", "))
+}
+
+/// The same for regions: the `Debug` form before `behind` existed, with the
+/// list appended only when it is not empty.
+fn regions_text(regions: &[VisibleRegion]) -> String {
+    let texts: Vec<String> = regions
+        .iter()
+        .map(|r| {
+            let behind = if r.behind.is_empty() {
+                String::new()
+            } else {
+                format!(", behind: {:?}", r.behind)
+            };
+            format!(
+                "VisibleRegion {{ mesh: {:?}, source: {:?}, outer: {:?}, holes: {:?}, triangles: {:?}{behind} }}",
+                r.mesh, r.source, r.outer, r.holes, r.triangles
+            )
+        })
+        .collect();
+    format!("[{}]", texts.join(", "))
+}
+
+fn hash(text: &str) -> u64 {
+    use std::hash::{Hash, Hasher};
+    let mut hasher = std::collections::hash_map::DefaultHasher::new();
+    text.hash(&mut hasher);
+    hasher.finish()
+}
+
+/// Every third box of a grid wholly see-through, the rest opaque.
+fn glazing(meshes: &[TriMesh]) -> Vec<Vec<Occlusion>> {
+    meshes
+        .iter()
+        .enumerate()
+        .map(|(k, mesh)| {
+            let flag = if k % 3 == 0 {
+                Occlusion::SeeThrough
+            } else {
+                Occlusion::Opaque
+            };
+            vec![flag; mesh.triangle_count()]
+        })
+        .collect()
+}
+
 /// A perspective view of an `n` x `n` grid from an eye off its corner.
 fn perspective_view(n: f64) -> View {
     let eye = Point3::new(-0.3 * n, -0.3 * n, 0.6 * n);
@@ -179,10 +245,12 @@ fn perspective_view(n: f64) -> View {
 /// gap to its neighbours. In the isometric view every box overlaps its
 /// neighbours in the image; the cut plan sets the near plane at mid-height
 /// (2.0), so the taller columns are capped and the lower ones drawn whole;
-/// the perspective case looks at the grid from an eye off its corner.
-/// Each case runs with the BVH broad phase and with the linear scan
-/// (`ScanHiddenLines`, identical output), so the broad phase's gain is read
-/// off the same group; the provider CHANGELOG records a run.
+/// the perspective case looks at the grid from an eye off its corner; the
+/// glazed case is the isometric one with every third box see-through (ADR
+/// 0111), timed against it. Each case runs with the BVH broad phase and with
+/// the linear scan (`ScanHiddenLines`, identical output), so the broad
+/// phase's gain is read off the same group; the provider CHANGELOG records a
+/// run.
 fn hidden_lines(criterion: &mut Criterion) {
     let bvh = ScalarHiddenLines::new();
     let providers: [(&str, &dyn MeshHiddenLines); 2] = [("bvh", &bvh), ("scan", &ScanHiddenLines)];
@@ -221,18 +289,25 @@ fn hidden_lines(criterion: &mut Criterion) {
             .enumerate()
             .map(|(k, mesh)| HiddenLineMesh::new(MeshId(k as u64 + 1), MeshRole::Solid, mesh))
             .collect();
+        let flags = glazing(&meshes);
+        let glazed: Vec<HiddenLineMesh<'_>> = entries
+            .iter()
+            .zip(&flags)
+            .map(|(entry, flags)| entry.with_occlusion(flags))
+            .collect();
         let limits =
             HiddenLineLimits::new(n * n, 8 * n * n, 12 * n * n, 4_000_000_000, 100_000_000);
         // The eye stands off the corner of the grid, above the columns, and
         // looks at its middle (ADR 0107): a pinhole view of the same scene.
         let perspective = perspective_view(n as f64);
-        for (name, view) in [
-            ("isometric", isometric),
-            ("cut-plan", plan),
-            ("perspective", perspective),
+        for (name, view, meshes) in [
+            ("isometric", isometric, &entries),
+            ("cut-plan", plan, &entries),
+            ("perspective", perspective, &entries),
+            ("glazed-isometric", isometric, &glazed),
         ] {
             let request =
-                HiddenLineRequest::new(&entries, view, EdgeSelection::new(Some(0.5)), limits);
+                HiddenLineRequest::new(meshes, view, EdgeSelection::new(Some(0.5)), limits);
             // A drawing with nothing visible, or nothing hidden, would time
             // beautifully; require both before timing.
             let outcome = bvh
@@ -244,28 +319,33 @@ fn hidden_lines(criterion: &mut Criterion) {
                     "{name} {n}x{n}: no {visibility:?} segment"
                 );
             }
+            // A glazed drawing must see through something.
+            assert_eq!(
+                name == "glazed-isometric",
+                outcome.evidence.seen_through_segments > 0,
+                "{name} {n}x{n}: seen-through segments"
+            );
             // The scan is the baseline only if it draws the same thing.
             let scanned = ScanHiddenLines
                 .hidden_lines(&request, &options)
                 .expect("the grid draws");
             assert_eq!(
-                format!("{:?}", outcome.segments),
-                format!("{:?}", scanned.segments),
+                outcome.segments, scanned.segments,
                 "{name} {n}x{n}: broad phases disagree"
             );
             // The drawing's hash and the exact work are printed so two commits
             // can be compared: the hash must agree, the work may only fall.
-            {
-                use std::hash::{Hash, Hasher};
-                let mut hasher = std::collections::hash_map::DefaultHasher::new();
-                format!("{:?}", outcome.segments).hash(&mut hasher);
-                eprintln!(
-                    "hidden-lines {name} {n}x{n}: segments {:016x} escalations {} pairs {}",
-                    hasher.finish(),
-                    outcome.evidence.exact_escalations,
-                    outcome.evidence.candidate_pairs,
-                );
-            }
+            eprintln!(
+                "hidden-lines {name} {n}x{n}: segments {:016x} escalations {} pairs {}{}",
+                hash(&segments_text(&outcome.segments)),
+                outcome.evidence.exact_escalations,
+                outcome.evidence.candidate_pairs,
+                if name == "glazed-isometric" {
+                    format!(" seen-through {}", outcome.evidence.seen_through_segments)
+                } else {
+                    String::new()
+                },
+            );
             group.throughput(Throughput::Elements(outcome.evidence.selected_edges as u64));
             for (phase, provider) in providers {
                 group.bench_function(format!("{name}/{n}x{n}/{phase}"), |bencher| {
@@ -288,7 +368,9 @@ fn hidden_lines(criterion: &mut Criterion) {
 /// `bvh` is the shipped provider (BVH candidates, depth-pruned occluders),
 /// `scan` tests every pair, and `unpruned` keeps the BVH but skips the
 /// prune. The `overlap` scene makes neighbouring boxes interpenetrate, so
-/// the exact intersection curves are part of the timing.
+/// the exact intersection curves are part of the timing. The `glazed` scene
+/// is the isometric one with every third box see-through (ADR 0111), so its
+/// regions carry stacks and fewer edges are pruned.
 fn visible_faces(criterion: &mut Criterion) {
     let bvh = ScalarVisibleFaces::new();
     let providers: [(&str, &dyn MeshVisibleFaces); 3] = [
@@ -327,6 +409,8 @@ fn visible_faces(criterion: &mut Criterion) {
         ("cut-plan", 50, 0.75, plan),
         ("overlap-plan", 6, 1.5, plan),
         ("overlap-isometric", 6, 1.5, isometric),
+        ("glazed-isometric", 10, 0.75, isometric),
+        ("glazed-isometric", 20, 0.75, isometric),
     ];
     for (name, n, width, view) in scenes {
         let meshes: Vec<TriMesh> = (0..n * n)
@@ -341,6 +425,16 @@ fn visible_faces(criterion: &mut Criterion) {
             .enumerate()
             .map(|(k, mesh)| HiddenLineMesh::new(MeshId(k as u64 + 1), MeshRole::Solid, mesh))
             .collect();
+        let flags = glazing(&meshes);
+        let entries: Vec<HiddenLineMesh<'_>> = if name.starts_with("glazed") {
+            entries
+                .iter()
+                .zip(&flags)
+                .map(|(entry, flags)| entry.with_occlusion(flags))
+                .collect()
+        } else {
+            entries
+        };
         let limits = VisibleFaceLimits::new(
             n * n,
             8 * n * n,
@@ -348,24 +442,31 @@ fn visible_faces(criterion: &mut Criterion) {
             4_000_000_000,
             1_000_000,
             100_000_000,
-        );
+        )
+        .with_max_behind_surfaces(100_000_000);
         let request = VisibleFaceRequest::new(&entries, view, limits);
         let outcome = bvh
             .visible_faces(&request, &options)
             .expect("the grid resolves");
-        // A scene with no regions would time beautifully.
+        // A scene with no regions would time beautifully, and a glazed one
+        // must see through something.
         assert!(!outcome.regions.is_empty(), "{name} {n}x{n}: no regions");
+        assert_eq!(
+            name.starts_with("glazed"),
+            outcome.evidence.behind_surfaces > 0,
+            "{name} {n}x{n}: behind surfaces"
+        );
         // The variants are baselines only if they return the same regions.
         for (phase, provider) in providers {
             let other = provider
                 .visible_faces(&request, &options)
                 .expect("the grid resolves");
             assert_eq!(
-                format!("{:?}", outcome.regions),
-                format!("{:?}", other.regions),
+                outcome.regions, other.regions,
                 "{name} {n}x{n}: {phase} disagrees"
             );
         }
+        print_faces(name, n, &outcome);
         group.throughput(Throughput::Elements(outcome.regions.len() as u64));
         for (phase, provider) in providers {
             group.bench_function(format!("{name}/{n}x{n}/{phase}"), |bencher| {
@@ -380,6 +481,23 @@ fn visible_faces(criterion: &mut Criterion) {
         }
     }
     group.finish();
+}
+
+/// The regions' hash, counts and exact work, so two commits can be compared:
+/// the hash must agree, the work may only fall.
+fn print_faces(name: &str, n: usize, outcome: &VisibleFaceOutcome) {
+    let e = &outcome.evidence;
+    eprintln!(
+        "visible-faces {name} {n}x{n}: regions {:016x} count {} escalations {} pairs {} pieces {} tied {} boundary {} behind {}",
+        hash(&regions_text(&outcome.regions)),
+        e.regions,
+        e.exact_escalations,
+        e.candidate_pairs,
+        e.pieces,
+        e.tied_sides,
+        e.boundary_segments,
+        e.behind_surfaces,
+    );
 }
 
 criterion_group!(

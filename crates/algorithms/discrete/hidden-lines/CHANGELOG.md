@@ -70,6 +70,20 @@ caret rule for `0.x` versions.
   `FaceGroups::Planar` joins two triangles only when their occlusion is
   equal. Without a see-through triangle no extra comparison is made and the
   regions and evidence are unchanged.
+- `scenario/hidden-lines` and `scenario/visible-faces` gain a
+  `glazed-isometric` grid, the isometric one with every third box wholly
+  see-through, and print a drawing hash that leaves out an empty count or
+  stack, so the opaque scenes print what they printed before (#496); they
+  did, hash, escalations and pairs alike. Three runs each on a loaded machine
+  (median of each run, BVH provider, against the opaque isometric grid of the
+  same size): hidden lines 400 boxes 0.50-0.52 s against 0.27-0.39 s (79,064
+  to 94,509 pairs), 2,500 boxes 2.33-3.29 s against 2.50-2.51 s (511,016 to
+  617,263 pairs); visible faces 100 boxes 0.34-0.36 s against 0.23-0.30 s
+  (1,266 to 2,001 pieces, 142 surfaces behind), 400 boxes 1.18-1.92 s against
+  1.25-1.30 s (4,938 to 11,097 pieces, 383,574 to 789,043 pairs, 1,931
+  surfaces behind). Edges behind glass lose the early-out of full cover and
+  are no longer pruned from the arrangement, which the counts show; the run
+  to run spread on this machine is as large as the cost.
 
 ## [0.1.4] - 2026-11-13
 

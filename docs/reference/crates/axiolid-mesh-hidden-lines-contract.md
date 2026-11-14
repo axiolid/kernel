@@ -34,6 +34,16 @@ support, and `PerspectiveConformanceSuite` checks the claim: a hidden-line
 provider that claims it must draw the perspective fixtures, and a visible-face
 claim is not yet verifiable.
 
+Triangles may be marked see-through (`Occlusion`, ADR 0111). A see-through
+triangle hides nothing: a visible hidden-line piece counts the see-through
+triangles in front of it (`seen_through`), and a visible-face region of a
+see-through source lists the surfaces seen through it, front to back
+(`behind`), down to the first opaque one, within `max_behind_surfaces`. A
+provider says whether it honours them with `supports_occlusion`; the
+registries never give a see-through triangle to a provider that does not, and
+`SeeThroughConformanceSuite` checks the claim. Without a see-through flag
+every answer is what it was.
+
 ## Depends on
 
 - [`axiolid-contracts`](./axiolid-contracts)

@@ -52,6 +52,18 @@ group is named by its smallest triangle (ADR 0106).
 A region whose area collapses under rounding is dropped and counted in the
 evidence, never refused.
 
+Both providers honour see-through triangles (ADR 0111). A see-through
+triangle hides nothing. A visible hidden-line piece counts the see-through
+triangles strictly in front of it, decided with the perturbed image point of
+the caps, so panes sharing a diagonal count once. A visible-face region of a
+see-through source lists its stack: the surfaces behind it in exact depth
+layers down to the first opaque triangle or cap, found with a counted linear
+pass and a binary insertion; a face group must be all opaque or all
+see-through, and planar groups never join triangles of different occlusion.
+The cap of a cut solid occludes whatever its triangles' flags. Without a
+see-through triangle the drawing, the regions, the evidence and the exact
+work are unchanged.
+
 ## Depends on
 
 - [`axiolid-contracts`](./axiolid-contracts)
