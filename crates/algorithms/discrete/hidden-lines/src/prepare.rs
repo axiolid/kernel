@@ -23,7 +23,7 @@ use axiolid_mesh_hidden_lines_contract::{
 
 use crate::caps::Cap;
 use crate::decide::decide;
-use crate::edges::{push_triangles, Tri};
+use crate::edges::{occlusion_flags, push_triangles, Tri};
 use crate::recipe::{Constraint, Kind, ValueSign};
 use crate::view::Vert;
 
@@ -243,6 +243,7 @@ fn validate_shape(
                 )),
             ));
         }
+        occlusion_flags(entry)?;
     }
 
     validate_frame(&view.frame, options.tolerance(), label)?;

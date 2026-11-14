@@ -42,9 +42,19 @@ caret rule for `0.x` versions.
   the span of each non-skipped side counts as in front without the nearer-than
   test, while the near plane still has to be reached and the point still has
   to be strictly beyond it (ADR 0107, #387).
-- The providers refuse a request with a see-through triangle by name
-  (`UnsupportedInput`, input `see-through triangles`) and keep
-  `supports_occlusion` at its default (ADR 0111, #496).
+- `ScalarHiddenLines` and `ScanHiddenLines` honour see-through triangles and
+  claim them through `supports_occlusion` (ADR 0111, #496). A see-through
+  triangle hides nothing; a visible piece counts in `seen_through` the
+  see-through triangles of nonzero image area whose plane is strictly in
+  front of it and whose image holds the point shifted by `(ε, ε²)`, decided
+  with the perturbed image-side clips of the caps, in orthographic and
+  perspective views. A visible gap is split where that count changes and a
+  hidden piece is not split. Without a see-through triangle no step of this
+  runs: the drawing, the evidence and the exact work are unchanged. A
+  `PerTriangle` occlusion slice of the wrong length, or an unknown occlusion
+  mode, is `InvalidInput` naming the mesh. The visible-face providers refuse a
+  request with a see-through triangle by name (`UnsupportedInput`, input
+  `see-through triangles`) and keep `supports_occlusion` at its default.
 
 ## [0.1.4] - 2026-11-13
 

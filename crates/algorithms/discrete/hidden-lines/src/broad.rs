@@ -196,6 +196,7 @@ mod tests {
             v: [0, 0, 0],
             sigma: Ordering::Less,
             bounds: Bounds { lo, hi },
+            see_through: false,
         }
     }
 

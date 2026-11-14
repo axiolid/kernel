@@ -174,6 +174,7 @@ impl<'a> Faces<'a> {
             caps: self.caps,
             broad: self.broad,
             edge_on_occludes: false,
+            count_see_through: false,
             perspective: false,
         }
     }

@@ -20,6 +20,7 @@ use axiolid_guarantees::Sign;
 use axiolid_mesh::TriMesh;
 use axiolid_mesh_hidden_lines_contract::{
     EdgeKind, EdgeSelection, FaceGroup, HiddenLineError, HiddenLineMesh, MeshId, MeshRole,
+    Occlusion, TriangleOcclusion,
 };
 
 use crate::decide::decide;
@@ -34,6 +35,9 @@ pub(crate) struct Tri {
     /// Image orientation: counter-clockwise, clockwise or edge-on.
     pub sigma: Ordering,
     pub bounds: Bounds,
+    /// Whether the triangle is `Occlusion::SeeThrough`: it hides nothing
+    /// (ADR 0111). The caps still read it.
+    pub see_through: bool,
 }
 
 /// A selected edge, oriented from its lower vertex to its higher one.
@@ -105,8 +109,32 @@ pub(crate) struct MeshEdges<'a> {
     pub groups: Option<&'a [FaceGroup]>,
 }
 
+/// The mesh's occlusion flags, `None` when every triangle is opaque. A flag
+/// slice whose length differs from the triangle count, or a mode this crate
+/// does not know, is refused naming the mesh (ADR 0111).
+pub(crate) fn occlusion_flags<'a>(
+    entry: &HiddenLineMesh<'a>,
+) -> Result<Option<&'a [Occlusion]>, HiddenLineError> {
+    let refuse = |detail: String| HiddenLineError::mesh(entry.id, GeomError::InvalidInput(detail));
+    match entry.occlusion {
+        TriangleOcclusion::AllOpaque => Ok(None),
+        TriangleOcclusion::PerTriangle(flags) => {
+            let count = entry.mesh.triangle_count();
+            if flags.len() != count {
+                return Err(refuse(format!(
+                    "{} occlusion flags for {count} triangles",
+                    flags.len()
+                )));
+            }
+            Ok(Some(flags))
+        }
+        _ => Err(refuse("unknown occlusion mode".into())),
+    }
+}
+
 /// Append the mesh's triangles to `tris`, each with its exact image
-/// orientation. A triangle that is exactly collinear is refused.
+/// orientation and its occlusion. A triangle that is exactly collinear is
+/// refused.
 pub(crate) fn push_triangles(
     entry: &HiddenLineMesh<'_>,
     base: u32,
@@ -119,6 +147,7 @@ pub(crate) fn push_triangles(
     let (id, mesh) = (entry.id, entry.mesh);
     let refuse = |error: GeomError| HiddenLineError::mesh(id, error);
     let memory = || HiddenLineError::from(GeomError::BudgetExceeded { resource: "memory" });
+    let flags = occlusion_flags(entry)?;
     tris.try_reserve(mesh.triangle_count())
         .map_err(|_| memory())?;
     for (t, corner) in mesh.indices.as_chunks::<3>().0.iter().enumerate() {
@@ -160,6 +189,7 @@ pub(crate) fn push_triangles(
             v,
             sigma,
             bounds: Bounds::of(verts, &v),
+            see_through: flags.is_some_and(|flags| flags[t] == Occlusion::SeeThrough),
         });
     }
     Ok(())

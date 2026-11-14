@@ -9,6 +9,16 @@
 //! Each condition is an affine constraint in the edge parameter (`recipe`), so
 //! the hidden part of the edge for one triangle is an interval or a short
 //! union of intervals whose ends are roots, ordered exactly (`param`).
+//!
+//! A see-through triangle (ADR 0111) hides nothing. When the scene counts
+//! them, each one of nonzero image area whose plane is strictly in front adds
+//! its span to the count of the visible pieces under it: the span where the
+//! image point shifted by `δ = (ε, ε²)` lies inside the triangle's image, the
+//! perturbation of the caps, so two see-through triangles sharing an edge
+//! above the edge count once. A visible gap between hidden spans is split at
+//! the span ends inside it, each part counts the spans that contain it, and
+//! neighbours of one count are merged. A hidden piece is not split. Without a
+//! see-through triangle among the candidates no step of this runs.
 
 use std::cmp::Ordering;
 
@@ -40,6 +50,9 @@ pub(crate) struct Scene<'a> {
     /// Whether the view is perspective (ADR 0107): every constraint is the
     /// eye-ray reading and the caps are decided along the eye ray.
     pub perspective: bool,
+    /// Whether the see-through triangles in front of a visible piece are
+    /// counted (hidden lines). Either way they hide nothing.
+    pub count_see_through: bool,
 }
 
 impl Scene<'_> {
@@ -49,12 +62,15 @@ impl Scene<'_> {
     }
 }
 
-/// A piece of an edge with one visibility.
+/// A piece of an edge with one visibility and one see-through count.
 #[derive(Debug, Clone, Copy)]
 pub(crate) struct Piece {
     pub lo: Param,
     pub hi: Param,
     pub hidden: bool,
+    /// See-through triangles in front of a visible piece; 0 when hidden or
+    /// when the scene does not count them.
+    pub seen_through: u32,
 }
 
 pub(crate) enum Resolved {
@@ -130,6 +146,8 @@ fn resolve_with(
     };
 
     let mut hidden: Vec<Span> = Vec::new();
+    // The spans of the see-through triangles in front, unmerged.
+    let mut glass: Vec<Span> = Vec::new();
     let mut fully_hidden = false;
     let query = Query {
         image: edge.bounds,
@@ -144,6 +162,13 @@ fn resolve_with(
             });
         }
         *pairs += 1;
+        if tri.see_through {
+            // It hides nothing; seen edge-on it covers no area either.
+            if scene.count_see_through && tri.sigma != Ordering::Equal {
+                glass.extend(see_through(solver, scene, tri, kept)?);
+            }
+            continue;
+        }
         if tri.sigma == Ordering::Equal {
             if scene.edge_on_occludes {
                 for span in edge_on(solver, scene, edge, tri, kept)? {
@@ -171,27 +196,94 @@ fn resolve_with(
     let mut cursor = kept.lo;
     for span in hidden {
         if solver.cmp(cursor, span.lo)? == Ordering::Less {
-            pieces.push(Piece {
-                lo: cursor,
-                hi: span.lo,
-                hidden: false,
-            });
+            visible(solver, &glass, &mut pieces, cursor, span.lo)?;
         }
         pieces.push(Piece {
             lo: span.lo,
             hi: span.hi,
             hidden: true,
+            seen_through: 0,
         });
         cursor = span.hi;
     }
     if solver.cmp(cursor, kept.hi)? == Ordering::Less {
-        pieces.push(Piece {
-            lo: cursor,
-            hi: kept.hi,
-            hidden: false,
-        });
+        visible(solver, &glass, &mut pieces, cursor, kept.hi)?;
     }
     Ok(Resolved::Pieces(pieces))
+}
+
+/// Push the visible gap `lo..hi`: one piece without `glass`, else one piece
+/// per maximal part covered by the same number of `glass` spans.
+fn visible(
+    solver: &mut Solver<'_>,
+    glass: &[Span],
+    pieces: &mut Vec<Piece>,
+    lo: Param,
+    hi: Param,
+) -> GeomResult<()> {
+    if glass.is_empty() {
+        pieces.push(Piece {
+            lo,
+            hi,
+            hidden: false,
+            seen_through: 0,
+        });
+        return Ok(());
+    }
+    // The span ends strictly inside the gap, sorted and distinct.
+    let mut cuts: Vec<Param> = Vec::new();
+    for span in glass {
+        for end in [span.lo, span.hi] {
+            if solver.cmp(lo, end)? == Ordering::Less && solver.cmp(end, hi)? == Ordering::Less {
+                insert_distinct(solver, &mut cuts, end)?;
+            }
+        }
+    }
+    let first = pieces.len();
+    let mut from = lo;
+    for to in cuts.into_iter().chain([hi]) {
+        // A span contains the part `from..to` exactly when it starts at or
+        // before `from` and ends at or after `to`: no end lies inside it.
+        let mut count = 0usize;
+        for span in glass {
+            if solver.cmp(span.lo, from)? != Ordering::Greater
+                && solver.cmp(span.hi, to)? != Ordering::Less
+            {
+                count += 1;
+            }
+        }
+        let seen_through = u32::try_from(count).map_err(|_| GeomError::BudgetExceeded {
+            resource: "hidden-line see-through count",
+        })?;
+        // Only a part of this gap is a neighbour to merge with.
+        let ours = pieces.len() > first;
+        match pieces.last_mut() {
+            Some(last) if ours && last.seen_through == seen_through => last.hi = to,
+            _ => pieces.push(Piece {
+                lo: from,
+                hi: to,
+                hidden: false,
+                seen_through,
+            }),
+        }
+        from = to;
+    }
+    Ok(())
+}
+
+/// Insert `param` into the sorted `list` unless an equal one is there.
+fn insert_distinct(solver: &mut Solver<'_>, list: &mut Vec<Param>, param: Param) -> GeomResult<()> {
+    let (mut low, mut high) = (0, list.len());
+    while low < high {
+        let mid = low + (high - low) / 2;
+        match solver.cmp(list[mid], param)? {
+            Ordering::Less => low = mid + 1,
+            Ordering::Greater => high = mid,
+            Ordering::Equal => return Ok(()),
+        }
+    }
+    list.insert(low, param);
+    Ok(())
 }
 
 /// Whether `hidden` is the single span `kept`, ends compared exactly.
@@ -289,6 +381,53 @@ fn facing(
         }
     }
     Ok(Some(span))
+}
+
+/// The part of `kept` that a see-through triangle of nonzero image area is
+/// counted over: where its plane is strictly in front, at a kept depth, and
+/// the image point shifted by `δ = (ε, ε²)` is inside its image. The image
+/// sides are perturbed as for the caps, so an edge running along a side of
+/// the triangle is decided by the side the shifted point lies on.
+fn see_through(
+    solver: &mut Solver<'_>,
+    scene: &Scene<'_>,
+    tri: &Tri,
+    kept: Span,
+) -> GeomResult<Option<Span>> {
+    let [v0, v1, v2] = tri.v;
+    let clockwise = tri.sigma == Ordering::Less;
+    let (t, neg, lift) = (tri.v, !clockwise, Lift::Own);
+    let in_front = scene.constraint(Kind::PlaneAbove { t, neg, lift }, true);
+    if solver.certainly_nowhere(&in_front) {
+        return Ok(None);
+    }
+    let mut span = kept;
+    for (p, q) in [(v0, v1), (v1, v2), (v2, v0)] {
+        let side = scene.constraint(
+            Kind::ImageSide {
+                p,
+                q,
+                neg: clockwise,
+            },
+            false,
+        );
+        match solver.clip_perturbed(span, &side)? {
+            Some(clipped) => span = clipped,
+            None => return Ok(None),
+        }
+    }
+    let Some(span) = solver.clip(span, &in_front)? else {
+        return Ok(None);
+    };
+    // Its point over the edge must be kept by the near plane, as in `facing`.
+    match scene.near {
+        None => Ok(Some(span)),
+        Some(near) => {
+            let (neg, lift) = (clockwise != scene.perspective, Lift::Near(near));
+            let not_cut = scene.constraint(Kind::PlaneAbove { t, neg, lift }, false);
+            solver.clip(span, &not_cut)
+        }
+    }
 }
 
 /// The parts of `kept` hidden by a triangle seen edge-on.
@@ -453,6 +592,7 @@ mod tests {
             v,
             sigma,
             bounds: Bounds::of(&verts, &v),
+            see_through: false,
         }];
         let ends = [3, 4];
         let edge = DrawEdge {
@@ -473,6 +613,7 @@ mod tests {
             broad: &broad,
             edge_on_occludes,
             perspective: false,
+            count_see_through: true,
         };
         match resolve(&scene, &edge, usize::MAX, &mut Work::default()).expect("resolved") {
             Resolved::Pieces(pieces) => pieces
@@ -540,5 +681,141 @@ mod tests {
         let (a, b) = (p(1.0, 0.0, 0.0), p(2.0, 0.0, 0.0));
         assert_eq!(pieces_with(wall, a, b, true), [(true, true)]);
         assert_eq!(pieces_with(wall, a, b, false), [(false, true)]);
+    }
+
+    /// Triangles, each opaque or see-through, over the edge `a -> b` in plan
+    /// view; returns `(hidden, seen_through, x of the end)` per piece.
+    fn counted(triangles: &[([Point3; 3], bool)], a: Point3, b: Point3) -> Vec<(bool, u32, f64)> {
+        let mut positions = vec![a, b];
+        for (corners, _) in triangles {
+            positions.extend(corners);
+        }
+        let verts: Vec<Vert> = positions.iter().map(|p| Vert::new(*p, &frame())).collect();
+        let tris: Vec<Tri> = triangles
+            .iter()
+            .enumerate()
+            .map(|(i, &(_, see_through))| {
+                let first = 2 + 3 * i as u32;
+                let v = [first, first + 1, first + 2];
+                let sigma = decide(
+                    &Orient2 {
+                        verts: &verts,
+                        a: v[0],
+                        b: v[1],
+                        c: v[2],
+                        perspective: false,
+                    },
+                    &mut 0,
+                )
+                .expect("decided");
+                Tri {
+                    v,
+                    sigma,
+                    bounds: Bounds::of(&verts, &v),
+                    see_through,
+                }
+            })
+            .collect();
+        let ends = [0, 1];
+        let edge = DrawEdge {
+            mesh: 0,
+            local: [0, 1],
+            ends,
+            kind: axiolid_mesh_hidden_lines_contract::EdgeKind::Boundary,
+            bounds: Bounds::of(&verts, &ends),
+        };
+        let broad = Broad::build(&tris, BroadPhase::Tree);
+        let scene = Scene {
+            verts: &verts,
+            tris: &tris,
+            near: None,
+            far: None,
+            region: None,
+            caps: &[],
+            broad: &broad,
+            edge_on_occludes: true,
+            perspective: false,
+            count_see_through: true,
+        };
+        let mut solver = Solver::new(&verts, 0, 1);
+        let Resolved::Pieces(pieces) =
+            resolve_with(&mut solver, &scene, &edge, usize::MAX, &mut 0).expect("resolved")
+        else {
+            panic!("expected pieces");
+        };
+        pieces
+            .iter()
+            .map(|piece| {
+                let x = match piece.hi {
+                    Param::One => b.x,
+                    _ => {
+                        crate::output::endpoint(&verts, 0, 1, piece.hi)
+                            .expect("finite")
+                            .x
+                    }
+                };
+                (piece.hidden, piece.seen_through, x)
+            })
+            .collect()
+    }
+
+    /// The pane `[1,3] x [1,5]` at depth 1 as its two triangles, sharing the
+    /// diagonal from `(1,1)` to `(3,5)`.
+    fn pane(see_through: bool) -> [([Point3; 3], bool); 2] {
+        [
+            (
+                [p(1.0, 1.0, 1.0), p(3.0, 1.0, 1.0), p(3.0, 5.0, 1.0)],
+                see_through,
+            ),
+            (
+                [p(1.0, 1.0, 1.0), p(3.0, 5.0, 1.0), p(1.0, 5.0, 1.0)],
+                see_through,
+            ),
+        ]
+    }
+
+    #[test]
+    fn a_see_through_diagonal_above_an_edge_is_counted_once() {
+        // Along the diagonal itself, and across it.
+        let along = counted(&pane(true), p(1.0, 1.0, 0.0), p(3.0, 5.0, 0.0));
+        assert_eq!(along, [(false, 1, 3.0)]);
+        let across = counted(&pane(true), p(0.0, 4.0, 0.0), p(4.0, 4.0, 0.0));
+        assert_eq!(across, [(false, 0, 1.0), (false, 1, 3.0), (false, 0, 4.0)]);
+    }
+
+    #[test]
+    fn a_see_through_triangle_at_equal_depth_or_behind_is_not_counted() {
+        let at = counted(&pane(true), p(0.0, 4.0, 1.0), p(4.0, 4.0, 1.0));
+        assert_eq!(at, [(false, 0, 4.0)]);
+        let above = counted(&pane(true), p(0.0, 4.0, 2.0), p(4.0, 4.0, 2.0));
+        assert_eq!(above, [(false, 0, 4.0)]);
+    }
+
+    #[test]
+    fn a_see_through_triangle_seen_edge_on_neither_counts_nor_hides() {
+        let wall = [p(0.0, 4.0, 1.0), p(4.0, 4.0, 1.0), p(2.0, 4.0, 3.0)];
+        let (a, b) = (p(1.0, 4.0, 0.0), p(2.0, 4.0, 0.0));
+        assert_eq!(counted(&[(wall, true)], a, b), [(false, 0, 2.0)]);
+        assert_eq!(counted(&[(wall, false)], a, b), [(true, 0, 2.0)]);
+    }
+
+    #[test]
+    fn see_through_triangles_behind_an_occluder_leave_it_hidden() {
+        // An opaque sheet [0,2] x [3,5] at depth 2 above the pane: the edge is
+        // hidden for x in [0,2] in one piece, then seen through the pane.
+        let mut scene = pane(true).to_vec();
+        scene.push((
+            [p(0.0, 3.0, 2.0), p(2.0, 3.0, 2.0), p(2.0, 5.0, 2.0)],
+            false,
+        ));
+        scene.push((
+            [p(0.0, 3.0, 2.0), p(2.0, 5.0, 2.0), p(0.0, 5.0, 2.0)],
+            false,
+        ));
+        let pieces = counted(&scene, p(0.0, 4.0, 0.0), p(4.0, 4.0, 0.0));
+        assert_eq!(pieces, [(true, 0, 2.0), (false, 1, 3.0), (false, 0, 4.0)]);
+        // The same pane opaque hides instead.
+        let opaque = counted(&pane(false), p(0.0, 4.0, 0.0), p(4.0, 4.0, 0.0));
+        assert_eq!(opaque, [(false, 0, 1.0), (true, 0, 3.0), (false, 0, 4.0)]);
     }
 }

@@ -2,11 +2,11 @@
 
 use axiolid_contracts::{
     Backend, BackendDescriptor, BackendId, CancellationGranularity, ExecutionOptions,
-    ExecutionTarget, GeomError, Operation, ScratchRequirement,
+    ExecutionTarget, GeomError, ScratchRequirement,
 };
 use axiolid_mesh_hidden_lines_contract::{
     HiddenLineError, HiddenLineEvidence, HiddenLineOutcome, HiddenLineRequest, HiddenLineSegment,
-    MeshHiddenLines, SourceEdge, ViewProjection, Visibility,
+    MeshHiddenLines, Occlusion, SourceEdge, ViewProjection, Visibility,
 };
 
 use crate::broad::{Broad, BroadPhase};
@@ -15,7 +15,6 @@ use crate::groups::resolve_groups;
 use crate::occlusion::{resolve, Resolved, Scene, Work};
 use crate::output::endpoint;
 use crate::prepare::{prepare, Prepared, ResourceNames, SharedLimits};
-use crate::view::require_opaque;
 
 /// Portable exact hidden-line provider for orthographic and perspective views.
 ///
@@ -32,6 +31,10 @@ use crate::view::require_opaque;
 /// point); a solid wholly beyond the plane is removed: it neither occludes
 /// nor is drawn. A failure to produce an endpoint (a coordinate beyond the
 /// binary64 range) is `Degenerate` and names the mesh of the edge.
+///
+/// A see-through triangle (ADR 0111) hides nothing and is counted in the
+/// `seen_through` of the visible pieces behind it; the cap of a cut solid is
+/// decided from all of its triangles and occludes whatever their flags.
 #[derive(Debug, Default, Clone, Copy)]
 pub struct ScalarHiddenLines;
 
@@ -72,12 +75,15 @@ impl MeshHiddenLines for ScalarHiddenLines {
         )
     }
 
+    fn supports_occlusion(&self, occlusion: Occlusion) -> bool {
+        matches!(occlusion, Occlusion::Opaque | Occlusion::SeeThrough)
+    }
+
     fn hidden_lines(
         &self,
         request: &HiddenLineRequest<'_>,
         options: &ExecutionOptions,
     ) -> Result<HiddenLineOutcome, HiddenLineError> {
-        require_opaque(request.meshes, Self::ID, Operation::MeshHiddenLines)?;
         draw(BroadPhase::Tree, request, options)
     }
 }
@@ -163,8 +169,14 @@ fn draw(
         broad: &broad,
         edge_on_occludes: true,
         perspective: request.view.projection == ViewProjection::Perspective,
+        count_see_through: true,
     };
     let mut evidence = HiddenLineEvidence::input_mesh(request.meshes.len(), total_triangles);
+    evidence.see_through_triangles = request
+        .meshes
+        .iter()
+        .map(|entry| entry.occlusion.see_through_count())
+        .sum();
     evidence.selected_edges = edges.len();
     let mut work = Work::default();
     let mut segments: Vec<HiddenLineSegment> = Vec::new();
@@ -194,7 +206,7 @@ fn draw(
         };
         let first = segments.len();
         // A collapsed piece since the last pushed segment: its neighbours
-        // of one visibility are one piece after rounding.
+        // of one visibility and count are one piece after rounding.
         let mut collapsed = false;
         for piece in pieces {
             if piece.hidden && !request.edges.hidden {
@@ -219,7 +231,7 @@ fn draw(
             if collapsed && segments.len() > first {
                 let count = segments.len();
                 let last = &mut segments[count - 1];
-                if last.visibility == visibility {
+                if last.visibility == visibility && last.seen_through == piece.seen_through {
                     last.end = to;
                     collapsed = false;
                     continue;
@@ -233,15 +245,19 @@ fn draw(
                 .into());
             }
             segments.try_reserve(1).map_err(|_| memory())?;
-            segments.push(HiddenLineSegment::new(
-                source, edge.kind, visibility, from, to,
-            ));
+            segments.push(
+                HiddenLineSegment::new(source, edge.kind, visibility, from, to)
+                    .with_seen_through(piece.seen_through),
+            );
         }
     }
     for segment in &segments {
         match segment.visibility {
             Visibility::Hidden => evidence.hidden_segments += 1,
             _ => evidence.visible_segments += 1,
+        }
+        if segment.seen_through > 0 {
+            evidence.seen_through_segments += 1;
         }
     }
     evidence.candidate_pairs = work.candidate_pairs;
@@ -282,16 +298,15 @@ impl MeshHiddenLines for ScanHiddenLines {
         )
     }
 
+    fn supports_occlusion(&self, occlusion: Occlusion) -> bool {
+        matches!(occlusion, Occlusion::Opaque | Occlusion::SeeThrough)
+    }
+
     fn hidden_lines(
         &self,
         request: &HiddenLineRequest<'_>,
         options: &ExecutionOptions,
     ) -> Result<HiddenLineOutcome, HiddenLineError> {
-        require_opaque(
-            request.meshes,
-            self.descriptor().id,
-            Operation::MeshHiddenLines,
-        )?;
         draw(BroadPhase::Scan, request, options)
     }
 }
