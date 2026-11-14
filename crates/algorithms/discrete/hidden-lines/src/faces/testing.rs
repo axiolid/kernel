@@ -117,6 +117,7 @@ impl Setup {
         Work {
             budget: PairBudget::new(max_pairs, PAIRS),
             escalations: 0,
+            stacks: Default::default(),
         }
     }
 

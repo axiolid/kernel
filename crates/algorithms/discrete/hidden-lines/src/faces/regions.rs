@@ -1,8 +1,10 @@
 //! Regions from the labelled arrangement.
 //!
-//! A piece is a boundary piece when its two labels differ. For each source
-//! `K` its half-edges are the boundary pieces with `K` on exactly one side,
-//! directed so that `K` is on the left. `trace` closes them into rings and
+//! A piece is a boundary piece when its two labels differ in their classes:
+//! a source and the stack seen through it (ADR 0111), the stack empty unless
+//! the source is see-through. For each class `K` its half-edges are the
+//! boundary pieces with `K` on exactly one side, directed so that `K` is on
+//! the left; a region is a region of one class. `trace` closes them into rings and
 //! nests holes. A ring vertex is kept unless exactly two boundary pieces, of
 //! any source, meet there in a straight line, so neighbouring regions share
 //! bit-identical vertices.
@@ -31,9 +33,9 @@ use axiolid_exact_arrangement::{
     canonical_rotation, check_winding, sequence_order, snap_round, trace, Arrangement, ExactPoints,
     HalfEdge, Location, PieceId, PointId, Segment, Snapped, TracedRegion, TracedRing, VertexId,
 };
-use axiolid_mesh_hidden_lines_contract::{FaceSource, VisibleRegion};
+use axiolid_mesh_hidden_lines_contract::{BehindSurface, FaceSource, VisibleRegion};
 
-use super::label::{Key, Label};
+use super::label::{Class, Label};
 use super::{Error, Faces, Work};
 
 /// Limits on the output.
@@ -41,6 +43,7 @@ use super::{Error, Faces, Work};
 pub(crate) struct OutputLimits {
     pub max_regions: usize,
     pub max_region_vertices: usize,
+    pub max_behind_surfaces: usize,
 }
 
 /// The side `left` (`false`: right) of a piece, as an index.
@@ -169,7 +172,7 @@ pub(crate) fn build(
     work: &mut Work,
     options: &ExecutionOptions,
 ) -> Result<Built, Error> {
-    let boundary: Vec<bool> = labels.iter().map(|[l, r]| l.keys != r.keys).collect();
+    let boundary: Vec<bool> = labels.iter().map(|[l, r]| !l.same_classes(r)).collect();
     let keep = kept_vertices(points, arrangement, &boundary)?;
     let sources = exact_sources(
         faces,
@@ -215,7 +218,7 @@ pub(crate) fn build(
     let mut boundary_after = vec![false; snapped.arrangement.pieces.len()];
     let mut nets = Vec::with_capacity(sources.len());
     for (source, chain) in sources.iter().zip(&chains) {
-        let id = faces.ids[source.key.0];
+        let id = faces.ids[source.key.0 .0];
         let net = snapped
             .class_boundary(chain)
             .map_err(|error| Error::mesh(id, error))?;
@@ -234,13 +237,20 @@ pub(crate) fn build(
         collapsed_holes: 0,
     };
     let mut vertex_total = 0usize;
+    let mut behind_total = 0usize;
     for (((source, net), element_rings), chain) in
         sources.iter().zip(&nets).zip(&chain_rings).zip(&chains)
     {
         options.check_cancelled()?;
-        let (mesh, kind) = source.key;
+        let ((mesh, kind), stack) = source.key;
         let id = faces.ids[mesh];
         let blame = |error: GeomError| Error::mesh(id, error);
+        let behind: Vec<BehindSurface> = work
+            .stacks
+            .get(stack)
+            .iter()
+            .map(|&(mesh, source, layer)| BehindSurface::new(faces.ids[mesh], source, layer))
+            .collect();
 
         // Which exact rings and regions survive, and which exact regions
         // each snapped piece was cut from. Each ring is netted alone: a ring
@@ -341,26 +351,39 @@ pub(crate) fn build(
             if kind == FaceSource::Cap {
                 listed.clear();
             }
-            built
-                .regions
-                .push(VisibleRegion::new(id, kind, outer, holes, listed));
+            behind_total += behind.len();
+            if behind_total > limits.max_behind_surfaces {
+                return Err(Error::from(GeomError::BudgetExceeded {
+                    resource: "visible-face behind surfaces",
+                }));
+            }
+            built.regions.push(
+                VisibleRegion::new(id, kind, outer, holes, listed).with_behind(behind.clone()),
+            );
         }
     }
 
     let position = |id| faces.ids.iter().position(|&m| m == id);
+    let behind_key = |b: &BehindSurface| (b.layer, position(b.mesh), b.source);
     built.regions.sort_by(|a, b| {
         position(a.mesh)
             .cmp(&position(b.mesh))
             .then(a.source.cmp(&b.source))
             .then_with(|| sequence_order(&a.outer, &b.outer))
+            .then_with(|| {
+                a.behind
+                    .iter()
+                    .map(behind_key)
+                    .cmp(b.behind.iter().map(behind_key))
+            })
     });
     Ok(built)
 }
 
-/// A source's exact regions: its rings, their nesting and, per region, the
+/// A class's exact regions: its rings, their nesting and, per region, the
 /// triangles frontmost on its sides.
 struct ExactSource {
-    key: Key,
+    key: Class,
     rings: Vec<TracedRing>,
     traced: Vec<TracedRegion>,
     triangles: Vec<Vec<u32>>,
@@ -378,24 +401,24 @@ fn exact_sources(
     work: &mut Work,
     options: &ExecutionOptions,
 ) -> Result<Vec<ExactSource>, Error> {
-    // Half-edges per source, with the source on their left.
-    let mut half_edges: BTreeMap<Key, Vec<HalfEdge>> = BTreeMap::new();
+    // Half-edges per class, with the class on their left.
+    let mut half_edges: BTreeMap<Class, Vec<HalfEdge>> = BTreeMap::new();
     for (index, [left, right]) in labels.iter().enumerate() {
         if !boundary[index] {
             continue;
         }
         let piece = PieceId(index);
-        for key in &left.keys {
-            if right.keys.binary_search(key).is_err() {
-                half_edges.entry(*key).or_default().push(HalfEdge {
+        for class in left.classes() {
+            if !right.has(&class) {
+                half_edges.entry(class).or_default().push(HalfEdge {
                     piece,
                     forward: true,
                 });
             }
         }
-        for key in &right.keys {
-            if left.keys.binary_search(key).is_err() {
-                half_edges.entry(*key).or_default().push(HalfEdge {
+        for class in right.classes() {
+            if !left.has(&class) {
+                half_edges.entry(class).or_default().push(HalfEdge {
                     piece,
                     forward: false,
                 });
@@ -403,9 +426,9 @@ fn exact_sources(
         }
     }
 
-    // The joins of sides, per source.
+    // The joins of sides, per class.
     let label_of = |at: usize| &labels[at / 2][at % 2];
-    let mut joins: BTreeMap<Key, Vec<(usize, usize)>> = BTreeMap::new();
+    let mut joins: BTreeMap<Class, Vec<(usize, usize)>> = BTreeMap::new();
     for vertex in 0..arrangement.vertices.len() {
         let fan = arrangement.fan(points, VertexId(vertex))?;
         for k in 0..fan.len() {
@@ -415,19 +438,19 @@ fn exact_sources(
             let a = side(p.0, p_out);
             let b = side(q.0, !q_out);
             let (la, lb) = (label_of(a), label_of(b));
-            if la.keys != lb.keys {
+            if !la.same_classes(lb) {
                 return Err(disagreement(faces, la, lb));
             }
-            for key in &la.keys {
-                joins.entry(*key).or_default().push((a, b));
+            for class in la.classes() {
+                joins.entry(class).or_default().push((a, b));
             }
         }
     }
     for (index, [left, right]) in labels.iter().enumerate() {
-        for key in &left.keys {
-            if right.keys.binary_search(key).is_ok() {
+        for class in left.classes() {
+            if right.has(&class) {
                 joins
-                    .entry(*key)
+                    .entry(class)
                     .or_default()
                     .push((side(index, true), side(index, false)));
             }
@@ -437,7 +460,7 @@ fn exact_sources(
     let mut sources = Vec::with_capacity(half_edges.len());
     for (key, half_edges) in &half_edges {
         options.check_cancelled()?;
-        let (mesh, _) = *key;
+        let ((mesh, _), _) = *key;
         let blame = |error: GeomError| Error::mesh(faces.ids[mesh], error);
         let (rings, traced) = trace(
             points,
@@ -515,7 +538,7 @@ fn exact_sources(
                     placed
                 }
             };
-            for &t in label_of(node).fronts_of(key) {
+            for &t in label_of(node).fronts_of(&key.0) {
                 triangles[region].push((t - faces.firsts[mesh]) as u32);
             }
         }

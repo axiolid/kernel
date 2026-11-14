@@ -17,14 +17,19 @@
 //!    the crop box. Hidden pieces of edges are dropped: a hidden piece lies
 //!    under a frontmost surface that either covers both of its sides, so both
 //!    carry its key, or covers one side only, so the piece lies on that
-//!    surface's own visible edge, which is kept.
+//!    surface's own visible edge, which is kept. A see-through triangle
+//!    hides nothing (ADR 0111), so every edge across which what is seen
+//!    through it changes stays in; an edge hidden by an opaque surface lies
+//!    behind the end of every stack there.
 //! 3. `axiolid-exact-arrangement` cuts the segments into pieces.
 //! 4. `label` decides, for each side of each piece, the frontmost sources at
 //!    a point just beside it (`side`): an infinitesimal point
 //!    `A + ε·d + ε²·n` whose affine signs are lexicographic and exact. Equal
 //!    depth keeps every tied source; a triangle seen edge-on covers nothing;
 //!    the cap of a cut solid is a surface at depth `near` found by ray
-//!    parity.
+//!    parity. A see-through front source also gets the stack seen through it,
+//!    and a face group that mixes see-through and opaque triangles is
+//!    refused.
 //! 5. `regions` closes the boundary pieces of each source into exact rings,
 //!    nests holes and attributes the frontmost triangles; then snap-rounds
 //!    the edges of all rings together (`axiolid_exact_arrangement::snap_round`,
@@ -58,23 +63,26 @@ use std::cmp::Ordering;
 use axiolid_contracts::{ExecutionOptions, GeomError, GeomResult};
 use axiolid_core::Aabb2;
 use axiolid_exact_arrangement::PairBudget;
-use axiolid_mesh_hidden_lines_contract::{FaceGroup, HiddenLineMesh, MeshId};
+use axiolid_mesh_hidden_lines_contract::{FaceGroup, HiddenLineMesh, MeshId, Occlusion};
 
 use crate::broad::Broad;
 use crate::caps::Cap;
 use crate::decide::decide;
-use crate::edges::Tri;
+use crate::edges::{occlusion_flags, Tri};
 use crate::groups::resolve_groups;
 use crate::occlusion::{kept_constraints, Scene};
 use crate::prepare::Prepared;
 use crate::recipe::{Constraint, ValueSign};
 use crate::view::Vert;
+use label::Stacks;
 use side::{Form, Plane};
 
 /// Counters shared by all steps of one request.
 pub(crate) struct Work {
     pub budget: PairBudget,
     pub escalations: usize,
+    /// The stacks seen through see-through triangles (ADR 0111).
+    pub stacks: Stacks,
 }
 
 /// The prepared scene with what the face operation adds to it.
@@ -104,6 +112,40 @@ pub(crate) struct Faces<'a> {
     pub crop: Vec<Form>,
 }
 
+/// Refuse a mesh with see-through triangles whose face group holds both
+/// see-through and opaque triangles (ADR 0111): a region's source must say
+/// whether it occludes. `groups` are the mesh's resolved groups.
+fn uniform_groups(entry: &HiddenLineMesh<'_>, groups: &[FaceGroup]) -> Result<(), Error> {
+    if !entry.occlusion.has_see_through() {
+        return Ok(());
+    }
+    let Some(flags) = occlusion_flags(entry)? else {
+        return Ok(());
+    };
+    let mut pairs: Vec<(FaceGroup, bool)> = Vec::new();
+    pairs
+        .try_reserve_exact(groups.len())
+        .map_err(|_| Error::from(GeomError::BudgetExceeded { resource: "memory" }))?;
+    pairs.extend(
+        groups
+            .iter()
+            .zip(flags)
+            .map(|(&group, &flag)| (group, flag == Occlusion::SeeThrough)),
+    );
+    pairs.sort_unstable();
+    pairs.dedup();
+    match pairs.windows(2).find(|pair| pair[0].0 == pair[1].0) {
+        Some(pair) => Err(Error::mesh(
+            entry.id,
+            GeomError::InvalidInput(format!(
+                "face group {} mixes see-through and opaque triangles",
+                pair[0].0 .0
+            )),
+        )),
+        None => Ok(()),
+    }
+}
+
 impl<'a> Faces<'a> {
     pub(crate) fn new(
         prepared: &'a Prepared,
@@ -119,6 +161,9 @@ impl<'a> Faces<'a> {
         for (index, (entry, range)) in meshes.iter().zip(&prepared.ranges).enumerate() {
             mesh_of.resize(mesh_of.len() + range.triangles.len(), index);
             group_of.extend(resolve_groups(entry, options, &mut work.escalations)?);
+        }
+        for (entry, range) in meshes.iter().zip(&prepared.ranges) {
+            uniform_groups(entry, &group_of[range.triangles.clone()])?;
         }
         let mut faces = Self {
             verts,

@@ -1,12 +1,11 @@
-//! See-through triangles (ADR 0111). The hidden-line providers claim them
-//! and pass the see-through suite; flags that are all opaque change nothing,
-//! evidence included. A provider that does not honour them keeps
-//! `supports_occlusion` at its default and refuses them by name when called
-//! directly.
+//! See-through triangles (ADR 0111). Every provider claims them and passes
+//! the see-through suite; flags that are all opaque change nothing, evidence
+//! and exact work included. A provider that claims them and lets them hide
+//! is refused at registration.
 
 mod common;
 
-use axiolid_contracts::{Backend, BackendDescriptor, ExecutionOptions, GeomError, Operation};
+use axiolid_contracts::{Backend, BackendDescriptor, ExecutionOptions, GeomError};
 use axiolid_core::Tolerance;
 use axiolid_dispatch::{MeshHiddenLinesRegistry, MeshVisibleFacesRegistry};
 use axiolid_hidden_lines::{
@@ -20,7 +19,9 @@ use axiolid_mesh_hidden_lines_contract::{
     MeshHiddenLines, MeshId, MeshRole, MeshVisibleFaces, Occlusion, TriangleOcclusion, View,
     VisibleFaceOutcome, VisibleFaceRequest,
 };
-use common::{box_mesh, plan_frame, scene, solids, try_draw_with, views, FACE_LIMITS, LIMITS};
+use common::{
+    box_mesh, plan_frame, scene, solids, try_draw_with, try_faces, views, FACE_LIMITS, LIMITS,
+};
 
 fn options() -> ExecutionOptions {
     ExecutionOptions::new(Tolerance::new(1e-9, 1e-9).expect("tolerance"))
@@ -30,6 +31,17 @@ fn options() -> ExecutionOptions {
 /// the request with every flag dropped.
 #[derive(Debug)]
 struct Ignores;
+
+fn opaque<'a>(meshes: &[HiddenLineMesh<'a>]) -> Vec<HiddenLineMesh<'a>> {
+    meshes
+        .iter()
+        .map(|entry| {
+            let mut entry = *entry;
+            entry.occlusion = TriangleOcclusion::AllOpaque;
+            entry
+        })
+        .collect()
+}
 
 impl Backend for Ignores {
     fn descriptor(&self) -> BackendDescriptor {
@@ -47,18 +59,10 @@ impl MeshHiddenLines for Ignores {
         request: &HiddenLineRequest<'_>,
         options: &ExecutionOptions,
     ) -> Result<HiddenLineOutcome, HiddenLineError> {
-        let meshes: Vec<HiddenLineMesh<'_>> = request
-            .meshes
-            .iter()
-            .map(|entry| {
-                let mut entry = *entry;
-                entry.occlusion = TriangleOcclusion::AllOpaque;
-                entry
-            })
-            .collect();
-        let mut opaque = request.clone();
-        opaque.meshes = &meshes;
-        ScalarHiddenLines.hidden_lines(&opaque, options)
+        let meshes = opaque(request.meshes);
+        let mut request = request.clone();
+        request.meshes = &meshes;
+        ScalarHiddenLines.hidden_lines(&request, options)
     }
 }
 
@@ -72,7 +76,10 @@ impl MeshVisibleFaces for Ignores {
         request: &VisibleFaceRequest<'_>,
         options: &ExecutionOptions,
     ) -> Result<VisibleFaceOutcome, HiddenLineError> {
-        ScalarVisibleFaces.visible_faces(request, options)
+        let meshes = opaque(request.meshes);
+        let mut request = request.clone();
+        request.meshes = &meshes;
+        ScalarVisibleFaces.visible_faces(&request, options)
     }
 }
 
@@ -103,13 +110,6 @@ fn register_conformant_refuses_an_unverified_see_through_claim() {
         }
     )));
     assert_eq!(faces.providers().count(), 0);
-}
-
-fn is_named_refusal(error: &GeomError, operation: Operation) -> bool {
-    matches!(
-        error,
-        GeomError::UnsupportedInput { operation: o, input: "see-through triangles", .. } if *o == operation
-    )
 }
 
 #[test]
@@ -185,25 +185,78 @@ fn a_short_occlusion_slice_is_refused_by_the_provider() {
 }
 
 #[test]
-fn visible_face_providers_that_do_not_claim_see_through_refuse_it_by_name() {
-    let mesh = box_mesh([0.0, 0.0, 0.0], [1.0, 1.0, 1.0]);
-    let mut flags = [Occlusion::Opaque; 12];
-    flags[3] = Occlusion::SeeThrough;
-    let meshes = [HiddenLineMesh::new(MeshId(1), MeshRole::Solid, &mesh).with_occlusion(&flags)];
-    let view = View::new(plan_frame());
+fn the_visible_face_providers_pass_the_see_through_suite() {
     let faces: [&dyn MeshVisibleFaces; 3] = [
         &ScalarVisibleFaces,
         &ScanVisibleFaces,
         &UnprunedVisibleFaces,
     ];
     for provider in faces {
-        assert!(!provider.supports_occlusion(Occlusion::SeeThrough));
-        let request = VisibleFaceRequest::new(&meshes, view, FACE_LIMITS);
-        let error = provider
+        let report = SeeThroughConformanceSuite::run_faces(provider);
+        assert!(report.claimed);
+        assert!(report.is_success(), "{report}");
+    }
+    let mut registry = MeshVisibleFacesRegistry::new();
+    registry
+        .register_conformant(0, ScalarVisibleFaces::new())
+        .unwrap_or_else(|report| panic!("{report}"));
+}
+
+/// The seeded scenes of the face oracle in every view, with and without a
+/// near plane: flags that are all opaque give the same outcome, evidence and
+/// escalations included, as no flags.
+#[test]
+fn opaque_flags_change_no_visible_faces() {
+    for seed in 0..12 {
+        let meshes = scene(seed);
+        let plain = solids(&meshes);
+        let flags: Vec<Vec<Occlusion>> = meshes
+            .iter()
+            .map(|m| vec![Occlusion::Opaque; m.triangle_count()])
+            .collect();
+        let flagged: Vec<HiddenLineMesh<'_>> = plain
+            .iter()
+            .zip(&flags)
+            .map(|(entry, flags)| entry.with_occlusion(flags))
+            .collect();
+        for (name, frame) in views() {
+            for near in [None, Some(0.5)] {
+                let view = near.map_or(View::new(frame), |near| View::new(frame).with_near(near));
+                let a = try_faces(&ScalarVisibleFaces, &plain, view, None);
+                let b = try_faces(&ScalarVisibleFaces, &flagged, view, None);
+                assert_eq!(a, b, "seed {seed}, {name}, near {near:?}");
+                if let Ok(outcome) = &b {
+                    assert_eq!(outcome.evidence.see_through_triangles, 0);
+                    assert_eq!(outcome.evidence.behind_surfaces, 0);
+                    assert!(outcome.regions.iter().all(|r| r.behind.is_empty()));
+                }
+            }
+        }
+    }
+}
+
+#[test]
+fn a_short_occlusion_slice_or_a_mixed_group_is_refused_by_the_face_provider() {
+    let mesh = box_mesh([0.0, 0.0, 0.0], [1.0, 1.0, 1.0]);
+    let short = [Occlusion::SeeThrough; 11];
+    let mut mixed = [Occlusion::Opaque; 12];
+    mixed[3] = Occlusion::SeeThrough;
+    for flags in [&short[..], &mixed[..]] {
+        let meshes = [
+            HiddenLineMesh::new(MeshId(1), MeshRole::Solid, &mesh),
+            HiddenLineMesh::new(MeshId(2), MeshRole::Solid, &mesh).with_occlusion(flags),
+        ];
+        let request = VisibleFaceRequest::new(
+            &meshes,
+            View::new(plan_frame()),
+            FACE_LIMITS.with_max_behind_surfaces(16),
+        );
+        let error = ScalarVisibleFaces
             .visible_faces(&request, &options())
             .expect_err("refused");
+        assert_eq!(error.mesh, Some(MeshId(2)));
         assert!(
-            is_named_refusal(&error.error, Operation::MeshVisibleFaces),
+            matches!(error.error, GeomError::InvalidInput(_)),
             "{error:?}"
         );
     }

@@ -8,8 +8,8 @@ use axiolid_contracts::{
 };
 use axiolid_exact_arrangement::{arrange, PairBudget, Segment};
 use axiolid_mesh_hidden_lines_contract::{
-    FaceGroups, HiddenLineError, MeshVisibleFaces, VisibleFaceEvidence, VisibleFaceOutcome,
-    VisibleFaceRequest,
+    FaceGroups, HiddenLineError, MeshVisibleFaces, Occlusion, VisibleFaceEvidence,
+    VisibleFaceOutcome, VisibleFaceRequest,
 };
 
 use super::intersect::intersection_segments;
@@ -20,7 +20,7 @@ use super::segments::{clip_segments, crop_segments, edge_segments, PAIRS};
 use super::{Faces, Work};
 use crate::broad::{Broad, BroadPhase};
 use crate::prepare::{prepare, Prepared, ResourceNames, SharedLimits};
-use crate::view::{require_opaque, require_orthographic};
+use crate::view::require_orthographic;
 
 /// Bytes of scratch per source triangle that the provider declares.
 const SCRATCH_PER_ELEMENT: usize = 3072;
@@ -76,12 +76,15 @@ impl MeshVisibleFaces for ScalarVisibleFaces {
         CancellationGranularity::Incremental
     }
 
+    fn supports_occlusion(&self, occlusion: Occlusion) -> bool {
+        matches!(occlusion, Occlusion::Opaque | Occlusion::SeeThrough)
+    }
+
     fn visible_faces(
         &self,
         request: &VisibleFaceRequest<'_>,
         options: &ExecutionOptions,
     ) -> Result<VisibleFaceOutcome, HiddenLineError> {
-        require_opaque(request.meshes, Self::ID, Operation::MeshVisibleFaces)?;
         require_orthographic(&request.view, Self::ID, Operation::MeshVisibleFaces)?;
         run(BroadPhase::Tree, true, request, options)
     }
@@ -111,16 +114,15 @@ impl MeshVisibleFaces for ScanVisibleFaces {
         CancellationGranularity::Incremental
     }
 
+    fn supports_occlusion(&self, occlusion: Occlusion) -> bool {
+        matches!(occlusion, Occlusion::Opaque | Occlusion::SeeThrough)
+    }
+
     fn visible_faces(
         &self,
         request: &VisibleFaceRequest<'_>,
         options: &ExecutionOptions,
     ) -> Result<VisibleFaceOutcome, HiddenLineError> {
-        require_opaque(
-            request.meshes,
-            self.descriptor().id,
-            Operation::MeshVisibleFaces,
-        )?;
         require_orthographic(
             &request.view,
             self.descriptor().id,
@@ -156,16 +158,15 @@ impl MeshVisibleFaces for UnprunedVisibleFaces {
         CancellationGranularity::Incremental
     }
 
+    fn supports_occlusion(&self, occlusion: Occlusion) -> bool {
+        matches!(occlusion, Occlusion::Opaque | Occlusion::SeeThrough)
+    }
+
     fn visible_faces(
         &self,
         request: &VisibleFaceRequest<'_>,
         options: &ExecutionOptions,
     ) -> Result<VisibleFaceOutcome, HiddenLineError> {
-        require_opaque(
-            request.meshes,
-            self.descriptor().id,
-            Operation::MeshVisibleFaces,
-        )?;
         require_orthographic(
             &request.view,
             self.descriptor().id,
@@ -220,6 +221,7 @@ fn run(
     let mut work = Work {
         budget: PairBudget::new(limits.max_candidate_pairs, PAIRS),
         escalations: *escalations,
+        stacks: Default::default(),
     };
     let faces = Faces::new(
         &prepared,
@@ -268,8 +270,8 @@ fn run(
         }
         let ends = piece.ends.map(|v| arrangement.vertices[v.0].point);
         let label = label_piece(&faces, &points.store, ends, &mut work)?;
-        evidence.tied_sides += label.iter().filter(|l| l.keys.len() > 1).count();
-        if label[0].keys != label[1].keys && piece.segments[0] < outline_segments {
+        evidence.tied_sides += label.iter().filter(|l| l.keys.len() > 1 || l.tied).count();
+        if !label[0].same_classes(&label[1]) && piece.segments[0] < outline_segments {
             evidence.boundary_segments += 1;
         }
         labels.push(label);
@@ -283,6 +285,7 @@ fn run(
         OutputLimits {
             max_regions: limits.max_regions,
             max_region_vertices: limits.max_region_vertices,
+            max_behind_surfaces: limits.max_behind_surfaces,
         },
         per_element,
         &mut work,
@@ -306,5 +309,11 @@ fn run(
     evidence.rerouted_edges = built.rerouted_edges;
     evidence.collapsed_regions = built.collapsed_regions;
     evidence.collapsed_holes = built.collapsed_holes;
+    evidence.see_through_triangles = request
+        .meshes
+        .iter()
+        .map(|entry| entry.occlusion.see_through_count())
+        .sum();
+    evidence.behind_surfaces = regions.iter().map(|r| r.behind.len()).sum();
     Ok(VisibleFaceOutcome::new(request.view, regions, evidence))
 }

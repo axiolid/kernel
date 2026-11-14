@@ -10,7 +10,7 @@
 use axiolid_contracts::{BackendId, GeomError, Operation};
 use axiolid_core::{Frame3, Point3};
 use axiolid_exact::{Arith, Dyadic, Interval};
-use axiolid_mesh_hidden_lines_contract::{HiddenLineError, HiddenLineMesh, View, ViewProjection};
+use axiolid_mesh_hidden_lines_contract::{HiddenLineError, View, ViewProjection};
 
 /// The refusal of a view this crate does not draw, by name. The providers
 /// leave `supports_projection` at its default, so a registry does not reach
@@ -27,26 +27,6 @@ pub(crate) fn require_orthographic(
         backend,
         operation,
         input: "perspective view",
-    }
-    .into())
-}
-
-/// The refusal of see-through triangles by a provider that does not honour
-/// them, by name. Such a provider leaves `supports_occlusion` at its default,
-/// so a registry does not reach it with them (ADR 0111); a direct call is
-/// refused here.
-pub(crate) fn require_opaque(
-    meshes: &[HiddenLineMesh<'_>],
-    backend: BackendId,
-    operation: Operation,
-) -> Result<(), HiddenLineError> {
-    if !meshes.iter().any(|entry| entry.occlusion.has_see_through()) {
-        return Ok(());
-    }
-    Err(GeomError::UnsupportedInput {
-        backend,
-        operation,
-        input: "see-through triangles",
     }
     .into())
 }

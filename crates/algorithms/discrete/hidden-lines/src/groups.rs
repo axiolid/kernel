@@ -22,7 +22,7 @@ use axiolid_guarantees::Sign;
 use axiolid_mesh_hidden_lines_contract::{FaceGroup, FaceGroups, HiddenLineError, HiddenLineMesh};
 
 use crate::decide::decide;
-use crate::edges::{normal, triangle_points};
+use crate::edges::{normal, occlusion_flags, triangle_points};
 
 /// The group of every triangle of `entry`.
 ///
@@ -137,6 +137,8 @@ fn planar(
     let refuse = |error: GeomError| HiddenLineError::mesh(entry.id, error);
     let mesh = entry.mesh;
     let count = mesh.triangle_count();
+    // Triangles of different occlusion are never joined (ADR 0111).
+    let flags = occlusion_flags(entry)?;
     let mut records: Vec<(u32, u32, u32)> = Vec::new();
     records.try_reserve_exact(3 * count).map_err(|_| memory())?;
     let mut parent: Vec<u32> = Vec::new();
@@ -166,6 +168,7 @@ fn planar(
             continue;
         };
         if t1 == t2
+            || flags.is_some_and(|flags| flags[t1 as usize] != flags[t2 as usize])
             || !same_plane_and_facing(&points(t1), &points(t2), escalations).map_err(refuse)?
         {
             continue;
@@ -243,5 +246,22 @@ mod tests {
         let error = resolve_groups(&entry, &options().with_cancellation(token), &mut 0)
             .expect_err("cancelled");
         assert_eq!(error.error, GeomError::Cancelled);
+    }
+
+    #[test]
+    fn planar_groups_join_only_triangles_of_one_occlusion() {
+        use axiolid_mesh_hidden_lines_contract::Occlusion::{Opaque, SeeThrough};
+        let mesh = square();
+        for (flags, expected) in [
+            ([Opaque, SeeThrough], [FaceGroup(0), FaceGroup(1)]),
+            ([SeeThrough, SeeThrough], [FaceGroup(0), FaceGroup(0)]),
+            ([Opaque, Opaque], [FaceGroup(0), FaceGroup(0)]),
+        ] {
+            let entry = HiddenLineMesh::new(MeshId(1), MeshRole::Sheet, &mesh)
+                .with_planar_groups()
+                .with_occlusion(&flags);
+            let groups = resolve_groups(&entry, &options(), &mut 0).expect("groups");
+            assert_eq!(groups, expected, "{flags:?}");
+        }
     }
 }

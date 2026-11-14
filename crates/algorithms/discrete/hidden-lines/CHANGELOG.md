@@ -52,9 +52,24 @@ caret rule for `0.x` versions.
   hidden piece is not split. Without a see-through triangle no step of this
   runs: the drawing, the evidence and the exact work are unchanged. A
   `PerTriangle` occlusion slice of the wrong length, or an unknown occlusion
-  mode, is `InvalidInput` naming the mesh. The visible-face providers refuse a
-  request with a see-through triangle by name (`UnsupportedInput`, input
-  `see-through triangles`) and keep `supports_occlusion` at its default.
+  mode, is `InvalidInput` naming the mesh.
+- `ScalarVisibleFaces`, `ScanVisibleFaces` and `UnprunedVisibleFaces` honour
+  see-through triangles and claim them (ADR 0111, #496). A side whose front
+  holds a see-through triangle gets its stack: the other candidates grouped
+  into exact depth layers down to the first one holding an opaque triangle or
+  a cap, found by one linear pass for the occluder and a binary insertion for
+  the layers between; each of these extra depth comparisons counts against
+  `max_candidate_pairs`. A region is a maximal region of one source and one
+  stack, `VisibleRegion::behind` lists the stack without the region's own
+  layer-0 entry, the output breaks a tie of mesh, source and outer ring by
+  `behind`, and `tied_sides` also counts a side with a tie behind its front.
+  The entries are bounded by `max_behind_surfaces` (`BudgetExceeded`,
+  `visible-face behind surfaces`). The prune keeps every edge behind a
+  see-through triangle, since it hides nothing. A face group that mixes
+  see-through and opaque triangles is `InvalidInput` naming the mesh, and
+  `FaceGroups::Planar` joins two triangles only when their occlusion is
+  equal. Without a see-through triangle no extra comparison is made and the
+  regions and evidence are unchanged.
 
 ## [0.1.4] - 2026-11-13
 
