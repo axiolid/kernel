@@ -10,6 +10,9 @@
 //! - **curved**: a wall `6 x 0.3 x 3` less a round window of radius `0.4`
 //!   under a building placement (#235). Its cylinder faces keep the rule
 //!   that stops once the bound is within the request.
+//! - **oblique**: a box `0.4 x 0.5 x 6` intersected with a quarter-turn
+//!   bent tube of radius `0.1` that meets the box's face at 27 degrees at
+//!   the least (#378, #380), so the tube is meshed at 0.457 of the chord.
 //!
 //! Each case is validated before it is timed: the report must be one
 //! certified boolean bound within the request, the all-planar one also
@@ -17,7 +20,7 @@
 //! `1e-10`.
 
 use axiolid_contracts::ExecutionOptions;
-use axiolid_core::{BooleanOperator, Tolerance, Transform2, Transform3, Vec2, Vec3};
+use axiolid_core::{BooleanOperator, Point3, Tolerance, Transform2, Transform3, Vec2, Vec3};
 use axiolid_mesh_boolean_boolmesh::BoolmeshBoolean;
 use axiolid_mesh_compile::deviation::{
     BOOLEAN_ROUNDING_FLOOR, COINCIDENT_OPERANDS, MESH_TO_EXACT, TOLERANCE_READINGS,
@@ -64,10 +67,14 @@ impl Graph {
     }
 
     fn difference(&mut self, left: NodeId, right: NodeId) -> NodeId {
+        self.boolean(left, right, BooleanOperator::Difference)
+    }
+
+    fn boolean(&mut self, left: NodeId, right: NodeId, operator: BooleanOperator) -> NodeId {
         self.push(GeometryNode::SolidOperation(SolidOperation::Boolean {
             left,
             right,
-            operator: BooleanOperator::Difference,
+            operator,
         }))
     }
 
@@ -126,6 +133,25 @@ fn curved() -> (GeometryGraph, NodeId) {
     g.finish(cut)
 }
 
+/// The box and the bent tube of #378, intersected: the tube meets the
+/// box's face obliquely.
+fn oblique() -> (GeometryGraph, NodeId) {
+    let mut g = Graph(GeometryGraphBuilder::new());
+    let block = g.extrusion(rectangle(0.4, 0.5), 6.0);
+    let profile = g.push(GeometryNode::Profile(Profile::Circle(CircleProfile {
+        radius: 0.1,
+        thickness: None,
+    })));
+    let tube = g.push(GeometryNode::SolidOperation(SolidOperation::Revolution {
+        profile,
+        axis_origin: Point3::new(-1.0, 0.0, 0.0),
+        axis_direction: Vec3::NEG_Y,
+        angle: std::f64::consts::FRAC_PI_2,
+    }));
+    let cut = g.boolean(block, tube, BooleanOperator::Intersection);
+    g.finish(cut)
+}
+
 fn deviation_report(c: &mut Criterion) {
     let mut group = c.benchmark_group("deviation/boolean");
     group.sample_size(10);
@@ -133,9 +159,11 @@ fn deviation_report(c: &mut Criterion) {
         .with_chord_error(REQUEST)
         .expect("a chord error");
     let compiler = ReferenceMeshCompiler::new(BoolmeshBoolean::new());
-    for (name, (graph, root), ceiling) in
-        [("planar", planar(), 1e-10), ("curved", curved(), REQUEST)]
-    {
+    for (name, (graph, root), ceiling) in [
+        ("planar", planar(), 1e-10),
+        ("curved", curved(), REQUEST),
+        ("oblique", oblique(), REQUEST),
+    ] {
         let (_, report) = compiler
             .compile_mesh_with_deviation(&graph, root, &options)
             .expect("the boolean compiles");
@@ -177,7 +205,7 @@ fn deviation_report(c: &mut Criterion) {
                 matches!(c.bound, DeviationBound::Certified(r) if r <= ceiling),
                 "{name}: {report:?}"
             ),
-            ("curved", []) => {}
+            ("curved" | "oblique", []) => {}
             _ => panic!("{name}: mesh to exact contributions {reverse:?}"),
         }
         eprintln!("{name}: bound {bound:e}");
