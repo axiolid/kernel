@@ -372,6 +372,7 @@ graph TD
     axiolid_overlay --> axiolid_contracts
     axiolid_overlay --> axiolid_core
     axiolid_overlay --> axiolid_exact
+    axiolid_overlay --> axiolid_exact_arrangement
     axiolid_overlay --> axiolid_guarantees
     axiolid_pointcloud --> axiolid_core
     axiolid_pointcloud_reconstruction_contract --> axiolid_contracts

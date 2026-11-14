@@ -13,6 +13,7 @@ readme = "README.md"
 axiolid-contracts.workspace = true
 axiolid-core.workspace = true
 axiolid-exact.workspace = true
+axiolid-exact-arrangement.workspace = true
 axiolid-guarantees.workspace = true
 i_overlay.workspace = true
 
@@ -23,7 +24,7 @@ role = "algorithm.planar"
 domain = "planar.overlay"
 public = true
 format-neutral = true
-allowed-internal-dependencies = ["axiolid-contracts", "axiolid-core", "axiolid-exact", "axiolid-guarantees"]
+allowed-internal-dependencies = ["axiolid-contracts", "axiolid-core", "axiolid-exact", "axiolid-exact-arrangement", "axiolid-guarantees"]
 
 [[bench]]
 name = "arc_overlay"

@@ -695,6 +695,7 @@ dependencies = [
  "axiolid-contracts",
  "axiolid-core",
  "axiolid-exact",
+ "axiolid-exact-arrangement",
  "axiolid-guarantees",
  "i_overlay",
 ]

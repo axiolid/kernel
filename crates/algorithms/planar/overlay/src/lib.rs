@@ -46,6 +46,7 @@ mod degenerate;
 mod exact_arc;
 mod exact_overlay;
 mod fill;
+mod free_faces;
 mod minkowski;
 mod nesting;
 mod offset;
@@ -74,6 +75,10 @@ pub use circle::{
 pub use degenerate::{
     DegenerateRings, DropReason, DroppedRing, OverlayOperand, OverlayOptions, ReportedOverlay,
     ReportedUnion, RingRole,
+};
+pub use free_faces::{
+    free_faces, free_faces_within, BarrierDefect, Bridge, FaceLocation, FreeFace, FreeFaceEvidence,
+    FreeFaces, FreeFacesError, FreeRing, FreeSpaceInput, PieceSource,
 };
 pub use minkowski::{BoundSide, MinkowskiError, MorphologyBound, MorphologyMode};
 pub use offset::{
