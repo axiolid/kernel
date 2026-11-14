@@ -365,7 +365,7 @@ dependencies = [
 
 [[package]]
 name = "axiolid-evaluate"
-version = "0.3.22"
+version = "0.3.23"
 dependencies = [
  "axiolid-contracts",
  "axiolid-core",
@@ -557,7 +557,7 @@ dependencies = [
 
 [[package]]
 name = "axiolid-mesh-compile"
-version = "0.3.46"
+version = "0.3.47"
 dependencies = [
  "axiolid-brep",
  "axiolid-brep-audit",
@@ -778,7 +778,7 @@ dependencies = [
 
 [[package]]
 name = "axiolid-reference"
-version = "0.3.18"
+version = "0.3.19"
 dependencies = [
  "axiolid-contracts",
  "axiolid-core",

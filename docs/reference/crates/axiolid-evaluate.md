@@ -8,7 +8,7 @@ Analytic and spline curve/surface evaluation, jets, and inversion.
 
 | | |
 | --- | --- |
-| Latest release | 0.3.22 (2026-11-14) |
+| Latest release | 0.3.23 (2026-11-14) |
 | crates.io | [`axiolid-evaluate`](https://crates.io/crates/axiolid-evaluate) |
 | Facade | [`axiolid`](./axiolid) feature `evaluate` |
 | Layer | algorithms (`algorithm.parametric`) |
@@ -45,62 +45,17 @@ intrinsics, threading or feature gates.
 
 ## Changes
 
-Latest release, 0.3.22 (2026-11-14):
+Latest release, 0.3.23 (2026-11-14):
 
 ### Added
 
-- `bound::ChainPositionTable` and `bound::SeamSide` (#438): certified
-  points, unit tangents and curvature vectors of an arc-length chain, read
-  in any order, each with a bound on its distance from the exact one. The
-  exact chain is the representation's: an intrinsic piece's points come from
-  an `IntrinsicPositionTable`; a line, circle, ellipse or B-spline piece is
-  read at the parameter whose certified arc length (chord panels) encloses
-  the distance, the evaluator's inverse only a guess that is bisected when
-  its enclosure misses; placements carry the position and the turn error
-  from piece to piece. A parametric piece may start up to
-  `PIECE_FRAME_TOLERANCE` off its local origin: a read at a join takes the
-  piece that starts there (`SeamSide::Outgoing`, what the evaluator reads)
-  or the piece that ends there (`SeamSide::Incoming`). `None` for a family
-  without a certified arc length, a piece longer than its curve and a
-  budget that runs out.
-- `bound::ElevatedPositionTable` takes an elevated or banked curve over a
-  chain plan (#438; 0.3.21 returned `None` for one): the plan is read from a
-  `ChainPositionTable`. `point3_on(d, side)` reads a join from either side,
-  `jet3_on` returns the point with the first and second derivatives (the
-  plan's from the chain table, the profile's and the pivot's in closed form;
-  over an intrinsic plan the curve's own, bit for bit) and `jet_errors`
-  bounds how far the three can be from the exact ones.
-
-### Changed
-
-- `chain::chain_certifies` is `false` for a chain with a parametric piece
-  other than a line, a circle, an ellipse or a B-spline (a sinusoid or a
-  polyline, #438): no certified arc length exists to charge its evaluated
-  ends against, so `flatten2` no longer claims such a chain.
-- `bound::certifies_flattening3` claims an elevated curve over a chain plan
-  again, exactly where `chain_certifies` does (#438; 0.3.21 refused it, #393,
-  because its chord bound under-reported the evaluated ends).
-
-### Fixed
-
-- `chain::chain_chord_bound`, `bound::chord_bound2` over a chain and
-  `bound::chord_bound3` of an elevated or banked curve over a chain plan
-  bound the distance to the chord of the *evaluated* ends (#438): the
-  exact-chord bound plus the larger distance of an evaluated end from a
-  certified `ChainPositionTable` point, the lower end read as the piece that
-  starts there, the upper end as the piece that ends there. They reported
-  only the exact chord: 1.95e-5 over `[116.4375, 116.5625]` of a chain of a
-  line and `k = 0.01 sin(50 s)`, where the exact curve lies 2.835e-3 from
-  the chord of the evaluated ends, and 0 for a point span whose evaluated
-  point is 1.4e-2 off; a parametric piece that starts off the end of the
-  one before it (up to `PIECE_FRAME_TOLERANCE`) is charged its jump.
-- `curve::flatten2` and `flatten3` no longer accept a span of a claimed
-  family (`certifies_flattening2/3`) whose chord bound is `None` on its
-  sagitta alone (#438): the span is refined and, at the depth limit,
-  refused with `BudgetExceeded`. A chain under a stretched start frame
-  (stretch 2 or 4) had its table refuse reads near its own bound, because a
-  rounding allowance grew with the square of the stretch; the resulting
-  `None` bounds passed as proven and the polyline lay 3.9e-3 from the curve
-  at a 3e-3 tolerance.
+- `station::FrameLaw::rates`, `FrameRates` and `RateBounds` (#406): certified
+  bounds of a section frame law's forward rate, rise, bend toward the lateral
+  and up axes and twist over a span, each with its value at the span's middle
+  read and that value's error. Frames read by quadrature (ellipses,
+  B-splines, offsets beside a line, circle, ellipse or B-spline) have them
+  from a certified second derivative of the exact curve; a span across a
+  point where their curvature may jump has none. `FrameLaw::bend` and
+  `has_bend` now cover frames read by quadrature as well.
 
 Full history: [`crates/algorithms/parametric/evaluate/CHANGELOG.md`](https://github.com/axiolid/kernel/blob/main/crates/algorithms/parametric/evaluate/CHANGELOG.md)

@@ -8,7 +8,7 @@ Portable scalar reference implementation and certified predicates.
 
 | | |
 | --- | --- |
-| Latest release | 0.3.18 (2026-11-14) |
+| Latest release | 0.3.19 (2026-11-14) |
 | crates.io | [`axiolid-reference`](https://crates.io/crates/axiolid-reference) |
 | Facade | [`axiolid`](./axiolid) feature `portable-provider` |
 | Layer | algorithms (`algorithm.reference`) |
@@ -49,14 +49,11 @@ evaluation should depend on those directly.
 
 ## Changes
 
-Latest release, 0.3.18 (2026-11-14):
+Latest release, 0.3.19 (2026-11-14):
 
 ### Added
 
-- `bound::ChainPositionTable` and `bound::SeamSide` are re-exported from
-  `axiolid-evaluate` (#438): certified points, tangents and curvature
-  vectors of an arc-length chain. `bound::ElevatedPositionTable` takes a
-  chain plan and reads its tangent and second derivative (`jet3_on`,
-  `jet_errors`).
+- `station::FrameRates`, `station::RateBounds` and `FrameLaw::rates` reach
+  through the `station` re-export of `axiolid-evaluate` (#406).
 
 Full history: [`crates/algorithms/reference/CHANGELOG.md`](https://github.com/axiolid/kernel/blob/main/crates/algorithms/reference/CHANGELOG.md)

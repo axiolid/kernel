@@ -9,6 +9,8 @@ caret rule for `0.x` versions.
 
 ## [Unreleased]
 
+## [0.3.47] - 2026-11-14
+
 ### Changed
 
 - Stationed spines, sectioned surfaces and open-section runs with turned

@@ -9,6 +9,8 @@ caret rule for `0.x` versions.
 
 ## [Unreleased]
 
+## [0.3.23] - 2026-11-14
+
 ### Added
 
 - `station::FrameLaw::rates`, `FrameRates` and `RateBounds` (#406): certified

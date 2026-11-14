@@ -59,7 +59,7 @@ Every page here is generated from the crate itself: its manifest, its crate docu
 | [`axiolid-construct`](./crates/axiolid-construct) | `algorithm.construction` | 0.4.0 | Solid generation: profiles, lofts, sweeps, revolutions and half-space clipping |
 | [`axiolid-decimate`](./crates/axiolid-decimate) | `algorithm.discrete` | 0.3.4 | Edge-collapse mesh decimation with a bounded, reported deviation |
 | [`axiolid-decompose`](./crates/axiolid-decompose) | `algorithm.discrete` | 0.3.3 | Convex decomposition of a solid, exact or approximate and always labelled |
-| [`axiolid-evaluate`](./crates/axiolid-evaluate) | `algorithm.parametric` | 0.3.22 | Analytic and spline curve/surface evaluation, jets, and inversion |
+| [`axiolid-evaluate`](./crates/axiolid-evaluate) | `algorithm.parametric` | 0.3.23 | Analytic and spline curve/surface evaluation, jets, and inversion |
 | [`axiolid-exact`](./crates/axiolid-exact) | `algorithm.reference` | 0.1.4 | Filtered exact arithmetic: interval filter, dyadic big integers, a + b*sqrt(c) |
 | [`axiolid-exact-arrangement`](./crates/axiolid-exact-arrangement) | `algorithm.planar` | 0.1.2 | Exact arrangement of straight segments on rational points, with face tracing |
 | [`axiolid-field-ops`](./crates/axiolid-field-ops) | `algorithm.sampled` | 0.3.4 | Sampling, morphology, clearance, and navigation over Axiolid layered fields. |
@@ -76,7 +76,7 @@ Every page here is generated from the crate itself: its manifest, its crate docu
 | [`axiolid-predicates`](./crates/axiolid-predicates) | `algorithm.reference` | 0.3.5 | Certified exact-arithmetic geometric predicates |
 | [`axiolid-project`](./crates/axiolid-project) | `algorithm.planar` | 0.4.0 | Projection of triangle meshes onto a plane, and prism intersection |
 | [`axiolid-ray-mesh`](./crates/axiolid-ray-mesh) | `algorithm.query` | 0.4.2 | Narrow-phase ray/triangle-mesh nearest-hit intersection |
-| [`axiolid-reference`](./crates/axiolid-reference) | `algorithm.reference` | 0.3.18 | Portable scalar reference implementation and certified predicates |
+| [`axiolid-reference`](./crates/axiolid-reference) | `algorithm.reference` | 0.3.19 | Portable scalar reference implementation and certified predicates |
 | [`axiolid-refine`](./crates/axiolid-refine) | `algorithm.discrete` | 0.3.4 | Mesh refinement, smoothing, isotropic remeshing, hole filling, fairing and subdivision surfaces |
 | [`axiolid-route`](./crates/axiolid-route) | `algorithm.planar` | 0.4.0 | Exact planar shortest path over a visibility graph |
 | [`axiolid-spatial`](./crates/axiolid-spatial) | `algorithm.query` | 0.3.6 | Acceleration structures: BVH and uniform point grid, and their queries; barycentric and mean-value coordinates. |
@@ -97,7 +97,7 @@ Every page here is generated from the crate itself: its manifest, its crate docu
 | [`axiolid-backend-cpu`](./crates/axiolid-backend-cpu) | `execution.context` | 0.3.4 | Portable and runtime-optimized CPU execution context for Axiolid geometry |
 | [`axiolid-backend-gpu`](./crates/axiolid-backend-gpu) | `execution.context` | 0.3.3 | GPU executor adapter contract for batched Axiolid geometry |
 | [`axiolid-dispatch`](./crates/axiolid-dispatch) | `execution.dispatch` | 0.3.13 | Provider registration, ordering, fallback, and execution policy |
-| [`axiolid-mesh-compile`](./crates/axiolid-mesh-compile) | `execution.orchestration` | 0.3.46 | Scalar reference MeshCompiler: profiles, extrusion, transforms, boolean dispatch. |
+| [`axiolid-mesh-compile`](./crates/axiolid-mesh-compile) | `execution.orchestration` | 0.3.47 | Scalar reference MeshCompiler: profiles, extrusion, transforms, boolean dispatch. |
 
 ## Facade
 

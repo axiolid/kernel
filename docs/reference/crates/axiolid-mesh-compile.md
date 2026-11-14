@@ -8,7 +8,7 @@ Scalar reference MeshCompiler: profiles, extrusion, transforms, boolean dispatch
 
 | | |
 | --- | --- |
-| Latest release | 0.3.46 (2026-11-14) |
+| Latest release | 0.3.47 (2026-11-14) |
 | crates.io | [`axiolid-mesh-compile`](https://crates.io/crates/axiolid-mesh-compile) |
 | Layer | execution (`execution.orchestration`) |
 | API documentation | [rustdoc](/api/rustdoc/axiolid_mesh_compile/index.html) · [docs.rs](https://docs.rs/axiolid-mesh-compile) |
@@ -118,40 +118,19 @@ owns graph traversal and dispatch; the construction algorithms themselves
 
 ## Changes
 
-Latest release, 0.3.46 (2026-11-14):
+Latest release, 0.3.47 (2026-11-14):
 
 ### Changed
 
-- Flattening a 2D chain is narrowed (`axiolid_reference::bound`, #438): a
-  chain with a sinusoid or two-point polyline parametric piece is no longer
-  claimed. Curve-bounded boundaries and profile segments over such chains
-  go from proven to unbounded, and a compiled polyline of such a chain is
-  refused (`UnsupportedInput`, "an arc-length chain with a piece no
-  certified position table reads"). An elevated curve over one was already
-  unclaimed in 0.3.45 (#393). A claimed family whose chord
-  bound is missing on a span is refined and, at the depth limit, refused,
-  never accepted on the midpoint's sagitta; a chain with a fast intrinsic
-  piece, whose evaluated ends are centimetres off, can reach
-  `BudgetExceeded` below a tolerance its ends' gap exceeds.
-- A swept disk along an elevated or banked curve over a chain plan is no
-  longer unbounded by name (#438; 0.3.45 reported
-  `UNCERTIFIED_DIRECTRIX_POINTS` for it, #393): see Fixed. Under an intrinsic
-  profile it stays unbounded (`TODO(#481)`).
-
-### Fixed
-
-- A swept disk along an elevated curve over a chain plan (a line, a cubic
-  transition and an arc) is certified against the exact tube (#438): the
-  centre line, its tangent and its second derivative are read from the
-  `ElevatedPositionTable` over the chain, and the bound charges their
-  errors (`wall_jet_charge`, held against adversarially perturbed jets in
-  a unit test). The evaluator's points were taken as exact there: the
-  arc-length inverse's tolerance and every placement before a piece carry
-  into them. A 0.3 m disk along such a plan over `[5, 95]` at 1 mm is
-  certified at 1 mm and the exact tube lies within the reported bound. A
-  swept disk along a chain with a sinusoid or two-point polyline piece was
-  certified in 0.3.44 from the evaluator's points; it is now unbounded, by
-  the generic reason ("the directrix could not be bounded"), since no
-  certified arc length exists for such a piece.
+- Stationed spines, sectioned surfaces and open-section runs with turned
+  sections, or along ellipses, B-splines and offsets beside them, have their
+  folds decided exactly (#406, ADR 0082 amendment): a fold, or a touch within
+  rounding and the frames' certified error, is refused as `InvalidInput`
+  ("station-placed sections fold") by the mesh and the exact compiler alike,
+  where it was reported `Unbounded` (`FOLD_NOT_EXCLUDED`); a clear run is
+  certified. A section turned to face backwards along its basis is refused by
+  the same rule. Only a span whose frames or turn cannot be bounded, or that
+  crosses a curvature break of a frame read by quadrature, is still checked
+  conservatively and reported unbounded by name where that cannot clear it.
 
 Full history: [`crates/execution/compile/CHANGELOG.md`](https://github.com/axiolid/kernel/blob/main/crates/execution/compile/CHANGELOG.md)

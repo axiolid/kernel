@@ -2802,6 +2802,19 @@ Every publishable crate versions and publishes independently ([ADR 0067](/adr/00
 
 ## axiolid-evaluate
 
+### 0.3.23 - 2026-11-14
+
+### Added
+
+- `station::FrameLaw::rates`, `FrameRates` and `RateBounds` (#406): certified
+  bounds of a section frame law's forward rate, rise, bend toward the lateral
+  and up axes and twist over a span, each with its value at the span's middle
+  read and that value's error. Frames read by quadrature (ellipses,
+  B-splines, offsets beside a line, circle, ellipse or B-spline) have them
+  from a certified second derivative of the exact curve; a span across a
+  point where their curvature may jump has none. `FrameLaw::bend` and
+  `has_bend` now cover frames read by quadrature as well.
+
 ### 0.3.22 - 2026-11-14
 
 ### Added
@@ -5058,6 +5071,21 @@ Every publishable crate versions and publishes independently ([ADR 0067](/adr/00
 
 
 ## axiolid-mesh-compile
+
+### 0.3.47 - 2026-11-14
+
+### Changed
+
+- Stationed spines, sectioned surfaces and open-section runs with turned
+  sections, or along ellipses, B-splines and offsets beside them, have their
+  folds decided exactly (#406, ADR 0082 amendment): a fold, or a touch within
+  rounding and the frames' certified error, is refused as `InvalidInput`
+  ("station-placed sections fold") by the mesh and the exact compiler alike,
+  where it was reported `Unbounded` (`FOLD_NOT_EXCLUDED`); a clear run is
+  certified. A section turned to face backwards along its basis is refused by
+  the same rule. Only a span whose frames or turn cannot be bounded, or that
+  crosses a curvature break of a frame read by quadrature, is still checked
+  conservatively and reported unbounded by name where that cannot clear it.
 
 ### 0.3.46 - 2026-11-14
 
@@ -9436,6 +9464,13 @@ Every publishable crate versions and publishes independently ([ADR 0067](/adr/00
 
 
 ## axiolid-reference
+
+### 0.3.19 - 2026-11-14
+
+### Added
+
+- `station::FrameRates`, `station::RateBounds` and `FrameLaw::rates` reach
+  through the `station` re-export of `axiolid-evaluate` (#406).
 
 ### 0.3.18 - 2026-11-14
 
