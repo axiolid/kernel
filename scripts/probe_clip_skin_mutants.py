@@ -78,7 +78,7 @@ MUTANTS = [
     ("every skin is refereed where it is cut, not at the chain's root", COMPILER,
      "    if id == root || graph.roots().contains(&id) {\n        return false;\n    }",
      "    if true || id == root || graph.roots().contains(&id) {\n        return false;\n    }",
-     [["-p", "axiolid-mesh-compile", "--test", "exact_difference_referee"]]),
+     [L + ["--", "many_flush_openings_do_not_compile_the_subtree_each"]]),
 ]
 
 probe_lib.main(MUTANTS, timeout=1800, reject_uncompiled=True)

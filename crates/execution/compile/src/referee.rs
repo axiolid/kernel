@@ -61,6 +61,13 @@ pub(crate) fn within_reach(linear: Scalar, reach: Scalar) -> bool {
     linear <= reach
 }
 
+#[cfg(test)]
+thread_local! {
+    /// How often this thread called [`boolean`], that is, compiled a subtree
+    /// exactly (#486).
+    pub(crate) static CALLS: std::cell::Cell<usize> = const { std::cell::Cell::new(0) };
+}
+
 /// The boolean node `id` of `graph`, an `operator`, compiled exactly and
 /// tessellated, or the reason it is refused. A difference or an
 /// intersection is decided only [`Against`] its mesh.
@@ -73,6 +80,8 @@ pub(crate) fn boolean(
     against: Option<Against<'_>>,
     rounding: Option<Scalar>,
 ) -> Result<Built, String> {
+    #[cfg(test)]
+    CALLS.with(|calls| calls.set(calls.get() + 1));
     let (exact, report) = ReferenceExactCompiler::new()
         .compile_exact_with_report(graph, id, options)
         .map_err(|error| error.to_string())?;
@@ -166,10 +175,14 @@ pub(crate) fn boolean(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use axiolid_core::{BooleanOperator, Point3, Tolerance, Transform3, Vec3};
+    use axiolid_core::{
+        BooleanOperator, Interval, Point2, Point3, Scalar, Tolerance, Transform3, Vec3,
+    };
+    use axiolid_curve::{Curve2, Line2};
     use axiolid_mesh::{AttributeChannel, Blend, TriMesh};
+    use axiolid_mesh_compile_contract::MeshCompiler as _;
     use axiolid_model::{GeometryGraphBuilder, GeometryNode, Instance, SolidOperation};
-    use axiolid_profile::{Profile, RectangleProfile};
+    use axiolid_profile::{Contour, ContourProfile, Profile, ProfileSegment, RectangleProfile};
 
     /// A tetrahedron with a corner-indexed `uv` channel: the stand-in for
     /// what an operand's history carried.
@@ -343,5 +356,91 @@ mod tests {
             "{report}"
         );
         assert_eq!(axiolid_mesh::component_count(&built.mesh), 1);
+    }
+
+    /// The rectangle from `(x0, y0)` to `(x1, y1)`.
+    fn corners(x0: Scalar, y0: Scalar, x1: Scalar, y1: Scalar) -> Profile {
+        let c = [
+            Point2::new(x0, y0),
+            Point2::new(x1, y0),
+            Point2::new(x1, y1),
+            Point2::new(x0, y1),
+        ];
+        let line = |a: Point2, b: Point2| ProfileSegment {
+            curve: Curve2::Line(Line2 {
+                origin: a,
+                direction: b - a,
+            }),
+            domain: Interval::UNIT,
+            same_sense: true,
+        };
+        Profile::Contour(ContourProfile {
+            outer: Contour::new((0..4).map(|i| line(c[i], c[(i + 1) % 4])).collect()),
+            holes: Vec::new(),
+        })
+    }
+
+    /// A placed wall with `n` flush through-openings, side by side. Each
+    /// opening stands up on its edge, so its placement's linear part differs
+    /// from the wall's in a bit, as a turn computed two ways does.
+    fn wall_with_flush_openings(n: usize, world: Transform3) -> (GeometryGraph, NodeId) {
+        let mut builder = GeometryGraphBuilder::new();
+        let slab = |builder: &mut GeometryGraphBuilder, profile, depth, transform| {
+            let mut push = |node| builder.push(node).expect("a valid node");
+            let profile = push(GeometryNode::Profile(profile));
+            let solid = push(GeometryNode::SolidOperation(SolidOperation::Extrusion {
+                profile,
+                direction: Vec3::Z,
+                depth,
+            }));
+            push(GeometryNode::Instance(Instance {
+                source: solid,
+                transform,
+            }))
+        };
+        let length = n as Scalar + 0.5;
+        let mut root = slab(&mut builder, corners(0.0, 0.0, length, 0.25), 3.0, world);
+        let across =
+            Transform3::from_cols(Vec3::X, Vec3::Z, Vec3::NEG_Y, Vec3::new(0.0, 0.25, 0.0));
+        for k in 0..n {
+            let x = 0.5 + k as Scalar;
+            let opening = slab(
+                &mut builder,
+                corners(x, 0.0, x + 0.5, 2.2),
+                0.25,
+                world * across,
+            );
+            root = builder
+                .push(GeometryNode::SolidOperation(SolidOperation::Boolean {
+                    left: root,
+                    right: opening,
+                    operator: BooleanOperator::Difference,
+                }))
+                .expect("a valid node");
+        }
+        (builder.finish(vec![root]).expect("a valid graph"), root)
+    }
+
+    /// A chain of flush cuts compiles the exact subtree once, not once per
+    /// cut (#486): a mesh of one component holds no void and keeps its
+    /// result, and a skin within rounding waits for the root of the chain
+    /// (#400). The count of exact compiles stands for the property, so the
+    /// test names no time.
+    #[test]
+    fn many_flush_openings_do_not_compile_the_subtree_each() {
+        let world = Transform3::from_translation(Vec3::new(12.5, -4.0, 3.2))
+            * Transform3::from_rotation_z(0.6);
+        let (graph, root) = wall_with_flush_openings(16, world);
+        CALLS.with(|calls| calls.set(0));
+        let options = ExecutionOptions::new(Tolerance::MILLIMETRE);
+        let outcome = crate::ReferenceMeshCompiler::new(
+            axiolid_mesh_boolean_boolmesh::BoolmeshBoolean::new(),
+        )
+        .compile_mesh_reported(&graph, root, &options)
+        .expect("compiles");
+        let compiles = CALLS.with(std::cell::Cell::get);
+        assert_eq!(axiolid_mesh::component_count(&outcome.mesh), 1);
+        // The one compile is the root's, which decides the whole chain.
+        assert!(compiles <= 1, "{compiles} exact compiles for 16 cuts");
     }
 }

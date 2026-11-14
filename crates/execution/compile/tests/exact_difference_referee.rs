@@ -24,7 +24,7 @@ use axiolid_mesh_compile::deviation::{
     REFEREED_INTERSECTION_EXACT,
 };
 use axiolid_mesh_compile::{DeviationBound, DeviationReport, ReferenceMeshCompiler};
-use axiolid_mesh_compile_contract::{MeshClosure, MeshCompiler as _};
+use axiolid_mesh_compile_contract::MeshClosure;
 use axiolid_model::{
     GeometryGraph, GeometryGraphBuilder, GeometryNode, Instance, NodeId, SolidOperation,
 };
@@ -435,38 +435,6 @@ fn a_half_space_tool_is_never_refereed() {
             );
         }
     }
-}
-
-/// A placed wall with `n` flush through-openings, side by side.
-fn wall_with_flush_openings(n: usize, world: Transform3) -> (GeometryGraph, NodeId) {
-    let mut g = Graph::new();
-    let length = n as Scalar + 0.5;
-    let mut root = slab(&mut g, corners(0.0, 0.0, length, 0.25), 3.0, world);
-    let across = Transform3::from_cols(Vec3::X, Vec3::Z, Vec3::NEG_Y, Vec3::new(0.0, 0.25, 0.0));
-    for k in 0..n {
-        let x = 0.5 + k as Scalar;
-        let opening = slab(&mut g, corners(x, 0.0, x + 0.5, 2.2), 0.25, world * across);
-        root = g.boolean(root, opening, BooleanOperator::Difference);
-    }
-    g.finish(root)
-}
-
-/// The exact compiler decides a cut only where its mesh holds a slug: a mesh
-/// of one component skips the dear exact compile of the whole subtree, which
-/// each of the cuts of a long chain once paid. Sixteen flush openings in a
-/// placed wall compile in a few hundredths of a second; the guard is
-/// generous, as the chain took seconds with a compile per cut.
-#[test]
-fn many_flush_openings_do_not_compile_the_subtree_each() {
-    let (graph, root) = wall_with_flush_openings(16, building());
-    let started = std::time::Instant::now();
-    let outcome = ReferenceMeshCompiler::new(BoolmeshBoolean::new())
-        .compile_mesh_reported(&graph, root, &millimetre())
-        .expect("compiles");
-    let seconds = started.elapsed().as_secs_f64();
-    eprintln!("sixteen openings: {seconds:.3} s");
-    assert_eq!(component_count(&outcome.mesh), 1);
-    assert!(seconds < 1.0, "{seconds} s");
 }
 
 /// A sheared placement is no similarity, and the exact compiler refuses it:
