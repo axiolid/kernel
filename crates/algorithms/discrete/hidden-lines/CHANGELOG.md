@@ -53,7 +53,9 @@ caret rule for `0.x` versions.
   1.25-1.30 s (4,938 to 11,097 pieces, 383,574 to 789,043 pairs, 1,931
   surfaces behind). Edges behind glass lose the early-out of full cover and
   are no longer pruned from the arrangement, which the counts show; the run
-  to run spread on this machine is as large as the cost.
+  to run spread on this machine is as large as the cost. These timings were
+  taken before the count became a sweep over the sorted span ends; the
+  drawings are the same since.
 
 ## [0.1.5] - 2026-11-14
 

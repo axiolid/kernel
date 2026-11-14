@@ -278,6 +278,9 @@ const UNIFORM_PAIR_BYTES: usize = std::mem::size_of::<(FaceGroup, bool)>();
 // The pairs of one mesh stay within the audit scratch of that mesh, which the
 // memory budget has admitted before the check runs (`scratch_fits` takes the
 // largest mesh's audit as the audit peak, and the two phases are sequential).
+// Comparing one triangle is enough only because `audit_mesh_scratch_bytes` is
+// linear in the triangle count with no constant term; if it ever gains one,
+// compare per mesh instead.
 const _: () = assert!(matches!(
     audit_mesh_scratch_bytes(1),
     Some(bytes) if bytes >= UNIFORM_PAIR_BYTES
