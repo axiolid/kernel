@@ -74,6 +74,17 @@
 //!   rounded), so equal exact points round equally whatever their recipe;
 //!   `presented` and `settle_validated` then get identical input.
 //!
+//! # Preconditions
+//!
+//! Only `minkowski.rs` may call [`region`]: it builds the terms, so the rings
+//! from `first` on are convex hulls (hulls, chord hulls, trimmed hulls and
+//! parallelograms, refused there if of zero area) and `Rule::holds` gives
+//! one answer for every list holding one of them. Neither is checked in a
+//! release build, since a caller that broke them would get a wrong region
+//! and not a refusal; debug builds assert both. A caller outside
+//! `minkowski.rs` would need typed refusals first, which is an error-variant
+//! decision (`OverlayError` is public).
+//!
 //! Refusals are unchanged: the shape's validation (`polygon_part`),
 //! `validate_arc_ring` on each ring in list order (`oriented_rings`, the
 //! loop `ArcArrangement::new` runs) and linking (`SelfIntersection`).

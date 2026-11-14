@@ -2015,11 +2015,8 @@ mod tests {
 
     #[test]
     fn the_term_union_reads_random_scenes_as_the_arrangement_did() {
-        // The first 40 cases, and 154, the smallest one a term union cut
-        // only at the pieces' vertices, or at none, reads differently from
-        // the arrangement (454 is the next).
         let mut compared = 0;
-        for case in (0..40).chain([154]) {
+        for case in 0..40 {
             let Some((region, part)) = random_scene(case) else {
                 continue;
             };
@@ -2033,6 +2030,111 @@ mod tests {
             compared += 1;
         }
         assert!(compared >= 20, "{compared} random scenes were valid");
+    }
+
+    fn arc_ring(points: &[(f64, f64)]) -> ArcRing {
+        ArcRing::from_points(
+            &points
+                .iter()
+                .map(|&(x, y)| Point2::new(x, y))
+                .collect::<Vec<_>>(),
+        )
+    }
+
+    /// The corners of the one polygon the term union reads from `rings` as a
+    /// union, which equals the arrangement's.
+    fn union_corners(rings: &[ArcRing], first: usize) -> usize {
+        let t = Tolerance::METRE;
+        let holds = |r: &[usize]| !r.is_empty();
+        let new = term_union::region(rings, first, holds, t).unwrap();
+        let old = by_arrangement(rings, holds, t).unwrap();
+        assert_eq!(new.polygons(), old.polygons());
+        assert_eq!(new.polygons().len(), 1);
+        new.polygons()[0].outer.points.len()
+    }
+
+    #[test]
+    fn a_vertex_of_a_piece_on_a_kept_edge_is_a_corner_of_the_result() {
+        // The triangle's base end point (2, 0) lies on the square's bottom
+        // edge, which is kept: the edge is cut there, where the triangle's
+        // own edges leave it. A union cut at no term vertex, or only at the
+        // pieces' vertices, loses that corner (4 corners).
+        let rings = [
+            arc_ring(&[(2.0, 0.0), (3.0, 2.0), (1.0, 2.0)]),
+            arc_ring(&[(0.0, 0.0), (4.0, 0.0), (4.0, 4.0), (0.0, 4.0)]),
+        ];
+        assert_eq!(union_corners(&rings, 1), 5);
+    }
+
+    #[test]
+    fn crossing_pieces_need_a_stop_at_each_other_s_vertices() {
+        // Three overlapping convex pieces whose vertices lie on one
+        // another's edges. Cut at no term vertex, the kept edges cross
+        // themselves and the link is refused (`SelfIntersection`); the
+        // arrangement gives 9 corners.
+        let rings = [
+            arc_ring(&[(-4.0, 0.0), (8.0, 0.0), (8.0, 4.0), (-4.0, 4.0)]),
+            arc_ring(&[(2.0, 4.0), (6.0, 3.0), (6.0, 9.0), (1.0, 6.0)]),
+            arc_ring(&[(2.0, 4.0), (3.0, 6.0), (-2.0, 9.0), (-2.0, 3.0)]),
+        ];
+        assert_eq!(union_corners(&rings, 0), 9);
+    }
+
+    /// The convex hull of a few random points of a 6 by 6 integer grid,
+    /// counter-clockwise; `None` when it has no area.
+    fn grid_hull(rng: &mut Lcg) -> Option<Vec<(f64, f64)>> {
+        let mut pts: Vec<(i32, i32)> = (0..3 + rng.below(3))
+            .map(|_| (rng.below(7) as i32, rng.below(7) as i32))
+            .collect();
+        pts.sort_unstable();
+        pts.dedup();
+        let cross = |o: (i32, i32), a: (i32, i32), b: (i32, i32)| {
+            (a.0 - o.0) * (b.1 - o.1) - (a.1 - o.1) * (b.0 - o.0)
+        };
+        let chain = |points: &mut dyn Iterator<Item = (i32, i32)>| {
+            let mut half: Vec<(i32, i32)> = Vec::new();
+            for p in points {
+                while half.len() >= 2 && cross(half[half.len() - 2], half[half.len() - 1], p) <= 0 {
+                    half.pop();
+                }
+                half.push(p);
+            }
+            half.pop();
+            half
+        };
+        let mut hull = chain(&mut pts.iter().copied());
+        hull.extend(chain(&mut pts.iter().rev().copied()));
+        (hull.len() >= 3).then(|| {
+            hull.into_iter()
+                .map(|(x, y)| (f64::from(x), f64::from(y)))
+                .collect()
+        })
+    }
+
+    #[test]
+    fn the_term_union_reads_integer_grid_pieces_as_the_arrangement_did() {
+        // Vertices fall on one another's edges and edges overlap.
+        let mut rng = Lcg(6);
+        let mut compared = 0;
+        for case in 0..300 {
+            let mut rings = Vec::new();
+            for _ in 0..2 + rng.below(4) {
+                rings.extend(grid_hull(&mut rng).map(|h| arc_ring(&h)));
+            }
+            if rings.is_empty() {
+                continue;
+            }
+            let holds = |r: &[usize]| !r.is_empty();
+            let t = Tolerance::METRE;
+            let new = term_union::region(&rings, 0, holds, t);
+            let old = by_arrangement(&rings, holds, t);
+            match (new, old) {
+                (Ok(new), Ok(old)) => assert_eq!(new.polygons(), old.polygons(), "grid {case}"),
+                (new, old) => assert_eq!(new.map(|_| ()), old.map(|_| ()), "grid {case}"),
+            }
+            compared += 1;
+        }
+        assert!(compared > 250, "{compared}");
     }
 
     #[test]
