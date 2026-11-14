@@ -20,6 +20,7 @@ PR = HL + "prepare.rs"
 PV = HL + "provider.rs"
 ED = HL + "edges.rs"
 PA = HL + "param.rs"
+BR = HL + "broad.rs"
 
 TESTS = [
     "-p", "axiolid-hidden-lines",
@@ -27,6 +28,8 @@ TESTS = [
     "--test", "perspective_oracle",
     "--test", "perspective",
 ]
+
+BROAD = ["-p", "axiolid-hidden-lines", "--lib", "broad"]
 
 ONE = "&Dyadic::from_parts(1.into(), 0)"
 
@@ -130,6 +133,19 @@ MUTANTS = [
     ("a root's denominator swaps the weights", OUT,
      "let denominator = a.mul(weight(end)).sub(&b.mul(weight(start)));",
      "let denominator = a.mul(weight(start)).sub(&b.mul(weight(end)));"),
+    # The broad phase: the hierarchy's depth is scaled in the build and the probe.
+    ("the probe's depth is not scaled", BR,
+     "                query.w_lo * self.depth_scale,",
+     "                query.w_lo,", BROAD),
+    ("the probe's upper depth is not scaled", BR,
+     "                query.w_hi * self.depth_scale,",
+     "                query.w_hi,", BROAD),
+    ("the depth scale is negative", BR,
+     "    if image.is_finite() && depth.is_finite() && scale.is_finite() && scale > 0.0 {\n        scale",
+     "    if image.is_finite() && depth.is_finite() && scale.is_finite() && scale > 0.0 {\n        -scale", BROAD),
+    ("an orthographic view scales the depth", BR,
+     "        let depth_scale = if perspective {",
+     "        let depth_scale = if true {", BROAD),
     # Validation and the flag through the pipeline.
     ("a near depth of zero is accepted", PR,
      "if !view.near.is_some_and(|near| near < 0.0) {",

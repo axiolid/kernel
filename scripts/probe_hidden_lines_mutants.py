@@ -143,14 +143,14 @@ MUTANTS = [
      '            (Some(near), _) => {', TESTS),
     # The broad phase.
     ('BVH probe misses touching boxes', BRD,
-     '                    max: Point3::new(query.image.hi[0], query.image.hi[1], query.w_hi),',
-     '                    max: Point3::new(query.image.hi[0].next_down(), query.image.hi[1], query.w_hi),', TESTS),
+     '                query.image.hi[0],\n',
+     '                query.image.hi[0].next_down(),\n', TESTS),
     ('BVH probe misses touching boxes at y max', BRD,
-     '                    max: Point3::new(query.image.hi[0], query.image.hi[1], query.w_hi),',
-     '                    max: Point3::new(query.image.hi[0], query.image.hi[1].next_down(), query.w_hi),', TESTS),
+     '                query.image.hi[1],\n',
+     '                query.image.hi[1].next_down(),\n', TESTS),
     ('BVH probe misses touching boxes at depth max', BRD,
-     '                    max: Point3::new(query.image.hi[0], query.image.hi[1], query.w_hi),',
-     '                    max: Point3::new(query.image.hi[0], query.image.hi[1], query.w_hi.next_down()),', TESTS),
+     '                query.w_hi * self.depth_scale,\n',
+     '                (query.w_hi * self.depth_scale).next_down(),\n', TESTS),
     # Exact-evaluation cost (#369): each shortcut must leave the drawing as it
     # was, so a mutant that makes one apply where it does not must be seen.
     ('early exit on a partly hidden edge: start unchecked', OCC,
