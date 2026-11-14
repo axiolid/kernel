@@ -1204,9 +1204,12 @@ where
     // `mid` equals `a` or `b` in floating point. Returning the chord anyway
     // would hand back an unverified approximation, so this fails closed --
     // unless the chord already meets the tolerance, in which case there was
-    // nothing left to verify.
+    // nothing left to verify. A claimed family also needs its bound there:
+    // the evaluated points of a point span can be far off the exact ones
+    // (#438), and a missing bound is not a verified chord.
     if !(mid > a && mid < b) {
-        if sagitta(pa, pb, pa) <= tol && (pb.sub(pa)).length() <= tol {
+        let certified = !claimed || bound(a, b).is_some_and(|d| d <= tol);
+        if sagitta(pa, pb, pa) <= tol && (pb.sub(pa)).length() <= tol && certified {
             return Ok(());
         }
         return Err(GeomError::Degenerate(format!(
@@ -1846,5 +1849,14 @@ mod tests {
         let loose = |_: Scalar, _: Scalar| Some(1.0);
         let refused = subdivide(&eval, &loose, 0.0, 1.0, 1e-3, 6, 1 << 10, true, &mut out);
         assert!(matches!(refused, Err(GeomError::BudgetExceeded { .. })));
+        // A span too small to bisect is not accepted without its bound
+        // either, when the family is claimed.
+        let mut point = Vec::new();
+        subdivide(&eval, &none, 1.0, 1.0, 1e-3, 6, 1 << 10, false, &mut point).unwrap();
+        let refused = subdivide(&eval, &none, 1.0, 1.0, 1e-3, 6, 1 << 10, true, &mut point);
+        assert!(matches!(refused, Err(GeomError::Degenerate(_))));
+        let refused = subdivide(&eval, &loose, 1.0, 1.0, 1e-3, 6, 1 << 10, true, &mut point);
+        assert!(matches!(refused, Err(GeomError::Degenerate(_))));
+        subdivide(&eval, &some, 1.0, 1.0, 1e-3, 6, 1 << 10, true, &mut point).unwrap();
     }
 }

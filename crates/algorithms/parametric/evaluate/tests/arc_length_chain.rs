@@ -843,3 +843,19 @@ fn a_stretched_chain_keeps_a_bound_and_flattens_within_it() {
         }
     }
 }
+
+#[test]
+fn a_point_domain_of_a_chain_is_refused_not_returned_as_a_chord() {
+    // The evaluated point at 116.5 is 1.4e-2 off the exact one: a zero-width
+    // domain cannot be bisected, and the claimed chain's bound there (1.4e-2)
+    // exceeds the tolerance, so it must not come back as `[p, p]`.
+    let curve = Curve2::Chain(harmonic());
+    let domain = Interval::new(116.5, 116.5);
+    let result = flatten2(&curve, domain, 1e-3, 30);
+    assert!(
+        matches!(result, Err(GeomError::Degenerate(_))),
+        "{result:?}"
+    );
+    // A tolerance above the point's gap accepts it.
+    assert!(flatten2(&curve, domain, 0.05, 30).is_ok());
+}
