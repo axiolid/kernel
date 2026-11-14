@@ -430,6 +430,25 @@ fn tube_bound(
     mesh: &TriMesh,
     target: Scalar,
 ) -> Option<Scalar> {
+    tube_bound_with(curve, span, radius, inner, mesh, target, certify_thin_quads)
+}
+
+/// [`tube_bound`] with the certificate injected ([`certify_thin_quads`]: the
+/// patches, the cells, the mesh, the target, the settle bound, the flatness),
+/// so a test can read the budget the tube hands it (`target` less the error
+/// the bound carries).
+fn tube_bound_with<C>(
+    curve: &Curve3,
+    span: (Scalar, Scalar),
+    radius: Scalar,
+    inner: Option<Scalar>,
+    mesh: &TriMesh,
+    target: Scalar,
+    certify: C,
+) -> Option<Scalar>
+where
+    C: Fn(&[&dyn Patch], Vec<Cell>, &TriMesh, Scalar, Scalar, Scalar) -> Option<Scalar>,
+{
     let (lo, hi) = (span.0.min(span.1), span.0.max(span.1));
     if !(lo < hi && radius > 0.0) {
         return None;
@@ -546,7 +565,7 @@ fn tube_bound(
     // across their long edges, the search need not resolve every quad's
     // diagonal down to the bound's size (#252). It settles once within the
     // target: a long tube has too many cells to tighten further.
-    certify_thin_quads(
+    certify(
         &patches,
         cells,
         mesh,
@@ -1147,6 +1166,74 @@ mod tests {
         assert_eq!(tube_error(e0, charge, 0.0), e0 + charge);
         assert_eq!(tube_error(e0, 2.0, 1.0), e0 + 2.0);
         assert_eq!(tube_error(e0, 1.0, 2.0), e0 + 2.0);
+    }
+
+    /// The bound `tube_bound` reports carries the centre's error and the
+    /// larger of the walls' jet charge and the end disks' tilt: read through a
+    /// certifier that finds nothing to add, over a cubic chain plan where
+    /// both are positive (#438).
+    #[test]
+    fn the_tube_bound_carries_the_centre_and_the_jet_charges() {
+        use axiolid_curve::{BSplineCurve2, Chain2, ChainPiece2, Elevated3};
+        let (reach, a) = (40.0, 1.0 / (6.0 * 300.0 * 40.0));
+        let cubic = Curve2::BSpline(BSplineCurve2 {
+            degree: 3,
+            control_points: vec![
+                axiolid_core::Point2::new(0.0, 0.0),
+                axiolid_core::Point2::new(reach / 3.0, 0.0),
+                axiolid_core::Point2::new(2.0 * reach / 3.0, 0.0),
+                axiolid_core::Point2::new(reach, a * reach * reach * reach),
+            ],
+            knots: vec![0.0, 1.0],
+            multiplicities: vec![4, 4],
+            weights: None,
+            closed: false,
+            self_intersect: None,
+            knot_spec: KnotSpec::Unspecified,
+        });
+        let curve = Curve3::Elevated(Elevated3::new(
+            Curve2::Chain(Chain2::new(
+                chain_frame(),
+                vec![ChainPiece2::Parametric {
+                    curve: cubic,
+                    start: 0.0,
+                    length: 40.0,
+                }],
+            )),
+            ElevationLaw::constant_grade(50.0, 0.04),
+        ));
+        let (lo, hi, radius, target) = (10.0, 30.0, 0.3, 1e-3);
+        let table = ElevatedPositionTable::new(&curve, TUBE_POSITION_SHARE * target, hi).unwrap();
+        let [e0, e1, _] = table.jet_errors();
+        assert!(e1 > 0.0);
+        let pieces = smooth_pieces(&curve, lo, hi).unwrap();
+        let jets = pieces
+            .iter()
+            .map(|&piece| piece_jet_charge(&curve, &table, piece, radius).unwrap())
+            .fold(0.0, Scalar::max);
+        let tilt = |s: Scalar, side| {
+            let c1 = table.jet3_on(s, side).unwrap().1;
+            radius * 2.0 * e1 / c1.length()
+        };
+        let caps = tilt(lo, SeamSide::Outgoing).max(tilt(hi, SeamSide::Incoming));
+        assert!(jets > 0.0 && caps > 0.0);
+        let mesh = TriMesh::default();
+        let budget = std::cell::Cell::new(Scalar::NAN);
+        let seen =
+            |_: &[&dyn Patch], _: Vec<Cell>, _: &TriMesh, b: Scalar, _: Scalar, _: Scalar| {
+                budget.set(b);
+                Some(0.0)
+            };
+        let bound = tube_bound_with(&curve, (lo, hi), radius, None, &mesh, target, seen).unwrap();
+        let carried = target - budget.get();
+        let expected = e0 + jets.max(caps);
+        assert!(
+            (carried - expected).abs() <= 1e-12 * expected,
+            "{carried:e} against {expected:e}"
+        );
+        assert!(carried > e0);
+        // With nothing certified beyond it the bound is the carried error.
+        assert!((bound - carried).abs() <= 1e-9 * carried, "{bound:e}");
     }
 
     /// Over an intrinsic plan the table's derivatives are exact closed forms:

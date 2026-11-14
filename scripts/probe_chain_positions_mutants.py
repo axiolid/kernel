@@ -30,8 +30,9 @@ Not probed, because no test can tell them apart:
   `1e-11` of a `1e-3` budget, below any sampling. The sum it feeds
   (`tube_error`) and the first-order errors it sums are held by unit tests
   (`deviation::paths::tests`: a coarse table's wall against the exact series
-  wall, and against adversarially perturbed jets); that `tube_bound` calls
-  `tube_error` at all is only guarded by review.
+  wall, and against adversarially perturbed jets); the call site that
+  assembles the carried error from them is held by the budget
+  `tube_bound_with` hands its certifier, read in a unit test.
 
 Every mutant runs in its own process group with a timeout that kills the
 whole group, and the file is restored whatever happens.
@@ -65,6 +66,12 @@ WALL_COARSE = [
     "axiolid-mesh-compile",
     "--lib",
     "deviation::paths::tests::a_wall_from_a_coarse_chain_table",
+]
+TUBE_BOUND = [
+    "-p",
+    "axiolid-mesh-compile",
+    "--lib",
+    "deviation::paths::tests::the_tube_bound_carries",
 ]
 NONE_BOUND = ["-p", "axiolid-evaluate", "--all-features", "--lib", "claimed_family"]
 TUBE = [
@@ -119,6 +126,9 @@ MUTANTS = [
     ("a claimed family passes a span without a bound", CURVE,
      "        None => !claimed,",
      "        None => true,", [NONE_BOUND, CHORDS]),
+    ("a claimed point span passes without its bound", CURVE,
+     "        let certified = !claimed || bound(a, b).is_some_and(|d| d <= tol);",
+     "        let certified = true;", [NONE_BOUND, CHORDS]),
     # Elevated and banked curves over a chain plan.
     ("the elevated chord bound answers a chain plan with the exact chord", ELEVATED,
      "        Curve2::Chain(chain) => (chain.start, chain.length()?),",
@@ -138,6 +148,16 @@ MUTANTS = [
      "                table.jet3_on(s, side).map(|(_, c1, c2)| {\n"
      "                    (axiolid_reference::curve::evaluate3(self.curve, s).unwrap(), c1, c2)\n"
      "                })\n", [WALL_CHAIN]),
+    ("the tube drops the call that assembles its carried error", PATHS,
+     "    error = tube_error(error, jets, caps_charge);",
+     "    error = error + 0.0 * tube_error(error, jets, caps_charge);", [TUBE_BOUND]),
+    ("the tube stops accumulating the walls' jet charge", PATHS,
+     "            jets = jets.max(piece_jet_charge(curve, table, (a, b), radius)?);",
+     "            jets = jets.max(0.0 * piece_jet_charge(curve, table, (a, b), radius)?);",
+     [TUBE_BOUND]),
+    ("the tube stops accumulating the end disks' tilt", PATHS,
+     "                    caps_charge = caps_charge.max(radius * 2.0 * table.jet_errors()[1] / speed);",
+     "                    caps_charge = caps_charge.max(0.0);", [TUBE_BOUND]),
     ("the tube carries no jet charge", PATHS,
      "    centre + jets.max(caps)",
      "    centre + 0.0 * jets.max(caps)", [WALL_COARSE]),
