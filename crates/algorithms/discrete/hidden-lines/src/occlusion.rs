@@ -15,10 +15,11 @@
 //! its span to the count of the visible pieces under it: the span where the
 //! image point shifted by `δ = (ε, ε²)` lies inside the triangle's image, the
 //! perturbation of the caps, so two see-through triangles sharing an edge
-//! above the edge count once. A visible gap between hidden spans is split at
-//! the span ends inside it, each part counts the spans that contain it, and
-//! neighbours of one count are merged. A hidden piece is not split. Without a
-//! see-through triangle among the candidates no step of this runs.
+//! above the edge count once. The span ends are sorted once and swept with a
+//! running count (O(G log G) exact comparisons for G spans): a visible gap
+//! between hidden spans is cut where the count changes, so its pieces are
+//! maximal. A hidden piece is not split. Without a see-through triangle among
+//! the candidates no step of this runs.
 
 use std::cmp::Ordering;
 
@@ -192,11 +193,12 @@ fn resolve_with(
         }
     }
 
+    let mut sweep = Sweep::new(solver, &glass)?;
     let mut pieces = Vec::with_capacity(2 * hidden.len() + 1);
     let mut cursor = kept.lo;
     for span in hidden {
         if solver.cmp(cursor, span.lo)? == Ordering::Less {
-            visible(solver, &glass, &mut pieces, cursor, span.lo)?;
+            sweep.visible(solver, &mut pieces, cursor, span.lo)?;
         }
         pieces.push(Piece {
             lo: span.lo,
@@ -207,83 +209,127 @@ fn resolve_with(
         cursor = span.hi;
     }
     if solver.cmp(cursor, kept.hi)? == Ordering::Less {
-        visible(solver, &glass, &mut pieces, cursor, kept.hi)?;
+        sweep.visible(solver, &mut pieces, cursor, kept.hi)?;
     }
     Ok(Resolved::Pieces(pieces))
 }
 
-/// Push the visible gap `lo..hi`: one piece without `glass`, else one piece
-/// per maximal part covered by the same number of `glass` spans.
-fn visible(
-    solver: &mut Solver<'_>,
-    glass: &[Span],
-    pieces: &mut Vec<Piece>,
-    lo: Param,
-    hi: Param,
-) -> GeomResult<()> {
-    if glass.is_empty() {
-        pieces.push(Piece {
-            lo,
-            hi,
-            hidden: false,
-            seen_through: 0,
-        });
-        return Ok(());
-    }
-    // The span ends strictly inside the gap, sorted and distinct.
-    let mut cuts: Vec<Param> = Vec::new();
-    for span in glass {
-        for end in [span.lo, span.hi] {
-            if solver.cmp(lo, end)? == Ordering::Less && solver.cmp(end, hi)? == Ordering::Less {
-                insert_distinct(solver, &mut cuts, end)?;
-            }
-        }
-    }
-    let first = pieces.len();
-    let mut from = lo;
-    for to in cuts.into_iter().chain([hi]) {
-        // A span contains the part `from..to` exactly when it starts at or
-        // before `from` and ends at or after `to`: no end lies inside it.
-        let mut count = 0usize;
-        for span in glass {
-            if solver.cmp(span.lo, from)? != Ordering::Greater
-                && solver.cmp(span.hi, to)? != Ordering::Less
-            {
-                count += 1;
-            }
-        }
-        let seen_through = u32::try_from(count).map_err(|_| GeomError::BudgetExceeded {
-            resource: "hidden-line see-through count",
-        })?;
-        // Only a part of this gap is a neighbour to merge with.
-        let ours = pieces.len() > first;
-        match pieces.last_mut() {
-            Some(last) if ours && last.seen_through == seen_through => last.hi = to,
-            _ => pieces.push(Piece {
-                lo: from,
-                hi: to,
-                hidden: false,
-                seen_through,
-            }),
-        }
-        from = to;
-    }
-    Ok(())
+/// The see-through spans of one edge as a sweep: their ends sorted once, with
+/// `+1` where a span starts and `-1` where it ends. The visible gaps are
+/// asked in increasing order, so one pass over the ends counts the spans over
+/// every part of every gap: O(G log G) exact comparisons for G spans.
+struct Sweep {
+    /// `(end, +1 or -1)`, ascending by the end.
+    ends: Vec<(Param, i32)>,
+    /// The ends before `next` have been applied to `count`.
+    next: usize,
+    /// The spans over the part just after the last applied end.
+    count: i64,
 }
 
-/// Insert `param` into the sorted `list` unless an equal one is there.
-fn insert_distinct(solver: &mut Solver<'_>, list: &mut Vec<Param>, param: Param) -> GeomResult<()> {
-    let (mut low, mut high) = (0, list.len());
-    while low < high {
-        let mid = low + (high - low) / 2;
-        match solver.cmp(list[mid], param)? {
-            Ordering::Less => low = mid + 1,
-            Ordering::Greater => high = mid,
-            Ordering::Equal => return Ok(()),
+impl Sweep {
+    fn new(solver: &mut Solver<'_>, glass: &[Span]) -> GeomResult<Self> {
+        let ends: Vec<(Param, i32)> = glass
+            .iter()
+            .flat_map(|span| [(span.lo, 1), (span.hi, -1)])
+            .collect();
+        Ok(Self {
+            ends: sorted(solver, ends)?,
+            next: 0,
+            count: 0,
+        })
+    }
+
+    /// Apply every end at or before `at`.
+    fn advance(&mut self, solver: &mut Solver<'_>, at: Param) -> GeomResult<()> {
+        while let Some(&(end, step)) = self.ends.get(self.next) {
+            if solver.cmp(end, at)? == Ordering::Greater {
+                break;
+            }
+            self.count += i64::from(step);
+            self.next += 1;
+        }
+        Ok(())
+    }
+
+    /// Push the visible gap `lo..hi`: one piece without see-through spans,
+    /// else one piece per maximal part covered by the same number of them.
+    fn visible(
+        &mut self,
+        solver: &mut Solver<'_>,
+        pieces: &mut Vec<Piece>,
+        lo: Param,
+        hi: Param,
+    ) -> GeomResult<()> {
+        if self.ends.is_empty() {
+            pieces.push(Piece {
+                lo,
+                hi,
+                hidden: false,
+                seen_through: 0,
+            });
+            return Ok(());
+        }
+        // A span covers the part just after `lo` when it starts at or before
+        // `lo` and ends after it.
+        self.advance(solver, lo)?;
+        let first = pieces.len();
+        let mut from = lo;
+        loop {
+            // The next end strictly inside the gap, if any, closes this part.
+            let (to, inside) = match self.ends.get(self.next) {
+                Some(&(end, _)) if solver.cmp(end, hi)? == Ordering::Less => (end, true),
+                _ => (hi, false),
+            };
+            let seen_through =
+                u32::try_from(self.count).map_err(|_| GeomError::BudgetExceeded {
+                    resource: "hidden-line see-through count",
+                })?;
+            // Only a part of this gap is a neighbour to merge with.
+            let ours = pieces.len() > first;
+            match pieces.last_mut() {
+                Some(last) if ours && last.seen_through == seen_through => last.hi = to,
+                _ => pieces.push(Piece {
+                    lo: from,
+                    hi: to,
+                    hidden: false,
+                    seen_through,
+                }),
+            }
+            if !inside {
+                return Ok(());
+            }
+            // `to` is the next end itself: apply it, then the ends equal to it.
+            self.count += i64::from(self.ends[self.next].1);
+            self.next += 1;
+            self.advance(solver, to)?;
+            from = to;
         }
     }
-    list.insert(low, param);
-    Ok(())
+}
+
+/// `items` sorted by their parameter, by merge sort: O(n log n) exact
+/// comparisons, each of which may fail.
+fn sorted(solver: &mut Solver<'_>, mut items: Vec<(Param, i32)>) -> GeomResult<Vec<(Param, i32)>> {
+    if items.len() < 2 {
+        return Ok(items);
+    }
+    let right = items.split_off(items.len() / 2);
+    let (left, right) = (sorted(solver, items)?, sorted(solver, right)?);
+    let mut out = Vec::with_capacity(left.len() + right.len());
+    let (mut i, mut j) = (0, 0);
+    while i < left.len() && j < right.len() {
+        if solver.cmp(right[j].0, left[i].0)? == Ordering::Less {
+            out.push(right[j]);
+            j += 1;
+        } else {
+            out.push(left[i]);
+            i += 1;
+        }
+    }
+    out.extend_from_slice(&left[i..]);
+    out.extend_from_slice(&right[j..]);
+    Ok(out)
 }
 
 /// Whether `hidden` is the single span `kept`, ends compared exactly.
