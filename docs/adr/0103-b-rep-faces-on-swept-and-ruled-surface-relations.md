@@ -4,6 +4,7 @@
 - **Date:** 2026-11-07
 - **Deciders:** Friedrich Schrödter
 - **Supersedes:** —
+- **Amended by:** [0110](./0110-edges-without-pcurves-are-inverted-onto-surface-relations.md): an edge use without a pcurve is inverted onto the relation (D6).
 - **Amends:** [0097](./0097-ruled-surfaces-are-a-graph-relation-between-two-curve-sides.md) (a B-rep face on a ruled surface)
 
 ## Context
@@ -92,7 +93,10 @@ B-spline"). A zero or non-finite axis or direction is `InvalidInput`. A face
 on a relation needs a pcurve on every edge use: an edge use without one is
 `UnsupportedInput` ("an edge use without a pcurve on a face over a surface
 relation"), raised before any meshing, because inverting an edge onto a
-relation is not done (#454). Any other relation (curve-bounded, rectangular
+relation is not done (#454). Amended by
+[0110](./0110-edges-without-pcurves-are-inverted-onto-surface-relations.md):
+such a use is inverted onto the relation along its swept parameter, and the
+refusal is gone. Any other relation (curve-bounded, rectangular
 trimmed, offset, sectioned) stays `UnsupportedInput` ("a B-rep face on a
 surface relation other than a revolution, a linear extrusion or a ruled
 surface"; rectangular trims are #455). Exact compilation is unchanged: a

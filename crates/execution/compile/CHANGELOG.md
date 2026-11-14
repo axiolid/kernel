@@ -9,6 +9,24 @@ caret rule for `0.x` versions.
 
 ## [Unreleased]
 
+### Added
+
+- An edge use without a pcurve on a B-rep face over a
+  `SurfaceRelation::Revolution`, `LinearExtrusion` or `Ruled` is inverted
+  onto the relation instead of refused (#454, ADR 0110), as IFC and Revit
+  write most such faces. Each sample is located along the swept parameter
+  by a certified one-dimensional search on its distance from the generating
+  circle, line or ruling, required to have one connected minimiser (across
+  a swept conic's seam), and checked against the linear tolerance; the
+  other parameter is read in closed form. The face then meshes and is
+  bounded as one over an atomic surface without pcurves is, sharing its
+  edges' samples with its neighbours. Refused by name: a sample within the
+  tolerance of the axis of revolution, of a ruled apex or on a collapsed
+  ruling (`Degenerate`), off the surface with a certified floor, without
+  unique parameters (a surface covered twice, a closed swept B-spline's
+  seam, a fold), a line extruded along itself (`Degenerate`), and a search
+  past its work cap (`BudgetExceeded`). The refusal `an edge use without a
+  pcurve on a face over a surface relation` is gone.
 ## [0.3.47] - 2026-11-14
 
 ### Changed
