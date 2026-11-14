@@ -261,8 +261,7 @@ impl CurveSpan {
                 let p1 = axiolid_reference::curve::evaluate3(curve, n1).ok()?;
                 (p1 - p0).length()
             } else {
-                axiolid_reference::bound::curve_derivative_bounds3(curve, n0, n1)?.first
-                    * (n1 - n0).abs()
+                local_arc(curve, n0, n1)?
             };
             chord = chord.max(d);
         }
@@ -285,6 +284,27 @@ impl CurveSpan {
         }
         Some(SpanBound { chord, arc })
     }
+}
+
+/// A certified bound on the arc length of `curve` between `n0` and `n1`:
+/// the smaller of the speed bound over the span times its length, and the
+/// speed at its middle plus the second-derivative bound over half of it,
+/// `|C'(m)| h + sup|C''| h^2 / 4` with `h = |n1 - n0|` (`|C'|` is Lipschitz
+/// with constant `sup|C''|`). A conic's speed bound is its largest semi-axis
+/// over any span, while its second-derivative bound follows the span, so
+/// the second form is the tighter one along an ellipse's flat side.
+fn local_arc(curve: &Curve3, n0: Scalar, n1: Scalar) -> Option<Scalar> {
+    let bounds = axiolid_reference::bound::curve_derivative_bounds3(curve, n0, n1)?;
+    let h = (n1 - n0).abs();
+    let global = bounds.first * h;
+    let local = axiolid_reference::curve::derivative3(curve, 0.5 * (n0 + n1))
+        .ok()
+        .map(|speed| {
+            (speed.length() * h + 0.25 * bounds.second * h * h)
+                * (1.0 + axiolid_reference::bound::ROUNDING)
+        })
+        .filter(|local| local.is_finite());
+    Some(local.map_or(global, |local| local.min(global)))
 }
 
 /// The span of `curve` an edge from `start` to `end` covers (the module
@@ -637,6 +657,37 @@ mod tests {
 
     fn error_text(result: GeomResult<impl core::fmt::Debug>) -> String {
         format!("{:?}", result.expect_err("refused"))
+    }
+
+    /// Over a flat ellipse's vertex the arc bound follows the short
+    /// semi-axis, not the long one, and still covers the arc.
+    #[test]
+    fn a_span_s_arc_bound_follows_the_curve_s_local_speed() {
+        let ellipse = Curve3::Ellipse(axiolid_curve::Ellipse3 {
+            frame: axiolid_core::Frame3 {
+                origin: Point3::ZERO,
+                x: Vec3::X,
+                y: Vec3::Y,
+                z: Vec3::Z,
+            },
+            semi_axis_x: 1.2,
+            semi_axis_y: 0.1,
+        });
+        for (n0, n1) in [(-0.05, 0.05), (0.0, 0.2), (1.0, 1.6)] {
+            let bound = local_arc(&ellipse, n0, n1).unwrap();
+            let point = |t: Scalar| axiolid_reference::curve::evaluate3(&ellipse, t).unwrap();
+            let arc: Scalar = (0..1000)
+                .map(|i| {
+                    let t = |k: Scalar| n0 + (n1 - n0) * k / 1000.0;
+                    (point(t(i as Scalar + 1.0)) - point(t(i as Scalar))).length()
+                })
+                .sum();
+            assert!(arc <= bound, "[{n0}, {n1}]: arc {arc} above {bound}");
+            assert!(
+                bound <= 1.5 * arc,
+                "[{n0}, {n1}]: {bound} for an arc of {arc}"
+            );
+        }
     }
 
     /// A closed square from one vertex a third of the way along its first
