@@ -193,12 +193,18 @@ fn resolve_with(
         }
     }
 
-    let mut sweep = Sweep::new(solver, &glass)?;
+    // Sorted at the first visible gap, so a hidden edge sorts nothing.
+    let mut sweep: Option<Sweep> = None;
     let mut pieces = Vec::with_capacity(2 * hidden.len() + 1);
     let mut cursor = kept.lo;
     for span in hidden {
         if solver.cmp(cursor, span.lo)? == Ordering::Less {
-            sweep.visible(solver, &mut pieces, cursor, span.lo)?;
+            Sweep::lazily(&mut sweep, solver, &glass)?.visible(
+                solver,
+                &mut pieces,
+                cursor,
+                span.lo,
+            )?;
         }
         pieces.push(Piece {
             lo: span.lo,
@@ -209,7 +215,7 @@ fn resolve_with(
         cursor = span.hi;
     }
     if solver.cmp(cursor, kept.hi)? == Ordering::Less {
-        sweep.visible(solver, &mut pieces, cursor, kept.hi)?;
+        Sweep::lazily(&mut sweep, solver, &glass)?.visible(solver, &mut pieces, cursor, kept.hi)?;
     }
     Ok(Resolved::Pieces(pieces))
 }
@@ -228,6 +234,18 @@ struct Sweep {
 }
 
 impl Sweep {
+    /// The sweep in `slot`, built from `glass` on first use.
+    fn lazily<'s>(
+        slot: &'s mut Option<Self>,
+        solver: &mut Solver<'_>,
+        glass: &[Span],
+    ) -> GeomResult<&'s mut Self> {
+        if slot.is_none() {
+            *slot = Some(Self::new(solver, glass)?);
+        }
+        Ok(slot.as_mut().expect("built above"))
+    }
+
     fn new(solver: &mut Solver<'_>, glass: &[Span]) -> GeomResult<Self> {
         let ends: Vec<(Param, i32)> = glass
             .iter()
