@@ -469,6 +469,67 @@ fn errors_say_what_is_wrong() {
 
 // --- budget and cancellation -----------------------------------------------
 
+/// `n` staggered parallel barriers 1e-3 apart: every vertex is within the
+/// gap of every barrier, but only the neighbours are unshadowed, so the
+/// search keeps a foot for each of about `n` squared candidates.
+fn comb(n: usize) -> FreeSpaceInput {
+    input(
+        Vec::new(),
+        (0..n)
+            .map(|i| {
+                let y = i as f64 * 1e-3;
+                if i % 2 == 0 {
+                    barrier((0.0, y), (1.0, y))
+                } else {
+                    barrier((-0.5, y), (1.5, y))
+                }
+            })
+            .collect(),
+    )
+}
+
+#[test]
+fn the_memory_budget_bounds_the_search_for_bridges() {
+    let n = 60;
+    // Without a budget the same input is searched to the end.
+    let all = free_faces_within(&comb(n), 10.0, &ExecutionOptions::new(t())).unwrap();
+    let kept = all.bridges().len();
+    assert!(kept > 10);
+    // The search keeps a foot for each of the pairs it tests, far more than
+    // the bridges it keeps; a budget for the inputs, those bridges and their
+    // feet, and a little more, refuses it.
+    let options = ExecutionOptions::new(t()).with_memory_budget(256 * (n + 3 * kept));
+    assert_eq!(
+        free_faces_within(&comb(n), 10.0, &options).unwrap_err(),
+        FreeFacesError::BudgetExceeded { resource: "memory" }
+    );
+    // Bridges between ends keep no foot, and count by themselves: `m` rows
+    // of two barriers that nearly meet.
+    let m = 20;
+    let rows = input(
+        Vec::new(),
+        (0..m)
+            .flat_map(|i| {
+                let y = i as f64;
+                [
+                    barrier((0.0, y), (1.0, y)),
+                    barrier((1.0 + 1e-3, y), (2.0, y)),
+                ]
+            })
+            .collect(),
+    );
+    let few = ExecutionOptions::new(t()).with_memory_budget(2 * m * 256 + 3 * 256);
+    assert_eq!(
+        free_faces_within(&rows, 2e-3, &few).unwrap_err(),
+        FreeFacesError::BudgetExceeded { resource: "memory" }
+    );
+    let all = free_faces_within(&rows, 2e-3, &ExecutionOptions::new(t())).unwrap();
+    assert_eq!(all.bridges().len(), m);
+    // A budget for everything the search keeps lets it finish.
+    let ample = ExecutionOptions::new(t()).with_memory_budget(256 * (n + 4 * n * n));
+    assert!(free_faces_within(&comb(n), 10.0, &ample).is_ok());
+}
+
 #[test]
 fn a_tiny_memory_budget_is_refused_and_a_cancelled_token_stops() {
     let room = input(closed_room(), Vec::new());
@@ -860,6 +921,88 @@ fn a_corridor_narrower_than_the_gap_between_two_rooms_is_a_closed_gap() {
     assert_eq!(faces.faces().len(), 2);
     assert_eq!(faces.closed_gaps().len(), 1);
     assert_eq!(faces.bridges().len(), 2);
+}
+
+/// An equilateral hole of inradius 1 round the origin and a concentric
+/// island of inradius `1 - w`: a wall `w` wide all round, at distance `2 w`
+/// corner to corner.
+fn triangle_ring(inradius: f64) -> Vec<(f64, f64)> {
+    let r = 2.0 * inradius;
+    let c = 3f64.sqrt() / 2.0 * r;
+    vec![(0.0, r), (-c, -r / 2.0), (c, -r / 2.0)]
+}
+
+fn wrapped_triangle(w: f64) -> FreeFaces {
+    faces_of(
+        vec![
+            walled(&triangle_ring(1.0)),
+            polygon(&triangle_ring(1.0 - w)),
+        ],
+        Vec::new(),
+        GAP,
+    )
+}
+
+#[test]
+fn a_wall_narrower_than_the_gap_all_round_is_gaps_and_wider_corner_cells_are_faces() {
+    // At a corner of angle 60 degrees wrapped at clearance w, bridging the
+    // island's corner to the two outer sides cuts off a kite of width
+    // 2 w cos^2(theta / 2): a gap while that is under the closing width, a
+    // face once it exceeds it (ADR 0109).
+    let narrow = wrapped_triangle(0.6e-4);
+    assert_eq!(narrow.faces().len(), 0);
+    assert_eq!(narrow.closed_gaps().len(), 6);
+    let wide = wrapped_triangle(0.8e-4);
+    assert_eq!(wide.faces().len(), 3);
+    assert_eq!(wide.closed_gaps().len(), 3);
+}
+
+#[test]
+fn a_gap_that_rounds_away_is_counted() {
+    // A sliver 1e-8 high: two bridges close it, and its ring is gone after
+    // snap rounding.
+    let faces = faces_of(
+        vec![walled(&[
+            (1.0, 1.0),
+            (1.5, 1.0),
+            (5.0, 1.0),
+            (5.0, 1.0 + 1e-8),
+        ])],
+        Vec::new(),
+        GAP,
+    );
+    assert!(faces.faces().is_empty());
+    assert_eq!(faces.closed_gaps().len(), 2);
+    assert_eq!(faces.bridges().len(), 2);
+    assert_eq!(faces.evidence().collapsed_gaps, 1);
+}
+
+#[test]
+fn a_bridge_from_a_projection_on_a_vertex_joins_everything_at_that_vertex() {
+    // (0, 1) projects on the end (0, 0) of the second barrier exactly; two
+    // barriers end there.
+    let faces = faces_of(
+        Vec::new(),
+        vec![
+            barrier((0.0, 1.0), (-3.0, -0.5)),
+            barrier((0.0, 0.0), (5.0, 0.0)),
+            barrier((0.0, 0.0), (1.0, 3.0)),
+        ],
+        2.0,
+    );
+    let bridge = faces
+        .bridges()
+        .iter()
+        .find(|bridge| bridge.ends == [point(0.0, 0.0), point(0.0, 1.0)])
+        .expect("the bridge from (0, 1) to (0, 0)");
+    assert_eq!(
+        bridge.joins[0],
+        vec![
+            PieceSource::Barrier { barrier: 1 },
+            PieceSource::Barrier { barrier: 2 }
+        ]
+    );
+    assert_eq!(bridge.joins[1], vec![PieceSource::Barrier { barrier: 0 }]);
 }
 
 #[test]

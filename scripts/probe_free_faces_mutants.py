@@ -9,8 +9,6 @@ point is located, and the numbering of faces and distances underneath -- and
 must turn a test red.
 
 Equivalent mutants, deliberately not listed:
-- `dot <= 0` against `dot < 0` in `nearest_on_segment`: the foot of a
-  perpendicular that lands on the end is the end itself;
 - leaving out the dedup of vertex pairs found from both sides: two identical
   bridge segments are one piece, and equal rounded ends merge into one record;
 - the vertex a closed-gap scan starts at (`count / 2`): the scan stops at the
@@ -65,6 +63,18 @@ MUTANTS = [
     ("the foot's weight is dropped", D,
      "            a[2].mul(&scale),",
      "            a[2].clone(),", [DISTANCE_TESTS] + TESTS),
+    ("a foot kept by the search is not charged", B,
+     "                Target::Foot => {\n                    charge(options, declared_bytes, &mut charged)?;\n",
+     "                Target::Foot => {\n", TESTS),
+    ("a bridge kept by the search is not charged", B,
+     "            charge(options, declared_bytes, &mut charged)?;\n            found.push(Found {",
+     "            found.push(Found {", TESTS),
+    ("a projection on an end is a foot", D,
+     "        if ask(Question::Behind)? != Sign::Positive {",
+     "        if ask(Question::Behind)? == Sign::Negative {", TESTS),
+    ("a gap that rounds away is not counted", R,
+     "built.collapsed_gaps += 1;",
+     "built.collapsed_gaps += 0;", TESTS),
     ("a bridge inside an obstacle is kept", C,
      "bridge_alive.push(!obstacle[faces.left(piece).0]);",
      "bridge_alive.push(true);", TESTS),

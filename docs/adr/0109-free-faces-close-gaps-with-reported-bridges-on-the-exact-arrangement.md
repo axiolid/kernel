@@ -55,7 +55,16 @@ Details that define the contract:
 
 - `gap` is strict (`<`), `0` is valid and closes nothing, and there is no upper
   bound: the memory budget (ADR 0088) and cancellation bound the work, and a
-  guessed constant would be a guessed default.
+  guessed constant would be a guessed default. The memory budget bounds what
+  grows with crossings, T-junctions and bridges: the cuts of both
+  arrangements on top of 256 bytes per input segment or bridge, each exact
+  foot and each bridge the search keeps (256 bytes each), and the cells and
+  fragments of snap rounding; beyond it the operation is refused with
+  `BudgetExceeded` for `memory`. It does not bound the arrangement's vertices
+  and pieces, the faces, the rings or the output, which are linear in the size
+  of the arrangement, nor the candidate pairs the search examines, which are
+  quadratic in the worst case (a comb of staggered parallel barriers) and are
+  bounded only through the feet and bridges they keep, and by cancellation.
 - A ring on one line is refused (`ZeroArea`), although ADR 0104 leaves it out
   of a region: a wall that vanished silently would make a room leak. The caller
   can pass the line as barriers.
@@ -109,6 +118,15 @@ Details that define the contract:
   only source is a bridge.
 - A redundant collinear vertex within `gap` of an adjacent edge cuts an acute
   tip off the face and reports it as a closed gap.
+- The strip rule measures the width of a cell, not the clearance of the wall
+  that made it. At a corner of angle `theta` under 90 degrees that a wall wraps
+  at clearance `w` under `gap`, the bridges from the wall's corner to the two
+  sides cut off a kite of width `2 w cos^2(theta / 2)`, which is returned as a
+  face once it exceeds `gap`, although the wall is everywhere closer than `gap`
+  (an equilateral hole of inradius 1 round an island of inradius `1 - w`: at
+  `w = 0.6 gap` six gaps and no face, at `w = 0.8 gap` three faces and three
+  gaps). By the definition of width that cell is a face, and a rule by inscribed
+  disc would keep it as well; the tests pin both cases.
 - Component nesting in `faces` is quadratic in the number of components in the
   worst case, and the closed-gap scan is quadratic in the hull in the worst
   case.

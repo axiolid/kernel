@@ -50,12 +50,15 @@ impl Faces {
         self.count
     }
 
-    /// The face left of `piece`, running from `ends[0]` to `ends[1]`.
+    /// The face left of `piece`, running from `ends[0]` to `ends[1]`; left
+    /// is in the points' frame (see [`ExactPoints`]), so it is the right in
+    /// `(x, y)` for a store with a negative frame sign.
     pub fn left(&self, piece: PieceId) -> FaceId {
         self.sides[piece.0][0]
     }
 
-    /// The face right of `piece`, running from `ends[0]` to `ends[1]`.
+    /// The face right of `piece`, running from `ends[0]` to `ends[1]`; right
+    /// is in the points' frame, as for [`Faces::left`].
     pub fn right(&self, piece: PieceId) -> FaceId {
         self.sides[piece.0][1]
     }

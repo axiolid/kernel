@@ -13,11 +13,11 @@
 use std::cmp::Ordering;
 use std::collections::BTreeSet;
 
-use axiolid_contracts::{ExecutionOptions, GeomResult, Sign};
+use axiolid_contracts::{ExecutionOptions, GeomError, GeomResult, Sign};
 use axiolid_core::Point2;
 use axiolid_exact_arrangement::{Arrangement, ExactPoints, Nearest, PairBudget, PointId, VertexId};
 
-use super::PieceSource;
+use super::{PieceSource, SEGMENT_BYTES};
 use crate::exact_arc::boxes::BoxTree;
 use crate::exact_arc::Bounds;
 
@@ -91,14 +91,44 @@ enum Target {
     Foot,
 }
 
+/// Refuse the next retained exact point or bridge when `declared_bytes`
+/// (the arrangement of the inputs) and what the search has kept so far no
+/// longer fit the memory budget.
+fn charge(
+    options: &ExecutionOptions,
+    declared_bytes: usize,
+    charged: &mut usize,
+) -> GeomResult<()> {
+    let Some(budget) = options.memory_budget_bytes() else {
+        return Ok(());
+    };
+    match declared_bytes
+        .checked_add(*charged)
+        .and_then(|total| total.checked_add(SEGMENT_BYTES))
+    {
+        Some(needed) if needed <= budget => {
+            *charged += SEGMENT_BYTES;
+            Ok(())
+        }
+        _ => Err(GeomError::BudgetExceeded { resource: "memory" }),
+    }
+}
+
 /// Every bridge of `arrangement`, the arrangement of the input segments
 /// whose sources are `sources`, for a closing width `gap`. None when `gap`
 /// is zero.
+///
+/// The search keeps one exact foot for every candidate that reaches the
+/// shadow test, and one record per bridge; each is charged `SEGMENT_BYTES`
+/// on top of `declared_bytes` against the memory budget, and the search is
+/// refused with `BudgetExceeded` for `memory` beyond it. A candidate pair
+/// that is neither kept nor a foot costs nothing that outlives it.
 pub(super) fn find(
     points: &mut ExactPoints,
     arrangement: &Arrangement,
     sources: &[PieceSource],
     gap: f64,
+    declared_bytes: usize,
     budget: &mut PairBudget,
     options: &ExecutionOptions,
 ) -> GeomResult<Vec<Found>> {
@@ -134,6 +164,7 @@ pub(super) fn find(
     let plain = BoxTree::new(boxes(0.0));
 
     let mut found = Vec::new();
+    let mut charged = 0usize;
     let mut pairs = BTreeSet::<(VertexId, VertexId)>::new();
     let (mut near, mut between, mut stack) = (Vec::new(), Vec::new(), Vec::new());
     for (index, vertex) in arrangement.vertices.iter().enumerate() {
@@ -173,7 +204,10 @@ pub(super) fn find(
             }
             let there = match target {
                 Target::Vertex(to) => arrangement.vertices[to.0].point,
-                Target::Foot => points.foot(here, start, end)?,
+                Target::Foot => {
+                    charge(options, declared_bytes, &mut charged)?;
+                    points.foot(here, start, end)?
+                }
             };
             let span = Bounds::around(&corners(points, &[here, there]), 0.0);
             plain.query_into(|b| b.overlaps(&span), &mut between, &mut stack);
@@ -195,6 +229,7 @@ pub(super) fn find(
                 Target::Vertex(to) => joined(to),
                 Target::Foot => own[piece].clone(),
             };
+            charge(options, declared_bytes, &mut charged)?;
             found.push(Found {
                 ends: [here, there],
                 joins: [joined(here_id), there_joins],

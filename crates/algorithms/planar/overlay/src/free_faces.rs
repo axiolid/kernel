@@ -34,6 +34,14 @@
 //!    (`rings`, ADR 0100), so [`FreeFaceEvidence::snap_displacement`] bounds
 //!    how far the binary64 ring moved from the exact one.
 //!
+//! The strip rule is a width, not a clearance. At a corner of angle `theta`
+//! under 90 degrees that a wall wraps at clearance `w` under `gap`, the
+//! bridges from the wall's corner to the two sides cut off a kite of width
+//! `2 w cos^2(theta / 2)`: a closed gap while that is under `gap`, a face
+//! once it exceeds it (an equilateral hole of inradius 1 and a concentric
+//! island of inradius `1 - w`: 6 gaps at `w = 0.6 gap`, 3 faces and 3 gaps at
+//! `w = 0.8 gap`).
+//!
 //! A ring on one line is refused: a wall that vanished silently would make a
 //! room leak. A piece with the same face on both sides, a dangling barrier or
 //! bridge, is in no ring. `gap == 0` closes nothing and returns the exact
@@ -303,6 +311,17 @@ pub fn free_faces(
 
 /// [`free_faces`] with execution options: the memory budget (ADR 0088) and
 /// the cancellation token; the tolerance is `execution.tolerance()`.
+///
+/// The memory budget bounds what grows with the number of crossings,
+/// T-junctions and bridges: the cuts of both arrangements (as `arrange`
+/// charges them, on top of 256 bytes per input segment or bridge), each exact
+/// foot and each bridge the search for bridges keeps, and the cells and
+/// fragments of snap rounding. Exceeding it is `BudgetExceeded` for
+/// `"memory"`. It does not bound the arrangement's own vertices and pieces,
+/// the faces, the rings or the output, which are linear in the size of the
+/// arrangement; the search's candidate pairs, quadratic in the worst case,
+/// are bounded only through the feet and bridges they keep, and by
+/// cancellation.
 pub fn free_faces_within(
     input: &FreeSpaceInput,
     gap: f64,
@@ -324,6 +343,7 @@ pub fn free_faces_within(
         &first,
         &model.sources,
         gap,
+        inputs * SEGMENT_BYTES,
         &mut budget,
         execution,
     )?;
