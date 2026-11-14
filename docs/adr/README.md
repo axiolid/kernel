@@ -96,3 +96,4 @@ Package names and paths in older accepted records describe the tree at the time 
 | [0109](./0109-free-faces-close-gaps-with-reported-bridges-on-the-exact-arrangement.md) | Free faces close gaps with reported bridges on the exact arrangement |
 | [0110](./0110-edges-without-pcurves-are-inverted-onto-surface-relations.md) | Edges without pcurves are inverted onto surface relations |
 | [0111](./0111-see-through-triangles-in-hidden-lines-and-visible-faces.md) | See-through triangles in hidden lines and visible faces |
+| [0112](./0112-faces-that-reach-a-pole-of-their-surface.md) | Faces that reach a pole of their surface |

@@ -5,6 +5,7 @@
 - **Deciders:** Friedrich Schrödter
 - **Supersedes:** —
 - **Amends:** [0103](./0103-b-rep-faces-on-swept-and-ruled-surface-relations.md) (D6: an edge use without a pcurve on a relation face)
+- **Amended by:** [0112](./0112-faces-that-reach-a-pole-of-their-surface.md): an edge ending at the axis or a ruled apex closes its face there (D4, D6); the collapsed ruling moves to #502.
 
 ## Context
 

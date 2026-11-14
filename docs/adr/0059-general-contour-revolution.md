@@ -117,8 +117,8 @@ over a pole as no turn round the surface (it used to snap the jump to whole
 periods and add a second seam, so every such face was refused with
 `TangentSplit` or `Assembly`), and the deviation oracle treats a loop that
 leaves a pole at the height it reached it as closed and ends a cone's box at
-its apex. The B-rep tessellator has no pole row of samples yet and refuses
-such a face by name (#463).
+its apex. The B-rep tessellator closes such a face with a row of samples
+welded to the pole's vertex (#463, ADR 0112).
 
 **The apex frame.** A cone with an end on the axis is framed at its apex with
 radius zero, as the partial-turn path does, so the apex is at v = 0 exactly.

@@ -4,6 +4,7 @@
 - **Date:** 2026-10-14
 - **Deciders:** Friedrich Schrödter
 - **Supersedes:** —
+- **Amended by:** [0112](./0112-faces-that-reach-a-pole-of-their-surface.md): an edge sample at a cone apex or sphere pole that is an end of its edge is no longer refused; its `v` is the pole's and its `u` its neighbour's.
 
 ## Context
 

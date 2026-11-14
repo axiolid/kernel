@@ -5,6 +5,7 @@
 - **Deciders:** Friedrich Schrödter
 - **Supersedes:** —
 - **Amended by:** [0110](./0110-edges-without-pcurves-are-inverted-onto-surface-relations.md): an edge use without a pcurve is inverted onto the relation (D6).
+- **Amended by:** [0112](./0112-faces-that-reach-a-pole-of-their-surface.md): a face on a revolution reaching its axis or a ruled surface with an apex reaches that pole (D6).
 - **Amends:** [0097](./0097-ruled-surfaces-are-a-graph-relation-between-two-curve-sides.md) (a B-rep face on a ruled surface)
 
 ## Context
