@@ -56,11 +56,6 @@ Latest release, 0.3.17 (2026-11-13):
 - `bound::ElevatedPositionTable` is re-exported from `axiolid-evaluate`
   0.3.21 (#393): certified points of an elevated or banked curve over an
   intrinsic plan, which `axiolid-mesh-compile` reads for its swept disks.
-  Over a chain plan it also reads the tangent and the second derivative
-  (`jet3_on`, `jet_errors`, #438).
-- `bound::ChainPositionTable` and `bound::SeamSide` are re-exported from
-  `axiolid-evaluate` 0.3.21 (#438): certified points, tangents and
-  curvature vectors of an arc-length chain.
 
 ### Changed
 
