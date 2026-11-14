@@ -2156,7 +2156,12 @@ run on the outer side of an ellipse was reported unbounded too.
   curve or under a placement that tilts `+Z`); `rise = O'_z` under the plan
   reading and zero under the section reading. Ranges are the middle value
   plus `(span / 2 + measure)` times the Lipschitz constants from
-  `FrameLawBounds` (`|tau'| <= |U'||L'| + |L''|`, `|rise'| <= |O''|`).
+  `FrameLawBounds` (`|tau'| <= |U'||L'| + |L''|`, `|rise'| <= |O''|`). On a
+  frame read by quadrature those constants are taken over the native range of
+  the span's two reads padded by twice the reads' measure of arc length, not
+  over frames read at padded ends, and the reads at a span's ends are kept
+  for its halves: the fold decision calls `rates` once per bisected span, and
+  an offset beside a cubic across its knot spent 47 of 52 s there before.
 - **The orientation's turn** is closed form: `e'.n = a'.n / |a|`, `y^'.n =
   -(r'.y^ - (r.e)(a'.y^) / |a|) / |g|` for the interpolated axis `a` and
   reference `r` (`g = r - (r.e) e`), bounded over a span by the existing
@@ -2199,4 +2204,6 @@ ellipse's closed form at an RK4 arc length, offsets against `1/(R + d)`),
 `crates/execution/compile/src/station/bound/fold/` (`turned.rs`, `rate.rs`),
 `crates/execution/compile/tests/station_fold_turned.rs` (closed forms and a
 finite-difference oracle of the placed vertices),
-`tests/station_fold_quadrature.rs` and `scripts/probe_exact_fold_mutants.py`.
+`tests/station_fold_quadrature.rs`, `scripts/probe_exact_fold_mutants.py` and
+`tools/benchmark/benches/station_quadrature.rs` (the compile of runs along an
+ellipse and along a cubic's offset across its knot).

@@ -9,6 +9,19 @@ caret rule for `0.x` versions.
 
 ## [Unreleased]
 
+### Changed
+
+- Stationed spines, sectioned surfaces and open-section runs with turned
+  sections, or along ellipses, B-splines and offsets beside them, have their
+  folds decided exactly (#406, ADR 0082 amendment): a fold, or a touch within
+  rounding and the frames' certified error, is refused as `InvalidInput`
+  ("station-placed sections fold") by the mesh and the exact compiler alike,
+  where it was reported `Unbounded` (`FOLD_NOT_EXCLUDED`); a clear run is
+  certified. A section turned to face backwards along its basis is refused by
+  the same rule. Only a span whose frames or turn cannot be bounded, or that
+  crosses a curvature break of a frame read by quadrature, is still checked
+  conservatively and reported unbounded by name where that cannot clear it.
+
 ## [0.3.46] - 2026-11-14
 
 ### Changed

@@ -9,6 +9,11 @@ caret rule for `0.x` versions.
 
 ## [Unreleased]
 
+### Added
+
+- `station::FrameRates`, `station::RateBounds` and `FrameLaw::rates` reach
+  through the `station` re-export of `axiolid-evaluate` (#406).
+
 ## [0.3.18] - 2026-11-14
 
 ### Added

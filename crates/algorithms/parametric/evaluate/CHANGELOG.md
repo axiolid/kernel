@@ -9,6 +9,17 @@ caret rule for `0.x` versions.
 
 ## [Unreleased]
 
+### Added
+
+- `station::FrameLaw::rates`, `FrameRates` and `RateBounds` (#406): certified
+  bounds of a section frame law's forward rate, rise, bend toward the lateral
+  and up axes and twist over a span, each with its value at the span's middle
+  read and that value's error. Frames read by quadrature (ellipses,
+  B-splines, offsets beside a line, circle, ellipse or B-spline) have them
+  from a certified second derivative of the exact curve; a span across a
+  point where their curvature may jump has none. `FrameLaw::bend` and
+  `has_bend` now cover frames read by quadrature as well.
+
 ## [0.3.22] - 2026-11-14
 
 ### Added

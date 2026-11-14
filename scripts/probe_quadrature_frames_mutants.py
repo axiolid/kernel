@@ -43,11 +43,11 @@ QUAD = ["-p", "axiolid-mesh-compile", "--all-features", "--test", "station_bound
 MUTANTS = [
     # The frame law in the exact curve's arc length.
     ("the curvature bound is short a power of the speed", READING,
-     "            let k1 = second / (sigma * sigma);",
-     "            let k1 = second / sigma;", [LAW]),
+     "        let k1 = second / (sigma * sigma);",
+     "        let k1 = second / sigma;", [LAW]),
     ("the tangent's second derivative drops the unit vector's", READING,
-     "            let k2 = unit_second / (sigma * sigma) + x * x / (sigma * sigma);",
-     "            let k2 = 0.0 * unit_second / (sigma * sigma) + x * x / (sigma * sigma);",
+     "        let k2 = unit_second / (sigma * sigma) + x * x / (sigma * sigma);",
+     "        let k2 = 0.0 * unit_second / (sigma * sigma) + x * x / (sigma * sigma);",
      [LAW]),
     ("every curve read by quadrature is framed as planar", READING,
      "                    planar: matches!(curve, StationCurve::Two(_)),",
