@@ -9,20 +9,8 @@ caret rule for `0.x` versions.
 
 ## [Unreleased]
 
-## [0.1.6] - 2026-11-14
-
 ### Added
 
-- Perspective fixtures for hidden lines (a box in front of the eye, the same
-  box cut by the near plane, an eye inside a box, an exact non-dyadic
-  boundary, an edge along the eye ray, an eye inside an edge-on triangle)
-  and the refusal of a perspective near
-  depth that is missing, zero, positive or not finite. A hidden-line provider
-  that claims perspective is checked against them by
-  `PerspectiveConformanceSuite::run`, which reports a failure as the new
-  `PerspectiveConformanceFailure::HiddenLines`. This replaces the 0.1.5
-  behaviour in which every claim failed closed with `ClaimUnverifiable`; a
-  visible-face claim still does until its fixtures land (ADR 0107, #387).
 - See-through triangles (ADR 0111, #496). `Occlusion` (`Opaque`, the
   default, and `SeeThrough`) and `TriangleOcclusion` (`AllOpaque`, the
   default, and `PerTriangle`) with `HiddenLineMesh::occlusion` and
@@ -54,6 +42,21 @@ caret rule for `0.x` versions.
   solid, planar groups split by occlusion), refuse a mixed face group, a
   short occlusion slice and a stack over `max_behind_surfaces`, and answer
   three base scenes flagged all opaque as without flags (ADR 0111, #496).
+
+## [0.1.6] - 2026-11-14
+
+### Added
+
+- Perspective fixtures for hidden lines (a box in front of the eye, the same
+  box cut by the near plane, an eye inside a box, an exact non-dyadic
+  boundary, an edge along the eye ray, an eye inside an edge-on triangle)
+  and the refusal of a perspective near
+  depth that is missing, zero, positive or not finite. A hidden-line provider
+  that claims perspective is checked against them by
+  `PerspectiveConformanceSuite::run`, which reports a failure as the new
+  `PerspectiveConformanceFailure::HiddenLines`. This replaces the 0.1.5
+  behaviour in which every claim failed closed with `ClaimUnverifiable`; a
+  visible-face claim still does until its fixtures land (ADR 0107, #387).
 
 ## [0.1.5] - 2026-11-13
 

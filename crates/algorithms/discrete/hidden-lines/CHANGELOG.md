@@ -9,47 +9,17 @@ caret rule for `0.x` versions.
 
 ## [Unreleased]
 
-## [0.1.5] - 2026-11-14
-
 ### Added
 
-- `ScalarHiddenLines` and `ScanHiddenLines` draw perspective views and claim
-  them through `supports_projection`, replacing the by-name refusal of 0.1.4:
-  a pinhole at the frame origin, image `(U / -W, V / -W)`, `near` required
-  and below zero. Every visibility predicate is an exact determinant of
-  vectors from the eye, so triangles behind the eye need no case, endpoints
-  are the exact rationals rounded once, and the near-plane cap is decided by
-  ray parity along the eye ray. The perspective conformance fixtures and a
-  binary64 eye-ray oracle (seeded scenes, eyes outside and inside) check it;
-  the provider refuses a perspective view whose `near` is missing, zero,
-  positive or not finite with `InvalidInput`. The visible-face providers
-  still refuse a perspective view by name (ADR 0107, #387).
-- The broad phase scales the depth coordinate of its hierarchy to the size of
-  the image in a perspective view, where the image is in units of one over the
-  depth and the longest-extent split would otherwise cut by depth alone. On
-  the 50x50 perspective grid of `scenario/hidden-lines` the tree then returns
-  4.2M boxes instead of 44.3M before the exact test (540,676 pairs either
-  way; the isometric grid returns 3.5M). The drawing is unchanged and
-  orthographic views are untouched. A vertex at or behind the eye plane
-  (`W >= 0`) has an unbounded image enclosure, so a triangle beside or behind
-  the eye sends the whole scene to the linear scan (same pairs, slower
-  candidate search); this is documented in the crate docs (#387).
-- An edge-on perspective triangle whose plane contains the eye may contain the
-  eye itself, strictly inside, on a side or at a vertex. The eye in the closed
-  triangle is decided exactly (no two of the three signs of `v_i × v_j` along
-  the normal strictly opposite) and every ray from the eye then starts in the
-  triangle, so its fibre reaches from the eye to the side the ray leaves by:
-  the span of each non-skipped side counts as in front without the nearer-than
-  test, while the near plane still has to be reached and the point still has
-  to be strictly beyond it (ADR 0107, #387).
 - `ScalarHiddenLines` and `ScanHiddenLines` honour see-through triangles and
   claim them through `supports_occlusion` (ADR 0111, #496). A see-through
   triangle hides nothing; a visible piece counts in `seen_through` the
   see-through triangles of nonzero image area whose plane is strictly in
   front of it and whose image holds the point shifted by `(ε, ε²)`, decided
   with the perturbed image-side clips of the caps, in orthographic and
-  perspective views. A visible gap is split where that count changes and a
-  hidden piece is not split. Without a see-through triangle no step of this
+  perspective views. A visible gap is split where that count changes, found
+  by one sweep over the sorted span ends (O(G log G) exact comparisons for G
+  see-through spans over an edge), and a hidden piece is not split. Without a see-through triangle no step of this
   runs: the drawing, the evidence and the exact work are unchanged. A
   `PerTriangle` occlusion slice of the wrong length, or an unknown occlusion
   mode, is `InvalidInput` naming the mesh.
@@ -84,6 +54,40 @@ caret rule for `0.x` versions.
   surfaces behind). Edges behind glass lose the early-out of full cover and
   are no longer pruned from the arrangement, which the counts show; the run
   to run spread on this machine is as large as the cost.
+
+## [0.1.5] - 2026-11-14
+
+### Added
+
+- `ScalarHiddenLines` and `ScanHiddenLines` draw perspective views and claim
+  them through `supports_projection`, replacing the by-name refusal of 0.1.4:
+  a pinhole at the frame origin, image `(U / -W, V / -W)`, `near` required
+  and below zero. Every visibility predicate is an exact determinant of
+  vectors from the eye, so triangles behind the eye need no case, endpoints
+  are the exact rationals rounded once, and the near-plane cap is decided by
+  ray parity along the eye ray. The perspective conformance fixtures and a
+  binary64 eye-ray oracle (seeded scenes, eyes outside and inside) check it;
+  the provider refuses a perspective view whose `near` is missing, zero,
+  positive or not finite with `InvalidInput`. The visible-face providers
+  still refuse a perspective view by name (ADR 0107, #387).
+- The broad phase scales the depth coordinate of its hierarchy to the size of
+  the image in a perspective view, where the image is in units of one over the
+  depth and the longest-extent split would otherwise cut by depth alone. On
+  the 50x50 perspective grid of `scenario/hidden-lines` the tree then returns
+  4.2M boxes instead of 44.3M before the exact test (540,676 pairs either
+  way; the isometric grid returns 3.5M). The drawing is unchanged and
+  orthographic views are untouched. A vertex at or behind the eye plane
+  (`W >= 0`) has an unbounded image enclosure, so a triangle beside or behind
+  the eye sends the whole scene to the linear scan (same pairs, slower
+  candidate search); this is documented in the crate docs (#387).
+- An edge-on perspective triangle whose plane contains the eye may contain the
+  eye itself, strictly inside, on a side or at a vertex. The eye in the closed
+  triangle is decided exactly (no two of the three signs of `v_i × v_j` along
+  the normal strictly opposite) and every ray from the eye then starts in the
+  triangle, so its fibre reaches from the eye to the side the ray leaves by:
+  the span of each non-skipped side counts as in front without the nearer-than
+  test, while the near plane still has to be reached and the point still has
+  to be strictly beyond it (ADR 0107, #387).
 
 ## [0.1.4] - 2026-11-13
 
