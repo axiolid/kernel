@@ -29,11 +29,11 @@ caret rule for `0.x` versions.
 - `conformance::see_through::SeeThroughConformanceSuite` (`run`, `run_faces`)
   with its report and failure types infers the see-through claim from
   `supports_occlusion`: an unclaiming provider must refuse a see-through
-  request by name; a hidden-line claim must draw eight fixtures (panes over a
+  request by name; a hidden-line claim must draw nine fixtures (panes over a
   floor and over each other, a pane under an opaque sheet, a see-through box,
   edges under a pane's border and diagonal, the occluding cap of a cut
-  see-through solid, and a see-through slab in perspective when that is
-  claimed too) with their `seen_through` counts and evidence, refuse a short
+  see-through solid, a see-through pane cut by the near plane, and a
+  see-through slab in perspective when that is claimed too) with their `seen_through` counts and evidence, refuse a short
   occlusion slice naming the mesh, and draw three base scenes flagged all
   opaque as without flags. A visible-face claim must reproduce the regions and
   `behind` lists of eight scenes (a pane over a box, two panes over a box, a

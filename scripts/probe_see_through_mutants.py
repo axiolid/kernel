@@ -96,7 +96,8 @@ MUTANTS = [
     ('edge-on glass occludes', OCC, '        if tri.see_through {', '        if tri.see_through && tri.sigma != Ordering::Equal {', OCC_LIB),
     ('seen-through segments are not counted', PRO, '            evidence.seen_through_segments += 1;', '            evidence.seen_through_segments += 0;', LINE_SUITE),
     ('the count includes glass at equal depth', OCC, '    let in_front = scene.constraint(Kind::PlaneAbove { t, neg, lift }, true);', '    let in_front = scene.constraint(Kind::PlaneAbove { t, neg, lift }, false);', LINE_SUITE),
-    ('the count includes glass beyond the near plane', OCC, '            solver.clip(span, &not_cut)\n', '            let _ = not_cut;\n            Ok(Some(span))\n', [LINE_SUITE, PROVIDERS, ORACLE]),
+    ('the count includes glass beyond the near plane', OCC, '            solver.clip(span, &not_cut)\n', '            let _ = not_cut;\n            Ok(Some(span))\n', LINE_SUITE),
+    ('the count includes glass beyond the near plane (oracle)', OCC, '            solver.clip(span, &not_cut)\n', '            let _ = not_cut;\n            Ok(Some(span))\n', ORACLE),
     ('the sweep counts only the ends before a gap', OCC, '            if solver.cmp(end, at)? == Ordering::Greater {', '            if solver.cmp(end, at)? != Ordering::Less {', [LINE_SUITE, OCC_LIB]),
     ('collapsed neighbours of different counts are joined', PRO, '                if last.visibility == visibility && last.seen_through == piece.seen_through {', '                if last.visibility == visibility {', PROVIDERS + ["a_collapsed_piece"]),
     # 18. The prune.

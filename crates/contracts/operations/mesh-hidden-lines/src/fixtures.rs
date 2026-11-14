@@ -1632,6 +1632,43 @@ pub(crate) fn see_through_cases() -> Vec<Case> {
         },
     ));
 
+    // A see-through pane over [1,3] x [1,5] rising as z = x from 1 to 3, cut
+    // by the near plane z = 2. Only its part with x <= 2 is kept, so over the
+    // floor's top edge y = 4 it counts from x = 2 to x = 1; beyond the plane
+    // it counts nothing, though it lies in front of the floor.
+    cases.push(see_through_case(
+        "see-through pane cut by the near plane",
+        vec![
+            floor(),
+            sheet(
+                2,
+                soup(
+                    vec![
+                        Point3::new(1.0, 1.0, 1.0),
+                        Point3::new(3.0, 1.0, 3.0),
+                        Point3::new(3.0, 5.0, 3.0),
+                        Point3::new(1.0, 5.0, 1.0),
+                    ],
+                    vec![0, 1, 2, 0, 2, 3],
+                ),
+            )
+            .see_through(),
+        ],
+        plan(plan_frame()).with_near(2.0),
+        Expect {
+            edges: vec![EdgePieces {
+                edge: edge(1, 2, 3),
+                kind: Boundary,
+                pieces: vec![
+                    piece(Visible, [4.0, 4.0], [2.0, 4.0]),
+                    seen(1, [2.0, 4.0], [1.0, 4.0]),
+                    piece(Visible, [1.0, 4.0], [0.0, 4.0]),
+                ],
+            }],
+            ..Expect::default()
+        },
+    ));
+
     // The perspective slab of "perspective slab hides part of an edge", now
     // see-through. For the wall edge's image points (x, 1/2) with
     // 1/3 < x < 1/2 the eye ray (x t, t/2, -t) enters the slab through its
@@ -2001,7 +2038,7 @@ mod tests {
                 assert!((total - outlines).abs() < EPS, "{}", case.name);
             }
         }
-        assert_eq!(names.len(), 8);
+        assert_eq!(names.len(), 9);
         for name in NEUTRAL_CASES {
             assert!(cases().iter().any(|c| c.name == name), "{name}");
         }

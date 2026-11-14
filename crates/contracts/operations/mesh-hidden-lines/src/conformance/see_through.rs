@@ -10,8 +10,8 @@
 //! and the suite then draws the see-through fixtures (panes over a floor,
 //! panes over panes, a pane under an opaque sheet, a see-through box, edges
 //! under a pane's border and diagonal, the occluding cap of a cut
-//! see-through solid and, when the provider also claims perspective, a
-//! see-through slab seen from an eye), checks each piece's
+//! see-through solid, a see-through pane cut by the near plane and, when the
+//! provider also claims perspective, a see-through slab seen from an eye), checks each piece's
 //! [`seen_through`](crate::HiddenLineSegment::seen_through) count and the
 //! evidence, requires a short occlusion slice to be refused naming its mesh,
 //! and requires base scenes flagged all opaque to be drawn exactly as without
