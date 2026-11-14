@@ -14,6 +14,14 @@
 //! count are those of the linear scan. A box the hierarchy would refuse
 //! (non-finite enclosure) makes the scan the answer; it never loses a pair.
 //! `ScanHiddenLines` runs the scan throughout, for the benchmark baseline.
+//!
+//! The hierarchy splits along the longest extent. In a perspective view the
+//! image is in units of one over the depth, tiny beside `W`, so the tree would
+//! split by depth alone and prune nothing in the image. Its third coordinate
+//! is therefore `W` times a positive constant that brings the depth extent to
+//! the size of the image's. A positive factor keeps every order (rounding a
+//! product is monotone), so the probe still encloses what the exact test
+//! admits; the exact test runs on the unscaled boxes as before.
 
 use axiolid_core::{Aabb, Point3};
 use axiolid_spatial::{Bvh, SpatialItem};
@@ -51,38 +59,90 @@ pub(crate) enum BroadPhase {
 #[derive(Debug)]
 pub(crate) struct Broad {
     bvh: Option<Bvh<usize>>,
+    /// The factor of the depth coordinate in the hierarchy.
+    depth_scale: f64,
+}
+
+/// The depth factor that makes the depth extent of `tris` as large as the
+/// image extent, or one when either is zero or not finite.
+fn perspective_depth_scale(tris: &[Tri]) -> f64 {
+    let mut lo = [f64::INFINITY; 3];
+    let mut hi = [f64::NEG_INFINITY; 3];
+    for tri in tris {
+        for axis in 0..3 {
+            lo[axis] = lo[axis].min(tri.bounds.lo[axis]);
+            hi[axis] = hi[axis].max(tri.bounds.hi[axis]);
+        }
+    }
+    let image = (hi[0] - lo[0]).max(hi[1] - lo[1]);
+    let depth = hi[2] - lo[2];
+    let scale = image / depth;
+    if image.is_finite() && depth.is_finite() && scale.is_finite() && scale > 0.0 {
+        scale
+    } else {
+        1.0
+    }
 }
 
 impl Broad {
+    /// The hierarchy of an orthographic view.
     pub(crate) fn build(tris: &[Tri], phase: BroadPhase) -> Self {
+        Self::build_view(tris, phase, false)
+    }
+
+    /// The hierarchy of a view that is perspective or not.
+    pub(crate) fn build_view(tris: &[Tri], phase: BroadPhase, perspective: bool) -> Self {
         if phase == BroadPhase::Scan {
-            return Self { bvh: None };
+            return Self {
+                bvh: None,
+                depth_scale: 1.0,
+            };
         }
+        let depth_scale = if perspective {
+            perspective_depth_scale(tris)
+        } else {
+            1.0
+        };
         let bvh = Bvh::build(tris.iter().enumerate().map(|(i, tri)| {
             let (lo, hi) = (tri.bounds.lo, tri.bounds.hi);
             SpatialItem::new(
                 i,
                 Aabb {
-                    min: Point3::new(lo[0], lo[1], lo[2]),
-                    max: Point3::new(hi[0], hi[1], hi[2]),
+                    min: Point3::new(lo[0], lo[1], lo[2] * depth_scale),
+                    max: Point3::new(hi[0], hi[1], hi[2] * depth_scale),
                 },
             )
         }));
         Self {
             bvh: (bvh.rejected_items() == 0).then_some(bvh),
+            depth_scale,
         }
+    }
+
+    /// The tree's leaves the probe of `query` reaches, before the exact test.
+    fn reached(&self, bvh: &Bvh<usize>, query: &Query) -> Vec<usize> {
+        let probe = Aabb {
+            min: Point3::new(
+                query.image.lo[0],
+                query.image.lo[1],
+                query.w_lo * self.depth_scale,
+            ),
+            max: Point3::new(
+                query.image.hi[0],
+                query.image.hi[1],
+                query.w_hi * self.depth_scale,
+            ),
+        };
+        let mut hits = Vec::new();
+        bvh.query_aabb(&probe, &mut hits);
+        hits
     }
 
     /// The triangles `query` admits, ascending.
     pub(crate) fn candidates(&self, tris: &[Tri], query: &Query) -> Vec<usize> {
         let found = match &self.bvh {
             Some(bvh) => {
-                let probe = Aabb {
-                    min: Point3::new(query.image.lo[0], query.image.lo[1], query.w_lo),
-                    max: Point3::new(query.image.hi[0], query.image.hi[1], query.w_hi),
-                };
-                let mut hits = Vec::new();
-                bvh.query_aabb(&probe, &mut hits);
+                let hits = self.reached(bvh, query);
                 // The hierarchy returns whole leaves: keep the boxes that
                 // really overlap the probe.
                 let mut keys: Vec<usize> = hits
@@ -176,6 +236,48 @@ mod tests {
         // A depth gap: nothing.
         let q = query([5.0, 0.0, 0.0], [5.0, 0.0, 0.0], 1.5, 5.0);
         assert!(broad.candidates(&tris, &q).is_empty());
+    }
+
+    #[test]
+    fn a_perspective_hierarchy_scales_the_depth_and_still_equals_the_scan() {
+        // Image units of 0.01 against depth units of 10: unscaled, the tree
+        // would split on depth alone.
+        let tris: Vec<Tri> = (0..40)
+            .map(|i| {
+                let (x, w) = (f64::from(i % 8) * 0.01, -10.0 * f64::from(i / 8));
+                tri([x, 0.0, w - 1.0], [x + 0.01, 0.01, w])
+            })
+            .collect();
+        let broad = Broad::build_view(&tris, BroadPhase::Tree, true);
+        assert!(broad.depth_scale > 0.0 && broad.depth_scale < 0.01);
+        assert_eq!(
+            Broad::build_view(&tris, BroadPhase::Tree, false).depth_scale,
+            1.0
+        );
+        let mut touching = 0;
+        for x in (-1..10).map(|k| f64::from(k) * 0.005) {
+            for w_lo in [f64::NEG_INFINITY, -41.0, -30.0, -10.0, 0.0] {
+                for w_hi in [-30.0, -10.0, -1.0, 0.0, f64::INFINITY] {
+                    let q = query([x, 0.0, 0.0], [x + 0.01, 0.01, 0.0], w_lo, w_hi);
+                    touching += usize::from(!broad.candidates(&tris, &q).is_empty());
+                }
+            }
+        }
+        assert!(touching > 100);
+        // The probe is as tight as the scaled tree allows: a query for one
+        // layer of depth reaches a few leaves, not the whole tree.
+        let bvh = broad.bvh.as_ref().expect("a hierarchy");
+        let narrow = query([0.0, 0.0, 0.0], [0.01, 0.01, 0.0], -11.0, -9.0);
+        let reached = broad.reached(bvh, &narrow).len();
+        assert!(reached < tris.len() / 2, "{reached} of {}", tris.len());
+    }
+
+    #[test]
+    fn a_degenerate_extent_keeps_the_depth_unscaled() {
+        let flat = vec![tri([0.0, 0.0, -1.0], [1.0, 1.0, -1.0])];
+        assert_eq!(perspective_depth_scale(&flat), 1.0);
+        let point = vec![tri([0.0, 0.0, -2.0], [0.0, 0.0, -1.0])];
+        assert_eq!(perspective_depth_scale(&point), 1.0);
     }
 
     #[test]

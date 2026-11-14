@@ -22,6 +22,13 @@ caret rule for `0.x` versions.
   the provider refuses a perspective view whose `near` is missing, zero,
   positive or not finite with `InvalidInput` (ADR 0107, #387).
 - The visible-face providers still refuse a perspective view by name.
+- The broad phase scales the depth coordinate of its hierarchy to the size of
+  the image in a perspective view, where the image is in units of one over the
+  depth and the longest-extent split would otherwise cut by depth alone. On
+  the 50x50 perspective grid of `scenario/hidden-lines` the tree then returns
+  4.2M boxes instead of 44.3M before the exact test (540,676 pairs either
+  way; the isometric grid returns 3.5M). The drawing is unchanged and
+  orthographic views are untouched (#387).
 
 ## [0.1.4] - 2026-11-13
 

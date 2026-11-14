@@ -126,6 +126,12 @@ The exact method of the Decision is made concrete as follows.
   of a near depth that is missing, zero, positive or not finite. A provider
   that claims hidden-line perspective and ignores the projection fails them.
   The binary64 oracle of the provider tests casts rays from the eye.
+- **Broad phase.** The hierarchy splits along the longest extent, and a
+  perspective image is in units of one over the depth, tiny beside `W`. Its
+  depth coordinate is `W` times a positive constant that brings the depth
+  extent to that of the image. A positive factor keeps every order, so the
+  probe still encloses what the exact test admits, and the pairs and the
+  drawing do not change.
 - **Compatibility.** Orthographic output is bit for bit unchanged: a
   constraint carries a `perspective` flag and the orthographic arm of every
   evaluation is the code it was.

@@ -143,7 +143,11 @@ fn draw(
         )?;
     }
 
-    let broad = Broad::build(&tris, phase);
+    let broad = Broad::build_view(
+        &tris,
+        phase,
+        request.view.projection == ViewProjection::Perspective,
+    );
     let scene = Scene {
         verts: &verts,
         tris: &tris,
