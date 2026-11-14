@@ -497,16 +497,16 @@ impl FaceBound<'_> {
     /// `sigma` below that is assumed. While inside `B` the edge's preimage
     /// moves at most `|C'| / sigma` per unit of its parameter, so it never
     /// leaves `B` when `B` holds every point within `arc / sigma` of the
-    /// chord's start (`B` is clamped to a B-spline's domain, which the
-    /// preimage never leaves). Inside `B`, `|S(x) - S(y)| >= sigma |x - y|`,
+    /// chord's start (`B` is clamped to the support's open domain, a
+    /// B-spline's or the ruled unit square, which the preimage never
+    /// leaves). Inside `B`, `|S(x) - S(y)| >= sigma |x - y|`,
     /// so the preimage is within `W = near / sigma` of the chord, a segment
     /// across the lens is at most `2 W` long, and the surface strays from
     /// that segment's chord by `q(2 W) / 8` at most.
     fn lens(&self, a: Point2, b: Point2, arc: Scalar, near: Scalar) -> Option<Scalar> {
-        let surface = self.surface.atomic()?;
         let oracle = self.oracle.as_ref()?;
         let m = (a + b) * 0.5;
-        let (su, sv) = axiolid_reference::surface::partials(surface, m.x, m.y).ok()?;
+        let (su, sv) = self.surface.partials(m.x, m.y).ok()?;
         let (alpha, beta) = (su.length(), sv.length());
         if !(alpha > 0.0 && beta > 0.0 && alpha.is_finite() && beta.is_finite()) {
             return None;
@@ -514,7 +514,7 @@ impl FaceBound<'_> {
         // The scaled Gram matrix is [[1, c], [c, 1]]: eigenvalues 1 +- c.
         let c = (su.dot(sv) / (alpha * beta)).abs();
         let sigma_m = (1.0 - c).max(0.0).sqrt();
-        let ((u0, u1), (v0, v1)) = parameter_domain(surface);
+        let ((u0, u1), (v0, v1)) = self.surface.open_domain();
         let mut sigma = 0.5 * sigma_m;
         for _ in 0..LENS_ATTEMPTS {
             if sigma.is_nan() || sigma <= 0.0 {
@@ -552,7 +552,7 @@ const LENS_ATTEMPTS: usize = 4;
 
 /// The native domain of a B-spline's open axes, which its preimages stay
 /// in; unbounded otherwise.
-fn parameter_domain(surface: &Surface) -> ((Scalar, Scalar), (Scalar, Scalar)) {
+pub(super) fn parameter_domain(surface: &Surface) -> ((Scalar, Scalar), (Scalar, Scalar)) {
     let unbounded = (Scalar::NEG_INFINITY, Scalar::INFINITY);
     let Surface::BSpline(spline) = surface else {
         return (unbounded, unbounded);

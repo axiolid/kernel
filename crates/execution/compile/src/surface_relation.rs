@@ -124,6 +124,11 @@ impl<'g> SweptCurve<'g> {
         axiolid_reference::curve::evaluate3(self.curve, self.parameter(t)?)
     }
 
+    /// The curve's tangent `c'(t)`, read where [`Self::point`] reads.
+    pub(crate) fn tangent(&self, t: Scalar) -> GeomResult<Vec3> {
+        axiolid_reference::curve::derivative3(self.curve, self.parameter(t)?)
+    }
+
     #[cfg(test)]
     fn derivatives(&self, t: Scalar) -> GeomResult<(Vec3, Vec3)> {
         let t = self.parameter(t)?;
@@ -267,9 +272,36 @@ impl<'g> RelationSurface<'g> {
         }
     }
 
+    /// `S_u` and `S_v`, read where [`Self::evaluate`] reads.
+    pub(crate) fn tangents(&self, u: Scalar, v: Scalar) -> GeomResult<(Vec3, Vec3)> {
+        match self {
+            Self::Revolution {
+                curve,
+                origin,
+                axis,
+            } => {
+                let w = curve.point(v)? - *origin;
+                Ok((
+                    axis.cross(rotate(*axis, u, w)),
+                    rotate(*axis, u, curve.tangent(v)?),
+                ))
+            }
+            Self::Extrusion { curve, direction } => Ok((curve.tangent(u)?, *direction)),
+            Self::Ruled { sides } => {
+                let (u, v) = (unit(u)?, unit(v)?);
+                let [a, b] = sides;
+                Ok((
+                    a.derivative(u)? * (1.0 - v) + b.derivative(u)? * v,
+                    b.at(u)? - a.at(u)?,
+                ))
+            }
+        }
+    }
+
     /// `S_u, S_v, S_uu, S_uv, S_vv`.
     #[cfg(test)]
     pub(crate) fn partials(&self, u: Scalar, v: Scalar) -> GeomResult<[Vec3; 5]> {
+        let (su, sv) = self.tangents(u, v)?;
         match self {
             Self::Revolution {
                 curve,
@@ -281,25 +313,36 @@ impl<'g> RelationSurface<'g> {
                 let (d1, d2) = curve.derivatives(v)?;
                 let spin = |x: Vec3| rotate(a, u, x);
                 let (rw, r1) = (spin(w), spin(d1));
-                Ok([a.cross(rw), r1, a.cross(a.cross(rw)), a.cross(r1), spin(d2)])
+                Ok([su, sv, a.cross(a.cross(rw)), a.cross(r1), spin(d2)])
             }
-            Self::Extrusion { curve, direction } => {
-                let (d1, d2) = curve.derivatives(u)?;
-                Ok([d1, *direction, d2, Vec3::ZERO, Vec3::ZERO])
+            Self::Extrusion { curve, .. } => {
+                let (_, d2) = curve.derivatives(u)?;
+                Ok([su, sv, d2, Vec3::ZERO, Vec3::ZERO])
             }
             Self::Ruled { sides } => {
                 let (u, v) = (unit(u)?, unit(v)?);
                 let [a, b] = sides;
                 let (a1, a2) = (a.derivative(u)?, a.second_derivative(u)?);
                 let (b1, b2) = (b.derivative(u)?, b.second_derivative(u)?);
-                Ok([
-                    a1 * (1.0 - v) + b1 * v,
-                    b.at(u)? - a.at(u)?,
-                    a2 * (1.0 - v) + b2 * v,
-                    b1 - a1,
-                    Vec3::ZERO,
-                ])
+                Ok([su, sv, a2 * (1.0 - v) + b2 * v, b1 - a1, Vec3::ZERO])
             }
+        }
+    }
+
+    /// The parameter range of each open axis, which a preimage never
+    /// leaves: a swept B-spline's domain, the ruled unit square; unbounded
+    /// elsewhere.
+    pub(crate) fn open_domain(&self) -> ((Scalar, Scalar), (Scalar, Scalar)) {
+        let unbounded = (Scalar::NEG_INFINITY, Scalar::INFINITY);
+        let swept = |curve: &SweptCurve<'_>| {
+            curve
+                .domain
+                .map_or(unbounded, |domain| (domain.start, domain.end))
+        };
+        match self {
+            Self::Revolution { curve, .. } => (unbounded, swept(curve)),
+            Self::Extrusion { curve, .. } => (swept(curve), unbounded),
+            Self::Ruled { .. } => ((0.0, 1.0), (0.0, 1.0)),
         }
     }
 
@@ -781,6 +824,52 @@ mod tests {
             self_intersect: None,
             knot_spec: KnotSpec::Unspecified,
         })
+    }
+
+    #[test]
+    fn the_tangents_match_central_differences_for_every_kind() {
+        let h = 1e-6;
+        let check = |surface: &RelationSurface<'_>, u: Scalar, v: Scalar| {
+            let at = |u: Scalar, v: Scalar| surface.evaluate(u, v).unwrap();
+            let (su, sv) = surface.tangents(u, v).unwrap();
+            let close = |got: Vec3, want: Vec3| {
+                assert!(
+                    (got - want).length() <= 1e-6 * (1.0 + want.length()),
+                    "{got:?} vs {want:?} at ({u}, {v})"
+                );
+            };
+            close((at(u + h, v) - at(u - h, v)) / (2.0 * h), su);
+            close((at(u, v + h) - at(u, v - h)) / (2.0 * h), sv);
+        };
+        for (curve, (lo, hi)) in profiles() {
+            let (graph, id) = curve_graph(curve);
+            let (origin, direction) = skewed_axis();
+            let turned = RelationSurface::revolution(&graph, id, origin, direction).unwrap();
+            check(&turned, -2.1, lo + 0.3 * (hi - lo));
+            let swept = RelationSurface::extrusion(&graph, id, oblique()).unwrap();
+            check(&swept, lo + 0.6 * (hi - lo), -0.4);
+        }
+        for specs in ruled_cases() {
+            let (graph, [first, second]) = ruled_graph(specs);
+            let surface = RelationSurface::ruled(&graph, &first, &second).unwrap();
+            check(&surface, 0.35, 0.6);
+        }
+    }
+
+    #[test]
+    fn the_open_domain_is_the_swept_spline_s_or_the_unit_square() {
+        let unbounded = (Scalar::NEG_INFINITY, Scalar::INFINITY);
+        let (graph, id) = curve_graph(kinked());
+        assert_eq!(about_z(&graph, id).open_domain(), (unbounded, (0.0, 1.0)));
+        let extruded = RelationSurface::extrusion(&graph, id, Vec3::X).unwrap();
+        assert_eq!(extruded.open_domain(), ((0.0, 1.0), unbounded));
+        let (graph, id) = curve_graph(circle_profile());
+        assert_eq!(about_z(&graph, id).open_domain(), (unbounded, unbounded));
+        let extruded = RelationSurface::extrusion(&graph, id, Vec3::Z).unwrap();
+        assert_eq!(extruded.open_domain(), (unbounded, unbounded));
+        let (graph, [first, second]) = ruled_graph(arc_and_line(false));
+        let ruled = RelationSurface::ruled(&graph, &first, &second).unwrap();
+        assert_eq!(ruled.open_domain(), ((0.0, 1.0), (0.0, 1.0)));
     }
 
     #[test]

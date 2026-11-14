@@ -10,7 +10,7 @@
 
 use crate::surface_relation::{RelationOracle, RelationSurface};
 use axiolid_contracts::GeomResult;
-use axiolid_core::{Point3, Scalar};
+use axiolid_core::{Point3, Scalar, Vec3};
 use axiolid_model::SurfaceRelation;
 use axiolid_reference::bound::{SurfaceBoundOracle, SurfaceBounds};
 use axiolid_surface::Surface;
@@ -41,6 +41,23 @@ impl<'a> Support<'a> {
         match self {
             Self::Surface(surface) => axiolid_reference::surface::evaluate(surface, u, v),
             Self::Relation { surface, .. } => surface.evaluate(u, v),
+        }
+    }
+
+    /// The support's tangents `S_u` and `S_v` at `(u, v)`.
+    pub(crate) fn partials(self, u: Scalar, v: Scalar) -> GeomResult<(Vec3, Vec3)> {
+        match self {
+            Self::Surface(surface) => axiolid_reference::surface::partials(surface, u, v),
+            Self::Relation { surface, .. } => surface.tangents(u, v),
+        }
+    }
+
+    /// The parameter range of each open axis, which a preimage never
+    /// leaves; unbounded elsewhere.
+    pub(crate) fn open_domain(self) -> ((Scalar, Scalar), (Scalar, Scalar)) {
+        match self {
+            Self::Surface(surface) => super::inversion::parameter_domain(surface),
+            Self::Relation { surface, .. } => surface.open_domain(),
         }
     }
 
