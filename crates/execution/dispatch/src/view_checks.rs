@@ -59,6 +59,20 @@ pub(crate) fn occlusion_length_fault(entry: &HiddenLineMesh<'_>) -> Option<GeomE
     }
 }
 
+/// A `PerTriangle` occlusion slice must have one flag per triangle. Checked
+/// before routing, so a short slice is `InvalidInput` naming the mesh even when
+/// no provider honours see-through triangles.
+pub(crate) fn validate_occlusion_lengths(
+    meshes: &[HiddenLineMesh<'_>],
+) -> Result<(), HiddenLineError> {
+    for entry in meshes {
+        if let Some(error) = occlusion_length_fault(entry) {
+            return Err(HiddenLineError::mesh(entry.id, error));
+        }
+    }
+    Ok(())
+}
+
 /// A `PerTriangle` group slice must have one id per triangle, and a
 /// `PerTriangle` occlusion slice one flag per triangle.
 pub(crate) fn validate_group_lengths(

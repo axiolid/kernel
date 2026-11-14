@@ -10,6 +10,7 @@ use std::sync::Arc;
 
 use axiolid_contracts::{BackendId, ExecutionOptions, GeomError, Operation};
 use axiolid_core::Point2;
+use axiolid_mesh::audit_mesh_scratch_bytes;
 use axiolid_mesh_hidden_lines_contract::{
     conformance::{
         faces::{FaceConformanceFailure, FaceConformanceReport, FaceConformanceSuite},
@@ -19,8 +20,8 @@ use axiolid_mesh_hidden_lines_contract::{
         },
         see_through::SeeThroughConformanceSuite,
     },
-    BehindSurface, FaceGroups, FaceSource, HiddenLineError, HiddenLineMesh, MeshId, MeshRole,
-    MeshVisibleFaces, Occlusion, TriangleOcclusion, ViewProjection, VisibleFaceOutcome,
+    BehindSurface, FaceGroup, FaceGroups, FaceSource, HiddenLineError, HiddenLineMesh, MeshId,
+    MeshRole, MeshVisibleFaces, Occlusion, TriangleOcclusion, ViewProjection, VisibleFaceOutcome,
     VisibleFaceRequest, VisibleRegion,
 };
 
@@ -271,42 +272,61 @@ fn validate_request_shape(
     Ok(())
 }
 
+/// Bytes per triangle of the pairs `validate_uniform_groups` sorts.
+const UNIFORM_PAIR_BYTES: usize = std::mem::size_of::<(FaceGroup, bool)>();
+
+// The pairs of one mesh stay within the audit scratch of that mesh, which the
+// memory budget has admitted before the check runs (`scratch_fits` takes the
+// largest mesh's audit as the audit peak, and the two phases are sequential).
+const _: () = assert!(matches!(
+    audit_mesh_scratch_bytes(1),
+    Some(bytes) if bytes >= UNIFORM_PAIR_BYTES
+));
+
 /// Every face group of a mesh with see-through triangles must be all opaque
 /// or all see-through (ADR 0111), so a region's source says whether it
 /// occludes. `Planar` groups cannot mix: the provider derives them per
-/// occlusion. Allocating; called after the memory budget admitted the audit.
+/// occlusion. `Single` needs no scratch; `PerTriangle` sorts one
+/// `(group, see-through)` pair per triangle of one mesh at a time, within the
+/// audit scratch already admitted (see `UNIFORM_PAIR_BYTES`).
 fn validate_uniform_groups(meshes: &[HiddenLineMesh<'_>]) -> Result<(), HiddenLineError> {
+    let mixed = |entry: &HiddenLineMesh<'_>, group: FaceGroup| {
+        HiddenLineError::mesh(
+            entry.id,
+            GeomError::InvalidInput(format!(
+                "face group {} mixes see-through and opaque triangles",
+                group.0
+            )),
+        )
+    };
     for entry in meshes {
         let TriangleOcclusion::PerTriangle(flags) = entry.occlusion else {
             continue;
         };
-        if !entry.occlusion.has_see_through()
-            || !matches!(
-                entry.groups,
-                FaceGroups::Single | FaceGroups::PerTriangle(_)
-            )
-        {
+        if !entry.occlusion.has_see_through() {
             continue;
         }
-        let mut pairs = Vec::new();
-        pairs
-            .try_reserve(flags.len())
-            .map_err(|_| GeomError::BudgetExceeded { resource: "memory" })?;
-        pairs.extend(
-            flags.iter().enumerate().map(|(triangle, &flag)| {
-                (entry.groups.of(triangle), flag == Occlusion::SeeThrough)
-            }),
-        );
-        pairs.sort_unstable();
-        pairs.dedup();
-        if let Some(pair) = pairs.windows(2).find(|pair| pair[0].0 == pair[1].0) {
-            return Err(HiddenLineError::mesh(
-                entry.id,
-                GeomError::InvalidInput(format!(
-                    "face group {} mixes see-through and opaque triangles",
-                    pair[0].0 .0
-                )),
-            ));
+        match entry.groups {
+            FaceGroups::Single => {
+                if flags.contains(&Occlusion::Opaque) {
+                    return Err(mixed(entry, FaceGroup(0)));
+                }
+            }
+            FaceGroups::PerTriangle(_) => {
+                let mut pairs = Vec::new();
+                pairs
+                    .try_reserve_exact(flags.len())
+                    .map_err(|_| GeomError::BudgetExceeded { resource: "memory" })?;
+                pairs.extend(flags.iter().enumerate().map(|(triangle, &flag)| {
+                    (entry.groups.of(triangle), flag == Occlusion::SeeThrough)
+                }));
+                pairs.sort_unstable();
+                pairs.dedup();
+                if let Some(pair) = pairs.windows(2).find(|pair| pair[0].0 == pair[1].0) {
+                    return Err(mixed(entry, pair[0].0));
+                }
+            }
+            _ => {}
         }
     }
     Ok(())

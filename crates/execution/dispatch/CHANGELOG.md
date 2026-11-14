@@ -16,7 +16,8 @@ caret rule for `0.x` versions.
   provider that does not claim `Occlusion::SeeThrough` and is `Unsupported`
   when none does, before the topology audit. A `PerTriangle` occlusion slice
   whose length differs from the triangle count is `InvalidInput` naming the
-  mesh, in `hidden_lines`, `audit` and `visible_faces`, and a visible-face
+  mesh, before routing in `hidden_lines` and `visible_faces` and as a listed
+  mesh in `audit`, and a visible-face
   group that mixes see-through and opaque triangles is `InvalidInput` naming
   the mesh (ADR 0111, #496).
 - `register_conformant` of both registries also runs the see-through suite

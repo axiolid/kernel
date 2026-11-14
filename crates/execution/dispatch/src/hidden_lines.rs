@@ -21,7 +21,8 @@ use axiolid_mesh_hidden_lines_contract::{
 use crate::device::matches_device;
 use crate::view_checks::{
     has_see_through, invalid, mesh_verdict, scratch_fits, see_through_triangles, source_totals,
-    validate_meshes, validate_region, validate_topology, validate_view, SharedLimits,
+    validate_meshes, validate_occlusion_lengths, validate_region, validate_topology, validate_view,
+    SharedLimits,
 };
 
 #[derive(Debug, Clone)]
@@ -194,6 +195,9 @@ impl MeshHiddenLinesRegistry {
     ) -> Result<HiddenLineOutcome, HiddenLineError> {
         options.check_cancelled()?;
         validate_request_shape(request, options)?;
+        // Before routing: a short occlusion slice is the mesh's fault, whoever
+        // could draw it. The audit lists it through the mesh verdict.
+        validate_occlusion_lengths(request.meshes)?;
 
         let see_through = has_see_through(request.meshes);
         let mut has_matching_provider = false;

@@ -1552,3 +1552,26 @@ fn routing_by_occlusion_comes_before_the_topology_audit() {
         "{error}"
     );
 }
+
+#[test]
+fn a_short_occlusion_slice_is_refused_before_routing() {
+    // No registered provider honours see-through triangles, yet the answer
+    // is the mesh's fault, not Unsupported.
+    let cube = cube();
+    let short = [Occlusion::SeeThrough; 4];
+    let meshes = [
+        mesh(1, MeshRole::Solid, &cube),
+        mesh(2, MeshRole::Solid, &cube).with_occlusion(&short),
+    ];
+    let request = HiddenLineRequest::new(&meshes, view(), selection(), limits());
+    let calls = counter();
+    let error = registry(&calls, well_behaved)
+        .hidden_lines(&request, &options())
+        .expect_err("a short occlusion slice");
+    assert_eq!(calls_of(&calls), 0);
+    assert_eq!(error.mesh, Some(MeshId(2)));
+    assert!(
+        matches!(&error.error, GeomError::InvalidInput(detail) if detail.contains("occlusion")),
+        "{error:?}"
+    );
+}
