@@ -65,8 +65,10 @@ sup|G''| / 2`, where `G` moves as the swept curve for a revolution (turned by
 a fixed `u*`) and an extrusion (shifted by a fixed `v* d`) and as `(1 - v*) A
 + v* B` for a ruled surface, `sup|G''|` certified over the interval. Where a
 tangent break of the swept curve (a knot of full multiplicity, a ruled
-side's corner) lies inside the interval, the bound is the certified speed
-over the interval times `r` instead: the speed jumps there. For the same
+side's corner) lies inside the interval, the speed jumps there and no
+Taylor step crosses it: each side of `t*` is bounded by its sub-pieces
+between breaks, each its length times its certified speed, and the larger
+side is the bound. For the same
 reason the cover's coarse cells are cut at every tangent break, so no cell's
 speed bound, nor its Taylor step from the middle, spans one. A ruling pivoting about a slow rim,
 or an ellipse's flat side, is not a fold: the generator barely moves near
@@ -177,14 +179,22 @@ crate-private, as the relation evaluators do.
   centred on the axis is refused when the arc is stored as a full circle,
   because a relation carries no swept range. Adapters must lower trimmed
   arcs to B-spline arcs until #455.
-- A kinked or degree-1 profile is not smooth across the lens's box, so such
-  a face meshes but reports unbounded by name.
+- A face without pcurves that touches a tangent break of its swept curve
+  (a kinked or degree-1 profile's corner, a ruled side's) meshes but is
+  unbounded by name ("the surface is not certifiably invertible along an
+  edge without a pcurve"): the lens's box across the break is not smooth,
+  and the lens does not bound the two sides apart (#498). A patch on the
+  fast side of a corner, stopping half a tolerance short of it, is
+  certified below 1e-15 in 258 triangles; one whose edge lies a
+  tenth of the tolerance past it is unbounded by that name.
 - A full turn bounded by its two rims with no seam edge is not triangulated,
   on an atomic cylinder as on a relation.
 
 **Follow-ups / risks to watch**
 
 - #463: faces reaching a relation's pole.
+- #498: bound the lens on each side of a tangent break (`TODO(#498)` at
+  `FaceBound::lens`).
 - #497: grade B-rep edge sampling by local speed (`TODO(#497)` at
   `sample_edge`).
 - #455: a trimmed relation's range should restrict the bracket of `t`.
