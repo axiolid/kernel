@@ -8,7 +8,7 @@ Exact scalar hidden-line drawings of triangle meshes in orthographic and perspec
 
 | | |
 | --- | --- |
-| Latest release | 0.1.5 (2026-11-14) |
+| Latest release | 0.1.6 (2026-11-14) |
 | crates.io | [`axiolid-hidden-lines`](https://crates.io/crates/axiolid-hidden-lines) |
 | Facade | [`axiolid`](./axiolid) feature `hidden-lines-provider` |
 | Layer | algorithms (`algorithm.discrete`) |
@@ -77,38 +77,54 @@ work are unchanged.
 
 ## Changes
 
-Latest release, 0.1.5 (2026-11-14):
+Latest release, 0.1.6 (2026-11-14):
 
 ### Added
 
-- `ScalarHiddenLines` and `ScanHiddenLines` draw perspective views and claim
-  them through `supports_projection`, replacing the by-name refusal of 0.1.4:
-  a pinhole at the frame origin, image `(U / -W, V / -W)`, `near` required
-  and below zero. Every visibility predicate is an exact determinant of
-  vectors from the eye, so triangles behind the eye need no case, endpoints
-  are the exact rationals rounded once, and the near-plane cap is decided by
-  ray parity along the eye ray. The perspective conformance fixtures and a
-  binary64 eye-ray oracle (seeded scenes, eyes outside and inside) check it;
-  the provider refuses a perspective view whose `near` is missing, zero,
-  positive or not finite with `InvalidInput`. The visible-face providers
-  still refuse a perspective view by name (ADR 0107, #387).
-- The broad phase scales the depth coordinate of its hierarchy to the size of
-  the image in a perspective view, where the image is in units of one over the
-  depth and the longest-extent split would otherwise cut by depth alone. On
-  the 50x50 perspective grid of `scenario/hidden-lines` the tree then returns
-  4.2M boxes instead of 44.3M before the exact test (540,676 pairs either
-  way; the isometric grid returns 3.5M). The drawing is unchanged and
-  orthographic views are untouched. A vertex at or behind the eye plane
-  (`W >= 0`) has an unbounded image enclosure, so a triangle beside or behind
-  the eye sends the whole scene to the linear scan (same pairs, slower
-  candidate search); this is documented in the crate docs (#387).
-- An edge-on perspective triangle whose plane contains the eye may contain the
-  eye itself, strictly inside, on a side or at a vertex. The eye in the closed
-  triangle is decided exactly (no two of the three signs of `v_i × v_j` along
-  the normal strictly opposite) and every ray from the eye then starts in the
-  triangle, so its fibre reaches from the eye to the side the ray leaves by:
-  the span of each non-skipped side counts as in front without the nearer-than
-  test, while the near plane still has to be reached and the point still has
-  to be strictly beyond it (ADR 0107, #387).
+- `ScalarHiddenLines` and `ScanHiddenLines` honour see-through triangles and
+  claim them through `supports_occlusion` (ADR 0111, #496). A see-through
+  triangle hides nothing; a visible piece counts in `seen_through` the
+  see-through triangles of nonzero image area whose plane is strictly in
+  front of it and whose image holds the point shifted by `(ε, ε²)`, decided
+  with the perturbed image-side clips of the caps, in orthographic and
+  perspective views. A visible gap is split where that count changes, found
+  by one sweep over the sorted span ends (O(G log G) exact comparisons for G
+  see-through spans over an edge), and a hidden piece is not split. Without a see-through triangle no step of this
+  runs: the drawing, the evidence and the exact work are unchanged. A
+  `PerTriangle` occlusion slice of the wrong length, or an unknown occlusion
+  mode, is `InvalidInput` naming the mesh.
+- `ScalarVisibleFaces`, `ScanVisibleFaces` and `UnprunedVisibleFaces` honour
+  see-through triangles and claim them (ADR 0111, #496). A side whose front
+  holds a see-through triangle gets its stack: the other candidates grouped
+  into exact depth layers down to the first one holding an opaque triangle or
+  a cap, found by one linear pass for the occluder and a binary insertion for
+  the layers between; each of these extra depth comparisons counts against
+  `max_candidate_pairs`. A region is a maximal region of one source and one
+  stack, `VisibleRegion::behind` lists the stack without the region's own
+  layer-0 entry, the output breaks a tie of mesh, source and outer ring by
+  `behind`, and `tied_sides` also counts a side with a tie behind its front.
+  The entries are bounded by `max_behind_surfaces` (`BudgetExceeded`,
+  `visible-face behind surfaces`). The prune keeps every edge behind a
+  see-through triangle, since it hides nothing. A face group that mixes
+  see-through and opaque triangles is `InvalidInput` naming the mesh, and
+  `FaceGroups::Planar` joins two triangles only when their occlusion is
+  equal. Without a see-through triangle no extra comparison is made and the
+  regions and evidence are unchanged.
+- `scenario/hidden-lines` and `scenario/visible-faces` gain a
+  `glazed-isometric` grid, the isometric one with every third box wholly
+  see-through, and print a drawing hash that leaves out an empty count or
+  stack, so the opaque scenes print what they printed before (#496); they
+  did, hash, escalations and pairs alike. Three runs each on a loaded machine
+  (median of each run, BVH provider, against the opaque isometric grid of the
+  same size): hidden lines 400 boxes 0.50-0.52 s against 0.27-0.39 s (79,064
+  to 94,509 pairs), 2,500 boxes 2.33-3.29 s against 2.50-2.51 s (511,016 to
+  617,263 pairs); visible faces 100 boxes 0.34-0.36 s against 0.23-0.30 s
+  (1,266 to 2,001 pieces, 142 surfaces behind), 400 boxes 1.18-1.92 s against
+  1.25-1.30 s (4,938 to 11,097 pieces, 383,574 to 789,043 pairs, 1,931
+  surfaces behind). Edges behind glass lose the early-out of full cover and
+  are no longer pruned from the arrangement, which the counts show; the run
+  to run spread on this machine is as large as the cost. These timings were
+  taken before the count became a sweep over the sorted span ends; the
+  drawings are the same since.
 
 Full history: [`crates/algorithms/discrete/hidden-lines/CHANGELOG.md`](https://github.com/axiolid/kernel/blob/main/crates/algorithms/discrete/hidden-lines/CHANGELOG.md)

@@ -42,7 +42,7 @@ Every page here is generated from the crate itself: its manifest, its crate docu
 | [`axiolid-mesh-boolean-contract`](./crates/axiolid-mesh-boolean-contract) | `contract.operation` | 0.3.5 | Portable mesh boolean request, result, evidence, and conformance contract |
 | [`axiolid-mesh-compile-contract`](./crates/axiolid-mesh-compile-contract) | `contract.operation` | 0.3.6 | Portable graph-to-mesh compilation contract |
 | [`axiolid-mesh-contracts`](./crates/axiolid-mesh-contracts) | `contract.common.mesh` | 0.3.3 | Shared mesh admissibility contracts |
-| [`axiolid-mesh-hidden-lines-contract`](./crates/axiolid-mesh-hidden-lines-contract) | `contract.operation` | 0.1.6 | Portable hidden-line drawing request, result, and conformance contract for triangle meshes |
+| [`axiolid-mesh-hidden-lines-contract`](./crates/axiolid-mesh-hidden-lines-contract) | `contract.operation` | 0.1.7 | Portable hidden-line drawing request, result, and conformance contract for triangle meshes |
 | [`axiolid-mesh-section-contract`](./crates/axiolid-mesh-section-contract) | `contract.operation` | 0.3.9 | Portable mesh plane-section request, result, and evidence contract |
 | [`axiolid-pointcloud-reconstruction-contract`](./crates/axiolid-pointcloud-reconstruction-contract) | `contract.operation` | 0.3.4 | Portable pointcloud-to-surface reconstruction contract, evidence, and conformance suite. |
 | [`axiolid-tessellation-contract`](./crates/axiolid-tessellation-contract) | `contract.operation` | 0.3.4 | Curves, surfaces and B-reps to triangles under an explicit tolerance. |
@@ -64,7 +64,7 @@ Every page here is generated from the crate itself: its manifest, its crate docu
 | [`axiolid-exact-arrangement`](./crates/axiolid-exact-arrangement) | `algorithm.planar` | 0.1.2 | Exact arrangement of straight segments on rational points, with face tracing |
 | [`axiolid-field-ops`](./crates/axiolid-field-ops) | `algorithm.sampled` | 0.3.4 | Sampling, morphology, clearance, and navigation over Axiolid layered fields. |
 | [`axiolid-heal`](./crates/axiolid-heal) | `algorithm.repair` | 0.3.4 | Explicit diagnosis and opt-in repair contracts for dirty geometry |
-| [`axiolid-hidden-lines`](./crates/axiolid-hidden-lines) | `algorithm.discrete` | 0.1.5 | Exact scalar hidden-line drawings of triangle meshes in orthographic and perspective views, and visible face regions in orthographic views |
+| [`axiolid-hidden-lines`](./crates/axiolid-hidden-lines) | `algorithm.discrete` | 0.1.6 | Exact scalar hidden-line drawings of triangle meshes in orthographic and perspective views, and visible face regions in orthographic views |
 | [`axiolid-inspect`](./crates/axiolid-inspect) | `algorithm.query` | 0.3.10 | Mesh queries: clearance, containment, ray casting, and genus |
 | [`axiolid-levelset`](./crates/axiolid-levelset) | `algorithm.sampled` | 0.3.3 | Level-set extraction: a closed manifold mesh from a sampled scalar field |
 | [`axiolid-linear-intersection`](./crates/axiolid-linear-intersection) | `algorithm.query` | 0.3.3 | Portable, deterministic intersections for linear geometry |
@@ -96,12 +96,12 @@ Every page here is generated from the crate itself: its manifest, its crate docu
 | --- | --- | --- | --- |
 | [`axiolid-backend-cpu`](./crates/axiolid-backend-cpu) | `execution.context` | 0.3.4 | Portable and runtime-optimized CPU execution context for Axiolid geometry |
 | [`axiolid-backend-gpu`](./crates/axiolid-backend-gpu) | `execution.context` | 0.3.3 | GPU executor adapter contract for batched Axiolid geometry |
-| [`axiolid-dispatch`](./crates/axiolid-dispatch) | `execution.dispatch` | 0.3.13 | Provider registration, ordering, fallback, and execution policy |
+| [`axiolid-dispatch`](./crates/axiolid-dispatch) | `execution.dispatch` | 0.3.14 | Provider registration, ordering, fallback, and execution policy |
 | [`axiolid-mesh-compile`](./crates/axiolid-mesh-compile) | `execution.orchestration` | 0.3.47 | Scalar reference MeshCompiler: profiles, extrusion, transforms, boolean dispatch. |
 
 ## Facade
 
 | Crate | Role | Latest release | Description |
 | --- | --- | --- | --- |
-| [`axiolid`](./crates/axiolid) | `facade` | 0.5.1 | Feature-gated facade for Axiolid's format-neutral geometry stack |
+| [`axiolid`](./crates/axiolid) | `facade` | 0.5.2 | Feature-gated facade for Axiolid's format-neutral geometry stack |
 | [`axiolid-capi`](./crates/axiolid-capi) | `facade.native-c` | 0.4.0 | Versioned, memory-safe C ABI for the Axiolid application facade. |

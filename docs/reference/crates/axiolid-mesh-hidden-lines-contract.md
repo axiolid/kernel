@@ -8,7 +8,7 @@ Portable hidden-line drawing request, result, and conformance contract for trian
 
 | | |
 | --- | --- |
-| Latest release | 0.1.6 (2026-11-14) |
+| Latest release | 0.1.7 (2026-11-14) |
 | crates.io | [`axiolid-mesh-hidden-lines-contract`](https://crates.io/crates/axiolid-mesh-hidden-lines-contract) |
 | Facade | [`axiolid`](./axiolid) feature `mesh-hidden-lines` |
 | Layer | contracts (`contract.operation`) |
@@ -52,19 +52,40 @@ every answer is what it was.
 
 ## Changes
 
-Latest release, 0.1.6 (2026-11-14):
+Latest release, 0.1.7 (2026-11-14):
 
 ### Added
 
-- Perspective fixtures for hidden lines (a box in front of the eye, the same
-  box cut by the near plane, an eye inside a box, an exact non-dyadic
-  boundary, an edge along the eye ray, an eye inside an edge-on triangle)
-  and the refusal of a perspective near
-  depth that is missing, zero, positive or not finite. A hidden-line provider
-  that claims perspective is checked against them by
-  `PerspectiveConformanceSuite::run`, which reports a failure as the new
-  `PerspectiveConformanceFailure::HiddenLines`. This replaces the 0.1.5
-  behaviour in which every claim failed closed with `ClaimUnverifiable`; a
-  visible-face claim still does until its fixtures land (ADR 0107, #387).
+- See-through triangles (ADR 0111, #496). `Occlusion` (`Opaque`, the
+  default, and `SeeThrough`) and `TriangleOcclusion` (`AllOpaque`, the
+  default, and `PerTriangle`) with `HiddenLineMesh::occlusion` and
+  `with_occlusion`; a see-through triangle hides nothing. A visible hidden-line
+  piece counts the see-through triangles in front of it in
+  `HiddenLineSegment::seen_through` (`with_seen_through`), and the evidence
+  gains `see_through_triangles` and `seen_through_segments`. A visible-face
+  region of a see-through source lists what is seen through it in
+  `VisibleRegion::behind` (`with_behind`), as `BehindSurface { mesh, source,
+  layer }` entries bounded by the new `VisibleFaceLimits::max_behind_surfaces`
+  (`with_max_behind_surfaces`; 0 from `new`), and the evidence gains
+  `see_through_triangles` and `behind_surfaces`. Both traits gain a defaulted
+  `supports_occlusion` that is `true` for `Opaque` only, so a registry never
+  gives a see-through triangle to a provider that predates it. A request
+  without a see-through flag is answered exactly as before.
+- `conformance::see_through::SeeThroughConformanceSuite` (`run`, `run_faces`)
+  with its report and failure types infers the see-through claim from
+  `supports_occlusion`: an unclaiming provider must refuse a see-through
+  request by name; a hidden-line claim must draw nine fixtures (panes over a
+  floor and over each other, a pane under an opaque sheet, a see-through box,
+  edges under a pane's border and diagonal, the occluding cap of a cut
+  see-through solid, a see-through pane cut by the near plane, and a
+  see-through slab in perspective when that is claimed too) with their `seen_through` counts and evidence, refuse a short
+  occlusion slice naming the mesh, and draw three base scenes flagged all
+  opaque as without flags. A visible-face claim must reproduce the regions and
+  `behind` lists of eight scenes (a pane over a box, two panes over a box, a
+  depth cycle of three panes, a see-through box, a pane tied with a floor, a
+  stack stopped by an opaque sheet, the occluding cap of a cut see-through
+  solid, planar groups split by occlusion), refuse a mixed face group, a
+  short occlusion slice and a stack over `max_behind_surfaces`, and answer
+  three base scenes flagged all opaque as without flags (ADR 0111, #496).
 
 Full history: [`crates/contracts/operations/mesh-hidden-lines/CHANGELOG.md`](https://github.com/axiolid/kernel/blob/main/crates/contracts/operations/mesh-hidden-lines/CHANGELOG.md)

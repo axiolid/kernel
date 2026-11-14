@@ -9,6 +9,8 @@ caret rule for `0.x` versions.
 
 ## [Unreleased]
 
+## [0.1.6] - 2026-11-14
+
 ### Added
 
 - `ScalarHiddenLines` and `ScanHiddenLines` honour see-through triangles and

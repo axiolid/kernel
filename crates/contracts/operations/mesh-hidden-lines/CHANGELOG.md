@@ -9,6 +9,8 @@ caret rule for `0.x` versions.
 
 ## [Unreleased]
 
+## [0.1.7] - 2026-11-14
+
 ### Added
 
 - See-through triangles (ADR 0111, #496). `Occlusion` (`Opaque`, the

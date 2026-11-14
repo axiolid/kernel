@@ -4,10 +4,10 @@
       "description": "Feature-gated facade for Axiolid's format-neutral geometry stack",
       "layer": "facade",
       "path": "crates/facade/axiolid",
-      "released": "0.5.1",
+      "released": "0.5.2",
       "released_date": "2026-11-14",
       "role": "facade",
-      "version": "0.5.1"
+      "version": "0.5.2"
     },
     "axiolid-arrangement": {
       "description": "Editable planar subdivision with persistent half-edge topology",
@@ -157,10 +157,10 @@
       "description": "Provider registration, ordering, fallback, and execution policy",
       "layer": "execution",
       "path": "crates/execution/dispatch",
-      "released": "0.3.13",
-      "released_date": "2026-11-13",
+      "released": "0.3.14",
+      "released_date": "2026-11-14",
       "role": "execution.dispatch",
-      "version": "0.3.13"
+      "version": "0.3.14"
     },
     "axiolid-evaluate": {
       "description": "Analytic and spline curve/surface evaluation, jets, and inversion",
@@ -247,10 +247,10 @@
       "description": "Exact scalar hidden-line drawings of triangle meshes in orthographic and perspective views, and visible face regions in orthographic views",
       "layer": "algorithms",
       "path": "crates/algorithms/discrete/hidden-lines",
-      "released": "0.1.5",
+      "released": "0.1.6",
       "released_date": "2026-11-14",
       "role": "algorithm.discrete",
-      "version": "0.1.5"
+      "version": "0.1.6"
     },
     "axiolid-inspect": {
       "description": "Mesh queries: clearance, containment, ray casting, and genus",
@@ -355,10 +355,10 @@
       "description": "Portable hidden-line drawing request, result, and conformance contract for triangle meshes",
       "layer": "contracts",
       "path": "crates/contracts/operations/mesh-hidden-lines",
-      "released": "0.1.6",
+      "released": "0.1.7",
       "released_date": "2026-11-14",
       "role": "contract.operation",
-      "version": "0.1.6"
+      "version": "0.1.7"
     },
     "axiolid-mesh-section-contract": {
       "description": "Portable mesh plane-section request, result, and evidence contract",

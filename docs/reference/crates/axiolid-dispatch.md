@@ -8,7 +8,7 @@ Provider registration, ordering, fallback, and execution policy.
 
 | | |
 | --- | --- |
-| Latest release | 0.3.13 (2026-11-13) |
+| Latest release | 0.3.14 (2026-11-14) |
 | crates.io | [`axiolid-dispatch`](https://crates.io/crates/axiolid-dispatch) |
 | Facade | [`axiolid`](./axiolid) feature `dispatch-mesh-boolean`, `dispatch-mesh-hidden-lines`, `dispatch-mesh-section`, `dispatch-pointcloud-reconstruction` |
 | Layer | execution (`execution.dispatch`) |
@@ -54,24 +54,35 @@ Default: none.
 
 ## Changes
 
-Latest release, 0.3.13 (2026-11-13):
+Latest release, 0.3.14 (2026-11-14):
 
 ### Added
 
 - `MeshHiddenLinesRegistry` and `MeshVisibleFacesRegistry` route by
-  `supports_projection`: a provider that does not support the view's
-  projection is skipped, and a request no provider supports is `Unsupported`
-  before the topology audit. A perspective view needs a `near` below zero
-  (`InvalidInput` otherwise). `register_perspective_conformant` registers a
-  provider after the base suite and the perspective suite. `register_conformant`
-  of both registries also runs the perspective suite when the provider claims
-  perspective, so an unverified claim is refused (ADR 0107, #387).
-- `MeshVisibleFacesRegistry` accepts `FaceGroups::Planar`: it checks that a
-  region's group id is a triangle of the mesh and no later than any triangle
-  the region lists, and does not recompute the groups (ADR 0106, #384).
-- `MeshHiddenLinesRegistry` accepts `EdgeKind::GroupBoundary` segments only
-  when `EdgeSelection::group_boundary` is set, and then refuses a
-  `PerTriangle` group slice of the wrong length naming the mesh (ADR 0106,
-  #385).
+  `supports_occlusion`: a request with a see-through triangle skips every
+  provider that does not claim `Occlusion::SeeThrough` and is `Unsupported`
+  when none does, before the topology audit. A `PerTriangle` occlusion slice
+  whose length differs from the triangle count is `InvalidInput` naming the
+  mesh, before routing in `hidden_lines` and `visible_faces` and as a listed
+  mesh in `audit`, and a visible-face
+  group that mixes see-through and opaque triangles is `InvalidInput` naming
+  the mesh (ADR 0111, #496).
+- `register_conformant` of both registries also runs the see-through suite
+  when the provider claims `Occlusion::SeeThrough`, and reports a failure as a
+  `ReturnedError` of the case `see-through claim`, so an unverified claim is
+  refused (ADR 0111, #496).
+- Both registries validate the see-through part of an outcome (ADR 0111,
+  #496). A hidden-line segment counts see-through triangles only when it is
+  visible and the request has one, neighbouring pieces of one edge differ in
+  visibility or count, and `seen_through_segments` and `see_through_triangles`
+  must match. A visible-face `behind` list may only follow a see-through
+  region, names request meshes, starts at layer 0 or 1 and steps by at most
+  one, ascends by mesh position and source within a layer, never repeats the
+  region's own source at layer 0, keeps an occluding surface (a cap, or a mesh
+  without see-through triangles) in its last layer and a cap to a solid cut
+  by the near plane; regions equal in mesh, source and outer ring are ordered
+  by `behind`; the entries are counted in `behind_surfaces` and over
+  `max_behind_surfaces` refused as `BudgetExceeded` (`visible-face behind
+  surfaces`).
 
 Full history: [`crates/execution/dispatch/CHANGELOG.md`](https://github.com/axiolid/kernel/blob/main/crates/execution/dispatch/CHANGELOG.md)

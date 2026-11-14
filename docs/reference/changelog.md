@@ -8,6 +8,16 @@ Every publishable crate versions and publishes independently ([ADR 0067](/adr/00
 
 ## axiolid
 
+### 0.5.2 - 2026-11-14
+
+### Added
+
+- `Application::hidden_lines` and `visible_faces` honour see-through
+  triangles (`HiddenLineMesh::with_occlusion`): both portable providers claim
+  them (ADR 0111, #496). Each claim has its own conformance suite, run once
+  per process and only by a call with a see-through triangle; a failure
+  refuses the call as the case `see-through claim` of the provider's report.
+
 ### 0.5.1 - 2026-11-14
 
 ### Added
@@ -2644,6 +2654,37 @@ Every publishable crate versions and publishes independently ([ADR 0067](/adr/00
 
 ## axiolid-dispatch
 
+### 0.3.14 - 2026-11-14
+
+### Added
+
+- `MeshHiddenLinesRegistry` and `MeshVisibleFacesRegistry` route by
+  `supports_occlusion`: a request with a see-through triangle skips every
+  provider that does not claim `Occlusion::SeeThrough` and is `Unsupported`
+  when none does, before the topology audit. A `PerTriangle` occlusion slice
+  whose length differs from the triangle count is `InvalidInput` naming the
+  mesh, before routing in `hidden_lines` and `visible_faces` and as a listed
+  mesh in `audit`, and a visible-face
+  group that mixes see-through and opaque triangles is `InvalidInput` naming
+  the mesh (ADR 0111, #496).
+- `register_conformant` of both registries also runs the see-through suite
+  when the provider claims `Occlusion::SeeThrough`, and reports a failure as a
+  `ReturnedError` of the case `see-through claim`, so an unverified claim is
+  refused (ADR 0111, #496).
+- Both registries validate the see-through part of an outcome (ADR 0111,
+  #496). A hidden-line segment counts see-through triangles only when it is
+  visible and the request has one, neighbouring pieces of one edge differ in
+  visibility or count, and `seen_through_segments` and `see_through_triangles`
+  must match. A visible-face `behind` list may only follow a see-through
+  region, names request meshes, starts at layer 0 or 1 and steps by at most
+  one, ascends by mesh position and source within a layer, never repeats the
+  region's own source at layer 0, keeps an occluding surface (a cap, or a mesh
+  without see-through triangles) in its last layer and a cap to a solid cut
+  by the near plane; regions equal in mesh, source and outer ring are ordered
+  by `behind`; the entries are counted in `behind_surfaces` and over
+  `max_behind_surfaces` refused as `BudgetExceeded` (`visible-face behind
+  surfaces`).
+
 ### 0.3.13 - 2026-11-13
 
 ### Added
@@ -3941,6 +3982,56 @@ Every publishable crate versions and publishes independently ([ADR 0067](/adr/00
 
 
 ## axiolid-hidden-lines
+
+### 0.1.6 - 2026-11-14
+
+### Added
+
+- `ScalarHiddenLines` and `ScanHiddenLines` honour see-through triangles and
+  claim them through `supports_occlusion` (ADR 0111, #496). A see-through
+  triangle hides nothing; a visible piece counts in `seen_through` the
+  see-through triangles of nonzero image area whose plane is strictly in
+  front of it and whose image holds the point shifted by `(ε, ε²)`, decided
+  with the perturbed image-side clips of the caps, in orthographic and
+  perspective views. A visible gap is split where that count changes, found
+  by one sweep over the sorted span ends (O(G log G) exact comparisons for G
+  see-through spans over an edge), and a hidden piece is not split. Without a see-through triangle no step of this
+  runs: the drawing, the evidence and the exact work are unchanged. A
+  `PerTriangle` occlusion slice of the wrong length, or an unknown occlusion
+  mode, is `InvalidInput` naming the mesh.
+- `ScalarVisibleFaces`, `ScanVisibleFaces` and `UnprunedVisibleFaces` honour
+  see-through triangles and claim them (ADR 0111, #496). A side whose front
+  holds a see-through triangle gets its stack: the other candidates grouped
+  into exact depth layers down to the first one holding an opaque triangle or
+  a cap, found by one linear pass for the occluder and a binary insertion for
+  the layers between; each of these extra depth comparisons counts against
+  `max_candidate_pairs`. A region is a maximal region of one source and one
+  stack, `VisibleRegion::behind` lists the stack without the region's own
+  layer-0 entry, the output breaks a tie of mesh, source and outer ring by
+  `behind`, and `tied_sides` also counts a side with a tie behind its front.
+  The entries are bounded by `max_behind_surfaces` (`BudgetExceeded`,
+  `visible-face behind surfaces`). The prune keeps every edge behind a
+  see-through triangle, since it hides nothing. A face group that mixes
+  see-through and opaque triangles is `InvalidInput` naming the mesh, and
+  `FaceGroups::Planar` joins two triangles only when their occlusion is
+  equal. Without a see-through triangle no extra comparison is made and the
+  regions and evidence are unchanged.
+- `scenario/hidden-lines` and `scenario/visible-faces` gain a
+  `glazed-isometric` grid, the isometric one with every third box wholly
+  see-through, and print a drawing hash that leaves out an empty count or
+  stack, so the opaque scenes print what they printed before (#496); they
+  did, hash, escalations and pairs alike. Three runs each on a loaded machine
+  (median of each run, BVH provider, against the opaque isometric grid of the
+  same size): hidden lines 400 boxes 0.50-0.52 s against 0.27-0.39 s (79,064
+  to 94,509 pairs), 2,500 boxes 2.33-3.29 s against 2.50-2.51 s (511,016 to
+  617,263 pairs); visible faces 100 boxes 0.34-0.36 s against 0.23-0.30 s
+  (1,266 to 2,001 pieces, 142 surfaces behind), 400 boxes 1.18-1.92 s against
+  1.25-1.30 s (4,938 to 11,097 pieces, 383,574 to 789,043 pairs, 1,931
+  surfaces behind). Edges behind glass lose the early-out of full cover and
+  are no longer pruned from the arrangement, which the counts show; the run
+  to run spread on this machine is as large as the cost. These timings were
+  taken before the count became a sweep over the sorted span ends; the
+  drawings are the same since.
 
 ### 0.1.5 - 2026-11-14
 
@@ -7328,6 +7419,42 @@ Every publishable crate versions and publishes independently ([ADR 0067](/adr/00
 
 
 ## axiolid-mesh-hidden-lines-contract
+
+### 0.1.7 - 2026-11-14
+
+### Added
+
+- See-through triangles (ADR 0111, #496). `Occlusion` (`Opaque`, the
+  default, and `SeeThrough`) and `TriangleOcclusion` (`AllOpaque`, the
+  default, and `PerTriangle`) with `HiddenLineMesh::occlusion` and
+  `with_occlusion`; a see-through triangle hides nothing. A visible hidden-line
+  piece counts the see-through triangles in front of it in
+  `HiddenLineSegment::seen_through` (`with_seen_through`), and the evidence
+  gains `see_through_triangles` and `seen_through_segments`. A visible-face
+  region of a see-through source lists what is seen through it in
+  `VisibleRegion::behind` (`with_behind`), as `BehindSurface { mesh, source,
+  layer }` entries bounded by the new `VisibleFaceLimits::max_behind_surfaces`
+  (`with_max_behind_surfaces`; 0 from `new`), and the evidence gains
+  `see_through_triangles` and `behind_surfaces`. Both traits gain a defaulted
+  `supports_occlusion` that is `true` for `Opaque` only, so a registry never
+  gives a see-through triangle to a provider that predates it. A request
+  without a see-through flag is answered exactly as before.
+- `conformance::see_through::SeeThroughConformanceSuite` (`run`, `run_faces`)
+  with its report and failure types infers the see-through claim from
+  `supports_occlusion`: an unclaiming provider must refuse a see-through
+  request by name; a hidden-line claim must draw nine fixtures (panes over a
+  floor and over each other, a pane under an opaque sheet, a see-through box,
+  edges under a pane's border and diagonal, the occluding cap of a cut
+  see-through solid, a see-through pane cut by the near plane, and a
+  see-through slab in perspective when that is claimed too) with their `seen_through` counts and evidence, refuse a short
+  occlusion slice naming the mesh, and draw three base scenes flagged all
+  opaque as without flags. A visible-face claim must reproduce the regions and
+  `behind` lists of eight scenes (a pane over a box, two panes over a box, a
+  depth cycle of three panes, a see-through box, a pane tied with a floor, a
+  stack stopped by an opaque sheet, the occluding cap of a cut see-through
+  solid, planar groups split by occlusion), refuse a mixed face group, a
+  short occlusion slice and a stack over `max_behind_surfaces`, and answer
+  three base scenes flagged all opaque as without flags (ADR 0111, #496).
 
 ### 0.1.6 - 2026-11-14
 

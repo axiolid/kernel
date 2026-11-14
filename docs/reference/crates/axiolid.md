@@ -8,7 +8,7 @@ Feature-gated facade for Axiolid's format-neutral geometry stack.
 
 | | |
 | --- | --- |
-| Latest release | 0.5.1 (2026-11-14) |
+| Latest release | 0.5.2 (2026-11-14) |
 | crates.io | [`axiolid`](https://crates.io/crates/axiolid) |
 | Layer | facade (`facade`) |
 | API documentation | [rustdoc](/api/rustdoc/axiolid/index.html) · [docs.rs](https://docs.rs/axiolid) |
@@ -132,15 +132,14 @@ Default: none.
 
 ## Changes
 
-Latest release, 0.5.1 (2026-11-14):
+Latest release, 0.5.2 (2026-11-14):
 
 ### Added
 
-- `Application::hidden_lines` draws perspective views: the portable
-  hidden-line provider claims them (ADR 0107, #387). The perspective claim
-  has its own conformance suite, run once per process and only by a call
-  whose view is perspective; a failure refuses the call as the case
-  `perspective claim` of the hidden-line report. Visible faces still refuse a
-  perspective view (`Unsupported`).
+- `Application::hidden_lines` and `visible_faces` honour see-through
+  triangles (`HiddenLineMesh::with_occlusion`): both portable providers claim
+  them (ADR 0111, #496). Each claim has its own conformance suite, run once
+  per process and only by a call with a see-through triangle; a failure
+  refuses the call as the case `see-through claim` of the provider's report.
 
 Full history: [`crates/facade/axiolid/CHANGELOG.md`](https://github.com/axiolid/kernel/blob/main/crates/facade/axiolid/CHANGELOG.md)

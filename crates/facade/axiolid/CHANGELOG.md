@@ -9,6 +9,8 @@ caret rule for `0.x` versions.
 
 ## [Unreleased]
 
+## [0.5.2] - 2026-11-14
+
 ### Added
 
 - `Application::hidden_lines` and `visible_faces` honour see-through
