@@ -22,10 +22,13 @@ mod common;
 
 use std::collections::BTreeMap;
 
-use axiolid_core::{Frame3, Point3, Vec3};
+use axiolid_contracts::ExecutionOptions;
+use axiolid_core::{Aabb2, Frame3, Point2, Point3, Tolerance, Vec3};
 use axiolid_mesh::TriMesh;
-use axiolid_mesh_hidden_lines_contract::{View, Visibility};
-use common::{draw, frame, looking_along, scalar, scene, solids, BOX_EDGES};
+use axiolid_mesh_hidden_lines_contract::{
+    EdgeSelection, HiddenLineRequest, MeshHiddenLines, View, Visibility,
+};
+use common::{frame, looking_along, scalar, scene, solids, BOX_EDGES};
 
 type V3 = [f64; 3];
 
@@ -245,7 +248,55 @@ fn eyes() -> Vec<(&'static str, Frame3)> {
     ]
 }
 
-fn check(seed: u64, name: &str, view_frame: Frame3, with_near: bool, tally: &mut Tally) {
+/// What a run limits the view with.
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum Mode {
+    /// A near plane at the eye's own scale, nothing cut.
+    Plain,
+    /// A near plane through the middle of a box, which caps it.
+    Cut,
+    /// A near plane, a far plane through the middle of the scene's depths,
+    /// and a crop rectangle in image coordinates.
+    Limited,
+}
+
+/// The crop of a limited run: an off-centre image rectangle. Its bounds are
+/// no rational the scene's 1/8 grid reaches (an edge on a bound would lie
+/// outside it by the rounding of the bound, not be a tie).
+fn crop() -> Aabb2 {
+    Aabb2 {
+        min: Point2::new(-0.153_7, -0.251_1),
+        max: Point2::new(0.201_3, 0.101_9),
+    }
+}
+
+/// The part of the image segment `p`-`r` inside `region`, as its length
+/// (Liang-Barsky).
+fn clipped_length(p: [f64; 2], r: [f64; 2], region: Aabb2) -> f64 {
+    let d = [r[0] - p[0], r[1] - p[1]];
+    let (mut lo, mut hi) = (0.0f64, 1.0f64);
+    for (origin, delta, min, max) in [
+        (p[0], d[0], region.min.x, region.max.x),
+        (p[1], d[1], region.min.y, region.max.y),
+    ] {
+        if delta == 0.0 {
+            if origin < min || origin > max {
+                return 0.0;
+            }
+            continue;
+        }
+        let (t0, t1) = ((min - origin) / delta, (max - origin) / delta);
+        lo = lo.max(t0.min(t1));
+        hi = hi.min(t0.max(t1));
+    }
+    if hi <= lo {
+        return 0.0;
+    }
+    (hi - lo) * (d[0] * d[0] + d[1] * d[1]).sqrt()
+}
+
+fn check(seed: u64, name: &str, view_frame: Frame3, mode: Mode, tally: &mut Tally) {
+    let with_near = mode == Mode::Cut;
     let meshes = scene(seed);
     let near = if with_near {
         // The depth halfway through a box's extent, so the plane cuts it.
@@ -262,10 +313,37 @@ fn check(seed: u64, name: &str, view_frame: Frame3, with_near: bool, tally: &mut
         -0.05
     };
     let oracle = Oracle::new(&meshes, &view_frame, near);
+    // A far plane halfway through the depths of the scene in front of the
+    // near plane: it removes the far half of what the edges reach.
+    let far = (mode == Mode::Limited)
+        .then(|| {
+            let depths = oracle
+                .verts
+                .iter()
+                .flatten()
+                .map(|v| v[2])
+                .filter(|w| *w < near);
+            let lo = depths.clone().fold(f64::INFINITY, f64::min);
+            let hi = depths.fold(f64::NEG_INFINITY, f64::max);
+            (lo.is_finite() && lo < hi).then_some((lo + hi) / 2.0)
+        })
+        .flatten();
+    let region = (mode == Mode::Limited).then(crop);
     let input = solids(&meshes);
-    let view = View::perspective(view_frame, near).expect("valid");
-    let context = format!("scene {seed}, eye {name}, near {near}");
-    let outcome = draw(&scalar(), &input, view);
+    let mut view = View::perspective(view_frame, near).expect("valid");
+    if let Some(far) = far {
+        view = view.with_far(far);
+    }
+    let context = format!("scene {seed}, eye {name}, near {near}, far {far:?}");
+    let mut request =
+        HiddenLineRequest::new(&input, view, EdgeSelection::new(Some(0.5)), common::LIMITS);
+    if let Some(region) = region {
+        request = request.with_region(region);
+    }
+    let options = ExecutionOptions::new(Tolerance::new(1e-9, 1e-9).expect("tolerance"));
+    let outcome = scalar()
+        .hidden_lines(&request, &options)
+        .unwrap_or_else(|error| panic!("{context}: {error}"));
 
     let mut covered: BTreeMap<(u64, [u32; 2]), f64> = BTreeMap::new();
     for segment in &outcome.segments {
@@ -275,13 +353,22 @@ fn check(seed: u64, name: &str, view_frame: Frame3, with_near: bool, tally: &mut
     for index in 0..meshes.len() {
         for edge in BOX_EDGES {
             let [a, b] = edge.map(|i| oracle.verts[index][i as usize]);
-            // The part of the edge at or in front of the near plane.
-            let (ta, tb) = match (a[2] <= near, b[2] <= near) {
+            // The part of the edge at or in front of the near plane and not
+            // beyond the far plane.
+            let (mut ta, mut tb) = match (a[2] <= near, b[2] <= near) {
                 (true, true) => (0.0, 1.0),
                 (false, false) => (0.0, 0.0),
                 (true, false) => (0.0, (near - a[2]) / (b[2] - a[2])),
                 (false, true) => ((near - a[2]) / (b[2] - a[2]), 1.0),
             };
+            if let Some(far) = far {
+                match (a[2] >= far, b[2] >= far) {
+                    (true, true) => {}
+                    (false, false) => tb = ta,
+                    (true, false) => tb = tb.min((far - a[2]) / (b[2] - a[2])),
+                    (false, true) => ta = ta.max((far - a[2]) / (b[2] - a[2])),
+                }
+            }
             let at = |t: f64| {
                 let p = [
                     a[0] + t * (b[0] - a[0]),
@@ -292,7 +379,10 @@ fn check(seed: u64, name: &str, view_frame: Frame3, with_near: bool, tally: &mut
             };
             let length = if tb > ta {
                 let (p, r) = (at(ta), at(tb));
-                ((r[0] - p[0]).powi(2) + (r[1] - p[1]).powi(2)).sqrt()
+                match region {
+                    Some(region) => clipped_length(p, r, region),
+                    None => ((r[0] - p[0]).powi(2) + (r[1] - p[1]).powi(2)).sqrt(),
+                }
             } else {
                 0.0
             };
@@ -320,6 +410,15 @@ fn check(seed: u64, name: &str, view_frame: Frame3, with_near: bool, tally: &mut
 
     for segment in &outcome.segments {
         let (mesh, [a, b]) = (segment.source.mesh.0 as usize - 1, segment.source.vertices);
+        if let Some(region) = region {
+            for p in [segment.start, segment.end] {
+                assert!(
+                    (region.min.x..=region.max.x).contains(&p.x)
+                        && (region.min.y..=region.max.y).contains(&p.y),
+                    "{context}: {segment:?} leaves the crop"
+                );
+            }
+        }
         for fraction in [0.25, 0.5, 0.75] {
             tally.segments += 1;
             let q = segment.start + (segment.end - segment.start) * fraction;
@@ -340,17 +439,33 @@ fn check(seed: u64, name: &str, view_frame: Frame3, with_near: bool, tally: &mut
     }
 }
 
-fn run(with_near: bool) {
+fn run(mode: Mode) {
     const SEEDS: u64 = 40;
+    let mut total = Tally::default();
     for (name, view_frame) in eyes() {
         let mut tally = Tally::default();
         for seed in 1..=SEEDS {
-            check(seed, name, view_frame, with_near, &mut tally);
+            check(seed, name, view_frame, mode, &mut tally);
         }
         eprintln!(
-            "{name:>9}: near cuts {with_near}: {} samples, {} robust, {} ambiguous",
-            tally.segments, tally.robust, tally.ambiguous
+            "{name:>9}: {}: {} samples, {} robust, {} ambiguous",
+            match mode {
+                Mode::Plain => "plain",
+                Mode::Cut => "near cuts",
+                Mode::Limited => "far and crop",
+            },
+            tally.segments,
+            tally.robust,
+            tally.ambiguous
         );
+        total.segments += tally.segments;
+        total.robust += tally.robust;
+        total.hidden += tally.hidden;
+        // The fixed crop sees little from an eye inside the scene, so a
+        // limited run is held to its totals.
+        if mode == Mode::Limited {
+            continue;
+        }
         assert!(
             tally.robust >= 50,
             "{name}: only {} robust samples",
@@ -372,14 +487,33 @@ fn run(with_near: bool) {
             tally.segments
         );
     }
+    if mode == Mode::Limited {
+        assert!(
+            total.robust >= 5000 && total.robust * 2 >= total.segments,
+            "{} robust of {} samples",
+            total.robust,
+            total.segments
+        );
+        assert!(
+            total.hidden >= 500 && total.robust - total.hidden >= 500,
+            "{} hidden of {} robust samples",
+            total.hidden,
+            total.robust
+        );
+    }
 }
 
 #[test]
 fn the_provider_agrees_with_an_independent_eye_ray_cast() {
-    run(false);
+    run(Mode::Plain);
 }
 
 #[test]
 fn caps_of_cut_solids_agree_with_an_independent_eye_line_parity() {
-    run(true);
+    run(Mode::Cut);
+}
+
+#[test]
+fn a_far_depth_and_a_crop_agree_with_the_eye_ray_cast() {
+    run(Mode::Limited);
 }
