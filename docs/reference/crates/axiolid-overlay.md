@@ -81,6 +81,12 @@ Validated, deterministic planar booleans (intersection, union, difference, xor) 
   A chord whose hull or any trimmed hull would be a ring of zero area is not used, so
   trimming never adds a ring the arrangement refuses (#331). `scripts/probe_minkowski_cover_mutants.py`
   and `scripts/probe_minkowski_degenerate_mutants.py` list the faults its tests must catch.
+- The union of those terms is read from the term edges that can bound it
+  (`src/term_union.rs`, ADR 0108, #344): an edge proved exactly to lie strictly inside one
+  convex term is left out, the rest are cut once by the exact core's partial mode, and the
+  same rule reads each piece, so results are bit for bit the ones read from all the edges.
+  A shape larger than the region's features no longer makes every hull cross every other.
+  `scripts/probe_term_union_mutants.py` lists the faults its tests must catch.
 - The disc morphology has two modes (`MorphologyMode`, ADR 0087, #330). `Exact`, the
   default and the behaviour of `erode_inner` and its siblings, is bit for bit the route
   above; a CAD kernel takes it. Its cost still grows with the square of the corners where

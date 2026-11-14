@@ -210,3 +210,24 @@ needles gave 562 corners, as `Exact`, and 500 needles 2,066.
   30 degrees, are not joined: each needle is filled alone but the valleys
   stay (2,500 needles: 385 to 456 corners against 68). A sound extension
   is #483.
+
+## Amendment 2026-11-07: one evaluation for both modes (#344)
+
+Both modes read the union of their Minkowski terms through `term_union`
+(ADR 0108): a term edge proved exactly to lie strictly inside one convex term
+is left out, and the rest are cut in one subdivision and read by the same
+rule. The terms, the rule and every rounding are unchanged, so `Exact`'s
+results are bit for bit what they were and `Fast` gives the same result for
+the same filled rings. All 110 cases of `benches/disc_erosion.rs` (modes
+`exact,fast`, default sizes) give the same hashes.
+
+- **Cost.** Median of one run in a release build, main against this change:
+  `Exact`, the 10,002-corner `teeth` erosion (inner) 3.61 s and 1,183 MB to
+  1.92 s and 395 MB, the 10,002-corner `hole` dilation (inner) 8.28 s and
+  1,173 MB to 2.00 s and 387 MB; `Fast`, no case slower than 1.05 times its
+  former time (the 50,000-corner `floor` 0.24 s to 0.22 s). The furniture
+  cluster the issue is about is in
+  `docs/research/minkowski-sums-from-bounding-term-edges.md`.
+- **Limit.** `Exact`'s cost on walls of teeth is still superlinear: the arcs
+  and slivers at every tip are not inside one convex term, so their edges are
+  kept (ADR 0108 says why). `Fast` remains the answer for those walls.
