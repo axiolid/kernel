@@ -72,8 +72,9 @@ impl<'a> HiddenLineMesh<'a> {
 
 /// How a view maps model points to the image.
 ///
-/// [`Orthographic`](Self::Orthographic) is the default and the only projection
-/// the in-tree providers draw today. A provider says which it draws with
+/// [`Orthographic`](Self::Orthographic) is the default. The in-tree hidden-line
+/// providers draw both projections; the visible-face providers draw only the
+/// orthographic one. A provider says which it draws with
 /// `supports_projection` on [`MeshHiddenLines`] and [`crate::MeshVisibleFaces`]
 /// (ADR 0107), and a registry never hands it a view it does not support.
 #[non_exhaustive]

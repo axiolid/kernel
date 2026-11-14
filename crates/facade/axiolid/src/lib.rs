@@ -308,7 +308,8 @@ pub mod mesh_section {
     pub use axiolid_mesh_section_contract::*;
 }
 
-/// Orthographic hidden-line drawings and visible face regions of triangle meshes.
+/// Hidden-line drawings (orthographic and perspective) and visible face regions
+/// (orthographic) of triangle meshes.
 ///
 /// The contracts and their types (ADR 0090, ADR 0094). The exact scalar
 /// providers arrive with the `hidden-lines-provider` feature, or a caller

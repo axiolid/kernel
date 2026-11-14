@@ -1,6 +1,6 @@
 [package]
 name = "axiolid-hidden-lines"
-description = "Exact scalar hidden-line drawings of triangle meshes in orthographic views"
+description = "Exact scalar hidden-line drawings of triangle meshes in orthographic and perspective views, and visible face regions in orthographic views"
 version = "0.1.4"
 edition.workspace = true
 rust-version.workspace = true

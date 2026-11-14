@@ -64,7 +64,7 @@ Every page here is generated from the crate itself: its manifest, its crate docu
 | [`axiolid-exact-arrangement`](./crates/axiolid-exact-arrangement) | `algorithm.planar` | 0.1.1 | Exact arrangement of straight segments on rational points, with face tracing |
 | [`axiolid-field-ops`](./crates/axiolid-field-ops) | `algorithm.sampled` | 0.3.4 | Sampling, morphology, clearance, and navigation over Axiolid layered fields. |
 | [`axiolid-heal`](./crates/axiolid-heal) | `algorithm.repair` | 0.3.4 | Explicit diagnosis and opt-in repair contracts for dirty geometry |
-| [`axiolid-hidden-lines`](./crates/axiolid-hidden-lines) | `algorithm.discrete` | 0.1.4 | Exact scalar hidden-line drawings of triangle meshes in orthographic views |
+| [`axiolid-hidden-lines`](./crates/axiolid-hidden-lines) | `algorithm.discrete` | 0.1.4 | Exact scalar hidden-line drawings of triangle meshes in orthographic and perspective views, and visible face regions in orthographic views |
 | [`axiolid-inspect`](./crates/axiolid-inspect) | `algorithm.query` | 0.3.10 | Mesh queries: clearance, containment, ray casting, and genus |
 | [`axiolid-levelset`](./crates/axiolid-levelset) | `algorithm.sampled` | 0.3.3 | Level-set extraction: a closed manifold mesh from a sampled scalar field |
 | [`axiolid-linear-intersection`](./crates/axiolid-linear-intersection) | `algorithm.query` | 0.3.3 | Portable, deterministic intersections for linear geometry |

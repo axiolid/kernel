@@ -1,5 +1,5 @@
 //! Provider registration, validation, fallback, and budget policy for
-//! orthographic hidden-line drawings.
+//! hidden-line drawings, orthographic and perspective.
 
 use std::sync::Arc;
 

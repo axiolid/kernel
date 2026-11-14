@@ -18,9 +18,15 @@
 //! of `(U, V, W)` is `(U / -W, V / -W)`. Every sign question is then an exact
 //! determinant of view-space vectors from the eye (`recipe`), affine in the
 //! edge parameter as before, so nothing divides before it is decided and a
-//! triangle behind the eye needs no case; the endpoints are the exact
+//! triangle behind the eye needs no case of its own (an edge-on triangle
+//! that contains the eye is decided exactly and its fibre starts at the eye,
+//! see `occlusion`); the endpoints are the exact
 //! rationals rounded once, and a near-plane cap is decided by ray parity along
 //! the eye ray (`caps`). The visible-face provider below is orthographic only.
+//! A vertex at or behind the eye plane (`W >= 0`) has no finite image, so a
+//! triangle beside or behind the eye makes the broad phase search the whole
+//! scene with the linear scan, as `ScanHiddenLines` does; the pairs, and so
+//! the drawing, are the same, and only the candidate search is slower.
 //!
 //! [`ScalarVisibleFaces`] implements
 //! [`MeshVisibleFaces`](axiolid_mesh_hidden_lines_contract::MeshVisibleFaces)

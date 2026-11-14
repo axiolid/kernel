@@ -13,6 +13,9 @@
 //! answer is sorted ascending, so the candidates, their order and the pair
 //! count are those of the linear scan. A box the hierarchy would refuse
 //! (non-finite enclosure) makes the scan the answer; it never loses a pair.
+//! In a perspective view that happens for every vertex at or behind the eye
+//! plane (`W >= 0`), whose image enclosure is unbounded: one triangle beside
+//! or behind the eye sends the whole scene to the scan.
 //! `ScanHiddenLines` runs the scan throughout, for the benchmark baseline.
 //!
 //! The hierarchy splits along the longest extent. In a perspective view the

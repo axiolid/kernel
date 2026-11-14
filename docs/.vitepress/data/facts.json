@@ -244,7 +244,7 @@
       "version": "0.3.4"
     },
     "axiolid-hidden-lines": {
-      "description": "Exact scalar hidden-line drawings of triangle meshes in orthographic views",
+      "description": "Exact scalar hidden-line drawings of triangle meshes in orthographic and perspective views, and visible face regions in orthographic views",
       "layer": "algorithms",
       "path": "crates/algorithms/discrete/hidden-lines",
       "released": "0.1.4",

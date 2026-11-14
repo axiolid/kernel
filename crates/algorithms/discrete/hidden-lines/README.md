@@ -2,7 +2,7 @@
 
 The exact scalar provider for `MeshHiddenLines` (ADR 0090): the visible and
 hidden pieces of the boundary, silhouette and crease edges of triangle
-meshes (and, when selected, the edges between face groups, ADR 0106) in an orthographic view. Visibility is decided exactly in the view's
+meshes (and, when selected, the edges between face groups, ADR 0106) in an orthographic or perspective view. Visibility is decided exactly in the view's
 affine frame, with the interval filter first and dyadic big integers when it
 cannot decide; no tolerance enters a decision, and the output endpoints are
 the exact points rounded once. It refuses what it cannot decide with a typed
