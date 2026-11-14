@@ -8,7 +8,7 @@ Scalar reference MeshCompiler: profiles, extrusion, transforms, boolean dispatch
 
 | | |
 | --- | --- |
-| Latest release | 0.3.47 (2026-11-14) |
+| Latest release | 0.3.48 (2026-11-14) |
 | crates.io | [`axiolid-mesh-compile`](https://crates.io/crates/axiolid-mesh-compile) |
 | Layer | execution (`execution.orchestration`) |
 | API documentation | [rustdoc](/api/rustdoc/axiolid_mesh_compile/index.html) · [docs.rs](https://docs.rs/axiolid-mesh-compile) |
@@ -118,19 +118,41 @@ owns graph traversal and dispatch; the construction algorithms themselves
 
 ## Changes
 
-Latest release, 0.3.47 (2026-11-14):
+Latest release, 0.3.48 (2026-11-14):
+
+### Added
+
+- An edge use without a pcurve on a B-rep face over a
+  `SurfaceRelation::Revolution`, `LinearExtrusion` or `Ruled` is inverted
+  onto the relation instead of refused (#454, ADR 0110), as IFC and Revit
+  write most such faces. Each sample is located along the swept parameter
+  by a certified one-dimensional search on its distance from the generating
+  circle, line or ruling, required to have one connected minimiser (across
+  a swept conic's seam), and checked against the linear tolerance; the
+  other parameter is read in closed form. The face then meshes and is
+  bounded as one over an atomic surface without pcurves is, sharing its
+  edges' samples with its neighbours. Refused by name: a sample within the
+  tolerance of the axis of revolution, of a ruled apex or on a collapsed
+  ruling (`Degenerate`), off the surface with a certified floor, without
+  unique parameters (a surface covered twice, an edge across a closed
+  swept B-spline's seam, a fold, generators turning about the sample), a
+  line extruded along itself (`Degenerate`), non-finite input or
+  arithmetic (`InvalidInput`), and a search past its work cap
+  (`BudgetExceeded`). The refusal `an edge use without a pcurve on a face
+  over a surface relation` is gone. Faces without pcurves report up to 1.6
+  times the budget on the tested fixtures, as atomic ones do, and an edge
+  whose surface's speed varies by orders of magnitude along it (a ruling
+  pivoting about a slow rim) is sampled finely throughout and can run into
+  the curved-face vertex budget (ADR 0110, #497).
 
 ### Changed
 
-- Stationed spines, sectioned surfaces and open-section runs with turned
-  sections, or along ellipses, B-splines and offsets beside them, have their
-  folds decided exactly (#406, ADR 0082 amendment): a fold, or a touch within
-  rounding and the frames' certified error, is refused as `InvalidInput`
-  ("station-placed sections fold") by the mesh and the exact compiler alike,
-  where it was reported `Unbounded` (`FOLD_NOT_EXCLUDED`); a clear run is
-  certified. A section turned to face backwards along its basis is refused by
-  the same rule. Only a span whose frames or turn cannot be bounded, or that
-  crosses a curvature break of a frame read by quadrature, is still checked
-  conservatively and reported unbounded by name where that cannot clear it.
+- The arc length bound of an edge span without a pcurve, which sizes the
+  lens's box, is `|C'(m)| h + sup|C''| h^2 / 4` where that is below the
+  curve's speed bound times `h`. A conic's speed bound is its largest
+  semi-axis over any span, so an elliptic edge over its flat side was
+  sampled and refined far past its budget: an extruded 1.2 x 0.1 ellipse
+  over its vertex meshes in 4,096 triangles instead of 32,768. The bound is
+  only tightened, on atomic faces too (#454).
 
 Full history: [`crates/execution/compile/CHANGELOG.md`](https://github.com/axiolid/kernel/blob/main/crates/execution/compile/CHANGELOG.md)

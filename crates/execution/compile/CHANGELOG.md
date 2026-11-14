@@ -9,6 +9,8 @@ caret rule for `0.x` versions.
 
 ## [Unreleased]
 
+## [0.3.48] - 2026-11-14
+
 ### Added
 
 - An edge use without a pcurve on a B-rep face over a
