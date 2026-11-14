@@ -27,8 +27,8 @@ caret rule for `0.x` versions.
   nominal triangles and the triangle bound. Between two poles the pcurves
   name the side of the meridians a face covers (of a sphere's two halves
   between the meridians at `u = 0` and `pi`, the second runs from `pi` to
-  `2 pi`, not back to `0`); without pcurves only a full turn is
-  determined. Refused by name: a trim closing across a collapsed
+  `2 pi`, not back to `0`); without pcurves only a full turn, one seam
+  used once each way, is determined. Refused by name: a trim closing across a collapsed
   edge of a surface without such poles (a B-spline's degenerate edge,
   #499), a face between two poles without pcurves that is not a full turn
   (#500), a pole row wider than a period (`InvalidInput`), a hole reaching

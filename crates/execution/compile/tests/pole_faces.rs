@@ -1214,6 +1214,177 @@ fn an_oblique_small_circle_into_a_pole_is_bounded_along_the_meridians() {
     );
 }
 
+/// One edge use of a face: the edge, its orientation and its pcurve's ends.
+type Use = (usize, Orientation, Option<[(Scalar, Scalar); 2]>);
+
+/// A closed shell on the sphere: each face a loop of `(edge, orientation,
+/// pcurve)` over edges between `vertices`, each edge a curve.
+fn sphere_shell(
+    vertices: &[Point3],
+    edges: &[(usize, usize, Curve3)],
+    faces: &[&[Use]],
+) -> GeomResult<Compiled> {
+    let mut builder = GeometryGraphBuilder::new();
+    let mut brep: BRep<NodeId> = BRep::default();
+    let support = sphere(&mut builder);
+    let vertices: Vec<_> = vertices
+        .iter()
+        .map(|&position| brep.add_vertex(Vertex { position }))
+        .collect();
+    let edges: Vec<_> = edges
+        .iter()
+        .map(|(start, end, curve)| {
+            let curve = push_curve3(&mut builder, curve.clone());
+            brep.add_edge(Edge {
+                start: vertices[*start],
+                end: vertices[*end],
+                curve: Some(curve),
+            })
+        })
+        .collect();
+    let faces: Vec<_> = faces
+        .iter()
+        .map(|uses| {
+            let edges = uses
+                .iter()
+                .map(|&(edge, orientation, pcurve)| EdgeUse {
+                    edge: edges[edge],
+                    orientation,
+                    pcurve: pcurve
+                        .map(|ends| builder.push(GeometryNode::Curve2(polyline(&ends))).unwrap()),
+                })
+                .collect();
+            let loop_id = brep.add_loop(Loop { edges });
+            brep.add_face(Face {
+                surface: Some(support),
+                bounds: vec![FaceBound {
+                    loop_id,
+                    orientation: Orientation::Forward,
+                    outer: true,
+                }],
+                orientation: Orientation::Forward,
+            })
+        })
+        .collect();
+    let shell = brep.add_shell(Shell {
+        faces: faces
+            .into_iter()
+            .map(|f| (f, Orientation::Forward))
+            .collect(),
+        closed: true,
+    });
+    brep.add_solid(Solid {
+        outer: shell,
+        voids: Vec::new(),
+    });
+    compile(builder, brep)
+}
+
+/// Two distinct edges between the poles are no seam, even where they leave
+/// both poles along each other (here they coincide): without pcurves the
+/// side of the meridians each face covers is not determined (P2). Read as
+/// a full turn, each face would be the whole sphere plus a sliver.
+#[test]
+fn two_edges_between_the_poles_are_no_full_turn() {
+    let poles = [Point3::new(0.0, 0.0, -R), Point3::new(0.0, 0.0, R)];
+    let meridian = || circle_in(Point3::ZERO, Vec3::X, Vec3::Z, R);
+    let (f, r) = (Orientation::Forward, Orientation::Reversed);
+    let result = sphere_shell(
+        &poles,
+        &[(0, 1, meridian()), (0, 1, meridian())],
+        &[&[(1, f, None), (0, r, None)], &[(0, f, None), (1, r, None)]],
+    );
+    match result {
+        Err(GeomError::UnsupportedInput { input, .. }) => assert!(
+            input.contains("between two poles whose edge uses carry no pcurves"),
+            "{input}"
+        ),
+        other => panic!("expected P2, got {:?}", other.map(|c| c.2)),
+    }
+}
+
+/// One seam used once each way is a full turn whether or not each use
+/// carries its pcurve. The use without one is inverted at the samples the
+/// other's pcurve set, so it has no chord bound on its curve and the face
+/// is unbounded by that name (ADR 0086), but a solid of the sphere's
+/// volume.
+#[test]
+fn a_full_turn_takes_one_seam_use_with_a_pcurve_and_one_without() {
+    let poles = [Point3::new(0.0, 0.0, -R), Point3::new(0.0, 0.0, R)];
+    let samples = dense(&|t, s| sphere_point(R, TAU * t, PI * (s - 0.5)));
+    let exact = (4.0 / 3.0 * PI * R * R * R, 4.0 * PI * R * R);
+    let (f, r) = (Orientation::Forward, Orientation::Reversed);
+    let up = Some([(TAU, -FRAC_PI_2), (TAU, FRAC_PI_2)]);
+    let down = Some([(0.0, FRAC_PI_2), (0.0, -FRAC_PI_2)]);
+    for (name, uses) in [
+        ("pcurve up only", [(0, f, up), (0, r, None)]),
+        ("pcurve down only", [(0, f, None), (0, r, down)]),
+    ] {
+        let result = sphere_shell(
+            &poles,
+            &[(0, 1, circle_in(Point3::ZERO, Vec3::X, Vec3::Z, R))],
+            &[&uses],
+        );
+        let (mesh, closure, report) = result.unwrap_or_else(|e| panic!("{name}: {e}"));
+        assert_eq!(closure, MeshClosure::Solid, "{name}");
+        assert_watertight(name, &mesh);
+        assert!(
+            report.contributions.iter().any(|c| matches!(c.bound,
+                DeviationBound::Unbounded(reason) if reason.contains("sampled through a neighbour's pcurve"))),
+            "{name}: {report:?}"
+        );
+        let volume = signed_volume(&mesh);
+        assert!(
+            (volume - exact.0).abs() <= 2.0 * BUDGET * exact.1,
+            "{name}: volume {volume}"
+        );
+        let worst = farthest(&mesh, &samples);
+        assert!(worst <= 2.0 * BUDGET, "{name}: {worst:e}");
+    }
+}
+
+/// A face whose true region is the complement of a geodesic triangle with
+/// a vertex at the north pole, with no seam, is invalid input (ADR 0059: a
+/// face round a pole needs a seam), and its ring is the triangle's: the
+/// complement is meshed as the triangle, wound as the face says, so the
+/// shell of the two is the triangle twice the same way round, which the
+/// closure check reports open. It used to be refused at the pole; now its
+/// side is not read (#500 owns reading it from the loop's winding).
+#[test]
+fn a_geodesic_triangle_s_complement_without_a_seam_meshes_as_the_triangle() {
+    let latitude = PI / 6.0;
+    let (a, b) = (
+        sphere_point(R, 0.0, latitude),
+        sphere_point(R, FRAC_PI_2, latitude),
+    );
+    let north = Point3::new(0.0, 0.0, R);
+    let x = a.normalize();
+    let y = (b - x * b.dot(x)).normalize();
+    let (f, r) = (Orientation::Forward, Orientation::Reversed);
+    let (mesh, closure, _) = sphere_shell(
+        &[a, b, north],
+        &[
+            (0, 1, circle_in(Point3::ZERO, x, y, R)),
+            (1, 2, circle_in(Point3::ZERO, Vec3::Y, Vec3::Z, R)),
+            (0, 2, circle_in(Point3::ZERO, Vec3::X, Vec3::Z, R)),
+        ],
+        &[
+            &[(0, f, None), (1, f, None), (2, r, None)],
+            &[(2, f, None), (1, r, None), (0, r, None)],
+        ],
+    )
+    .expect("the complement is not detected");
+    assert_eq!(closure, MeshClosure::OpenSolid);
+    // Both faces lie on the triangle, whose great-circle side bends toward
+    // the pole: no vertex lies below its corners.
+    let floor = mesh
+        .positions
+        .iter()
+        .map(|p| p.z)
+        .fold(Scalar::INFINITY, Scalar::min);
+    assert!(floor >= R * latitude.sin() - 1e-12, "{floor}");
+}
+
 /// The trims the tessellator refuses at a pole, each by name.
 fn refusal(result: GeomResult<Compiled>) -> String {
     refused(result).to_string()

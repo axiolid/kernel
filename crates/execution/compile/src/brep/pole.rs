@@ -20,8 +20,8 @@
 //! rows run as the pcurves place them, so between two poles the pcurves
 //! name the side of the meridians the face covers (the far meridian of a
 //! second half at `u + pi`, not back at `0`); two poles without that, on a
-//! periodic `u`, with the chains a whole number of periods apart, are one
-//! full turn; anything else is refused (P2). A row narrower than the
+//! periodic `u`, joined by one seam whose samples the two chains use once
+//! each way, are one full turn; anything else is refused (P2). A row narrower than the
 //! angular tolerance is no row, one wider than a period is invalid (P3), and
 //! a hole reaching a pole is refused (P4) (I3). A row copies the `u` of the
 //! ring's one run of samples at one `v` spanning it (a rim), bit for bit,
@@ -153,6 +153,26 @@ impl Chain {
     }
 }
 
+/// Whether two chains between the same two poles are one seam's samples
+/// used once each way: the mesh indices of the second, the shared end of
+/// each pair of its uses read once, are the first's reversed.
+fn one_seam(first: &Chain, second: &Chain) -> bool {
+    let indices = |chain: &Chain| {
+        let mut out: Vec<u32> = Vec::new();
+        for use_ in &chain.uses {
+            for &index in &use_.shared {
+                if out.last() != Some(&index) {
+                    out.push(index);
+                }
+            }
+        }
+        out
+    };
+    let (mut a, b) = (indices(first), indices(second));
+    a.reverse();
+    a.len() >= 2 && a == b
+}
+
 /// P2: two or more poles without the pcurves that place the meridians
 /// between them. `TODO(#500)`.
 fn sides_refusal() -> GeomError {
@@ -242,12 +262,12 @@ pub(super) fn pole_ring(
     }
     let k = chains.len();
     let angular = ctx.tolerance.angular();
-    let row = |chains: &[Chain], c: usize| chains[(c + 1) % k].first().x - chains[c].last().x;
     if k >= 2 && !chains.iter().all(|chain| chain.anchored) {
-        // Two poles, the chains on one meridian: one full turn.
+        // Two poles joined by one seam, its samples used once each way: one
+        // full turn. Two distinct edges between the poles leave the side
+        // undetermined, however near each other they run.
         let period = periods.0.ok_or_else(sides_refusal)?;
-        let whole = |du: Scalar| (du - (du / period).round() * period).abs() <= angular;
-        if k != 2 || !(whole(row(&chains, 0)) && whole(row(&chains, 1))) {
+        if k != 2 || !one_seam(&chains[0], &chains[1]) {
             return Err(sides_refusal());
         }
         let turn = chains[0].last().x + period - chains[1].first().x;
