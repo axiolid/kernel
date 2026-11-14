@@ -746,6 +746,9 @@ pub(super) fn straight_curve(curve: &axiolid_curve::Curve3) -> bool {
 /// span with a chord bound of zero. The pieces' span counts together stay
 /// within the segment cap. Returns the points, their parameters, the span
 /// bounds and the span count of each piece.
+///
+/// TODO(#497): the slowest stretch of a piece sets the spacing of all of it;
+/// grade the samples by the surface's local speed (ADR 0110).
 #[allow(clippy::type_complexity)]
 pub(super) fn sample_edge(
     trace: &EdgeTrace<'_>,

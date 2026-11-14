@@ -610,8 +610,15 @@ fn honest(name: &str, result: GeomResult<Compiled>, samples: &[Point3], allowed:
             Some(bound) => {
                 let worst = farthest(&mesh, samples);
                 eprintln!("{name}: certified {bound:e}, measured {worst:e}");
+                // The measurement's own rounding: on a plane patch
+                // certified exact, `closest_point_on_triangle` lands 1.8e-13
+                // off a sample inside a long thin triangle.
+                let scale = samples
+                    .iter()
+                    .map(|p| p.abs().max_element())
+                    .fold(1.0, Scalar::max);
                 assert!(
-                    worst <= bound * (1.0 + 1e-9),
+                    worst <= bound * (1.0 + 1e-9) + 1e-12 * scale,
                     "{name}: certified {bound:e} below the measured {worst:e}"
                 );
                 assert!(
@@ -1165,11 +1172,78 @@ fn a_ruling_pivoting_about_a_slow_rim_meshes_at_the_cost_of_uniform_samples() {
         true,
     );
     let without = without_pcurves(unit_sheet(&exact, curves()));
-    assert_inverted("pivoting ruling", &support, &without, RULED);
-    let (mesh, _, _) = open_sheet(&support, &without).unwrap();
+    let (mesh, _, report) = check_sheet("pivoting ruling", &support, &without, RULED, false);
+    let bound = report.bound.unwrap();
+    assert!(
+        bound <= INVERTED_CEILING * BUDGET,
+        "{bound:e} beyond {INVERTED_CEILING} budgets"
+    );
     let (cheap, dear) = (with.0.indices.len() / 3, mesh.indices.len() / 3);
     assert!(
         dear > 10 * cheap,
         "{dear} triangles without pcurves against {cheap} with them: update ADR 0110"
     );
+}
+
+/// Two straight pieces meeting at `knot` with a corner: `(0, 0)` to `(3, 0)`
+/// at speed `3 / knot`, then `(3, 0)` to `(3, 0.07)` a hundred times
+/// slower.
+fn kinked(degree: u16, knot: Scalar) -> Curve3 {
+    let p = |x: Scalar, y: Scalar| Point3::new(x, y, 0.0);
+    let (control_points, multiplicities) = match degree {
+        1 => (vec![p(0.0, 0.0), p(3.0, 0.0), p(3.0, 0.07)], vec![2, 1, 2]),
+        _ => (
+            vec![
+                p(0.0, 0.0),
+                p(1.5, 0.0),
+                p(3.0, 0.0),
+                p(3.0, 0.035),
+                p(3.0, 0.07),
+            ],
+            vec![3, 2, 3],
+        ),
+    };
+    Curve3::BSpline(BSplineCurve3 {
+        degree,
+        control_points,
+        knots: vec![0.0, knot, 1.0],
+        multiplicities,
+        weights: None,
+        closed: false,
+        self_intersect: None,
+        knot_spec: KnotSpec::Unspecified,
+    })
+}
+
+/// A plane patch on the fast side of a profile's corner, its edge a
+/// hundredth of the corner's piece from it: no cell of the cover spans the
+/// corner, where the speed jumps, so the slow side's speed never stands for
+/// the fast side's and the minimiser is never dropped.
+#[test]
+fn a_patch_beside_a_profile_s_corner_meshes_without_pcurves() {
+    for degree in [1, 2] {
+        for knot in [0.3, 0.5] {
+            let speed = 3.0 / knot;
+            let support =
+                move |b: &mut GeometryGraphBuilder| extrusion(b, kinked(degree, knot), Vec3::Z);
+            let point = move |u: Scalar, v: Scalar| Point3::new(speed * u, 0.0, v);
+            for (x0, x1) in [(1.0, 2.0), (2.0, 2.985)] {
+                let sheet = Sheet {
+                    u: (x0 / speed, x1 / speed),
+                    v: (0.0, HEIGHT),
+                    point: &point,
+                    curves: [None, None, None, None],
+                    pcurves: [false; 4],
+                    hole: None,
+                    window: None,
+                };
+                honest(
+                    &format!("degree {degree}, corner at {knot}, x in [{x0}, {x1}]"),
+                    open_sheet(&support, &sheet),
+                    &sheet_samples(&sheet),
+                    &[Outcome::Certified],
+                );
+            }
+        }
+    }
 }

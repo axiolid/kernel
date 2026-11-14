@@ -30,10 +30,12 @@
 //! 3. **Read and check.** Gauss-Newton on `t` sharpens it inside its
 //!    interval to `t*`, and the other parameter is read in closed form.
 //!    Every generator over the interval passes within the slack of the
-//!    sample, so their points nearest it must lie within `tau` of each
-//!    other: [`RelationInverter::spread`] bounds that at `t*` by `r
-//!    |G'(t*)| + r^2 sup|G''| / 2`, `r` the interval's farthest end from
-//!    `t*`. Beyond `tau` the surface runs along a fold (`S_u` parallel to
+//!    sample, so with `o*` the other parameter read at `t*` the points
+//!    `G(t) = S(t, o*)` over the interval must lie within `tau` of
+//!    `S(t*, o*)`: [`RelationInverter::spread`] bounds that by `r |G'(t*)| +
+//!    r^2 sup|G''| / 2`, `r` the interval's farthest end from `t*` (by the
+//!    certified speed over the interval times `r` where a tangent break lies
+//!    inside it). Beyond `tau` the surface runs along a fold (`S_u` parallel to
 //!    `S_v`) or its generators turn about the sample (the swept curve stops
 //!    and turns back), each refused by its own name; a ruling pivoting about
 //!    a slow rim, or an ellipse's flat side, moves little near the sample
@@ -184,6 +186,10 @@ pub(crate) struct RelationInverter<'g> {
     /// Half the swept domain, when the swept curve closes without a period
     /// (a closed B-spline; ruled sides that both close).
     closed_half: Option<Scalar>,
+    /// The swept parameters where the generator's tangent breaks (a swept
+    /// B-spline's knots of full multiplicity; either ruled side's), which
+    /// no cell of the cover spans.
+    breaks: Vec<Scalar>,
 }
 
 impl<'g> RelationInverter<'g> {
@@ -223,7 +229,7 @@ impl<'g> RelationInverter<'g> {
             }
             (RelationSurface::Revolution { curve, .. }, None)
             | (RelationSurface::Extrusion { curve, .. }, None) => {
-                fixed(&surface, curve_bracket(curve))?
+                fixed(&surface, curve_bracket(curve), &tangent_breaks(&surface))?
             }
             (RelationSurface::Ruled { .. }, _) => fixed(
                 &surface,
@@ -232,14 +238,17 @@ impl<'g> RelationInverter<'g> {
                     end: 1.0,
                     periodic: false,
                 },
+                &tangent_breaks(&surface),
             )?,
         };
         let closed_half = closed_half(&surface, tau)?;
+        let breaks = tangent_breaks(&surface);
         Ok(Self {
             surface,
             tau,
             sweep,
             closed_half,
+            breaks,
         })
     }
 
@@ -316,8 +325,8 @@ impl<'g> RelationInverter<'g> {
         let (start, piece) = unique_piece(&kept, bracket).ok_or_else(|| self.ambiguous())?;
         let t = self.polish(&probe, start, piece)?;
         // Every generator over the piece passes within the slack of the
-        // sample. Where their points nearest it lie further apart than
-        // `tau`, the sample does not fix `t`.
+        // sample. Where `S(t', o*)` moves further than `tau` over it, the
+        // sample does not fix `t`.
         let (moving, turning) = self.spread(&probe, t, piece)?;
         if moving + turning > self.tau {
             return Err(if turning > moving {
@@ -417,7 +426,8 @@ impl<'g> RelationInverter<'g> {
     /// middle plus the acceleration bound over half its width: near a slow
     /// stretch of the swept curve (an ellipse's flat side, a slow rim) the
     /// coarse cell's bound is its fastest speed, and the leaves would be
-    /// that much narrower than they need be.
+    /// that much narrower than they need be. The step holds because no
+    /// coarse cell spans a tangent break ([`cut_at_breaks`]).
     fn half(&self, probe: &Probe, cell: &Cell, a: Scalar, b: Scalar) -> GeomResult<Cell> {
         let middle = 0.5 * (a + b);
         let local =
@@ -492,7 +502,7 @@ impl<'g> RelationInverter<'g> {
             kept.into_iter().partition(|cell| cell.lower() <= threshold);
         let floor = if kept.is_empty() {
             dropped.extend(late);
-            self.sharpen(probe, dropped, best, work)
+            self.sharpen(probe, dropped, best, work)?
         } else {
             kept.iter()
                 .map(Cell::lower)
@@ -510,32 +520,31 @@ impl<'g> RelationInverter<'g> {
         cells: Vec<Cell>,
         mut best: Scalar,
         work: &mut usize,
-    ) -> Scalar {
+    ) -> GeomResult<Scalar> {
         let mut floor = Scalar::INFINITY;
         let mut pending = cells;
         while let Some(cell) = pending.pop() {
+            if !cell.lower().is_finite() {
+                return Err(non_finite());
+            }
             let m = cell.middle();
             let settled = cell.lower() >= FLOOR_SHARPNESS * best
                 || !(m > cell.a && m < cell.b)
                 || *work + 2 > RELATION_COVER_WORK;
-            let halves = if settled {
-                None
-            } else {
-                *work += 2;
-                self.half(probe, &cell, cell.a, m)
-                    .and_then(|low| Ok((low, self.half(probe, &cell, m, cell.b)?)))
-                    .ok()
-            };
-            match halves {
-                Some((low, high)) => {
-                    best = best.min(low.distance).min(high.distance);
-                    pending.push(high);
-                    pending.push(low);
-                }
-                None => floor = floor.min(cell.lower()),
+            if settled {
+                floor = floor.min(cell.lower());
+                continue;
             }
+            *work += 2;
+            let (low, high) = (
+                self.half(probe, &cell, cell.a, m)?,
+                self.half(probe, &cell, m, cell.b)?,
+            );
+            best = best.min(low.distance).min(high.distance);
+            pending.push(high);
+            pending.push(low);
         }
-        floor
+        Ok(floor)
     }
 
     /// The parameters at the swept parameter `t`, the other one read in
@@ -625,13 +634,15 @@ impl<'g> RelationInverter<'g> {
         Ok(t)
     }
 
-    /// A certified bound on how far the generator's point nearest the
-    /// sample moves while the swept parameter runs from `t` over `piece`,
-    /// as its first-order term `r |G'(t)|` and its second-order term
-    /// `r^2 sup|G''| / 2`, `r` the farthest end of the piece from `t`. `G` is
-    /// the swept curve for a revolution (the nearest point of the circle
-    /// turns with it) and an extrusion (the line's, shifted along it), and
-    /// the point `(1 - v) A + v B` at the sample's `v` for a ruled surface.
+    /// A certified bound on how far `S(t', o*)` moves from `S(t, o*)` while
+    /// the swept parameter `t'` runs over `piece`, `o*` the other parameter
+    /// read at `t`: as its first-order term `r |G'(t)|` and its second-order
+    /// term `r^2 sup|G''| / 2`, `r` the farthest end of the piece from `t`.
+    /// `G = S(., o*)` moves as the swept curve for a revolution (turned by a
+    /// fixed `u*`) and an extrusion (shifted by a fixed `v* d`), and as
+    /// `(1 - v*) A + v* B` for a ruled surface. Where a tangent break lies
+    /// inside the piece there is no Taylor step across it: the bound is the
+    /// certified speed over the piece times `r`.
     fn spread(
         &self,
         probe: &Probe,
@@ -639,6 +650,30 @@ impl<'g> RelationInverter<'g> {
         (lo, hi): (Scalar, Scalar),
     ) -> GeomResult<(Scalar, Scalar)> {
         let r = (t - lo).max(hi - t).max(0.0);
+        let up = 1.0 + ROUNDING;
+        if self.breaks.iter().any(|&b| b > lo && b < hi) {
+            // The tangent breaks inside the piece: no Taylor step across it,
+            // the certified speed bound over the whole piece instead.
+            let first = match &self.surface {
+                RelationSurface::Revolution { curve, .. }
+                | RelationSurface::Extrusion { curve, .. } => curve_derivative_bounds3(
+                    curve.curve,
+                    curve.parameter(lo)?,
+                    curve.parameter(hi)?,
+                )
+                .map(|bounds| bounds.first),
+                RelationSurface::Ruled { sides } => sides[0]
+                    .speeds(lo, hi)
+                    .zip(sides[1].speeds(lo, hi))
+                    .map(|((a1, _), (b1, _))| a1.max(b1)),
+            };
+            let first = first.ok_or_else(|| no_speed_bound(&self.surface))?;
+            let moving = r * first * up;
+            if !moving.is_finite() {
+                return Err(non_finite());
+            }
+            return Ok((moving, 0.0));
+        }
         let (speed, second) = match &self.surface {
             RelationSurface::Revolution { curve, .. }
             | RelationSurface::Extrusion { curve, .. } => {
@@ -661,7 +696,6 @@ impl<'g> RelationInverter<'g> {
             }
         };
         let second = second.ok_or_else(|| no_speed_bound(&self.surface))?;
-        let up = 1.0 + ROUNDING;
         let (moving, turning) = (r * speed * up, 0.5 * r * r * second * up);
         if !(moving.is_finite() && turning.is_finite()) {
             return Err(non_finite());
@@ -808,10 +842,13 @@ fn swept_line_direction(direction: Vec3) -> GeomResult<Vec3> {
     Ok(direction)
 }
 
-/// Half the swept domain when the swept curve closes within `tau` and has
-/// no period: a B-spline's, or a ruled surface whose sides both close.
+/// Half the swept domain when the swept curve closes and has no period: a
+/// B-spline's, or a ruled surface whose sides both close. It closes when its
+/// ends lie within `2 tau`: a sample within `tau` of the surface may then be
+/// within `tau` of both ends, so an edge through it can cross from one end
+/// to the other.
 fn closed_half(surface: &RelationSurface<'_>, tau: Scalar) -> GeomResult<Option<Scalar>> {
-    let closes = |a: Point3, b: Point3| (a - b).length() <= tau;
+    let closes = |a: Point3, b: Point3| (a - b).length() <= 2.0 * tau;
     Ok(match surface {
         RelationSurface::Revolution { curve, .. } | RelationSurface::Extrusion { curve, .. } => {
             match curve.domain {
@@ -871,10 +908,41 @@ fn generator(surface: &RelationSurface<'_>, t: Scalar) -> GeomResult<Generator> 
     }
 }
 
-/// The fixed bracket's coarse cells, each with its certified speed bound
-/// and its midpoint generator.
-fn fixed(surface: &RelationSurface<'_>, bracket: Bracket) -> GeomResult<Sweep> {
-    let cells = cut(bracket)
+/// The tangent breaks of a relation's swept parameter, ascending: a swept
+/// curve's (`continuity_breaks3` at order 1), or either ruled side's.
+fn tangent_breaks(surface: &RelationSurface<'_>) -> Vec<Scalar> {
+    let mut breaks = match surface {
+        RelationSurface::Revolution { curve, .. } | RelationSurface::Extrusion { curve, .. } => {
+            curve.breaks()
+        }
+        RelationSurface::Ruled { sides } => sides.iter().flat_map(Side::breaks_in_u).collect(),
+    };
+    breaks.sort_by(Scalar::total_cmp);
+    breaks.dedup();
+    breaks
+}
+
+/// `cells` cut again at every break strictly inside one, so that no cell
+/// spans a break: across one the generator's speed jumps, and neither a
+/// speed bound over the cell nor its Taylor step from the middle holds.
+fn cut_at_breaks(cells: Vec<(Scalar, Scalar)>, breaks: &[Scalar]) -> Vec<(Scalar, Scalar)> {
+    let mut out = Vec::with_capacity(cells.len() + breaks.len());
+    for (a, b) in cells {
+        let mut start = a;
+        for &cut in breaks.iter().filter(|&&t| t > a && t < b) {
+            out.push((start, cut));
+            start = cut;
+        }
+        out.push((start, b));
+    }
+    out
+}
+
+/// The fixed bracket's coarse cells, cut at the tangent breaks, each with
+/// its certified speed bound and its midpoint generator.
+fn fixed(surface: &RelationSurface<'_>, bracket: Bracket, breaks: &[Scalar]) -> GeomResult<Sweep> {
+    let cells = cut_at_breaks(cut(bracket).collect(), breaks)
+        .into_iter()
         .map(|(a, b)| {
             let bounds = match surface {
                 RelationSurface::Revolution { curve, .. }
