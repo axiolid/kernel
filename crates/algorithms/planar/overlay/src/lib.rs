@@ -54,8 +54,6 @@ mod rectangle;
 mod region;
 mod segment_sweep;
 mod settle;
-// Wired into `minkowski` by the next commit.
-#[allow(dead_code)]
 mod term_union;
 mod visibility;
 

@@ -2,7 +2,7 @@
 //! convex or not (#145), and disc morphology with a known side of error
 //! (#163).
 //!
-//! # One arrangement per operation
+//! # The terms and how their union is read
 //!
 //! For a region `R`, a connected shape `K` and any point `k0` of `K`,
 //!
@@ -30,11 +30,15 @@
 //! holds the origin, `R` itself stands in for `R - k0`.
 //!
 //! All the rings -- the region's own, the translated ones and the pieces --
-//! go into one [`ArcArrangement`] (ADR 0070): where boundaries cross, which
-//! pieces coincide and which ring holds what are decided exactly, and the
-//! result's faces are chosen by ring membership. Vertices are rounded once.
-//! The one rounding before that is each vertex sum `a + k`, a sum of two
-//! `f64`s, within half an ulp.
+//! are read by `crate::term_union` (#344, ADR 0108), exactly (ADR 0070):
+//! every term edge proved to lie strictly inside one convex piece is left
+//! out, since a piece's inside is the same for the rule whichever other
+//! rings hold it; the rest are cut once, where boundaries cross and at every
+//! term vertex, and the result's faces are chosen by ring membership. The
+//! result is what one [`ArcArrangement`] of all the rings read by the same
+//! rule gives, bit for bit (`by_arrangement`, the tests' oracle). Vertices
+//! are rounded once. The one rounding before that is each vertex sum
+//! `a + k`, a sum of two `f64`s, within half an ulp.
 //!
 //! # Reading the faces
 //!
@@ -550,7 +554,6 @@ enum Rule {
 
 impl Rule {
     /// The index of the first convex piece ring in the rule's ring list.
-    #[allow(dead_code)]
     fn first_piece(&self) -> usize {
         match self {
             Self::Sum(terms) => terms.pieces,
@@ -886,8 +889,7 @@ impl Region {
             return Ok(Self::empty());
         }
         let (rings, rule) = self.sum_rule(parts, true, tolerance);
-        let arrangement = ArcArrangement::new(&rings, tolerance)?;
-        region_of(&arrangement, |rings| rule.holds(rings), true, tolerance)
+        crate::term_union::region(&rings, rule.first_piece(), |r| rule.holds(r), tolerance)
     }
 
     /// The rings of a sum's arrangement and the rule that reads the sum
@@ -908,8 +910,7 @@ impl Region {
             return Ok(Self::empty());
         }
         let (rings, rule) = self.erosion_rule(parts, true, tolerance);
-        let arrangement = ArcArrangement::new(&rings, tolerance)?;
-        region_of(&arrangement, |rings| rule.holds(rings), true, tolerance)
+        crate::term_union::region(&rings, rule.first_piece(), |r| rule.holds(r), tolerance)
     }
 
     /// The rings of an erosion's arrangement and the rule that reads the
@@ -1238,8 +1239,12 @@ impl Region {
                 } else {
                     sum_rule_of(&filled.rings, shape, &parts, true, tolerance)
                 };
-                let arrangement = ArcArrangement::new(&rings, tolerance)?;
-                let mut out = region_of(&arrangement, |r| rule.holds(r), true, tolerance)?;
+                let mut out = crate::term_union::region(
+                    &rings,
+                    rule.first_piece(),
+                    |r| rule.holds(r),
+                    tolerance,
+                )?;
                 out.set_excess(filled.excess);
                 out
             }
@@ -1264,6 +1269,7 @@ fn by_arrangement(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::exact_arc::arrangement::PIECES;
     use crate::{term_union, Polygon};
 
     fn ring(points: &[(f64, f64)]) -> Ring {
@@ -1957,60 +1963,64 @@ mod tests {
         }
     }
 
+    /// Random scene number `case`: star-shaped polygons, some with a hole,
+    /// and a random convex shape, snapped to a grid (even cases) or far
+    /// from the origin (odd cases). `None` when the polygons are not a
+    /// valid region.
+    fn random_scene(case: u64) -> Option<(Region, Part)> {
+        let mut rng = Lcg(344 + case);
+        let n = 1 + rng.below(3);
+        let far = case % 2 == 1;
+        let offset = if far {
+            (640_000.0, 5_650_000.0)
+        } else {
+            (0.0, 0.0)
+        };
+        let snap = |p: Point2| {
+            if far {
+                p
+            } else {
+                Point2::new((p.x * 64.0).round() / 64.0, (p.y * 64.0).round() / 64.0)
+            }
+        };
+        let mut polygons = Vec::new();
+        for i in 0..n {
+            let corners = 8 + rng.below(33);
+            let centre = (offset.0 + 14.0 * i as f64, offset.1 + 14.0 * rng.next());
+            let hole = rng.below(3) == 0;
+            let mut polygon = star(&mut rng, corners, centre, hole);
+            for r in std::iter::once(&mut polygon.outer).chain(polygon.holes.iter_mut()) {
+                r.points.iter_mut().for_each(|p| *p = snap(*p));
+            }
+            polygons.push(polygon);
+        }
+        let region = Region::new(polygons, Tolerance::METRE).ok()?;
+        let sides = 3 + rng.below(6);
+        let mut angles: Vec<f64> = (0..sides)
+            .map(|i| {
+                (f64::from(i as u32) + 0.1 + 0.8 * rng.next()) * std::f64::consts::TAU
+                    / sides as f64
+            })
+            .collect();
+        angles.sort_by(f64::total_cmp);
+        let away = if rng.below(3) == 0 { 0.7 } else { 0.0 };
+        let (rx, ry) = (0.3 + 1.5 * rng.next(), 0.3 + 1.5 * rng.next());
+        let k = angles
+            .iter()
+            .map(|a| snap(Point2::new(away + rx * a.cos(), ry * a.sin())))
+            .collect::<Vec<_>>();
+        let part = polygon_part(&Ring { points: k }, &[], Tolerance::METRE).ok()?;
+        Some((region, part))
+    }
+
     #[test]
     fn the_term_union_reads_random_scenes_as_the_arrangement_did() {
-        // Star-shaped polygons, some with a hole, a random convex shape,
-        // on a grid or far from the origin.
+        // The first 40 cases, and 154, the smallest one a term union cut
+        // only at the pieces' vertices, or at none, reads differently from
+        // the arrangement (454 is the next).
         let mut compared = 0;
-        let mut rng = Lcg(344);
-        let mut valid = 0;
-        for case in 0..40 {
-            let n = 1 + rng.below(3);
-            let far = case % 2 == 1;
-            let offset = if far {
-                (640_000.0, 5_650_000.0)
-            } else {
-                (0.0, 0.0)
-            };
-            let snap = |p: Point2| {
-                if far {
-                    p
-                } else {
-                    Point2::new((p.x * 64.0).round() / 64.0, (p.y * 64.0).round() / 64.0)
-                }
-            };
-            let mut polygons = Vec::new();
-            for i in 0..n {
-                let corners = 8 + rng.below(33);
-                let centre = (offset.0 + 14.0 * i as f64, offset.1 + 14.0 * rng.next());
-                let hole = rng.below(3) == 0;
-                let mut polygon = star(&mut rng, corners, centre, hole);
-                for r in std::iter::once(&mut polygon.outer).chain(polygon.holes.iter_mut()) {
-                    r.points.iter_mut().for_each(|p| *p = snap(*p));
-                }
-                polygons.push(polygon);
-            }
-            let Ok(region) = Region::new(polygons, Tolerance::METRE) else {
-                continue;
-            };
-            valid += 1;
-            let k = {
-                let sides = 3 + rng.below(6);
-                let mut angles: Vec<f64> = (0..sides)
-                    .map(|i| {
-                        (f64::from(i as u32) + 0.1 + 0.8 * rng.next()) * std::f64::consts::TAU
-                            / sides as f64
-                    })
-                    .collect();
-                angles.sort_by(f64::total_cmp);
-                let away = if rng.below(3) == 0 { 0.7 } else { 0.0 };
-                let (rx, ry) = (0.3 + 1.5 * rng.next(), 0.3 + 1.5 * rng.next());
-                angles
-                    .iter()
-                    .map(|a| snap(Point2::new(away + rx * a.cos(), ry * a.sin())))
-                    .collect::<Vec<_>>()
-            };
-            let Ok(part) = polygon_part(&Ring { points: k }, &[], Tolerance::METRE) else {
+        for case in (0..40).chain([154]) {
+            let Some((region, part)) = random_scene(case) else {
                 continue;
             };
             assert_same_routes(
@@ -2022,8 +2032,7 @@ mod tests {
             );
             compared += 1;
         }
-        assert!(valid >= 20, "only {valid} random scenes were valid");
-        assert!(compared >= 20, "{compared}");
+        assert!(compared >= 20, "{compared} random scenes were valid");
     }
 
     #[test]
@@ -2126,5 +2135,29 @@ mod tests {
             }
         }
         assert_eq!(refused, 3);
+    }
+
+    #[test]
+    fn a_furniture_cluster_is_read_from_few_pieces() {
+        // Pieces the subdivision cuts to sum and erode a 304-corner cluster
+        // of furniture outlines, placed far from the origin, by a 1.7 m by
+        // 0.9 m rectangle (#344). The arrangement route cut 139,142 of them
+        // (sum and erosion together), every hull edge against every other;
+        // the term union cuts 1,700, only the edges no single hull holds.
+        // The bound is the next round number over 1.5 times that, and
+        // under a quarter of the old count.
+        let t = Tolerance::METRE;
+        let (sum, free) = furniture(2, 48, true);
+        let k = Ring {
+            points: turned_rectangle(1.7, 0.9, 0.0),
+        };
+        let cut = |run: &dyn Fn() -> Region| {
+            PIECES.with(|c| c.set(0));
+            assert!(!run().is_empty());
+            PIECES.with(std::cell::Cell::get)
+        };
+        let pieces = cut(&|| sum.minkowski_sum(&k, t).unwrap())
+            + cut(&|| free.minkowski_erosion(&k, t).unwrap());
+        assert!(pieces < 3_000, "{pieces} pieces");
     }
 }
