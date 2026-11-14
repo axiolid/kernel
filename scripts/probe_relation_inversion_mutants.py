@@ -14,6 +14,13 @@ killed.
 Not listed, as not observable (no fixture, not equivalent):
 - R8, the coarse cell without a certified speed bound, and the same refusal
   in the spread: the four supported swept families always have one.
+- the spread's own guard at a tangent break (the certified speed over the
+  piece instead of the Taylor step from `t*`; survives): a piece reaches past
+  a break only as far as the generators there stay within the slack of the
+  sample, so on the slow side the step from `t*` overstates nothing a
+  fixture can see, and from the fast side it overstates the slow side's
+  movement as the guard does. The guard keeps the bound certified where
+  that coincidence fails.
 - the `InvalidInput` refusals of non-finite arithmetic (a distance, the
   revolved line's bracket, the extruded plane's parameters, the residual,
   the spread): finite, valid curves give finite values throughout, and no
@@ -100,6 +107,9 @@ MUTANTS = [
     ("a span across a closed spline's seam is accepted", V,
      "            .any(|w| (swept(&w[1]) - swept(&w[0])).abs() > half)\n",
      "            .any(|w| (swept(&w[1]) - swept(&w[0])).abs() > 2.0 * half)\n"),
+    ("the cover's cells are not cut at tangent breaks", V,
+     "    let cells = cut_at_breaks(cut(bracket).collect(), breaks)\n",
+     "    let cells = cut_at_breaks(cut(bracket).collect(), &[])\n"),
     ("a closed swept spline is read as open", V,
      "                Some(domain) if closes(curve.point(domain.start)?, curve.point(domain.end)?) => {\n",
      "                Some(domain) if false && closes(curve.point(domain.start)?, curve.point(domain.end)?) => {\n"),
