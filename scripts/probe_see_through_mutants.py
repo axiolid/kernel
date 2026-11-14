@@ -34,6 +34,7 @@ FACE_SUITE = PROVIDERS + ["the_visible_face_providers_pass_the_see_through_suite
 OCC_LIB = ["-p", "axiolid-hidden-lines", "--lib", "occlusion::tests"]
 LABEL_LIB = ["-p", "axiolid-hidden-lines", "--lib", "label::tests"]
 GROUP_LIB = ["-p", "axiolid-hidden-lines", "--lib", "groups::tests"]
+ORACLE = ["-p", "axiolid-hidden-lines", "--test", "see_through_oracle"]
 
 DEFAULT_CLAIM = '        occlusion == Occlusion::Opaque\n    }\n'
 CLAIM_LINES = (
@@ -73,6 +74,16 @@ MUTANTS = [
     ('the behind layer order is not checked', VF, '        if !in_order {', '        if false && !in_order {', FACES),
     ('the registry ignores the behind budget', VF, '        if behind > limits.max_behind_surfaces {', '        if false && behind > limits.max_behind_surfaces {', FACES),
     ('regions are not ordered by what is behind them', VF, '            let order = order.then_with(|| behind_order(request, last_behind, &region.behind));', '            let order = order;', FACES),
+    ('the registry accepts a mixed single group', VF, '                if flags.contains(&Occlusion::Opaque) {', '                if false && flags.contains(&Occlusion::Opaque) {', FACES),
+    ('the registry accepts a region listing its own source', VF, '        if surface.layer == 0 && (surface.mesh, surface.source) == (region.mesh, region.source) {', '        if false && surface.layer == 0 && (surface.mesh, surface.source) == (region.mesh, region.source) {', FACES),
+    ('the registry accepts an occluder before the last layer', VF, '        if occludes && surface.layer != last.layer {', '        if false && occludes && surface.layer != last.layer {', FACES),
+    ('the registry accepts a cap behind a mesh that has none', VF, '        if surface.source == FaceSource::Cap\n', '        if false && surface.source == FaceSource::Cap\n', FACES),
+    ('the registry accepts a stack behind an opaque region', VF, '    if region.source == FaceSource::Cap || !entry.occlusion.has_see_through() || opaque_group {', '    if false {', FACES),
+    ('visible faces: behind surfaces are not checked', VF, '        || evidence.behind_surfaces != behind\n', '', FACES),
+    ('visible faces: see-through triangles are not checked', VF, '        || evidence.see_through_triangles != see_through_triangles(request.meshes)\n', '', FACES),
+    ('hidden lines: seen-through segments are not checked', HR, '        || evidence.seen_through_segments != seen_through\n', '', LINES),
+    ('hidden lines: see-through triangles are not checked', HR, '        || evidence.see_through_triangles != see_through_triangles(request.meshes)\n', '', LINES),
+    ('a short occlusion slice is routed first', HR, '        validate_occlusion_lengths(request.meshes)?;\n', '', LINES),
     ('the registry accepts a mixed face group', VF, '        if let Some(pair) = pairs.windows(2).find(|pair| pair[0].0 == pair[1].0) {', '        if let Some(pair) = pairs.windows(2).find(|pair| false && pair[0].0 == pair[1].0) {', FACES),
     # Registration verifies a claim.
     ('hidden lines: register_conformant ignores a see-through claim', HR, REGISTER, '        if false && provider.supports_occlusion(Occlusion::SeeThrough) {', PROVIDERS + ["register_conformant"]),
@@ -84,6 +95,10 @@ MUTANTS = [
     ('equal counts are not merged', OCC, '            Some(last) if ours && last.seen_through == seen_through => last.hi = to,', '            Some(last) if false && ours && last.seen_through == seen_through => last.hi = to,', LINE_SUITE),
     ('edge-on glass occludes', OCC, '        if tri.see_through {', '        if tri.see_through && tri.sigma != Ordering::Equal {', OCC_LIB),
     ('seen-through segments are not counted', PRO, '            evidence.seen_through_segments += 1;', '            evidence.seen_through_segments += 0;', LINE_SUITE),
+    ('the count includes glass at equal depth', OCC, '    let in_front = scene.constraint(Kind::PlaneAbove { t, neg, lift }, true);', '    let in_front = scene.constraint(Kind::PlaneAbove { t, neg, lift }, false);', LINE_SUITE),
+    ('the count includes glass beyond the near plane', OCC, '            solver.clip(span, &not_cut)\n', '            let _ = not_cut;\n            Ok(Some(span))\n', [LINE_SUITE, PROVIDERS, ORACLE]),
+    ('the sweep counts only the ends before a gap', OCC, '            if solver.cmp(end, at)? == Ordering::Greater {', '            if solver.cmp(end, at)? != Ordering::Less {', [LINE_SUITE, OCC_LIB]),
+    ('collapsed neighbours of different counts are joined', PRO, '                if last.visibility == visibility && last.seen_through == piece.seen_through {', '                if last.visibility == visibility {', PROVIDERS + ["a_collapsed_piece"]),
     # 18. The prune.
     ('the faces scene lets glass prune', OCC, '        if tri.see_through {', '        if tri.see_through && scene.count_see_through {', FACE_SUITE),
     # 19 to 21. The visible-face stacks.

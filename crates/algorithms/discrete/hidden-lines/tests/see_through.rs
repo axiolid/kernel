@@ -6,11 +6,12 @@
 mod common;
 
 use axiolid_contracts::{Backend, BackendDescriptor, ExecutionOptions, GeomError};
-use axiolid_core::Tolerance;
+use axiolid_core::{Point3, Tolerance};
 use axiolid_dispatch::{MeshHiddenLinesRegistry, MeshVisibleFacesRegistry};
 use axiolid_hidden_lines::{
     ScalarHiddenLines, ScalarVisibleFaces, ScanHiddenLines, ScanVisibleFaces, UnprunedVisibleFaces,
 };
+use axiolid_mesh::TriMesh;
 use axiolid_mesh_hidden_lines_contract::conformance::{
     faces::FaceConformanceFailure, see_through::SeeThroughConformanceSuite, ConformanceFailure,
 };
@@ -158,6 +159,70 @@ fn opaque_flags_change_no_hidden_line_drawing() {
             }
         }
     }
+}
+
+/// A piece that collapses under rounding joins its neighbours only when they
+/// agree in visibility and count.
+#[test]
+fn a_collapsed_piece_joins_neighbours_of_one_count_only() {
+    // The floor's edge y = 4 from x = 4 to 0 is under pane B from x = 4 to
+    // 3 + u/4 (u the ulp of 3: B's left edge runs from (3, 0) to (3 + u, 16)),
+    // under nothing to x = 3, a part whose ends both round to 3, and under
+    // two stacked panes from 3 to 1.
+    let ulp = f64::from_bits(3.0_f64.to_bits() + 1) - 3.0;
+    let floor = TriMesh::new(
+        vec![
+            Point3::new(0.0, 0.0, 0.0),
+            Point3::new(4.0, 0.0, 0.0),
+            Point3::new(4.0, 4.0, 0.0),
+            Point3::new(0.0, 4.0, 0.0),
+        ],
+        vec![0, 1, 2, 0, 2, 3],
+    );
+    let b = TriMesh::new(
+        vec![
+            Point3::new(3.0, 0.0, 2.0),
+            Point3::new(6.0, 8.0, 2.0),
+            Point3::new(3.0 + ulp, 16.0, 2.0),
+        ],
+        vec![0, 1, 2],
+    );
+    let pane = |z: f64| {
+        TriMesh::new(
+            vec![
+                Point3::new(1.0, 1.0, z),
+                Point3::new(3.0, 1.0, z),
+                Point3::new(3.0, 5.0, z),
+                Point3::new(1.0, 5.0, z),
+            ],
+            vec![0, 1, 2, 0, 2, 3],
+        )
+    };
+    let (low, high) = (pane(1.0), pane(1.5));
+    let (one, two) = ([Occlusion::SeeThrough], [Occlusion::SeeThrough; 2]);
+    let meshes = [
+        HiddenLineMesh::new(MeshId(1), MeshRole::Sheet, &floor),
+        HiddenLineMesh::new(MeshId(2), MeshRole::Sheet, &b).with_occlusion(&one),
+        HiddenLineMesh::new(MeshId(3), MeshRole::Sheet, &low).with_occlusion(&two),
+        HiddenLineMesh::new(MeshId(4), MeshRole::Sheet, &high).with_occlusion(&two),
+    ];
+    let request = HiddenLineRequest::new(
+        &meshes,
+        View::new(plan_frame()),
+        EdgeSelection::new(None),
+        LIMITS,
+    );
+    let outcome = ScalarHiddenLines
+        .hidden_lines(&request, &options())
+        .expect("draws");
+    let pieces: Vec<_> = outcome
+        .segments
+        .iter()
+        .filter(|s| s.source.mesh == MeshId(1) && s.source.vertices == [2, 3])
+        .map(|s| (s.seen_through, s.start.x, s.end.x))
+        .collect();
+    assert_eq!(pieces, [(1, 4.0, 3.0), (2, 3.0, 1.0), (0, 1.0, 0.0)]);
+    assert!(outcome.evidence.collapsed_segments > 0);
 }
 
 #[test]
