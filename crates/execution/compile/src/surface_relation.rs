@@ -333,9 +333,11 @@ impl<'g> RelationSurface<'g> {
         }
     }
 
-    /// The parameter range of each open axis, which a preimage never
-    /// leaves: a swept B-spline's domain, the ruled unit square; unbounded
-    /// elsewhere.
+    /// The parameter range each axis is read in, which a preimage never
+    /// leaves: a swept B-spline's domain, closed or not (it has no period,
+    /// and an edge crossing a closed one's seam is refused before it is
+    /// bounded), and the ruled unit square; unbounded along a periodic axis
+    /// (the turn, a swept conic) and along an extrusion's direction.
     pub(crate) fn open_domain(&self) -> ((Scalar, Scalar), (Scalar, Scalar)) {
         let unbounded = (Scalar::NEG_INFINITY, Scalar::INFINITY);
         let swept = |curve: &SweptCurve<'_>| {

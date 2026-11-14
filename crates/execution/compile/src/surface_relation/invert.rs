@@ -16,22 +16,29 @@
 //!    the bracket of `t` drops a cell whose lower bound exceeds `min(tau,
 //!    best + slack)`, `best` the least `g` evaluated, `slack =`
 //!    [`MINIMISER_SLACK`] `tau` and `tau` the linear tolerance, and keeps a
-//!    cell as a leaf once `L (b - a) / 2 <= slack`. The leaves cover every
-//!    `t` with `g(t) <= min g + slack` and lie within `min g + 3 slack`.
+//!    cell as a leaf once `L (b - a) / 2 <= slack`. A cell split from a
+//!    coarse one takes, where smaller, `L = |G'(m)| + M (b - a) / 2`, the
+//!    generator's speed at its middle plus the coarse cell's acceleration
+//!    bound `M` over half its width. The leaves cover every `t` with `g(t)
+//!    <= min g + slack` and lie within `min g + 3 slack`.
 //! 2. **Require one minimiser.** The leaves must merge into one interval,
 //!    or on a periodic bracket into two touching both of its ends, which
 //!    meet across the seam. Otherwise two generators pass within the slack
 //!    of the nearest one: the sample has no unique parameters (a closed
 //!    swept curve's seam, a surface covered twice or one meeting itself),
-//!    and it is refused, never resolved by a guess. So is a sample whose
-//!    interval holds generators more than `tau` apart (its width times the
-//!    largest `L` over it): all pass within the slack of the sample, so the
-//!    surface runs along a fold there (`S_u` parallel to `S_v`), and the
-//!    sample does not fix `t`.
+//!    and it is refused, never resolved by a guess.
 //! 3. **Read and check.** Gauss-Newton on `t` sharpens it inside its
-//!    interval, the other parameter is read in closed form, and the
-//!    residual `|S(u, v) - P|`, measured by [`RelationSurface::evaluate`],
-//!    must be within `tau`.
+//!    interval to `t*`, and the other parameter is read in closed form.
+//!    Every generator over the interval passes within the slack of the
+//!    sample, so their points nearest it must lie within `tau` of each
+//!    other: [`RelationInverter::spread`] bounds that at `t*` by `r
+//!    |G'(t*)| + r^2 sup|G''| / 2`, `r` the interval's farthest end from
+//!    `t*`. Beyond `tau` the surface runs along a fold (`S_u` parallel to
+//!    `S_v`) or its generators turn about the sample (the swept curve stops
+//!    and turns back), each refused by its own name; a ruling pivoting about
+//!    a slow rim, or an ellipse's flat side, moves little near the sample
+//!    and is no fold. The residual `|S(u, v) - P|`, measured by
+//!    [`RelationSurface::evaluate`], must be within `tau`.
 //!
 //! | Relation | `g(t)` | other parameter |
 //! |---|---|---|
@@ -52,8 +59,12 @@
 //! point, and after it, a sample on a ruling shorter than `tau`, where
 //! every `v` does (#463 owns those poles). A sample that leaves the surface
 //! is refused with a certified lower bound on its distance. A cover that
-//! needs more than [`RELATION_COVER_WORK`] evaluations, as on a fold at a
-//! fine tolerance, is refused as over budget.
+//! needs more than [`RELATION_COVER_WORK`] evaluations, as on a profile
+//! running along the extrusion direction, is refused as over budget. An
+//! edge whose samples jump more than half a closed swept curve's domain
+//! (which has no period) crosses its seam and is refused
+//! ([`RelationInverter::check_spans`]). Arithmetic that comes to no finite
+//! number is invalid input, never read as a distance.
 
 use super::{RelationSurface, SweptCurve};
 use crate::ruled::Side;
@@ -102,6 +113,7 @@ struct Coarse {
     a: Scalar,
     b: Scalar,
     speed: Scalar,
+    second: Scalar,
     generator: Generator,
 }
 
@@ -111,7 +123,10 @@ struct Coarse {
 struct Cell {
     a: Scalar,
     b: Scalar,
+    /// A bound on the generator's speed over the cell.
     speed: Scalar,
+    /// A bound on its acceleration over the coarse cell holding it.
+    second: Scalar,
     distance: Scalar,
 }
 
@@ -166,6 +181,9 @@ pub(crate) struct RelationInverter<'g> {
     surface: RelationSurface<'g>,
     tau: Scalar,
     sweep: Sweep,
+    /// Half the swept domain, when the swept curve closes without a period
+    /// (a closed B-spline; ruled sides that both close).
+    closed_half: Option<Scalar>,
 }
 
 impl<'g> RelationInverter<'g> {
@@ -216,11 +234,34 @@ impl<'g> RelationInverter<'g> {
                 },
             )?,
         };
+        let closed_half = closed_half(&surface, tau)?;
         Ok(Self {
             surface,
             tau,
             sweep,
+            closed_half,
         })
+    }
+
+    /// Refuse an edge whose swept parameter moves more than half the domain
+    /// between two samples of a closed swept curve without a period: it
+    /// crosses the seam, where its samples' parameters jump by the domain,
+    /// and no reading of them by continuity is certain.
+    pub(crate) fn check_spans(&self, params: &[Point2]) -> GeomResult<()> {
+        let Some(half) = self.closed_half else {
+            return Ok(());
+        };
+        let swept = |p: &Point2| match self.surface {
+            RelationSurface::Revolution { .. } => p.y,
+            _ => p.x,
+        };
+        if params
+            .windows(2)
+            .any(|w| (swept(&w[1]) - swept(&w[0])).abs() > half)
+        {
+            return Err(self.ambiguous());
+        }
+        Ok(())
     }
 
     /// The parameters `(u, v)` naming `point`, or a refusal by name.
@@ -242,6 +283,7 @@ impl<'g> RelationInverter<'g> {
                         a: cell.a,
                         b: cell.b,
                         speed: cell.speed,
+                        second: cell.second,
                         distance: self.distance(&probe, cell.generator),
                     })
                     .collect();
@@ -249,7 +291,7 @@ impl<'g> RelationInverter<'g> {
             }
             Sweep::RevolvedLine { origin, direction } => {
                 let bracket = self
-                    .line_bracket(&probe, *origin, *direction)
+                    .line_bracket(&probe, *origin, *direction)?
                     .map_err(|floor| self.off_surface(floor))?;
                 let speed = direction.length() * (1.0 + ROUNDING);
                 let seeds = cut(bracket)
@@ -259,6 +301,7 @@ impl<'g> RelationInverter<'g> {
                             a,
                             b,
                             speed,
+                            second: 0.0,
                             distance: self.distance(&probe, middle),
                         })
                     })
@@ -271,14 +314,18 @@ impl<'g> RelationInverter<'g> {
             return Err(self.off_surface(floor));
         }
         let (start, piece) = unique_piece(&kept, bracket).ok_or_else(|| self.ambiguous())?;
-        // The generators kept move at most `speed` per unit of `t`. Ones
-        // further apart than `tau` that all pass within the slack of the
-        // sample run along a fold, where the sample does not fix `t`.
-        let speed = kept.iter().map(|cell| cell.speed).fold(0.0, Scalar::max);
-        if (piece.1 - piece.0) * speed > self.tau {
-            return Err(self.ambiguous());
-        }
         let t = self.polish(&probe, start, piece)?;
+        // Every generator over the piece passes within the slack of the
+        // sample. Where their points nearest it lie further apart than
+        // `tau`, the sample does not fix `t`.
+        let (moving, turning) = self.spread(&probe, t, piece)?;
+        if moving + turning > self.tau {
+            return Err(if turning > moving {
+                self.turning()
+            } else {
+                self.ambiguous()
+            });
+        }
         let t = if bracket.periodic {
             t.rem_euclid(bracket.end - bracket.start) + bracket.start
         } else {
@@ -286,7 +333,10 @@ impl<'g> RelationInverter<'g> {
         };
         let uv = self.complete(&probe, t)?;
         let off = (self.surface.evaluate(uv.x, uv.y)? - point).length();
-        if off.is_nan() || off > self.tau {
+        if !off.is_finite() {
+            return Err(non_finite());
+        }
+        if off > self.tau {
             return Err(self.off_surface(floor));
         }
         Ok(uv)
@@ -362,12 +412,38 @@ impl<'g> RelationInverter<'g> {
     }
 
     /// One half of `cell`, its distance evaluated.
+    ///
+    /// Its speed bound is the parent's, or, where smaller, the speed at its
+    /// middle plus the acceleration bound over half its width: near a slow
+    /// stretch of the swept curve (an ellipse's flat side, a slow rim) the
+    /// coarse cell's bound is its fastest speed, and the leaves would be
+    /// that much narrower than they need be.
     fn half(&self, probe: &Probe, cell: &Cell, a: Scalar, b: Scalar) -> GeomResult<Cell> {
+        let middle = 0.5 * (a + b);
+        let local =
+            (self.generator_speed(middle)? + 0.5 * cell.second * (b - a)) * (1.0 + ROUNDING);
         Ok(Cell {
             a,
             b,
-            speed: cell.speed,
-            distance: self.distance(probe, generator(&self.surface, 0.5 * (a + b))?),
+            speed: if local.is_finite() {
+                cell.speed.min(local)
+            } else {
+                cell.speed
+            },
+            second: cell.second,
+            distance: self.distance(probe, generator(&self.surface, middle)?),
+        })
+    }
+
+    /// The generator's speed at `t`: the swept curve's, or the faster side's.
+    fn generator_speed(&self, t: Scalar) -> GeomResult<Scalar> {
+        Ok(match &self.surface {
+            RelationSurface::Revolution { curve, .. }
+            | RelationSurface::Extrusion { curve, .. } => curve.tangent(t)?.length(),
+            RelationSurface::Ruled { sides } => sides[0]
+                .derivative(t)?
+                .length()
+                .max(sides[1].derivative(t)?.length()),
         })
     }
 
@@ -389,7 +465,10 @@ impl<'g> RelationInverter<'g> {
         pending.reverse();
         let (mut kept, mut dropped) = (Vec::new(), Vec::new());
         while let Some(cell) = pending.pop() {
-            if cell.lower().is_nan() || cell.lower() > self.tau.min(best + slack) {
+            if !cell.lower().is_finite() {
+                return Err(non_finite());
+            }
+            if cell.lower() > self.tau.min(best + slack) {
                 dropped.push(cell);
                 continue;
             }
@@ -546,6 +625,50 @@ impl<'g> RelationInverter<'g> {
         Ok(t)
     }
 
+    /// A certified bound on how far the generator's point nearest the
+    /// sample moves while the swept parameter runs from `t` over `piece`,
+    /// as its first-order term `r |G'(t)|` and its second-order term
+    /// `r^2 sup|G''| / 2`, `r` the farthest end of the piece from `t`. `G` is
+    /// the swept curve for a revolution (the nearest point of the circle
+    /// turns with it) and an extrusion (the line's, shifted along it), and
+    /// the point `(1 - v) A + v B` at the sample's `v` for a ruled surface.
+    fn spread(
+        &self,
+        probe: &Probe,
+        t: Scalar,
+        (lo, hi): (Scalar, Scalar),
+    ) -> GeomResult<(Scalar, Scalar)> {
+        let r = (t - lo).max(hi - t).max(0.0);
+        let (speed, second) = match &self.surface {
+            RelationSurface::Revolution { curve, .. }
+            | RelationSurface::Extrusion { curve, .. } => {
+                let second = curve_derivative_bounds3(
+                    curve.curve,
+                    curve.parameter(lo)?,
+                    curve.parameter(hi)?,
+                )
+                .map(|bounds| bounds.second);
+                (curve.tangent(t)?.length(), second)
+            }
+            RelationSurface::Ruled { sides } => {
+                let v = self.complete(probe, t)?.y;
+                let speed = sides[0].derivative(t)? * (1.0 - v) + sides[1].derivative(t)? * v;
+                let second = sides[0]
+                    .speeds(lo, hi)
+                    .zip(sides[1].speeds(lo, hi))
+                    .map(|((_, a2), (_, b2))| (1.0 - v) * a2 + v * b2);
+                (speed.length(), second)
+            }
+        };
+        let second = second.ok_or_else(|| no_speed_bound(&self.surface))?;
+        let up = 1.0 + ROUNDING;
+        let (moving, turning) = (r * speed * up, 0.5 * r * r * second * up);
+        if !(moving.is_finite() && turning.is_finite()) {
+            return Err(non_finite());
+        }
+        Ok((moving, turning))
+    }
+
     /// The range of a revolved line's parameter where the sample can be
     /// within `tau` of its circle, or a lower bound on the sample's
     /// distance from the surface when there is none.
@@ -554,9 +677,9 @@ impl<'g> RelationInverter<'g> {
         probe: &Probe,
         origin: Vec3,
         direction: Vec3,
-    ) -> Result<Bracket, Scalar> {
+    ) -> GeomResult<Result<Bracket, Scalar>> {
         let RelationSurface::Revolution { axis, .. } = &self.surface else {
-            return Err(0.0);
+            return Err(non_finite());
         };
         let tau = self.tau;
         let everything = (Scalar::NEG_INFINITY, Scalar::INFINITY);
@@ -569,7 +692,7 @@ impl<'g> RelationInverter<'g> {
         } else if (h0 - probe.height).abs() <= tau {
             everything
         } else {
-            return Err((h0 - probe.height).abs());
+            return Ok(Err((h0 - probe.height).abs()));
         };
         // ... and at `|q_perp + t e_perp|` from the axis, at least `m`.
         let ee = e_perp.dot(e_perp);
@@ -578,7 +701,7 @@ impl<'g> RelationInverter<'g> {
             let m = (q_perp + e_perp * t_m).length();
             let outer = probe.rho + tau;
             if m > outer {
-                return Err(m - probe.rho);
+                return Ok(Err(m - probe.rho));
             }
             let half = (outer * outer - m * m).sqrt() / ee.sqrt();
             (t_m - half, t_m + half)
@@ -587,21 +710,21 @@ impl<'g> RelationInverter<'g> {
             if (m - probe.rho).abs() <= tau {
                 everything
             } else {
-                return Err((m - probe.rho).abs());
+                return Ok(Err((m - probe.rho).abs()));
             }
         };
         let (start, end) = (height.0.max(reach.0), height.1.min(reach.1));
-        if start.is_nan() || end.is_nan() || start > end {
-            return Err(tau);
-        }
         if !(start.is_finite() && end.is_finite()) {
-            return Err(0.0);
+            return Err(non_finite());
         }
-        Ok(Bracket {
+        if start > end {
+            return Ok(Err(tau));
+        }
+        Ok(Ok(Bracket {
             start,
             end,
             periodic: false,
-        })
+        }))
     }
 
     /// A sample on the plane an extruded line sweeps, in closed form.
@@ -617,9 +740,11 @@ impl<'g> RelationInverter<'g> {
         let c = origin + e * t;
         let v = (probe.point - c).dot(*direction) / direction.dot(*direction);
         let off = (self.surface.evaluate(t, v)? - probe.point).length();
-        if off.is_nan() || off > self.tau {
-            let floor = (w_perp + e_perp * t).length();
-            return Err(self.off_surface(if floor.is_nan() { 0.0 } else { floor }));
+        if !(t.is_finite() && v.is_finite() && off.is_finite()) {
+            return Err(non_finite());
+        }
+        if off > self.tau {
+            return Err(self.off_surface((w_perp + e_perp * t).length()));
         }
         Ok(Point2::new(t, v))
     }
@@ -632,6 +757,15 @@ impl<'g> RelationInverter<'g> {
         ))
     }
 
+    fn turning(&self) -> GeomError {
+        GeomError::Degenerate(format!(
+            "an edge sample without a p-curve has no unique parameters on its {}: its \
+             generators turn about it (near an apex or a slow rim of the swept curve), so it does \
+             not fix the swept parameter",
+            self.surface.family()
+        ))
+    }
+
     fn ambiguous(&self) -> GeomError {
         GeomError::Degenerate(format!(
             "an edge sample without a p-curve has no unique parameters on its {} (a seam of a \
@@ -639,6 +773,24 @@ impl<'g> RelationInverter<'g> {
             self.surface.family()
         ))
     }
+}
+
+/// R8: a swept curve without certified derivative bounds over a cell.
+fn no_speed_bound(surface: &RelationSurface<'_>) -> GeomError {
+    GeomError::Degenerate(format!(
+        "the swept curve of a {} has no certified speed bound",
+        surface.family()
+    ))
+}
+
+/// Arithmetic on finite input that came to no finite number: refused, not
+/// read as a distance.
+fn non_finite() -> GeomError {
+    GeomError::InvalidInput(
+        "the certified inversion of an edge sample onto a surface relation met a non-finite \
+         value"
+            .to_owned(),
+    )
 }
 
 /// `x` less its part along `d`.
@@ -654,6 +806,31 @@ fn swept_line_direction(direction: Vec3) -> GeomResult<Vec3> {
         ));
     }
     Ok(direction)
+}
+
+/// Half the swept domain when the swept curve closes within `tau` and has
+/// no period: a B-spline's, or a ruled surface whose sides both close.
+fn closed_half(surface: &RelationSurface<'_>, tau: Scalar) -> GeomResult<Option<Scalar>> {
+    let closes = |a: Point3, b: Point3| (a - b).length() <= tau;
+    Ok(match surface {
+        RelationSurface::Revolution { curve, .. } | RelationSurface::Extrusion { curve, .. } => {
+            match curve.domain {
+                Some(domain) if closes(curve.point(domain.start)?, curve.point(domain.end)?) => {
+                    Some(0.5 * (domain.end - domain.start).abs())
+                }
+                _ => None,
+            }
+        }
+        RelationSurface::Ruled { sides } => {
+            let closed = |side: &Side<'_>| -> GeomResult<bool> {
+                Ok(match side {
+                    Side::Curve { .. } => closes(side.at(0.0)?, side.at(1.0)?),
+                    Side::Apex(_) => true,
+                })
+            };
+            (closed(&sides[0])? && closed(&sides[1])?).then_some(0.5)
+        }
+    })
 }
 
 /// A swept B-spline's domain, or a conic's turn.
@@ -699,26 +876,24 @@ fn generator(surface: &RelationSurface<'_>, t: Scalar) -> GeomResult<Generator> 
 fn fixed(surface: &RelationSurface<'_>, bracket: Bracket) -> GeomResult<Sweep> {
     let cells = cut(bracket)
         .map(|(a, b)| {
-            let speed = match surface {
+            let bounds = match surface {
                 RelationSurface::Revolution { curve, .. }
                 | RelationSurface::Extrusion { curve, .. } => {
-                    curve_derivative_bounds3(curve.curve, a, b).map(|d| d.first)
+                    curve_derivative_bounds3(curve.curve, a, b).map(|d| (d.first, d.second))
                 }
                 RelationSurface::Ruled { sides } => sides[0]
                     .speeds(a, b)
                     .zip(sides[1].speeds(a, b))
-                    .map(|((first, _), (second, _))| first.max(second)),
+                    .map(|((a1, a2), (b1, b2))| (a1.max(b1), a2.max(b2))),
             };
-            let speed = speed.filter(|s| s.is_finite()).ok_or_else(|| {
-                GeomError::Degenerate(format!(
-                    "the swept curve of a {} has no certified speed bound",
-                    surface.family()
-                ))
-            })?;
+            let (speed, second) = bounds
+                .filter(|(s, t)| s.is_finite() && t.is_finite())
+                .ok_or_else(|| no_speed_bound(surface))?;
             Ok(Coarse {
                 a,
                 b,
                 speed: speed * (1.0 + ROUNDING),
+                second: second * (1.0 + ROUNDING),
                 generator: generator(surface, 0.5 * (a + b))?,
             })
         })
@@ -1217,6 +1392,142 @@ mod tests {
         for v in [0.0, 1e-9, TAU - 1e-9] {
             assert_round_trip("torus seam", &surface, 0.3, v);
         }
+        // Read back inside the turn, whichever side of the seam the cover
+        // started on.
+        let inverter = RelationInverter::new(surface, tolerance()).unwrap();
+        for v in [-1e-3, -1e-9, 0.0, 1e-9, 1e-3, TAU - 1e-3] {
+            let got = inverter.invert(surface.evaluate(0.3, v).unwrap()).unwrap();
+            assert!((0.0..=TAU).contains(&got.y), "{v}: {got:?}");
+        }
+    }
+
+    /// A circle revolved about an axis `e` beside its diameter covers its
+    /// sphere twice, `2 e` apart: with `2 e` five slacks wide, the far
+    /// sheet is no rival to the near one, and the sample inverts.
+    #[test]
+    fn a_rival_generator_beyond_the_slack_is_not_ambiguous() {
+        let tau = TAU_TEST;
+        let e = 2.5e-3 * tau;
+        let (graph, ids) = graph_of(vec![circle(
+            Point3::new(e, 0.0, 0.0),
+            Vec3::X,
+            Vec3::Z,
+            0.3,
+        )]);
+        let surface = RelationSurface::revolution(&graph, ids[0], Point3::ZERO, Vec3::Z).unwrap();
+        assert_round_trip("offset sphere", &surface, 0.4, 0.5);
+    }
+
+    /// The fold rule charges the generator's own movement near the sample,
+    /// not the swept curve's fastest speed: a ruling pivoting about a slow
+    /// rim, and a flat ellipse over its slow vertex, stay invertible.
+    #[test]
+    fn slow_generators_near_the_sample_are_not_a_fold() {
+        let millimetre = Tolerance::MILLIMETRE;
+        let tau = millimetre.linear();
+        let horizontal =
+            |z: Scalar, radius: Scalar| circle(Point3::new(0.0, 0.0, z), Vec3::X, Vec3::Y, radius);
+        let (graph, ids) = graph_of(vec![horizontal(0.0, 10.0), horizontal(1.0, 0.03)]);
+        let arcs = sides(&ids, [(0.0, FRAC_PI_2), (0.0, FRAC_PI_2)]);
+        let ruled = RelationSurface::ruled(&graph, &arcs[0], &arcs[1]).unwrap();
+        let inverter = RelationInverter::new(ruled, millimetre).unwrap();
+        for u in [0.0, 0.3, 0.75, 1.0] {
+            for v in [0.0, 0.5, 0.99, 1.0] {
+                let point = ruled.evaluate(u, v).unwrap();
+                let got = inverter
+                    .invert(point)
+                    .unwrap_or_else(|e| panic!("ruled 10:0.03 at ({u}, {v}): {e}"));
+                let off = (ruled.evaluate(got.x, got.y).unwrap() - point).length();
+                assert!(off <= 1e-9, "({u}, {v}): {off:e}");
+            }
+        }
+        for (a, b, off) in [(3.0, 0.1, 0.1), (1.2, 0.1, 0.7)] {
+            let flat = Curve3::Ellipse(Ellipse3 {
+                frame: Frame3 {
+                    origin: Point3::ZERO,
+                    x: Vec3::X,
+                    y: Vec3::Y,
+                    z: Vec3::Z,
+                },
+                semi_axis_x: a,
+                semi_axis_y: b,
+            });
+            let (graph, ids) = graph_of(vec![flat]);
+            let surface = RelationSurface::extrusion(&graph, ids[0], Vec3::Z).unwrap();
+            let inverter = RelationInverter::new(surface, millimetre).unwrap();
+            let off = off * tau;
+            for u in [-0.3, -0.05, 0.0, 0.1, 0.3] {
+                let point =
+                    Point3::new((a + off) * Scalar::cos(u), (b + off) * Scalar::sin(u), 0.2);
+                let got = inverter
+                    .invert(point)
+                    .unwrap_or_else(|e| panic!("ellipse {a}x{b} at {u}: {e}"));
+                let turn = (got.x - u).rem_euclid(TAU);
+                assert!(
+                    turn.min(TAU - turn) < 0.05 && (got.y - 0.2).abs() < 1e-9,
+                    "{got:?}"
+                );
+            }
+        }
+    }
+
+    /// `c(s) = (0.05 t^3, 0, t^2)`, `t = 2s - 1`, extruded along `z`:
+    /// the profile stops at `t = 0` and turns back along the direction, so
+    /// the generators about the sample there move only to second order.
+    #[test]
+    fn r5_a_sample_where_the_swept_curve_turns_back_is_refused_by_its_own_name() {
+        let cusp = [
+            (-1.0, 1.0),
+            (1.0, -1.0 / 3.0),
+            (-1.0, -1.0 / 3.0),
+            (1.0, 1.0),
+        ]
+        .map(|(x, z)| Point3::new(0.05 * x, 0.0, z));
+        let (graph, ids) = graph_of(vec![cubic(&cusp)]);
+        let surface = RelationSurface::extrusion(&graph, ids[0], Vec3::Z).unwrap();
+        let inverter = RelationInverter::new(surface, Tolerance::MILLIMETRE).unwrap();
+        let text = message(
+            inverter
+                .invert(surface.evaluate(0.5, 0.1).unwrap())
+                .unwrap_err(),
+        );
+        assert!(text.contains("its generators turn about it"), "{text}");
+    }
+
+    #[test]
+    fn a_sample_that_is_not_finite_is_invalid() {
+        let (graph, ids) = torus();
+        let inverter = RelationInverter::new(revolved(&graph, ids[0]), tolerance()).unwrap();
+        let error = inverter
+            .invert(Point3::new(Scalar::NAN, 0.0, 0.0))
+            .unwrap_err();
+        assert!(
+            matches!(&error, GeomError::InvalidInput(text) if text.contains("is not finite")),
+            "{error:?}"
+        );
+    }
+
+    /// A closed swept B-spline has no period: an edge whose samples jump
+    /// more than half its domain crosses its seam and is refused.
+    #[test]
+    fn r5_a_span_across_a_closed_spline_s_seam_is_refused() {
+        let closed = cubic(&[
+            Point3::new(0.3, 0.0, 0.0),
+            Point3::new(0.3, 0.4, 0.0),
+            Point3::new(-0.3, 0.4, 0.0),
+            Point3::new(0.3, 0.0, 0.0),
+        ]);
+        let (graph, ids) = graph_of(vec![closed]);
+        let surface = RelationSurface::extrusion(&graph, ids[0], Vec3::Z).unwrap();
+        let inverter = RelationInverter::new(surface, tolerance()).unwrap();
+        let near = [Point2::new(0.2, 0.0), Point2::new(0.45, 0.1)];
+        assert!(inverter.check_spans(&near).is_ok());
+        let across = [Point2::new(0.95, 0.0), Point2::new(0.05, 0.0)];
+        let text = message(inverter.check_spans(&across).unwrap_err());
+        assert!(text.contains("has no unique parameters"), "{text}");
+        let (graph, ids) = graph_of(vec![open_cubic()]);
+        let open = RelationInverter::new(extruded(&graph, ids[0]), tolerance()).unwrap();
+        assert!(open.check_spans(&across).is_ok());
     }
 
     /// `c(s) = 0.3 ((2s - 1)^3, 0, 2s - 1)` extruded along `z`: its tangent
@@ -1233,20 +1544,14 @@ mod tests {
         let (graph, ids) = graph_of(vec![cubic(&fold)]);
         let surface = RelationSurface::extrusion(&graph, ids[0], Vec3::Z).unwrap();
         let on_fold = surface.evaluate(0.5, 0.2).unwrap();
-        // At the model's tolerance the cover is wide but within the work
-        // cap; at a tenth of it, it is not.
-        let millimetre = RelationInverter::new(surface, Tolerance::MILLIMETRE).unwrap();
-        let text = message(millimetre.invert(on_fold).unwrap_err());
-        assert!(
-            text.contains("has no unique parameters on its surface of linear extrusion"),
-            "{text}"
-        );
-        let fine = RelationInverter::new(surface, tolerance()).unwrap();
-        let error = fine.invert(on_fold).unwrap_err();
-        assert!(
-            matches!(error, GeomError::BudgetExceeded { resource } if resource == BUDGET),
-            "{error:?}"
-        );
+        for tolerance in [Tolerance::MILLIMETRE, tolerance()] {
+            let inverter = RelationInverter::new(surface, tolerance).unwrap();
+            let text = message(inverter.invert(on_fold).unwrap_err());
+            assert!(
+                text.contains("has no unique parameters on its surface of linear extrusion (a"),
+                "{text}"
+            );
+        }
         assert_round_trip("off the fold", &surface, 0.2, 0.2);
     }
 

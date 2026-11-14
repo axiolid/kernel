@@ -140,11 +140,13 @@ impl<'s> SurfaceInverter<'s> {
 
     /// See [`AtomicInverter::check_spline_parameters`]. A relation
     /// evaluates exactly periodically along its periodic axes and nothing
-    /// is unwrapped along the others, so its parameters need no check.
+    /// is unwrapped along the others; an edge crossing the seam of a closed
+    /// swept curve without a period is refused instead
+    /// ([`RelationInverter::check_spans`]).
     fn check_spline_parameters(&self, params: &[Point2], points: &[Vec3]) -> GeomResult<()> {
         match &self.target {
             Target::Atomic(inverter) => inverter.check_spline_parameters(params, points),
-            Target::Relation(_) => Ok(()),
+            Target::Relation(inverter) => inverter.check_spans(params),
         }
     }
 }
