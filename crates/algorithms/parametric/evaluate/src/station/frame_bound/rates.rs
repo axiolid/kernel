@@ -54,7 +54,7 @@ use axiolid_core::{Scalar, Vec3};
 use axiolid_curve::{Curve3, SeamSide};
 
 use super::bend::{closed_raw_jet, lipschitz, presented};
-use super::{read_frame_bounds, FrameLaw, FrameReading, Slot, KEEPS_UP_TOLERANCE};
+use super::{read_frame_bounds_of, FrameLaw, FrameReading, Slot, KEEPS_UP_TOLERANCE};
 use crate::station::StationCurve;
 
 /// One rate of a section frame law over a span (#406).
@@ -137,8 +137,15 @@ impl FrameLaw<'_, '_> {
     /// quadrature whose span crosses a point where its curvature may jump.
     #[must_use]
     pub fn rates(&self, a: Scalar, b: Scalar, reading: FrameReading) -> Option<FrameRates> {
-        let bounds = self.bounds(a, b, reading)?;
         let at = self.locate(a, b)?;
+        // A span across a point where a frame read by quadrature may change
+        // its curvature has no rates: say so before reading any frame.
+        if let Slot::Read(reader) = self.slot(at.slot, &at.piece, at.table) {
+            if crosses_a_break(reader, &at, at.from, at.to)? {
+                return None;
+            }
+        }
+        let bounds = self.bounds(a, b, reading)?;
         let mid = 0.5 * (at.from + at.to);
         let (m, _) = at.piece.read_at(mid, SeamSide::Outgoing);
         let (jet, roll, measure, spanned) = match self.slots[at.slot].get()? {
@@ -165,21 +172,22 @@ impl FrameLaw<'_, '_> {
                 )
             }
             Slot::Read(reader) => {
-                // The exact law's true distance may lie `measure` off the
-                // one read: its Lipschitz constants are taken over the span
-                // widened by it, which must not cross a point where the
-                // curvature may jump.
+                // The exact law's true distance may lie `measure` off the one
+                // read: its Lipschitz constants are taken over the native
+                // range of the span's reads, padded by twice that much arc
+                // length (a true distance stands within it of the one read,
+                // and so does the read at a padded end), which must not
+                // cross a point where the curvature may jump.
                 let widening = bounds.measure;
-                let from = (at.from - widening).max(0.0);
-                let to = (at.to + widening).min(at.piece.length());
-                let wide = read_frame_bounds(reader, &at.piece, from, to, at.table, reading)?;
-                let (ta, tb) = reader
-                    .span_parameters(&at.piece, from, to, at.table)
+                let law = reader
+                    .read_padded(&at.piece, (at.from, at.to), at.table, widening)
                     .ok()??;
-                let (lo, hi) = (ta.min(tb), ta.max(tb));
-                if reader.bend_breaks().iter().any(|&k| lo < k && k < hi) {
-                    return None;
-                }
+                let wide = read_frame_bounds_of(
+                    &at.piece,
+                    law,
+                    (at.to - at.from) + 4.0 * widening,
+                    reading,
+                )?;
                 let jet = reader.jet(&at.piece, mid, at.table).ok()??;
                 (
                     Jet {
@@ -188,7 +196,7 @@ impl FrameLaw<'_, '_> {
                         ..Jet::exact(presented(&at.piece, (jet.tangent, jet.curvature))?)
                     },
                     Some((0.0, 0.0)),
-                    widening.max(wide.measure),
+                    widening,
                     wide,
                 )
             }
@@ -273,6 +281,22 @@ impl FrameLaw<'_, '_> {
             .all(RateBounds::is_finite)
             .then_some(out)
     }
+}
+
+/// Whether the native range of the reads at the distances `from` and `to`
+/// into the piece strictly contains a point where its curvature may jump;
+/// `None` where the reads have no parameters.
+fn crosses_a_break(
+    reader: &crate::station::certify::PieceReader<'_>,
+    at: &super::Located<'_, '_>,
+    from: Scalar,
+    to: Scalar,
+) -> Option<bool> {
+    let (ta, tb) = reader
+        .span_parameters(&at.piece, from, to, at.table)
+        .ok()??;
+    let (lo, hi) = (ta.min(tb), ta.max(tb));
+    Some(reader.bend_breaks().iter().any(|&k| lo < k && k < hi))
 }
 
 impl Jet {

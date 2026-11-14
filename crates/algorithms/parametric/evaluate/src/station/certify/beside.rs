@@ -570,6 +570,17 @@ fn offset_chords<R>(
         };
         let out = d2 + displacement;
         magnitude += displacement.length();
+        // The base's derivative control points difference neighbours a knot
+        // span apart: the cancellation `Native`'s own acceleration charges,
+        // once more for the third derivative the unit vectors' second rates
+        // are built from.
+        let rate = native.knot_rate();
+        let base = native.bounds(t, t)?;
+        magnitude += base.second
+            + base.first * rate
+            + base.third
+            + base.second * rate
+            + base.first * rate * rate;
         Ok((out, slip + VELOCITY_ROUNDING * (out.length() + magnitude)))
     };
     run(&Measured {

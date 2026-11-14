@@ -126,8 +126,10 @@
 //! vector `(P'' - (P''.V) V) / |P'|^2` (`V = P' / |P'|`), from the curve's
 //! closed-form second derivative at the native parameter a read stands at,
 //! within a certified error (`PieceReader::jet`). The Lipschitz constants
-//! above hold only where `P''` is continuous, so a span (widened by its
-//! measure) whose native range strictly contains a point where it may jump
+//! above hold only where `P''` is continuous, so a span whose native range
+//! (padded by twice its measure of arc length, without reading a frame at the
+//! padded ends: `PieceReader::read_padded`) strictly contains a point where
+//! it may jump
 //! (a B-spline's knot of multiplicity above `degree - 2`; beside an offset,
 //! `degree - 3`, since its `P''` holds the base's `B'''`) has no rates.
 //! Beside a base the offset's acceleration is `B'' + D''`, `D` the
@@ -561,6 +563,17 @@ pub(crate) fn read_frame_bounds(
         return None;
     }
     let read = reader.read(piece, u0, u1, table).ok()??;
+    read_frame_bounds_of(piece, read, u1 - u0 + 2.0 * read.measure, reading)
+}
+
+/// The bounds of a piece read by quadrature from its certified frame law
+/// `read` over a span `span` long of distance (#316, #406).
+pub(crate) fn read_frame_bounds_of(
+    piece: &StationPiece<'_>,
+    read: crate::station::certify::ReadLaw,
+    span: Scalar,
+    reading: FrameReading,
+) -> Option<FrameLawBounds> {
     let law = TangentLaw {
         point: read.point,
         tangent: read.tangent,
@@ -575,7 +588,7 @@ pub(crate) fn read_frame_bounds(
     finish(
         piece,
         law,
-        u1 - u0 + 2.0 * read.measure,
+        span,
         reading,
         [read.point_error, read.axis_error],
     )

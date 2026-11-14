@@ -26,8 +26,6 @@ caret rule for `0.x` versions.
 - `bound::ElevatedPositionTable` is re-exported from `axiolid-evaluate`
   0.3.21 (#393): certified points of an elevated or banked curve over an
   intrinsic plan, which `axiolid-mesh-compile` reads for its swept disks.
-- `station::FrameRates`, `station::RateBounds` and `FrameLaw::rates` reach
-  through the `station` re-export of `axiolid-evaluate` 0.3.21 (#406).
 
 ### Changed
 

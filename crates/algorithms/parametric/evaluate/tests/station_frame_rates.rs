@@ -813,3 +813,23 @@ fn a_constant_offset_beside_a_cubic_has_rates_only_between_its_knots() {
     assert!(law.rates(lo - 0.2, lo, FrameReading::Section).is_some());
     assert!(law.rates(hi, hi + 0.2, FrameReading::Section).is_some());
 }
+
+#[test]
+fn rates_over_a_span_do_not_depend_on_what_was_asked_before() {
+    // The reads at a span's ends are kept for its halves: asking the halves
+    // first, or the whole twice, changes nothing.
+    let plan = ellipse();
+    let base = StationPiece::between(StationCurve::Two(&plan), 0.0, 40.0).unwrap();
+    let basis =
+        CompositeBasis::new(offset_pieces(&[base], OffsetLaw::Planar { distance: -2.0 }).unwrap())
+            .unwrap();
+    let ask = |law: &FrameLaw<'_, '_>, a: Scalar, b: Scalar| {
+        law.rates(a, b, FrameReading::Section).unwrap()
+    };
+    let cold = basis.frame_law(TOLERANCE).unwrap();
+    let first = ask(&cold, 4.0, 6.0);
+    let warm = basis.frame_law(TOLERANCE).unwrap();
+    let _ = (ask(&warm, 4.0, 5.0), ask(&warm, 5.0, 6.0));
+    assert_eq!(first, ask(&warm, 4.0, 6.0));
+    assert_eq!(first, ask(&warm, 4.0, 6.0));
+}

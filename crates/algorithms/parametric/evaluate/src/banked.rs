@@ -282,12 +282,18 @@ pub(crate) fn roll_rate(
 ) -> Option<(Scalar, Scalar)> {
     let b = curve.rail_head_distance;
     let [cant, rate, _] = cant_jet(curve, d, false)?;
-    let (g, slope) = match curve.convention {
-        axiolid_curve::BankConvention::TangentRotation => (cant / b, rate / b),
+    // The slope `g'`, and the sum of the magnitudes of its terms, which its
+    // rounding (a cancellation between them) is relative to.
+    let (g, slope, terms) = match curve.convention {
+        axiolid_curve::BankConvention::TangentRotation => (cant / b, rate / b, rate.abs() / b),
         axiolid_curve::BankConvention::VerticalRise => {
             let scale = v.z.hypot(1.0);
             let scale_rate = v.z * w.z / scale;
-            (cant * scale / b, (rate * scale + cant * scale_rate) / b)
+            (
+                cant * scale / b,
+                (rate * scale + cant * scale_rate) / b,
+                ((rate * scale).abs() + (cant * scale_rate).abs()) / b,
+            )
         }
         _ => return None,
     };
@@ -297,7 +303,7 @@ pub(crate) fn roll_rate(
     let c = (1.0 - g * g).sqrt();
     let out = (
         slope / c,
-        64.0 * Scalar::EPSILON * (slope.abs() / c) * (2.0 + 1.0 / (c * c)),
+        64.0 * Scalar::EPSILON * (terms / c) * (2.0 + 1.0 / (c * c)),
     );
     (out.0.is_finite() && out.1.is_finite()).then_some(out)
 }

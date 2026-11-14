@@ -38,6 +38,9 @@
 //! closed form at the knot's parameter; there the read axes are the exact
 //! ones when the read point is the knot's, rounding aside.
 
+use std::cell::RefCell;
+use std::collections::HashMap;
+
 use axiolid_contracts::GeomResult;
 use axiolid_core::{Point3, Scalar, Vec3};
 use axiolid_curve::{OffsetLaw, SeamSide};
@@ -103,7 +106,20 @@ pub(crate) struct PieceReader<'c> {
     /// Native parameters where its curvature may jump: `P''` is continuous
     /// between them (#406).
     bend_breaks: Vec<Scalar>,
+    /// What a read at the distance `u` into the piece from a side stood at
+    /// and was charged, by `u`'s bits and whether the side is the outgoing
+    /// one: a span and its halves share their ends, and each read costs an
+    /// arc-length inverse and a frame (#406).
+    ends: RefCell<HashMap<(u64, bool), Option<End>>>,
+    /// The native parameter a measure is read at, by the measure's bits.
+    parameters: RefCell<HashMap<u64, Option<Scalar>>>,
+    /// The native parameters the piece spans, ascending.
+    range: (Scalar, Scalar),
 }
+
+/// A read's native parameter, its measure and the errors of its point and
+/// axes.
+type End = (Scalar, Scalar, Scalar, Scalar);
 
 /// The exact frame at `point` with unit tangent `tangent`, as the kernel
 /// frames it: the planar frame where the tangent is horizontal, the
@@ -162,6 +178,9 @@ impl<'c> PieceReader<'c> {
                     planar: matches!(base.curve, StationCurve::Two(_)) && level,
                     increasing: base.reversed == piece.reversed,
                     bend_breaks: beside.breaks.clone(),
+                    ends: RefCell::default(),
+                    parameters: RefCell::default(),
+                    range: (t0, t1),
                     source: Source::Offset(Box::new((offset, beside))),
                     table: lengths,
                     corners: Vec::new(),
@@ -189,6 +208,9 @@ impl<'c> PieceReader<'c> {
                     table: lengths,
                     corners,
                     bend_breaks: breaks,
+                    ends: RefCell::default(),
+                    parameters: RefCell::default(),
+                    range: (t0, t1),
                 }))
             }
         }
@@ -209,8 +231,23 @@ impl<'c> PieceReader<'c> {
         }
     }
 
-    /// The native parameter the curve's measure `m` is read at.
+    /// The native parameter the curve's measure `m` is read at: an
+    /// arc-length inverse, kept for the span and its halves that share it.
     fn parameter(&self, m: Scalar, table: Option<&OffsetTable>) -> GeomResult<Option<Scalar>> {
+        let known = self.parameters.borrow().get(&m.to_bits()).copied();
+        if let Some(t) = known {
+            return Ok(t);
+        }
+        let t = self.uncached_parameter(m, table)?;
+        self.parameters.borrow_mut().insert(m.to_bits(), t);
+        Ok(t)
+    }
+
+    fn uncached_parameter(
+        &self,
+        m: Scalar,
+        table: Option<&OffsetTable>,
+    ) -> GeomResult<Option<Scalar>> {
         match &self.source {
             Source::Curve(native) => native.parameter(m).map(Some),
             Source::Offset(boxed) => {
@@ -294,10 +331,12 @@ impl<'c> PieceReader<'c> {
             let size = acceleration.length();
             let tangent_error = 2.0 * slip / low;
             let rounding = 64.0 * Scalar::EPSILON;
-            let curvature_error = ((accel_error + 2.0 * size * tangent_error) / (low * low)
-                + 3.0 * size * slip / (low * low * low))
-                * (1.0 + rounding)
-                + rounding * size / (low * low);
+            let curvature_error =
+                ((accel_error + 2.0 * size * tangent_error + 2.0 * accel_error * tangent_error)
+                    / (low * low)
+                    + 3.0 * size * slip / (low * low * low))
+                    * (1.0 + rounding)
+                    + rounding * size / (low * low);
             let out = ReadJet {
                 tangent: self.travel() * unit,
                 curvature: (acceleration - unit * acceleration.dot(unit)) / (speed * speed),
@@ -326,16 +365,30 @@ impl<'c> PieceReader<'c> {
         to: Scalar,
         table: Option<&OffsetTable>,
     ) -> GeomResult<Option<ReadLaw>> {
-        let travel = self.travel();
         let mut reads = Vec::with_capacity(2);
         for (u, side) in [(from, SeamSide::Outgoing), (to, SeamSide::Incoming)] {
-            let (m, frame) = piece.raw_section(u, side, table)?;
-            let Some(t) = self.parameter(m, table)? else {
+            let key = (u.to_bits(), side == SeamSide::Outgoing);
+            let known = self.ends.borrow().get(&key).copied();
+            let end = match known {
+                Some(end) => end,
+                None => {
+                    let (m, frame) = piece.raw_section(u, side, table)?;
+                    let end = match self.parameter(m, table)? {
+                        Some(t) => self
+                            .measured(|curve| self.compare(curve, &frame, u, t))?
+                            .map(|(measure, point, axis)| (t, measure, point, axis)),
+                        None => None,
+                    };
+                    self.ends.borrow_mut().insert(key, end);
+                    end
+                }
+            };
+            let Some(end) = end else {
                 return Ok(None);
             };
-            reads.push((u, frame, t));
+            reads.push(end);
         }
-        let (ta, tb) = (reads[0].2, reads[1].2);
+        let (ta, tb) = (reads[0].0, reads[1].0);
         self.measured(|curve| {
             let mut out = ReadLaw {
                 point: [0.0; 2],
@@ -346,36 +399,106 @@ impl<'c> PieceReader<'c> {
                 point_error: 0.0,
                 axis_error: 0.0,
             };
-            for (u, read, t) in &reads {
-                let Some((measure, point_error, axis_error)) = self.compare(curve, read, *u, *t)?
-                else {
-                    return Ok(None);
-                };
+            for &(_, measure, point_error, axis_error) in &reads {
                 out.measure = out.measure.max(measure);
                 out.point_error = out.point_error.max(point_error);
                 out.axis_error = out.axis_error.max(axis_error);
             }
-            let (lo, hi) = (ta.min(tb), ta.max(tb));
-            let (second, third) = (curve.bounds)(lo, hi)?;
-            let Some(third) = third.filter(|m| m.is_finite()) else {
+            let Some(law) = self.constants(curve, ta.min(tb), ta.max(tb))? else {
                 return Ok(None);
             };
-            let (velocity, slip) = (curve.velocity)(0.5 * (lo + hi))?;
-            let sigma = velocity.length() - slip - 0.5 * (hi - lo) * second;
+            out.point = law.point;
+            out.tangent = law.tangent;
+            out.middle = law.middle;
+            let finite = [out.measure, out.point_error, out.axis_error]
+                .iter()
+                .chain(&out.point)
+                .chain(&out.tangent)
+                .all(|v| v.is_finite());
+            Ok(finite.then_some(out))
+        })
+    }
+
+    /// The frame law's constants over the native parameters `[lo, hi]`, with
+    /// no read's errors: `[|O'|, |O''|]`, `[|T'|, |T''|]` in the exact
+    /// curve's arc length and the unit tangent at the middle.
+    fn constants(
+        &self,
+        curve: &Measured<'_>,
+        lo: Scalar,
+        hi: Scalar,
+    ) -> GeomResult<Option<ReadLaw>> {
+        let (second, third) = (curve.bounds)(lo, hi)?;
+        let Some(third) = third.filter(|m| m.is_finite()) else {
+            return Ok(None);
+        };
+        let (velocity, slip) = (curve.velocity)(0.5 * (lo + hi))?;
+        let sigma = velocity.length() - slip - 0.5 * (hi - lo) * second;
+        if !(sigma.is_finite() && sigma > 0.0) {
+            return Ok(None);
+        }
+        let x = second / sigma;
+        let unit_second = third / sigma + 3.0 * x * x;
+        let k1 = second / (sigma * sigma);
+        let k2 = unit_second / (sigma * sigma) + x * x / (sigma * sigma);
+        Ok(Some(ReadLaw {
+            point: [1.0, k1],
+            tangent: [k1, k2],
+            middle: (self.travel() * velocity) / velocity.length(),
+            planar: self.planar,
+            measure: 0.0,
+            point_error: 0.0,
+            axis_error: 0.0,
+        }))
+    }
+
+    /// The frame law's constants over every true distance of a span read
+    /// between `from` and `to` into the piece, each read standing within
+    /// `measure` of its distance, without reading a frame at their ends
+    /// (#406): the native parameters of the two reads, padded by `2 measure`
+    /// of exact arc length, which at a speed of at least half the floor over
+    /// the span is `4 measure / sigma` of parameter. `None` where the speed
+    /// floor does not hold over the padded range or the reads have no
+    /// parameters or the padded range strictly contains a point where its
+    /// curvature may jump.
+    ///
+    /// # Errors
+    ///
+    /// The evaluators' refusals.
+    pub(crate) fn read_padded(
+        &self,
+        piece: &StationPiece<'c>,
+        (from, to): (Scalar, Scalar),
+        table: Option<&OffsetTable>,
+        measure: Scalar,
+    ) -> GeomResult<Option<ReadLaw>> {
+        let Some((ta, tb)) = self.span_parameters(piece, from, to, table)? else {
+            return Ok(None);
+        };
+        let (lo, hi) = (ta.min(tb), ta.max(tb));
+        self.measured(|curve| {
+            // The speed floor over a range, as `constants` takes it.
+            let floor = |lo: Scalar, hi: Scalar| -> GeomResult<Scalar> {
+                let (velocity, slip) = (curve.velocity)(0.5 * (lo + hi))?;
+                let (second, _) = (curve.bounds)(lo, hi)?;
+                Ok(velocity.length() - slip - 0.5 * (hi - lo) * second)
+            };
+            let sigma = floor(lo, hi)?;
             if !(sigma.is_finite() && sigma > 0.0) {
                 return Ok(None);
             }
-            let x = second / sigma;
-            let unit_second = third / sigma + 3.0 * x * x;
-            let k1 = second / (sigma * sigma);
-            let k2 = unit_second / (sigma * sigma) + x * x / (sigma * sigma);
-            out.point = [1.0, k1];
-            out.tangent = [k1, k2];
-            out.middle = (travel * velocity) / velocity.length();
-            let finite = [k1, k2, out.measure, out.point_error, out.axis_error]
-                .iter()
-                .all(|v| v.is_finite());
-            Ok(finite.then_some(out))
+            let pad = 4.0 * measure / sigma;
+            let (start, end) = self.range;
+            let (lo, hi) = ((lo - pad).max(start), (hi + pad).min(end));
+            // The padding assumed half the floor of the unpadded range.
+            if floor(lo, hi)? < 0.5 * sigma {
+                return Ok(None);
+            }
+            // Its Lipschitz constants hold where `P''` is continuous only.
+            if self.bend_breaks.iter().any(|&k| lo < k && k < hi) {
+                return Ok(None);
+            }
+            self.constants(curve, lo, hi)
         })
     }
 
