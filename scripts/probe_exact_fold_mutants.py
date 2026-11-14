@@ -21,11 +21,13 @@ The decision (`SectionLaw::decide`, `floors`): the orientation's up turn and
 lateral turn dropped, the profile point dropped from the vertex, the rise term
 dropped, the turned components not widened over the span, the turned frame
 replaced by the base's, the depth-limit fallback reporting a span unbounded
-without trying the conservative bound, and the bound of the turned tangent's
-turn dropped.
+without trying the conservative bound or not reporting it at all, the clear
+test accepting any floor, the bound of the turned tangent's turn dropped, and
+the rates of the lateral and the vertical offset (`F`'s `q'.n`) dropped.
 
 Each must turn `evaluate/tests/station_frame_rates.rs`, a unit test,
-`compile/tests/station_fold_turned.rs` or `station_fold_quadrature.rs` red.
+`compile/tests/station_fold_turned.rs`, `station_fold_quadrature.rs` or
+`station_fold_sheet.rs` red.
 A mutant that does not compile counts as BROKEN, not killed.
 
 Not probed, because no test can tell them apart:
@@ -66,6 +68,7 @@ FRAME_RATES = ["-p", "axiolid-evaluate", "--all-features", "--test", "station_fr
 STATION_BEND = ["-p", "axiolid-evaluate", "--all-features", "--test", "station_bend"]
 EVAL_LIB = ["-p", "axiolid-evaluate", "--all-features", "--lib"]
 FOLD_TURNED = ["-p", "axiolid-mesh-compile", "--all-features", "--test", "station_fold_turned"]
+FOLD_SHEET = ["-p", "axiolid-mesh-compile", "--all-features", "--test", "station_fold_sheet"]
 FOLD_QUADRATURE = ["-p", "axiolid-mesh-compile", "--all-features", "--test", "station_fold_quadrature"]
 TURNED_UNIT = ["-p", "axiolid-mesh-compile", "--all-features", "--lib", "turned"]
 
@@ -96,8 +99,8 @@ MUTANTS = [
      "            let slope = 0.0 * (spanned.up[0] * spanned.lateral[0] + spanned.lateral[1]);\n",
      [FRAME_RATES]),
     ("a span across a curvature break is given rates", RATES,
-     "                if reader.bend_breaks().iter().any(|&k| lo < k && k < hi) {\n",
-     "                if reader.bend_breaks().iter().any(|&k| lo < k && k < hi && false) {\n",
+     "    Some(reader.bend_breaks().iter().any(|&k| lo < k && k < hi))\n",
+     "    Some(reader.bend_breaks().iter().any(|&k| lo < k && k < hi && false))\n",
      [FRAME_RATES]),
     ("has_bend is blind to frames read by quadrature", BEND,
      "            Some(Slot::Read(reader)) => matches!(reader.jet(&at.piece, mid, at.table), Ok(Some(_))),\n",
@@ -163,6 +166,24 @@ MUTANTS = [
      "                    }\n",
      "                    let _ = part;\n                    verdict = Err(FOLD_NOT_EXCLUDED);\n",
      [FOLD_QUADRATURE]),
+    ("a span the conservative bound cannot clear is accepted", FOLD,
+     "                    if !matches!(self.advancing(part, reading, margin, identity)?, Ok(true)) {\n"
+     "                        verdict = Err(FOLD_NOT_EXCLUDED);\n"
+     "                    }\n",
+     "                    let _ = (part, identity);\n",
+     [FOLD_SHEET]),
+    ("the clear test accepts any floor", FOLD,
+     "            if floors.iter().all(|f| f.floor > 0.0) {\n",
+     "            if floors.iter().all(|f| f.floor > -1.0e9) {\n",
+     [FOLD_TURNED]),
+    ("the lateral offset's rate is dropped from F", RATE,
+     "        let rates = [0, 1, 2].map(|k| (components(b)[k] - components(a)[k]) / delta);\n",
+     "        let rates = [0, 1, 2].map(|k| if k == 1 { 0.0 } else { (components(b)[k] - components(a)[k]) / delta });\n",
+     [FOLD_TURNED]),
+    ("the vertical offset's rate is dropped from F", RATE,
+     "        let rates = [0, 1, 2].map(|k| (components(b)[k] - components(a)[k]) / delta);\n",
+     "        let rates = [0, 1, 2].map(|k| if k == 2 { 0.0 } else { (components(b)[k] - components(a)[k]) / delta });\n",
+     [FOLD_TURNED]),
     ("the turned tangent's turn bound is dropped", BOUND,
      "        tangent: [x1, x2],\n",
      "        tangent: [0.0, 0.0],\n",

@@ -17,18 +17,14 @@ conservative bound refusing. Each must turn
 `compile/tests/station_fold.rs` red. The probe of the turned and quadrature
 decision itself is `probe_exact_fold_mutants.py`.
 
-The sheets of open sections (#407) share the decision and add two steps in
+The sheets of open sections (#407) share the decision and add three steps in
 `station::sectioned_surface`: a sectioned surface and an open-section run
-skipping the fold check (each by its own test). Each must turn
+skipping the fold check (each by its own test), and an undecided fold
+reported certified (a sheet along the offset of a cubic, whose spans across
+the knot the conservative bound cannot clear). Each must turn
 `compile/tests/station_fold_sheet.rs` red.
 
 Not probed, because no test can tell them apart:
-
-- a sheet's undecided fold reported certified (`settle(.., fold, ..)`): since
-  #406 a fold is undecided only on a frame without bounds (a chain, whose
-  cells are unbounded by the same reason) or on a span across a curvature
-  break that the conservative bound fails to clear, which no test builds
-  reliably;
 
 - the `within` flag of a sheet (`fold.is_ok()`): refinement does not change
   when a run is unbounded, so no test can tell it from `true`;
@@ -133,6 +129,9 @@ MUTANTS = [
      [SHEET + ["--", "a_sectioned_surface_reaching"]]),
     ("an open section run skips the fold check", *SHEET_CHECK,
      [SHEET + ["--", "an_open_section_run_reaching"]]),
+    ("a sheet's undecided fold is reported certified", COMPILE_STATION,
+     "    let bound = settle(&law, Ok(0.0), fold, &samples, &rows)?;\n",
+     "    let bound = settle(&law, Ok(0.0), Ok(()), &samples, &rows)?;\n", [SHEET]),
 ]
 
 probe_lib.main(MUTANTS, root=ROOT, timeout=TIMEOUT, baseline=False)

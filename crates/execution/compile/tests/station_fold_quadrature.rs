@@ -356,12 +356,9 @@ fn offset_ellipse(b: &mut GeometryGraphBuilder) -> NodeId {
     .unwrap()
 }
 
-#[test]
-fn a_widening_section_along_an_inward_offset_of_an_ellipse_is_decided() {
-    // The offset's sharpest bend, at the major axis, has the radius
-    // `3.6 - 1.5 = 2.1`; a rectangle widening from 2 to 4 over stations 0
-    // to 5 reaches `a = 2` on the inner side at station 5, where the bend
-    // has eased: no fold, so the run is certified rather than unbounded.
+/// A rectangle `1` m high, `first` wide at station 0 and `last` wide at
+/// station 5, along the inward offset of the ellipse.
+fn widening(first: Scalar, last: Scalar) -> (GeometryGraph, NodeId) {
     let mut b = GeometryGraphBuilder::new();
     let basis = offset_ellipse(&mut b);
     let rectangle = |b: &mut GeometryGraphBuilder, x| {
@@ -374,7 +371,7 @@ fn a_widening_section_along_an_inward_offset_of_an_ellipse_is_decided() {
         }))
         .unwrap()
     };
-    let (narrow, wide) = (rectangle(&mut b, 2.0), rectangle(&mut b, 4.0));
+    let (narrow, wide) = (rectangle(&mut b, first), rectangle(&mut b, last));
     let root = b
         .push(GeometryNode::SolidOperation(
             SolidOperation::SectionsAtStations {
@@ -387,6 +384,23 @@ fn a_widening_section_along_an_inward_offset_of_an_ellipse_is_decided() {
             },
         ))
         .unwrap();
-    let graph = b.finish(vec![root]).unwrap();
+    (b.finish(vec![root]).unwrap(), root)
+}
+
+#[test]
+fn a_widening_section_along_an_inward_offset_of_an_ellipse_is_decided() {
+    // The offset's sharpest bend, at the major axis, has the radius
+    // `3.6 - 1.5 = 2.1`; a rectangle widening from 2 to 4 over stations 0
+    // to 5 reaches `a = 2` on the inner side at station 5, where the bend
+    // has eased: no fold, so the run is certified rather than unbounded.
+    let (graph, root) = widening(2.0, 4.0);
     certified(&mesh(&graph, root));
+}
+
+#[test]
+fn a_section_reaching_the_inward_offsets_sharpest_bend_is_refused() {
+    // The same run starting 4.4 wide: its inner edge, at `a = 2.2`, is past
+    // the radius 2.1 of the bend at station 0.
+    let (graph, root) = widening(4.4, 4.0);
+    refused(&mesh(&graph, root));
 }

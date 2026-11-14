@@ -8,20 +8,22 @@
 
 use axiolid_contracts::{ExecutionOptions, GeomError};
 use axiolid_core::{Frame2, Point2, Scalar, Tolerance, Vec2, Vec3};
-use axiolid_curve::{Circle2, Curve2, Curve3, Elevated3, ElevationLaw, Line2, Polyline2};
+use axiolid_curve::{
+    BSplineCurve2, Circle2, Curve2, Curve3, Elevated3, ElevationLaw, KnotSpec, Line2, Polyline2,
+};
 use axiolid_mesh_boolean_boolmesh::BoolmeshBoolean;
 use axiolid_mesh_compile::{DeviationBound, DeviationPath, ReferenceMeshCompiler};
 use axiolid_model::{
-    GeometryGraph, GeometryGraphBuilder, GeometryNode, NodeId, OpenProfile, SectionAtStation,
-    Station, StationFrame, StationOffsets, StationOrientation, StationedOpenSection,
-    SurfaceRelation,
+    CurveRelation, GeometryGraph, GeometryGraphBuilder, GeometryNode, NodeId, OpenProfile,
+    SectionAtStation, Station, StationFrame, StationOffsets, StationOrientation,
+    StationedOpenSection, SurfaceRelation,
 };
 
 const BUDGET: Scalar = 0.01;
 
-fn options() -> ExecutionOptions {
+fn options_at(chord: Scalar) -> ExecutionOptions {
     ExecutionOptions::new(Tolerance::MILLIMETRE)
-        .with_chord_error(BUDGET)
+        .with_chord_error(chord)
         .unwrap()
 }
 
@@ -34,8 +36,12 @@ enum Outcome {
 }
 
 fn mesh(graph: &GeometryGraph, root: NodeId) -> Outcome {
+    mesh_at(graph, root, BUDGET)
+}
+
+fn mesh_at(graph: &GeometryGraph, root: NodeId, chord: Scalar) -> Outcome {
     let compiler = ReferenceMeshCompiler::new(BoolmeshBoolean::new());
-    match compiler.compile_mesh_with_deviation(graph, root, &options()) {
+    match compiler.compile_mesh_with_deviation(graph, root, &options_at(chord)) {
         Ok((_, report)) => {
             let run = report
                 .contributions
@@ -313,5 +319,66 @@ fn a_turned_sheet_past_the_centre_is_refused() {
             Some(turn),
         );
         refused(past);
+    }
+}
+
+/// A cubic plan B-spline with an interior knot, about 25 long.
+fn cubic() -> Curve2 {
+    Curve2::BSpline(BSplineCurve2 {
+        degree: 3,
+        control_points: vec![
+            Point2::new(0.0, 0.0),
+            Point2::new(6.0, 1.0),
+            Point2::new(12.0, -2.0),
+            Point2::new(18.0, 3.0),
+            Point2::new(24.0, 2.0),
+        ],
+        knots: vec![0.0, 0.5, 1.0],
+        multiplicities: vec![4, 1, 4],
+        weights: None,
+        closed: false,
+        self_intersect: None,
+        knot_spec: KnotSpec::Unspecified,
+    })
+}
+
+#[test]
+fn a_sheet_with_an_undecided_fold_is_unbounded_by_name() {
+    // Along the offset by 1 of a cubic, 1 m to the side, the spans across the
+    // knot (where the offset's curvature jumps) have no rates and the
+    // conservative bound cannot clear them: the fold stays undecided, and the
+    // sheet must not be reported certified.
+    let mut b = GeometryGraphBuilder::new();
+    let base = b.push_value(cubic()).unwrap();
+    let basis = b
+        .push(GeometryNode::CurveRelation(CurveRelation::Offset {
+            basis: base,
+            distance: 1.0,
+            reference_direction: None,
+        }))
+        .unwrap();
+    let p = open(&mut b, segment(-0.5, 0.5));
+    let to = StationOffsets::new(1.0, 0.0, 0.0);
+    let root = b
+        .push(GeometryNode::SurfaceRelation(
+            SurfaceRelation::SectionedSurface {
+                directrix: basis,
+                sections: [1.0, 22.0]
+                    .map(|d| StationedOpenSection {
+                        profile: p,
+                        tags: vec![],
+                        station: Station::new(d, to),
+                    })
+                    .to_vec(),
+                frame: StationFrame::Section,
+            },
+        ))
+        .unwrap();
+    let graph = b.finish(vec![root]).unwrap();
+    match mesh_at(&graph, root, 0.05) {
+        Outcome::Unbounded(reason) => {
+            assert!(reason.contains("a fold cannot be excluded"), "{reason}");
+        }
+        other => panic!("expected unbounded by name, got {other:?}"),
     }
 }

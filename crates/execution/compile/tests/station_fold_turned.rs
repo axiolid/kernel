@@ -646,3 +646,77 @@ fn a_turned_section_across_a_curvature_break_is_cleared_by_the_conservative_boun
     );
     certified(&mesh(&graph, root));
 }
+
+/// A 1 m square run along the line `x` with a turned section at stations 0
+/// and 10, whose offsets run from zero to `end`.
+fn sliding(
+    frame: StationFrame,
+    orientation: StationOrientation,
+    end: StationOffsets,
+) -> (GeometryGraph, NodeId) {
+    let mut b = GeometryGraphBuilder::new();
+    let basis = b.push(line_x().into()).unwrap();
+    let square = b
+        .push_value(Profile::Rectangle(RectangleProfile {
+            x: 1.0,
+            y: 1.0,
+            thickness: None,
+            outer_radius: None,
+            inner_radius: None,
+        }))
+        .unwrap();
+    let root = b
+        .push(GeometryNode::SolidOperation(
+            SolidOperation::SectionsAtStations {
+                directrix: basis,
+                sections: [(0.0, StationOffsets::ZERO), (10.0, end)]
+                    .map(|(distance, offsets)| {
+                        SectionAtStation::new(square, Station::new(distance, offsets))
+                            .with_orientation(orientation)
+                    })
+                    .to_vec(),
+                frame,
+            },
+        ))
+        .unwrap();
+    (b.finish(vec![root]).unwrap(), root)
+}
+
+#[test]
+fn a_turned_section_is_judged_by_the_rates_of_its_offsets() {
+    // On a line the plane's normal `n` of a section yawed (pitched) by 30
+    // degrees has `n_T = cos(30)` and `n_L = sin(30)` (`n_U = sin(30)`), so
+    // `F = cos(30) + q_L' sin(30)` (`+ q_U' sin(30)`): -0.084 at a rate of
+    // -1.9 and +0.116 at -1.5, whatever the other offset does. Dropping the
+    // rate of the lateral or the vertical offset from `F` leaves a section
+    // that runs backwards certified.
+    let lateral = |rate: Scalar| StationOffsets::new(10.0 * rate, 0.0, 0.0);
+    let vertical = |rate: Scalar| StationOffsets::new(0.0, 10.0 * rate, 0.0);
+    for frame in FRAMES {
+        let cases: [(&str, StationOrientation, StationOffsets, bool); 8] = [
+            ("yaw, lateral -1.9", yawed(30.0), lateral(-1.9), false),
+            ("yaw, lateral -1.5", yawed(30.0), lateral(-1.5), true),
+            ("yaw, lateral +1.9", yawed(30.0), lateral(1.9), true),
+            ("yaw, vertical -1.9", yawed(30.0), vertical(-1.9), true),
+            ("pitch, vertical -1.9", pitched(30.0), vertical(-1.9), false),
+            ("pitch, vertical -1.5", pitched(30.0), vertical(-1.5), true),
+            ("pitch, vertical +1.9", pitched(30.0), vertical(1.9), true),
+            ("pitch, lateral -1.9", pitched(30.0), lateral(-1.9), true),
+        ];
+        for (name, orientation, end, clear) in cases {
+            let (graph, root) = sliding(frame, orientation, end);
+            let outcome = mesh(&graph, root);
+            if clear {
+                assert!(
+                    matches!(outcome, Outcome::Certified),
+                    "{frame:?} {name}: {outcome:?}"
+                );
+            } else {
+                assert!(
+                    matches!(&outcome, Outcome::Refused(d) if d.contains("sections fold")),
+                    "{frame:?} {name}: {outcome:?}"
+                );
+            }
+        }
+    }
+}
