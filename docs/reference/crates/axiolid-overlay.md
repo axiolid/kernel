@@ -8,7 +8,7 @@ Deterministic validated planar overlay contract.
 
 | | |
 | --- | --- |
-| Latest release | 0.4.1 (2026-11-14) |
+| Latest release | 0.4.2 (2026-11-14) |
 | crates.io | [`axiolid-overlay`](https://crates.io/crates/axiolid-overlay) |
 | Facade | [`axiolid`](./axiolid) feature `overlay` |
 | Layer | algorithms (`algorithm.planar`) |
@@ -109,17 +109,21 @@ Validated, deterministic planar booleans (intersection, union, difference, xor) 
 
 ## Changes
 
-Latest release, 0.4.1 (2026-11-14):
+Latest release, 0.4.2 (2026-11-14):
 
-### Added
+### Fixed
 
-- `free_faces`, `free_faces_within`, `FreeFaces` (with `locate`), `FreeSpaceInput`,
-  `FreeFace`, `FreeRing`, `Bridge`, `PieceSource`, `FaceLocation`, `FreeFaceEvidence`,
-  `FreeFacesError` and `BarrierDefect` (#490, ADR 0109): the bounded faces of the plane
-  that obstacle polygons and open-segment barriers leave free, with the inputs each ring
-  edge lies on. Gaps narrower than a closing width are closed by reported bridges, never
-  by moving an input; a free region narrower than the width is a closed gap, returned
-  apart. Rings are snap-rounded and certified as the visible faces are. Depends on
-  `axiolid-exact-arrangement` now.
+- `Region::minkowski_sum`, `minkowski_erosion` and their region and disc
+  siblings read the union of their terms from the term edges that can bound
+  it. An edge proved, exactly, to lie strictly inside one convex term is left
+  out, and the rest are cut once and read by the same rule. A 304-corner
+  cluster of furniture outlines summed with a 1.7 m by 0.9 m rectangle took
+  0.26 s and 89 MB, now 8 ms and 6 MB; at 3,040 corners 3.1 s and 941 MB,
+  now 84 ms and 26 MB (`minkowski_furniture`, release, median of 3). Results,
+  refusals and both morphology modes are unchanged bit for bit: every hash of
+  `minkowski_furniture`, `minkowski_plan` and `disc_erosion` is the same
+  (`tools/benchmark/benches/minkowski_furniture.rs`; `src/term_union.rs`,
+  ADR 0108, #344). `scripts/probe_term_union_mutants.py` lists the faults its
+  tests must catch.
 
 Full history: [`crates/algorithms/planar/overlay/CHANGELOG.md`](https://github.com/axiolid/kernel/blob/main/crates/algorithms/planar/overlay/CHANGELOG.md)

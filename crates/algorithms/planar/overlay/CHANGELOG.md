@@ -9,6 +9,8 @@ caret rule for `0.x` versions.
 
 ## [Unreleased]
 
+## [0.4.2] - 2026-11-14
+
 ### Fixed
 
 - `Region::minkowski_sum`, `minkowski_erosion` and their region and disc
