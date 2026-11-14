@@ -812,6 +812,42 @@ fn a_constant_offset_beside_a_cubic_has_rates_only_between_its_knots() {
     assert!(law.bounds(lo, hi, FrameReading::Section).is_some());
     assert!(law.rates(lo - 0.2, lo, FrameReading::Section).is_some());
     assert!(law.rates(hi, hi + 0.2, FrameReading::Section).is_some());
+
+    // The padded range of a span is held to the break too: spans 0.2 long
+    // lose their rates before the span itself reaches the knot, and keep
+    // none after it, by the padding on each side, `2 measure` of arc length
+    // and more of distance at the speed floor.
+    let knot = 0.5 * (lo + hi);
+    // The smallest end `x` of a span `[x - 0.2, x]` without rates, and the
+    // largest start `x` of a span `[x, x + 0.2]` without them.
+    let (mut some, mut absent) = (knot - 0.1, knot + 0.1);
+    for _ in 0..40 {
+        let mid = 0.5 * (some + absent);
+        if none(mid - 0.2, mid) {
+            absent = mid;
+        } else {
+            some = mid;
+        }
+    }
+    let first = absent;
+    let (mut absent, mut some) = (knot - 0.1, knot + 0.1);
+    for _ in 0..40 {
+        let mid = 0.5 * (some + absent);
+        if none(mid, mid + 0.2) {
+            absent = mid;
+        } else {
+            some = mid;
+        }
+    }
+    let last = absent;
+    let measure = law
+        .bounds(first - 0.2, first, FrameReading::Section)
+        .unwrap()
+        .measure;
+    assert!(
+        last - first >= 4.0 * measure,
+        "no rates between {first} and {last}, measure {measure}"
+    );
 }
 
 #[test]

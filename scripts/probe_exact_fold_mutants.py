@@ -32,9 +32,6 @@ A mutant that does not compile counts as BROKEN, not killed.
 
 Not probed, because no test can tell them apart:
 
-- the check of the padded range of a span against the curvature breaks, apart
-  from the check of the span itself that precedes it (a break within `2
-  measure`, about `1e-8` of distance, outside the span);
 - the witness window's widening by the measure (about `1e-8`, below any
   distance the tests put between a vertex and a fold);
 - the `64 eps` rounding allowances, the acceleration's and the jet's error
@@ -104,6 +101,10 @@ MUTANTS = [
     ("a span across a curvature break is given rates", READING,
      "                    bend_breaks: breaks,\n",
      "                    bend_breaks: Vec::new(),\n",
+     [FRAME_RATES]),
+    ("a span whose padded range crosses a curvature break is given rates", READING,
+     "            if self.bend_breaks.iter().any(|&k| lo < k && k < hi) {\n",
+     "            if false && self.bend_breaks.iter().any(|&k| lo < k && k < hi) {\n",
      [FRAME_RATES]),
     ("has_bend is blind to frames read by quadrature", BEND,
      "            Some(Slot::Read(reader)) => matches!(reader.jet(&at.piece, mid, at.table), Ok(Some(_))),\n",
