@@ -28,11 +28,11 @@ caret rule for `0.x` versions.
   line extruded along itself (`Degenerate`), non-finite input or
   arithmetic (`InvalidInput`), and a search past its work cap
   (`BudgetExceeded`). The refusal `an edge use without a pcurve on a face
-  over a surface relation` is gone. Faces without pcurves report up to
-  about 2.3 times the budget on the fixtures measured, as atomic ones do,
-  and an edge whose surface's speed varies by orders of magnitude along it
-  (a ruling pivoting about a slow rim) is sampled finely throughout and can
-  run into the curved-face vertex budget (ADR 0110).
+  over a surface relation` is gone. Faces without pcurves report up to 1.6
+  times the budget on the tested fixtures, as atomic ones do, and an edge
+  whose surface's speed varies by orders of magnitude along it (a ruling
+  pivoting about a slow rim) is sampled finely throughout and can run into
+  the curved-face vertex budget (ADR 0110, #497).
 
 ### Changed
 

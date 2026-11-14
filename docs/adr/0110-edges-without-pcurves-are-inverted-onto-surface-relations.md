@@ -56,14 +56,19 @@ periodic bracket into two touching both ends, which meet across the seam.
 Gauss-Newton then sharpens `t` inside the interval to `t*`, and the other
 parameter is read in closed form (`u = atan2` about the axis; `v` by
 projection onto the line or the ruling, clamped to the ruling). Every
-generator over the interval passes within the slack of the sample; their
-points nearest it must stay within `tau` of each other, or the surface runs
-along a fold there and the sample does not fix `t`. That spread is bounded
-locally, at `t*`: with `r` the interval's farthest end from `t*`, by `r
-|G'(t*)| + r^2 sup|G''| / 2`, `G` the swept curve for a revolution and an
-extrusion (the nearest points of the circle or the line move no faster) and
-the ruling's point `(1 - v) A + v B` at the sample's `v` for a ruled surface,
-`sup|G''|` certified over the interval. A ruling pivoting about a slow rim,
+generator over the interval passes within the slack of the sample. With
+`o*` the other parameter read at `t*`, the points `G(t) = S(t, o*)` over the
+interval must stay within `tau` of `S(t*, o*)`, or the surface runs along a
+fold there and the sample does not fix `t`. That spread is bounded locally,
+at `t*`: with `r` the interval's farthest end from `t*`, by `r |G'(t*)| + r^2
+sup|G''| / 2`, where `G` moves as the swept curve for a revolution (turned by
+a fixed `u*`) and an extrusion (shifted by a fixed `v* d`) and as `(1 - v*) A
++ v* B` for a ruled surface, `sup|G''|` certified over the interval. Where a
+tangent break of the swept curve (a knot of full multiplicity, a ruled
+side's corner) lies inside the interval, the bound is the certified speed
+over the interval times `r` instead: the speed jumps there. For the same
+reason the cover's coarse cells are cut at every tangent break, so no cell's
+speed bound, nor its Taylor step from the middle, spans one. A ruling pivoting about a slow rim,
 or an ellipse's flat side, is not a fold: the generator barely moves near
 the sample, however fast its far end or its vertex moves. The residual
 `|S(u, v) - P|`, measured by the relation's own evaluator, must be within
@@ -134,11 +139,12 @@ crate-private, as the relation evaluators do.
 
 - As on an atomic surface, an inverted edge's terms are sampled to the
   budget and the face adds its triangles' term, so an exact face without
-  pcurves reports above the budget: at 1e-3, a cylinder sheet 1.09e-3 (on
-  its atomic cylinder as on its relation), a flat ellipse's side 1.06e-3, a
-  frustum patch and an arc ruled against a line 1.6e-3, quarter arcs ruled
-  1:0.03 1.6e-3 and 1:0.01 2.3e-3, that is up to about 2.3 times the budget
-  on the fixtures measured. The bound holds in every case.
+  pcurves reports above the budget: on the tested fixtures at 1e-3, a
+  cylinder sheet 1.09e-3 (on its atomic cylinder as on its relation), a
+  flat ellipse beside its vertex 1.06e-3, and a frustum patch, an arc ruled
+  against a line and quarter arcs ruled 1:0.03 1.6e-3, so up to 1.6 times
+  the budget; the tests hold every such face within twice it, and its
+  bound against the exact surface.
 - The edge sampler refines a piece of an edge uniformly, until the lens can
   show the surface invertible along every span. Where the surface's speed
   across the edge varies by orders of magnitude (a ruling pivoting about a
@@ -148,7 +154,7 @@ crate-private, as the relation evaluators do.
   1:0.01 in about 170,000, and 10:0.1 and 10:0.03 run into the curved-face
   vertex budget (`BudgetExceeded`, after 38 s and 220 s) although every
   sample inverts. Sampling graded by the local speed would lift this; it
-  changes the edge sampler that atomic faces share, so it is left out here.
+  changes the edge sampler that atomic faces share, so it is left to #497.
   Measured on this branch (optimised test build, 1e-3, no pcurves):
 
   | Face | Before (fold rule by the coarse speed) | After (local spread, local arc, local cover speed) |
@@ -179,6 +185,8 @@ crate-private, as the relation evaluators do.
 **Follow-ups / risks to watch**
 
 - #463: faces reaching a relation's pole.
+- #497: grade B-rep edge sampling by local speed (`TODO(#497)` at
+  `sample_edge`).
 - #455: a trimmed relation's range should restrict the bracket of `t`.
 - A period for closed swept B-splines and closed ruled sides would remove
   their seam refusal; it amends ADR 0103.
