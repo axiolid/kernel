@@ -1067,3 +1067,109 @@ fn an_edge_into_a_collapsed_ruling_is_refused_there() {
         &[Outcome::Refused(COLLAPSED)],
     );
 }
+
+/// An edge crossing the seam of a closed swept spline off a sample: the
+/// spline has no period, so its samples' parameters jump by the domain
+/// there and the edge is refused, not read by continuity.
+#[test]
+fn an_edge_across_a_closed_spline_s_seam_off_a_sample_is_refused_as_not_unique() {
+    let support = |b: &mut GeometryGraphBuilder| extrusion(b, closed_spline_circle(), Vec3::Z);
+    let sheet = cylinder_patch((-0.4, 0.7));
+    honest_sheet(
+        "across the closed spline's seam",
+        &support,
+        &sheet,
+        &[Outcome::Refused(NOT_UNIQUE)],
+    );
+}
+
+fn flat_ellipse(z: Scalar, a: Scalar, b: Scalar) -> Curve3 {
+    Curve3::Ellipse(axiolid_curve::Ellipse3 {
+        frame: frame_at(z),
+        semi_axis_x: a,
+        semi_axis_y: b,
+    })
+}
+
+/// Over a flat ellipse's vertex the generators move at the short
+/// semi-axis's speed, not the long one's: edges a fraction of the tolerance
+/// off the surface are no fold, and the face is certified against the exact
+/// surface.
+#[test]
+fn a_flat_ellipse_extruded_over_its_slow_vertex_is_no_fold() {
+    for (a, b, off) in [(3.0, 0.1, 0.1), (1.2, 0.1, 0.7)] {
+        let off = off * BUDGET;
+        let support =
+            move |bld: &mut GeometryGraphBuilder| extrusion(bld, flat_ellipse(0.0, a, b), Vec3::Z);
+        let given =
+            move |u: Scalar, v: Scalar| Point3::new((a + off) * u.cos(), (b + off) * u.sin(), v);
+        let exact = move |u: Scalar, v: Scalar| Point3::new(a * u.cos(), b * u.sin(), v);
+        let sheet = Sheet {
+            point: &given,
+            curves: [
+                Some(flat_ellipse(0.0, a + off, b + off)),
+                None,
+                Some(flat_ellipse(HEIGHT, a + off, b + off)),
+                None,
+            ],
+            ..cylinder_patch((-0.3, 0.3))
+        };
+        let inside = Sheet {
+            point: &exact,
+            ..cylinder_patch((-0.29, 0.29))
+        };
+        honest(
+            &format!("ellipse {a} x {b}, edges {off:e} off"),
+            open_sheet(&support, &sheet),
+            &sheet_samples(&inside),
+            &[Outcome::Certified],
+        );
+    }
+}
+
+/// Quarter arcs of radii 1 and 0.03 ruled a unit apart: near the small rim
+/// the ruling pivots, and the edges' uniform samples must be as close as
+/// the lens needs there all along. The face is certified, at a cost the
+/// same face with pcurves does not pay (ADR 0110); this pins that cost
+/// until edges are sampled by their local speed.
+#[test]
+fn a_ruling_pivoting_about_a_slow_rim_meshes_at_the_cost_of_uniform_samples() {
+    let (big, small) = (1.0, 0.03);
+    let support = move |bld: &mut GeometryGraphBuilder| {
+        ruled(
+            bld,
+            [
+                (horizontal_circle(0.0, 0.0, 0.0, big), 0.0, FRAC_PI_2),
+                (horizontal_circle(0.0, 0.0, 1.0, small), 0.0, FRAC_PI_2),
+            ],
+        )
+    };
+    let exact = move |u: Scalar, v: Scalar| {
+        let angle = FRAC_PI_2 * u;
+        Point3::new(angle.cos(), angle.sin(), 0.0) * (big * (1.0 - v) + small * v)
+            + Point3::new(0.0, 0.0, v)
+    };
+    let curves = || {
+        [
+            Some(horizontal_circle(0.0, 0.0, 0.0, big)),
+            None,
+            Some(horizontal_circle(0.0, 0.0, 1.0, small)),
+            None,
+        ]
+    };
+    let with = check_sheet(
+        "pivoting ruling, pcurves",
+        &support,
+        &unit_sheet(&exact, curves()),
+        RULED,
+        true,
+    );
+    let without = without_pcurves(unit_sheet(&exact, curves()));
+    assert_inverted("pivoting ruling", &support, &without, RULED);
+    let (mesh, _, _) = open_sheet(&support, &without).unwrap();
+    let (cheap, dear) = (with.0.indices.len() / 3, mesh.indices.len() / 3);
+    assert!(
+        dear > 10 * cheap,
+        "{dear} triangles without pcurves against {cheap} with them: update ADR 0110"
+    );
+}
