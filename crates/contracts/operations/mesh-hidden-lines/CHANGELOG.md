@@ -47,8 +47,13 @@ caret rule for `0.x` versions.
   see-through solid, and a see-through slab in perspective when that is
   claimed too) with their `seen_through` counts and evidence, refuse a short
   occlusion slice naming the mesh, and draw three base scenes flagged all
-  opaque as without flags. A visible-face claim fails closed with
-  `ClaimUnverifiable` until its fixtures land (ADR 0111, #496).
+  opaque as without flags. A visible-face claim must reproduce the regions and
+  `behind` lists of eight scenes (a pane over a box, two panes over a box, a
+  depth cycle of three panes, a see-through box, a pane tied with a floor, a
+  stack stopped by an opaque sheet, the occluding cap of a cut see-through
+  solid, planar groups split by occlusion), refuse a mixed face group, a
+  short occlusion slice and a stack over `max_behind_surfaces`, and answer
+  three base scenes flagged all opaque as without flags (ADR 0111, #496).
 
 ## [0.1.5] - 2026-11-13
 

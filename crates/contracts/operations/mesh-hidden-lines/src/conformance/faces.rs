@@ -19,7 +19,6 @@ use axiolid_core::{Point2, Tolerance};
 use crate::face_fixtures::{
     area_cases, cases, face_refusals, snap_cases, EvidenceExpect, FaceFixture, AREA_TOLERANCE,
 };
-use crate::fixtures::reversed;
 use crate::{
     FaceSource, HiddenLineError, HiddenLineMesh, MeshId, MeshRole, MeshVisibleFaces, View,
     VisibleFaceLimits, VisibleFaceOutcome, VisibleFaceRequest, VisibleRegion,
@@ -95,10 +94,10 @@ impl fmt::Display for FaceConformanceReport {
 pub struct FaceConformanceSuite;
 
 /// What the generic checks need to know about the request.
-struct Scene<'a> {
-    name: &'static str,
-    meshes: &'a [FaceFixture],
-    view: View,
+pub(super) struct Scene<'a> {
+    pub(super) name: &'static str,
+    pub(super) meshes: &'a [FaceFixture],
+    pub(super) view: View,
 }
 
 impl FaceConformanceSuite {
@@ -310,7 +309,7 @@ impl FaceConformanceSuite {
     }
 }
 
-fn answer(
+pub(super) fn answer(
     provider: &dyn MeshVisibleFaces,
     fixtures: &[FaceFixture],
     view: View,
@@ -321,7 +320,10 @@ fn answer(
     let meshes: Vec<HiddenLineMesh<'_>> = fixtures
         .iter()
         .map(|f| {
-            let mesh = HiddenLineMesh::new(f.id, f.role, &f.mesh);
+            let mut mesh = HiddenLineMesh::new(f.id, f.role, &f.mesh);
+            if !f.occlusion.is_empty() {
+                mesh = mesh.with_occlusion(&f.occlusion);
+            }
             if f.planar {
                 mesh.with_planar_groups()
             } else if f.groups.is_empty() {
@@ -340,13 +342,13 @@ fn answer(
 
 /// Equal up to `exact_escalations`, which may differ between two otherwise
 /// identical requests.
-fn same_result(a: &VisibleFaceOutcome, b: &VisibleFaceOutcome) -> bool {
+pub(super) fn same_result(a: &VisibleFaceOutcome, b: &VisibleFaceOutcome) -> bool {
     let mut evidence = b.evidence;
     evidence.exact_escalations = a.evidence.exact_escalations;
     a.view == b.view && a.regions == b.regions && a.evidence == evidence
 }
 
-fn check_orientation(
+pub(super) fn check_orientation(
     provider: &dyn MeshVisibleFaces,
     report: &mut FaceConformanceReport,
     scene: &Scene<'_>,
@@ -355,17 +357,7 @@ fn check_orientation(
     expected: &VisibleFaceOutcome,
     options: &ExecutionOptions,
 ) {
-    let flipped: Vec<FaceFixture> = scene
-        .meshes
-        .iter()
-        .map(|f| FaceFixture {
-            id: f.id,
-            role: f.role,
-            mesh: reversed(&f.mesh),
-            groups: f.groups.clone(),
-            planar: f.planar,
-        })
-        .collect();
+    let flipped: Vec<FaceFixture> = scene.meshes.iter().map(FaceFixture::flipped).collect();
     match answer(provider, &flipped, scene.view, region, limits, options) {
         Ok(outcome) if same_result(&outcome, expected) => {}
         Ok(_) => report
@@ -475,7 +467,7 @@ fn check_ring(detail: &mut Option<String>, what: &str, ring: &[Point2], outer: b
 }
 
 /// The checks every outcome must pass, whatever the scene.
-fn check_shape(
+pub(super) fn check_shape(
     report: &mut FaceConformanceReport,
     scene: &Scene<'_>,
     outcome: &VisibleFaceOutcome,
@@ -566,7 +558,7 @@ fn check_shape(
     }
 }
 
-fn check_expected_evidence(
+pub(super) fn check_expected_evidence(
     report: &mut FaceConformanceReport,
     case: &'static str,
     expect: &EvidenceExpect,

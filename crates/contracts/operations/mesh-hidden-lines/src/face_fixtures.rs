@@ -18,18 +18,23 @@ pub(crate) use snap::snap_cases;
 
 use crate::fixtures::{box_mesh, isometric_frame, plan_frame, refusals, sheet_quad};
 use crate::MeshRole::{Sheet, Solid};
-use crate::{FaceGroup, FaceSource, MeshId, MeshRole, View, VisibleFaceLimits, VisibleRegion};
+use crate::{
+    BehindSurface, FaceGroup, FaceSource, MeshId, MeshRole, Occlusion, View, VisibleFaceLimits,
+    VisibleRegion,
+};
 
 /// One mesh of a scene. An empty `groups` means every triangle is in
 /// `FaceGroup(0)`. A `planar` fixture is requested with
 /// `FaceGroups::Planar`; its `groups` are then the groups that request must
-/// resolve to, used by the checks and not sent.
+/// resolve to, used by the checks and not sent. An empty `occlusion` sends no
+/// flags; otherwise it is sent `PerTriangle`.
 pub(crate) struct FaceFixture {
     pub id: MeshId,
     pub role: MeshRole,
     pub mesh: TriMesh,
     pub groups: Vec<FaceGroup>,
     pub planar: bool,
+    pub occlusion: Vec<Occlusion>,
 }
 
 impl FaceFixture {
@@ -40,6 +45,26 @@ impl FaceFixture {
             mesh,
             groups: Vec::new(),
             planar: false,
+            occlusion: Vec::new(),
+        }
+    }
+
+    /// Every triangle see-through.
+    fn see_through(mut self) -> Self {
+        self.occlusion = vec![Occlusion::SeeThrough; self.mesh.triangle_count()];
+        self
+    }
+
+    /// The same mesh with every triangle reversed; triangle order, groups and
+    /// flags are kept.
+    pub(crate) fn flipped(&self) -> Self {
+        Self {
+            id: self.id,
+            role: self.role,
+            mesh: crate::fixtures::reversed(&self.mesh),
+            groups: self.groups.clone(),
+            planar: self.planar,
+            occlusion: self.occlusion.clone(),
         }
     }
 
@@ -717,6 +742,7 @@ fn clone_fixture(f: &crate::fixtures::Fixture) -> FaceFixture {
     let mut clone = FaceFixture::new(f.id.0, f.role, f.mesh.clone());
     clone.groups = f.groups.clone();
     clone.planar = f.planar;
+    clone.occlusion = f.occlusion.clone();
     clone
 }
 
@@ -798,6 +824,498 @@ pub(crate) fn face_refusals() -> Vec<FaceRefusal> {
     all
 }
 
+// --- see-through triangles (ADR 0111) ----------------------------------------
+
+const G0: FaceSource = FaceSource::Group(FaceGroup(0));
+
+/// `region` with `behind` entries `(mesh, source, layer)`.
+fn seen(region: VisibleRegion, behind: &[(u64, FaceSource, u32)]) -> VisibleRegion {
+    region.with_behind(
+        behind
+            .iter()
+            .map(|&(mesh, source, layer)| BehindSurface::new(MeshId(mesh), source, layer))
+            .collect(),
+    )
+}
+
+fn see_through_case(
+    name: &'static str,
+    meshes: Vec<FaceFixture>,
+    view: View,
+    regions: Vec<VisibleRegion>,
+) -> FaceCase {
+    let mut c = case(name, meshes, view, regions);
+    c.limits = limits().with_max_behind_surfaces(16);
+    c
+}
+
+/// The square `[0,4]^2` at `z = 0`.
+fn floor() -> FaceFixture {
+    sheet(1, sheet_quad(0.0, 0.0, 4.0, 4.0, 0.0))
+}
+
+/// The square `[0,4]^2` with the hole `[1,3]^2`.
+fn square_with_hole(mesh: u64, triangles: &[u32]) -> VisibleRegion {
+    region(
+        mesh,
+        G0,
+        &[[0.0, 0.0], [4.0, 0.0], [4.0, 4.0], [0.0, 4.0]],
+        &[&[[1.0, 1.0], [1.0, 3.0], [3.0, 3.0], [3.0, 1.0]]],
+        triangles,
+    )
+}
+
+fn middle(mesh: u64, source: FaceSource, triangles: &[u32]) -> VisibleRegion {
+    region(
+        mesh,
+        source,
+        &[[1.0, 1.0], [3.0, 1.0], [3.0, 3.0], [1.0, 3.0]],
+        &[],
+        triangles,
+    )
+}
+
+/// A pane over a box. The box's top `[0,4]^2` at `z = 1` (triangles 2 and
+/// 3) is frontmost outside the see-through pane `[1,3] x [1,5]` at `z = 2`:
+/// a square with the notch `[1,3] x [1,4]`, area 10. The pane is frontmost
+/// over all of its image: over the box it lists the box's top behind it,
+/// beyond the box (`y` in `[4,5]`) nothing. The pane's diagonal from `(1,1)`
+/// to `(3,5)` separates no class, and both of its triangles reach both
+/// parts.
+fn pane_over_box() -> FaceCase {
+    see_through_case(
+        "pane over a box",
+        vec![
+            solid(1, box_mesh([0.0, 0.0, 0.0], [4.0, 4.0, 1.0])),
+            sheet(2, sheet_quad(1.0, 1.0, 3.0, 5.0, 2.0)).see_through(),
+        ],
+        plan(),
+        vec![
+            group(
+                1,
+                0,
+                &[
+                    [0.0, 0.0],
+                    [4.0, 0.0],
+                    [4.0, 4.0],
+                    [3.0, 4.0],
+                    [3.0, 1.0],
+                    [1.0, 1.0],
+                    [1.0, 4.0],
+                    [0.0, 4.0],
+                ],
+                &[2, 3],
+            ),
+            seen(
+                group(
+                    2,
+                    0,
+                    &[[1.0, 1.0], [3.0, 1.0], [3.0, 4.0], [1.0, 4.0]],
+                    &[0, 1],
+                ),
+                &[(1, G0, 1)],
+            ),
+            group(
+                2,
+                0,
+                &[[1.0, 4.0], [3.0, 4.0], [3.0, 5.0], [1.0, 5.0]],
+                &[0, 1],
+            ),
+        ],
+    )
+}
+
+/// Two panes over the box of `pane_over_box`: A = `[1,3]^2` at `z = 2` and
+/// B = `[2,5]^2` at `z = 3`, both see-through. The box's top is the square
+/// minus `A ∪ B`. A is frontmost where B is not, the L `A \ B`, over the
+/// box. B is frontmost over all of its image: over `[2,3]^2` it sees A and
+/// then the box, over the rest of the box only the box, beyond the box
+/// nothing. Every corner where three class boundaries meet is a ring vertex.
+fn panes_over_a_box() -> FaceCase {
+    see_through_case(
+        "panes over a box",
+        vec![
+            solid(1, box_mesh([0.0, 0.0, 0.0], [4.0, 4.0, 1.0])),
+            sheet(2, sheet_quad(1.0, 1.0, 3.0, 3.0, 2.0)).see_through(),
+            sheet(3, sheet_quad(2.0, 2.0, 5.0, 5.0, 3.0)).see_through(),
+        ],
+        plan(),
+        vec![
+            group(
+                1,
+                0,
+                &[
+                    [0.0, 0.0],
+                    [4.0, 0.0],
+                    [4.0, 2.0],
+                    [3.0, 2.0],
+                    [3.0, 1.0],
+                    [1.0, 1.0],
+                    [1.0, 3.0],
+                    [2.0, 3.0],
+                    [2.0, 4.0],
+                    [0.0, 4.0],
+                ],
+                &[2, 3],
+            ),
+            seen(
+                group(
+                    2,
+                    0,
+                    &[
+                        [1.0, 1.0],
+                        [3.0, 1.0],
+                        [3.0, 2.0],
+                        [2.0, 2.0],
+                        [2.0, 3.0],
+                        [1.0, 3.0],
+                    ],
+                    &[0, 1],
+                ),
+                &[(1, G0, 1)],
+            ),
+            seen(
+                group(
+                    3,
+                    0,
+                    &[[2.0, 2.0], [3.0, 2.0], [3.0, 3.0], [2.0, 3.0]],
+                    &[0, 1],
+                ),
+                &[(2, G0, 1), (1, G0, 2)],
+            ),
+            seen(
+                group(
+                    3,
+                    0,
+                    &[
+                        [2.0, 3.0],
+                        [3.0, 3.0],
+                        [3.0, 2.0],
+                        [4.0, 2.0],
+                        [4.0, 4.0],
+                        [2.0, 4.0],
+                    ],
+                    &[0, 1],
+                ),
+                &[(1, G0, 1)],
+            ),
+            group(
+                3,
+                0,
+                &[
+                    [2.0, 4.0],
+                    [4.0, 4.0],
+                    [4.0, 2.0],
+                    [5.0, 2.0],
+                    [5.0, 5.0],
+                    [2.0, 5.0],
+                ],
+                &[0, 1],
+            ),
+        ],
+    )
+}
+
+/// Three see-through sheets in a depth cycle, each in front of the next
+/// where two overlap and no three overlapping: A, the strip `[0,4] x [0,1]`
+/// with `z = x`; B, the strip `[3,4] x [0,4]` with `z = 2y`; C, the band
+/// between `y = x - 1` and `y = x` for `y` in `[0,3]` at `z = 3`. A is in
+/// front of B over `[3,4] x [0,1]` (`x >= 3 > 2 >= 2y`), B of C over the
+/// triangle `(3,2) (4,3) (3,3)` (`2y >= 4 > 3`) and C of A over the
+/// parallelogram `(0,0) (1,0) (2,1) (1,1)` (`3 > 2 >= x`). A's diagonal
+/// `y = x / 4` keeps its triangle 0 out of the corner left of C.
+fn see_through_cycle() -> FaceCase {
+    let ramp = |id: u64, corners: [[f64; 3]; 4]| {
+        let positions = corners.map(|[x, y, z]| Point3::new(x, y, z)).to_vec();
+        sheet(id, TriMesh::new(positions, vec![0, 1, 2, 0, 2, 3])).see_through()
+    };
+    see_through_case(
+        "see-through cycle",
+        vec![
+            ramp(
+                1,
+                [
+                    [0.0, 0.0, 0.0],
+                    [4.0, 0.0, 4.0],
+                    [4.0, 1.0, 4.0],
+                    [0.0, 1.0, 0.0],
+                ],
+            ),
+            ramp(
+                2,
+                [
+                    [3.0, 0.0, 0.0],
+                    [4.0, 0.0, 0.0],
+                    [4.0, 4.0, 8.0],
+                    [3.0, 4.0, 8.0],
+                ],
+            ),
+            ramp(
+                3,
+                [
+                    [0.0, 0.0, 3.0],
+                    [1.0, 0.0, 3.0],
+                    [4.0, 3.0, 3.0],
+                    [3.0, 3.0, 3.0],
+                ],
+            ),
+        ],
+        plan(),
+        vec![
+            group(1, 0, &[[0.0, 0.0], [1.0, 1.0], [0.0, 1.0]], &[1]),
+            group(
+                1,
+                0,
+                &[[1.0, 0.0], [3.0, 0.0], [3.0, 1.0], [2.0, 1.0]],
+                &[0, 1],
+            ),
+            seen(
+                group(
+                    1,
+                    0,
+                    &[[3.0, 0.0], [4.0, 0.0], [4.0, 1.0], [3.0, 1.0]],
+                    &[0, 1],
+                ),
+                &[(2, G0, 1)],
+            ),
+            group(
+                2,
+                0,
+                &[[3.0, 1.0], [4.0, 1.0], [4.0, 3.0], [3.0, 2.0]],
+                &[0, 1],
+            ),
+            seen(
+                group(2, 0, &[[3.0, 2.0], [4.0, 3.0], [3.0, 3.0]], &[0, 1]),
+                &[(3, G0, 1)],
+            ),
+            group(
+                2,
+                0,
+                &[[3.0, 3.0], [4.0, 3.0], [4.0, 4.0], [3.0, 4.0]],
+                &[0, 1],
+            ),
+            seen(
+                group(
+                    3,
+                    0,
+                    &[[0.0, 0.0], [1.0, 0.0], [2.0, 1.0], [1.0, 1.0]],
+                    &[0, 1],
+                ),
+                &[(1, G0, 1)],
+            ),
+            group(
+                3,
+                0,
+                &[[1.0, 1.0], [2.0, 1.0], [3.0, 2.0], [3.0, 3.0]],
+                &[0, 1],
+            ),
+        ],
+    )
+}
+
+/// A see-through box `[1,3]^2 x [1,2]` over the floor. Over its image the
+/// top (triangles 2 and 3) is frontmost; behind it lie its own bottom, the
+/// same source at another depth, and then the floor, which ends the stack.
+/// Its sides are seen edge-on.
+fn see_through_box() -> FaceCase {
+    let mut c = see_through_case(
+        "see-through box over a floor",
+        vec![
+            floor(),
+            solid(2, box_mesh([1.0, 1.0, 1.0], [3.0, 3.0, 2.0])).see_through(),
+        ],
+        plan(),
+        vec![
+            square_with_hole(1, &[0, 1]),
+            seen(middle(2, G0, &[2, 3]), &[(2, G0, 1), (1, G0, 2)]),
+        ],
+    );
+    c.evidence.edge_on = Some(8);
+    c
+}
+
+/// A see-through pane in the floor's plane. The tie gives both the area;
+/// the floor occludes, so it lists nothing, and the pane lists the floor in
+/// its own layer 0.
+fn see_through_tie() -> FaceCase {
+    let mut c = see_through_case(
+        "see-through pane tied with a floor",
+        vec![
+            floor(),
+            sheet(2, sheet_quad(1.0, 1.0, 3.0, 3.0, 0.0)).see_through(),
+        ],
+        plan(),
+        vec![
+            group(
+                1,
+                0,
+                &[[0.0, 0.0], [4.0, 0.0], [4.0, 4.0], [0.0, 4.0]],
+                &[0, 1],
+            ),
+            seen(middle(2, G0, &[0, 1]), &[(1, G0, 0)]),
+        ],
+    );
+    c.evidence.ties = true;
+    c
+}
+
+/// A see-through sheet over the whole floor with an opaque sheet
+/// `[1,3]^2` between them: the stack stops at the first opaque surface, so
+/// the middle lists the opaque sheet only and the rest the floor only. The
+/// floor and the opaque sheet are frontmost nowhere.
+fn stack_stops_at_an_occluder() -> FaceCase {
+    see_through_case(
+        "a stack stops at an opaque sheet",
+        vec![
+            floor(),
+            sheet(2, sheet_quad(1.0, 1.0, 3.0, 3.0, 1.0)),
+            sheet(3, sheet_quad(0.0, 0.0, 4.0, 4.0, 2.0)).see_through(),
+        ],
+        plan(),
+        vec![
+            seen(square_with_hole(3, &[0, 1]), &[(1, G0, 1)]),
+            seen(middle(3, G0, &[0, 1]), &[(2, G0, 1)]),
+        ],
+    )
+}
+
+/// A see-through box `[1,3]^2 x [1,4]` cut by the near plane `z = 2`: its
+/// cap is decided from all of its triangles and occludes, so the cap region
+/// lists nothing behind it.
+fn cap_of_a_see_through_solid() -> FaceCase {
+    see_through_case(
+        "cap of a see-through solid",
+        vec![
+            floor(),
+            solid(2, box_mesh([1.0, 1.0, 1.0], [3.0, 3.0, 4.0])).see_through(),
+        ],
+        plan().with_near(2.0),
+        vec![
+            square_with_hole(1, &[0, 1]),
+            middle(2, FaceSource::Cap, &[]),
+        ],
+    )
+}
+
+/// One sheet at `z = 1` over the floor `[0,4] x [0,2]`: the square
+/// `[0,2]^2` (triangles 0 and 1) opaque, the square `[2,4] x [0,2]`
+/// (triangles 2 and 3) see-through. Planar groups do not join triangles of
+/// different occlusion, so the coplanar sheet is two groups, named 0 and 2.
+fn planar_groups_split_by_occlusion() -> FaceFixture {
+    let positions = [
+        [0.0, 0.0],
+        [2.0, 0.0],
+        [2.0, 2.0],
+        [0.0, 2.0],
+        [4.0, 0.0],
+        [4.0, 2.0],
+    ]
+    .map(|[x, y]| Point3::new(x, y, 1.0))
+    .to_vec();
+    let mut glazed = sheet(
+        2,
+        TriMesh::new(positions, vec![0, 1, 2, 0, 2, 3, 1, 4, 5, 1, 5, 2]),
+    );
+    glazed.occlusion = vec![
+        Occlusion::Opaque,
+        Occlusion::Opaque,
+        Occlusion::SeeThrough,
+        Occlusion::SeeThrough,
+    ];
+    glazed
+}
+
+fn planar_glazing() -> FaceCase {
+    see_through_case(
+        "planar groups split by occlusion",
+        vec![
+            sheet(1, sheet_quad(0.0, 0.0, 4.0, 2.0, 0.0)),
+            planar_groups_split_by_occlusion().planar(&[0, 0, 2, 2]),
+        ],
+        plan(),
+        vec![
+            group(
+                2,
+                0,
+                &[[0.0, 0.0], [2.0, 0.0], [2.0, 2.0], [0.0, 2.0]],
+                &[0, 1],
+            ),
+            seen(
+                group(
+                    2,
+                    2,
+                    &[[2.0, 0.0], [4.0, 0.0], [4.0, 2.0], [2.0, 2.0]],
+                    &[2, 3],
+                ),
+                &[(1, G0, 1)],
+            ),
+        ],
+    )
+}
+
+/// The regions a provider that claims `Occlusion::SeeThrough` must
+/// reproduce, in plan view; each is also run with every triangle reversed.
+pub(crate) fn see_through_face_cases() -> Vec<FaceCase> {
+    vec![
+        pane_over_box(),
+        panes_over_a_box(),
+        see_through_cycle(),
+        see_through_box(),
+        see_through_tie(),
+        stack_stops_at_an_occluder(),
+        cap_of_a_see_through_solid(),
+        planar_glazing(),
+    ]
+}
+
+/// The base cases a see-through claim must answer unchanged when every
+/// triangle is flagged opaque.
+pub(crate) const NEUTRAL_FACE_CASES: [&str; 3] = [
+    "two_boxes_overlapping",
+    "cut_column_on_slab",
+    "coplanar_tie",
+];
+
+/// The see-through requests a provider that claims them must refuse.
+pub(crate) fn see_through_face_refusals() -> Vec<FaceRefusal> {
+    let invalid = |e: &GeomError| matches!(e, GeomError::InvalidInput(_));
+    let mut short = pane_over_box().meshes;
+    short[1].occlusion.truncate(1);
+    vec![
+        refusal_of(
+            "a face group mixing see-through and opaque triangles",
+            vec![
+                sheet(1, sheet_quad(0.0, 0.0, 4.0, 2.0, 0.0)),
+                planar_groups_split_by_occlusion(),
+            ],
+            limits().with_max_behind_surfaces(16),
+            invalid,
+            Some(MeshId(2)),
+        ),
+        refusal_of(
+            "occlusion flags shorter than the triangles",
+            short,
+            limits().with_max_behind_surfaces(16),
+            invalid,
+            Some(MeshId(2)),
+        ),
+        refusal_of(
+            "behind surfaces over the limit",
+            pane_over_box().meshes,
+            limits(),
+            |e| {
+                matches!(
+                    e,
+                    GeomError::BudgetExceeded {
+                        resource: "visible-face behind surfaces"
+                    }
+                )
+            },
+            None,
+        ),
+    ]
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -820,7 +1338,7 @@ mod tests {
 
     #[test]
     fn expected_rings_have_the_documented_orientation_and_start() {
-        for case in cases() {
+        for case in cases().into_iter().chain(see_through_face_cases()) {
             for r in &case.regions {
                 assert!(r.outer.len() >= 3, "{}", case.name);
                 assert!(area(&r.outer) > 0.0, "{}: outer is clockwise", case.name);
@@ -837,7 +1355,7 @@ mod tests {
 
     #[test]
     fn expected_regions_are_sorted_by_mesh_position_then_source() {
-        for case in cases() {
+        for case in cases().into_iter().chain(see_through_face_cases()) {
             let position = |id: MeshId| case.meshes.iter().position(|m| m.id == id).unwrap();
             let keys: Vec<_> = case
                 .regions
@@ -893,7 +1411,7 @@ mod tests {
                 );
             }
         };
-        for case in cases() {
+        for case in cases().into_iter().chain(see_through_face_cases()) {
             check(case.name, &case.meshes);
         }
         for case in area_cases() {
@@ -903,7 +1421,7 @@ mod tests {
 
     #[test]
     fn expected_triangles_belong_to_the_region_group_and_exist() {
-        for case in cases() {
+        for case in cases().into_iter().chain(see_through_face_cases()) {
             for r in &case.regions {
                 let fixture = case.meshes.iter().find(|m| m.id == r.mesh).unwrap();
                 for &t in &r.triangles {
@@ -992,5 +1510,81 @@ mod tests {
             .unwrap();
         let offender = mismatch.meshes.iter().find(|m| m.id == MeshId(2)).unwrap();
         assert_ne!(offender.groups.len(), offender.mesh.triangle_count());
+    }
+
+    #[test]
+    fn see_through_cases_cover_their_frontmost_areas_and_stack_by_layer() {
+        let total = |name: &str, mesh: u64| -> f64 {
+            let case = see_through_face_cases()
+                .into_iter()
+                .find(|c| c.name == name)
+                .unwrap();
+            case.regions
+                .iter()
+                .filter(|r| r.mesh == MeshId(mesh))
+                .map(|r| area(&r.outer) + r.holes.iter().map(|h| area(h)).sum::<f64>())
+                .sum()
+        };
+        // The box's top 16 minus the pane over it (2 x 3); the pane 2 x 4.
+        assert_eq!(total("pane over a box", 1), 10.0);
+        assert_eq!(total("pane over a box", 2), 8.0);
+        // The box's top minus A ∪ B (4 + 4 - 1); A minus B; all of B.
+        assert_eq!(total("panes over a box", 1), 9.0);
+        assert_eq!(total("panes over a box", 2), 3.0);
+        assert_eq!(total("panes over a box", 3), 9.0);
+        // A minus the parallelogram of C (area 1); B minus [3,4]x[0,1]; C
+        // (area 3) minus B's triangle (area 1/2).
+        assert_eq!(total("see-through cycle", 1), 3.0);
+        assert_eq!(total("see-through cycle", 2), 3.0);
+        assert_eq!(total("see-through cycle", 3), 2.5);
+        assert_eq!(total("see-through pane tied with a floor", 1), 16.0);
+        assert_eq!(total("a stack stops at an opaque sheet", 3), 16.0);
+        assert_eq!(total("planar groups split by occlusion", 2), 8.0);
+
+        for case in see_through_face_cases() {
+            assert!(
+                case.meshes
+                    .iter()
+                    .any(|m| m.occlusion.contains(&Occlusion::SeeThrough)),
+                "{}",
+                case.name
+            );
+            assert!(case.limits.max_behind_surfaces > 0, "{}", case.name);
+            for m in &case.meshes {
+                assert!(
+                    m.occlusion.is_empty() || m.occlusion.len() == m.mesh.triangle_count(),
+                    "{}",
+                    case.name
+                );
+            }
+            for r in &case.regions {
+                let position = |id: MeshId| case.meshes.iter().position(|m| m.id == id).unwrap();
+                let keys: Vec<_> = r
+                    .behind
+                    .iter()
+                    .map(|b| (b.layer, position(b.mesh), b.source))
+                    .collect();
+                assert!(keys.windows(2).all(|w| w[0] < w[1]), "{}", case.name);
+                assert!(
+                    keys.first().is_none_or(|k| k.0 <= 1)
+                        && keys.windows(2).all(|w| w[1].0 - w[0].0 <= 1),
+                    "{}",
+                    case.name
+                );
+                let own = case.meshes.iter().find(|m| m.id == r.mesh).unwrap();
+                let see_through = r.triangles.first().is_some_and(|&t| {
+                    own.occlusion.get(t as usize) == Some(&Occlusion::SeeThrough)
+                });
+                assert!(r.behind.is_empty() || see_through, "{}", case.name);
+            }
+        }
+        for refusal in see_through_face_refusals() {
+            if let Some(id) = refusal.mesh {
+                assert_eq!(refusal.meshes[1].id, id, "{}", refusal.name);
+            }
+        }
+        for name in NEUTRAL_FACE_CASES {
+            assert!(cases().iter().any(|c| c.name == name), "{name}");
+        }
     }
 }

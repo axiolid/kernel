@@ -15,15 +15,29 @@
 //! [`seen_through`](crate::HiddenLineSegment::seen_through) count and the
 //! evidence, requires a short occlusion slice to be refused naming its mesh,
 //! and requires base scenes flagged all opaque to be drawn exactly as without
-//! flags. The visible-face claim has no fixtures yet and fails closed with
-//! [`SeeThroughConformanceFailure::ClaimUnverifiable`].
+//! flags. A visible-face claim must reproduce the regions and `behind` lists
+//! of eight scenes (a pane over a box, two panes over a box, a depth cycle of
+//! three panes, a see-through box, a pane tied with a floor, a stack stopped
+//! by an opaque sheet, the cap of a cut see-through solid and planar groups
+//! split by occlusion), each also with every triangle reversed, refuse a mixed
+//! face group, a short occlusion slice and a stack over
+//! `max_behind_surfaces`, and answer base scenes flagged all opaque as
+//! without flags.
 
 use core::fmt;
 
 use axiolid_contracts::{ExecutionOptions, GeomError};
 use axiolid_core::Tolerance;
 
+use super::faces::{
+    answer, check_expected_evidence, check_orientation, check_shape, same_result,
+    FaceConformanceFailure, FaceConformanceReport, Scene,
+};
 use super::{check_outcome, draw, mesh_of, same_drawing, ConformanceFailure, ConformanceReport};
+use crate::face_fixtures::{
+    cases as face_cases, see_through_face_cases, see_through_face_refusals, FaceFixture,
+    NEUTRAL_FACE_CASES,
+};
 use crate::fixtures::{
     cases, see_through_cases, see_through_refusals, Case, Fixture, LENGTH_TOLERANCE, NEUTRAL_CASES,
 };
@@ -56,6 +70,11 @@ pub enum SeeThroughConformanceFailure {
     /// see-through fixture or refusal in its geometry, visibility, base
     /// evidence, determinism or orientation; the failure names the case.
     HiddenLines(ConformanceFailure),
+    /// A visible-face provider that claims see-through triangles failed a
+    /// see-through fixture or refusal: its regions (`behind` included),
+    /// shape, base evidence, determinism or orientation; the failure names
+    /// the case.
+    VisibleFaces(FaceConformanceFailure),
     /// The segments of one kind, visibility and `seen_through` count differ
     /// in number or total length from the expected ones.
     WrongSeenThroughRow {
@@ -98,12 +117,6 @@ pub enum SeeThroughConformanceFailure {
     NotNeutral {
         /// The base fixture.
         case: &'static str,
-    },
-    /// The provider claims see-through triangles, which this suite cannot
-    /// verify for the operation.
-    ClaimUnverifiable {
-        /// The operation, `"visible faces"`.
-        operation: &'static str,
     },
 }
 
@@ -174,11 +187,7 @@ impl SeeThroughConformanceSuite {
         };
         const OPERATION: &str = "visible faces";
         if claimed {
-            report
-                .failures
-                .push(SeeThroughConformanceFailure::ClaimUnverifiable {
-                    operation: OPERATION,
-                });
+            report.failures = claimed_face_failures(provider);
             return report;
         }
         let case = first_case();
@@ -304,6 +313,152 @@ fn claimed_failures(provider: &dyn MeshHiddenLines) -> Vec<SeeThroughConformance
         .map(SeeThroughConformanceFailure::HiddenLines)
         .chain(failures)
         .collect()
+}
+
+/// The failures of a visible-face provider that claims see-through
+/// triangles. The provider is called directly, so it must refuse a mixed
+/// group, a short occlusion slice and a stack over the limit itself.
+fn claimed_face_failures(provider: &dyn MeshVisibleFaces) -> Vec<SeeThroughConformanceFailure> {
+    let options = options();
+    let mut base = FaceConformanceReport::default();
+    let mut failures = Vec::new();
+    for case in see_through_face_cases() {
+        let scene = Scene {
+            name: case.name,
+            meshes: &case.meshes,
+            view: case.view,
+        };
+        let ask = || {
+            answer(
+                provider,
+                &case.meshes,
+                case.view,
+                case.region,
+                case.limits,
+                &options,
+            )
+        };
+        match (ask(), ask()) {
+            (Ok(a), Ok(b)) => {
+                check_shape(&mut base, &scene, &a);
+                if a.regions != case.regions {
+                    base.failures.push(FaceConformanceFailure::WrongRegions {
+                        case: case.name,
+                        expected: case.regions.clone(),
+                        actual: a.regions.clone(),
+                    });
+                }
+                check_expected_evidence(&mut base, case.name, &case.evidence, &a);
+                let flags: usize = case.meshes.iter().map(see_through_flags).sum();
+                let behind: usize = a.regions.iter().map(|r| r.behind.len()).sum();
+                if a.evidence.see_through_triangles != flags || a.evidence.behind_surfaces != behind
+                {
+                    failures
+                        .push(SeeThroughConformanceFailure::IncorrectEvidence { case: case.name });
+                }
+                if a != b {
+                    base.failures
+                        .push(FaceConformanceFailure::NonDeterministic { case: case.name });
+                }
+                check_orientation(
+                    provider,
+                    &mut base,
+                    &scene,
+                    case.region,
+                    case.limits,
+                    &a,
+                    &options,
+                );
+            }
+            (Err(error), _) | (_, Err(error)) => {
+                base.failures.push(FaceConformanceFailure::ReturnedError {
+                    case: case.name,
+                    error,
+                })
+            }
+        }
+    }
+    for refusal in see_through_face_refusals() {
+        match answer(
+            provider,
+            &refusal.meshes,
+            refusal.view,
+            None,
+            refusal.limits,
+            &options,
+        ) {
+            Ok(_) => base
+                .failures
+                .push(FaceConformanceFailure::MissingRefusal { case: refusal.name }),
+            Err(error) if !(refusal.accepts)(&error.error) => {
+                base.failures.push(FaceConformanceFailure::ReturnedError {
+                    case: refusal.name,
+                    error,
+                })
+            }
+            Err(error) if error.mesh != refusal.mesh => {
+                base.failures
+                    .push(FaceConformanceFailure::WrongRefusalMesh {
+                        case: refusal.name,
+                        expected: refusal.mesh,
+                        actual: error.mesh,
+                    })
+            }
+            Err(_) => {}
+        }
+    }
+    for case in face_cases()
+        .into_iter()
+        .filter(|case| NEUTRAL_FACE_CASES.contains(&case.name))
+    {
+        let opaque: Vec<FaceFixture> = case
+            .meshes
+            .iter()
+            .map(|f| FaceFixture {
+                id: f.id,
+                role: f.role,
+                mesh: f.mesh.clone(),
+                groups: f.groups.clone(),
+                planar: f.planar,
+                occlusion: vec![Occlusion::Opaque; f.mesh.triangle_count()],
+            })
+            .collect();
+        let ask = |meshes: &[FaceFixture]| {
+            answer(
+                provider,
+                meshes,
+                case.view,
+                case.region,
+                case.limits,
+                &options,
+            )
+        };
+        match (ask(&case.meshes), ask(&opaque)) {
+            (Ok(plain), Ok(flagged)) if same_result(&plain, &flagged) => {}
+            (Ok(_), Ok(_)) => {
+                failures.push(SeeThroughConformanceFailure::NotNeutral { case: case.name })
+            }
+            (Err(error), _) | (_, Err(error)) => {
+                base.failures.push(FaceConformanceFailure::ReturnedError {
+                    case: case.name,
+                    error,
+                })
+            }
+        }
+    }
+    base.failures
+        .into_iter()
+        .map(SeeThroughConformanceFailure::VisibleFaces)
+        .chain(failures)
+        .collect()
+}
+
+fn see_through_flags(fixture: &FaceFixture) -> usize {
+    fixture
+        .occlusion
+        .iter()
+        .filter(|&&o| o == Occlusion::SeeThrough)
+        .count()
 }
 
 /// The `seen_through` counts and the see-through evidence of one drawing.
@@ -608,17 +763,40 @@ mod tests {
     }
 
     #[test]
-    fn a_visible_face_claim_still_fails_closed() {
+    fn a_visible_face_claim_that_ignores_the_flags_fails_the_fixtures() {
         let faces = SeeThroughConformanceSuite::run_faces(&Probe {
             claims: true,
             answer: Answer::Draw,
         });
         assert!(faces.claimed);
-        assert_eq!(
-            faces.failures,
-            [SeeThroughConformanceFailure::ClaimUnverifiable {
-                operation: "visible faces"
-            }]
-        );
+        // The probe answers nothing: every case has the wrong regions, and
+        // every refusal is answered instead.
+        for case in ["pane over a box", "a stack stops at an opaque sheet"] {
+            assert!(
+                faces.failures.iter().any(|f| matches!(
+                    f,
+                    SeeThroughConformanceFailure::VisibleFaces(
+                        FaceConformanceFailure::WrongRegions { case: c, .. }
+                    ) if *c == case
+                )),
+                "{case}: {faces}"
+            );
+        }
+        for case in [
+            "a face group mixing see-through and opaque triangles",
+            "behind surfaces over the limit",
+        ] {
+            assert!(faces.failures.iter().any(|f| matches!(
+                f,
+                SeeThroughConformanceFailure::VisibleFaces(
+                    FaceConformanceFailure::MissingRefusal { case: c }
+                ) if *c == case
+            )));
+        }
+        assert!(faces
+            .failures
+            .contains(&SeeThroughConformanceFailure::IncorrectEvidence {
+                case: "pane over a box"
+            }));
     }
 }
