@@ -144,3 +144,7 @@ harness = false
 [[bench]]
 name = "chain_chord_bound"
 harness = false
+
+[[bench]]
+name = "station_quadrature"
+harness = false
