@@ -818,10 +818,11 @@ fn straight_face_on(mut builder: GeometryGraphBuilder, support: NodeId) -> (Geom
     (builder.finish(vec![root]).unwrap(), root)
 }
 
-/// A B-rep face on a ruled surface is meshed with pcurves on its edges
-/// (#411); one without them is refused by name, not as a malformed graph.
+/// A B-rep face on a ruled surface whose edges carry no pcurve has them
+/// inverted onto the surface (#454): the sheet `(u, v, v)` between two
+/// parallel lines meshes as its square on the plane `y = z`.
 #[test]
-fn a_ruled_face_whose_edges_have_no_pcurve_is_refused_by_name() {
+fn a_ruled_face_whose_edges_have_no_pcurve_is_inverted() {
     let a = line(Point3::ZERO, Vec3::X, (0.0, 1.0));
     let b = line(Point3::new(0.0, 1.0, 1.0), Vec3::X, (0.0, 1.0));
     let mut builder = GeometryGraphBuilder::new();
@@ -835,20 +836,24 @@ fn a_ruled_face_whose_edges_have_no_pcurve_is_refused_by_name() {
         .unwrap();
     let (graph, root) = straight_face_on(builder, ruled);
 
-    let error = compiler()
+    let mesh = compiler()
         .compile_mesh(&graph, root, &options_with(CHORD))
-        .unwrap_err();
-    assert!(
-        matches!(
-            error,
-            GeomError::UnsupportedInput {
-                operation: Operation::Tessellation,
-                input: "an edge use without a pcurve on a face over a surface relation",
-                ..
-            }
-        ),
-        "{error:?}"
-    );
+        .expect("the edges invert onto the ruled surface");
+    assert!(!mesh.indices.is_empty());
+    for p in &mesh.positions {
+        assert!((p.y - p.z).abs() <= 1e-12, "{p:?} is off the sheet");
+    }
+    let area: Scalar = mesh
+        .indices
+        .as_chunks::<3>()
+        .0
+        .iter()
+        .map(|t| {
+            let [a, b, c] = t.map(|i| mesh.positions[i as usize]);
+            0.5 * (b - a).cross(c - a).length()
+        })
+        .sum();
+    assert!((area - 2.0_f64.sqrt()).abs() <= 1e-12, "{area}");
 }
 
 /// A surface relation the tessellator does not read is refused as

@@ -2,9 +2,8 @@
 
 Each mutant weakens one decision of `crates/execution/compile/src/
 surface_relation.rs` (the parameterisation, the closed-form derivative
-bounds, the periods, the domain and the refusals), the view's arm for a
-revolution, or the refusal of an edge use without a pcurve.
-`tests/relation_faces.rs`, the module's unit tests, `tests/ruled_surface.rs`
+bounds, the periods, the domain and the refusals) or the view's arm for a
+revolution. `tests/relation_faces.rs`, the module's unit tests, `tests/ruled_surface.rs`
 or the tessellator's own tests must fail on it. A build error also counts as
 killed.
 
@@ -23,7 +22,6 @@ import probe_lib
 
 S = "crates/execution/compile/src/surface_relation.rs"
 V = "crates/execution/compile/src/brep/view.rs"
-I = "crates/execution/compile/src/brep/inversion.rs"
 R = "crates/execution/compile/src/ruled.rs"
 TARGETS = [
     ["-p", "axiolid-mesh-compile", "--lib", "surface_relation"],
@@ -142,13 +140,6 @@ MUTANTS = [
     ("the family of a revolution is named a surface", S,
      '            Self::Revolution { .. } => "surface of revolution",\n',
      '            Self::Revolution { .. } => "surface",\n'),
-    ("an edge use without a pcurve on a relation is refused as degenerate", I,
-     "            return Err(GeomError::UnsupportedInput {\n"
-     "                backend: crate::BACKEND_ID,\n"
-     "                operation: Operation::Tessellation,\n"
-     "                input: RELATION_WITHOUT_PCURVE,\n"
-     "            });\n",
-     '            return Err(GeomError::Degenerate("a relation without a pcurve".into()));\n'),
 ]
 
 probe_lib.main(MUTANTS, tests=TARGETS, command=probe_lib.CARGO_TEST + ("--all-features",), timeout=1800)

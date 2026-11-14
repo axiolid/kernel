@@ -53,6 +53,10 @@
 //! blend of the sides' bounds, and `S_vv = 0`. The bounds are smooth unless
 //! a side's tangent break, mapped to `u`, lies strictly inside.
 
+mod invert;
+
+pub(crate) use invert::RelationInverter;
+
 use crate::ruled::{resolve, Side};
 use axiolid_contracts::{GeomError, GeomResult, Operation};
 use axiolid_core::{Interval, Point3, Scalar, Vec3};

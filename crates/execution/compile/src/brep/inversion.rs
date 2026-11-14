@@ -20,10 +20,14 @@
 //!   global search ([`axiolid_nurbs::invert_surface_certified`], the
 //!   periodic form for a surface whose closed axes validate as periodic),
 //!   which refuses an off-surface point as soon as it proves the separation
-//!   (#320) and parameters that are not unique.
+//!   (#320) and parameters that are not unique. A face over a surface
+//!   relation inverts by the certified search along its swept parameter
+//!   ([`RelationInverter`], #454, ADR 0110), with the same refusals; every
+//!   step below applies to it as to an atomic face.
 //! - A sample at a cone's apex or a sphere's pole, where every `u` names
 //!   the point, is refused by name, as is a sample within the linear
-//!   tolerance of it.
+//!   tolerance of it, and so is one on a relation's axis of revolution,
+//!   ruled apex or collapsed ruling.
 //! - Periodic parameters are unwrapped along the ring by continuity. That
 //!   reading is unambiguous only while consecutive samples turn less than a
 //!   quarter period, so a new edge is sampled until they do; an edge whose
@@ -68,7 +72,8 @@
 
 use super::support::Support;
 use super::view::Pcurve;
-use axiolid_contracts::{GeomError, GeomResult, Operation};
+use crate::surface_relation::RelationInverter;
+use axiolid_contracts::{GeomError, GeomResult};
 use axiolid_core::{Point2, Scalar, Tolerance, Vec3};
 use axiolid_nurbs::{
     CertifiedSurfaceProjectionOptions, PeriodicBSplineSurface, SurfaceInversionCertificate3,
@@ -91,16 +96,61 @@ use super::{
 /// trades search work against polishing.
 const BSPLINE_PARAMETER_RESOLUTION: Scalar = 1e-4;
 
-/// Why a face over a surface relation has no inverter: an edge use without
-/// a pcurve there is refused before any meshing (#411).
-const RELATION_WITHOUT_PCURVE: &str =
-    "an edge use without a pcurve on a face over a surface relation";
-
 /// Gauss-Newton steps sharpening certified B-spline parameters.
 const POLISH_STEPS: usize = 8;
 
-/// How a face's surface names a point on it.
+/// How a face's support names a point on it.
 pub(super) struct SurfaceInverter<'s> {
+    target: Target<'s>,
+    /// Periods along which parameters are unwrapped by continuity.
+    periods: (Option<Scalar>, Option<Scalar>),
+}
+
+/// What inverts a sample: an atomic surface's own inversion, or a surface
+/// relation's certified one ([`RelationInverter`], ADR 0110).
+enum Target<'s> {
+    Atomic(AtomicInverter<'s>),
+    Relation(RelationInverter<'s>),
+}
+
+impl<'s> SurfaceInverter<'s> {
+    pub(super) fn new(support: Support<'s>, tolerance: Tolerance) -> GeomResult<Self> {
+        match support {
+            Support::Surface(surface) => {
+                let atomic = AtomicInverter::new(surface, tolerance)?;
+                Ok(Self {
+                    periods: atomic.periods,
+                    target: Target::Atomic(atomic),
+                })
+            }
+            Support::Relation { surface, .. } => Ok(Self {
+                periods: surface.periods(),
+                target: Target::Relation(RelationInverter::new(surface, tolerance)?),
+            }),
+        }
+    }
+
+    /// The parameters naming `point`, or a refusal by name.
+    fn invert(&self, point: Vec3) -> GeomResult<Point2> {
+        match &self.target {
+            Target::Atomic(inverter) => inverter.invert(point),
+            Target::Relation(inverter) => inverter.invert(point),
+        }
+    }
+
+    /// See [`AtomicInverter::check_spline_parameters`]. A relation
+    /// evaluates exactly periodically along its periodic axes and nothing
+    /// is unwrapped along the others, so its parameters need no check.
+    fn check_spline_parameters(&self, params: &[Point2], points: &[Vec3]) -> GeomResult<()> {
+        match &self.target {
+            Target::Atomic(inverter) => inverter.check_spline_parameters(params, points),
+            Target::Relation(_) => Ok(()),
+        }
+    }
+}
+
+/// How an atomic surface names a point on it.
+struct AtomicInverter<'s> {
     surface: &'s Surface,
     tolerance: Tolerance,
     kind: InverterKind,
@@ -135,15 +185,8 @@ struct SplineSearch {
     model: CertifiedSurfaceProjectionOptions,
 }
 
-impl<'s> SurfaceInverter<'s> {
-    pub(super) fn new(support: Support<'s>, tolerance: Tolerance) -> GeomResult<Self> {
-        let Some(surface) = support.atomic() else {
-            return Err(GeomError::UnsupportedInput {
-                backend: crate::BACKEND_ID,
-                operation: Operation::Tessellation,
-                input: RELATION_WITHOUT_PCURVE,
-            });
-        };
+impl<'s> AtomicInverter<'s> {
+    fn new(surface: &'s Surface, tolerance: Tolerance) -> GeomResult<Self> {
         let Surface::BSpline(spline) = surface else {
             return Ok(Self {
                 surface,
@@ -961,7 +1004,7 @@ fn align(inverter: &SurfaceInverter<'_>, params: &mut [Point2], previous_end: Op
     }
 }
 
-impl SurfaceInverter<'_> {
+impl AtomicInverter<'_> {
     /// A B-spline's evaluator does not wrap a parameter moved by whole
     /// periods back into its domain, so each unwrapped sample must still
     /// name its point there.

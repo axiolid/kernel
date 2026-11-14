@@ -35,7 +35,6 @@ use axiolid_topology::{
 };
 
 const BUDGET: Scalar = 1e-3;
-const NO_PCURVE: &str = "an edge use without a pcurve on a face over a surface relation";
 
 fn options() -> ExecutionOptions {
     ExecutionOptions::new(Tolerance::new(BUDGET, 1e-9).unwrap())
@@ -960,25 +959,6 @@ fn refused(result: GeomResult<Compiled>) -> GeomError {
         Ok((_, _, report)) => panic!("expected a refusal, got {report:?}"),
         Err(error) => error,
     }
-}
-
-#[test]
-fn a_revolved_face_whose_edges_have_no_pcurve_is_refused_by_name() {
-    let error = refused(open_sheet(
-        &cylinder_revolution,
-        &cylinder_sheet(false, None),
-    ));
-    assert!(
-        matches!(
-            error,
-            GeomError::UnsupportedInput {
-                operation: Operation::Tessellation,
-                input: NO_PCURVE,
-                ..
-            }
-        ),
-        "{error:?}"
-    );
 }
 
 #[test]

@@ -56,11 +56,11 @@
 //!
 //! A face's surface is a [`support::Support`]: an atomic surface, or a
 //! surface relation read through [`crate::surface_relation`] (#411, ADR
-//! 0103). The tessellator asks the support for points, periods, a family
-//! name and derivative bounds only, so a face over a revolution, a linear extrusion or a ruled surface is meshed
-//! and bounded as one over an atomic surface is. Such a face needs a pcurve
-//! on every edge use; a use without one is refused by name, since inverting
-//! an edge onto a relation is not done.
+//! 0103). The tessellator asks the support for points, tangents, periods, a
+//! family name and derivative bounds only, so a face over a revolution, a
+//! linear extrusion or a ruled surface is meshed and bounded as one over an
+//! atomic surface is. An edge use without a pcurve is inverted onto it as
+//! onto an atomic surface ([`inversion`], #454, ADR 0110).
 //!
 //! # Deviation (#232)
 //!
