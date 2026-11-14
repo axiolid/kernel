@@ -20,10 +20,19 @@
 //! A sample is skipped as ambiguous when it lies within `1e-7` of the image
 //! edge of a triangle (or, for faces, of an output ring), or two depths that
 //! decide it are within `1e-7` (a tie, which binary64 cannot tell from a near
-//! miss). At least 90% of the face samples must be checked, and 75% of the
-//! line samples in the isometric, oblique and pinhole views; in an axis view
-//! every box edge lies on the image line of a side of its own box seen
-//! edge-on, so only a minimum count of line samples is required there.
+//! miss). At least 90% of the face samples must be checked. Line samples lie
+//! on an edge, so they are ambiguous wherever another triangle's image edge
+//! runs along that edge's image, and how often that happens depends on the
+//! view:
+//!
+//! - oblique and pinhole: the direction is generic, so only chance
+//!   coincidences remain; 85% must be checked (about 89% and 91% are);
+//! - isometric: two thirds of the boxes are axis-aligned on a 1/8 grid, and
+//!   the isometric direction maps many grid edges of different boxes onto
+//!   common image lines; 75% must be checked (about 77% to 80% are);
+//! - the axis views: every box edge lies on the image line of a side of its
+//!   own box seen edge-on, so about half the samples are ambiguous and only a
+//!   minimum count is required.
 
 mod common;
 
@@ -414,15 +423,16 @@ fn hidden_lines_agree_with_see_through_ray_casting() {
             tally.checked >= 2000 && tally.counted >= 200,
             "{name}, near {near}: {tally:?}"
         );
-        // In an axis view every box edge lies on the image line of a side of
-        // its own box seen edge-on, so about half the samples are ambiguous;
-        // the generic views must check most of theirs.
-        if ["isometric", "oblique", "pinhole"].contains(name) {
-            assert!(
-                tally.checked * 4 >= total * 3,
-                "{name}, near {near}: {tally:?}"
-            );
-        }
+        // The share each view must check; see the module docs for why.
+        let percent = match *name {
+            "oblique" | "pinhole" => 85,
+            "isometric" => 75,
+            _ => 0,
+        };
+        assert!(
+            tally.checked * 100 >= total * percent,
+            "{name}, near {near}: {tally:?}"
+        );
     }
 }
 
@@ -552,11 +562,14 @@ fn check_faces(
             };
             let source_of = |hit: &Hit| if hit.cap { FaceSource::Cap } else { G0 };
             let id = meshes[front.mesh].id;
-            let own: Vec<_> = holding
-                .iter()
-                .filter(|r| r.mesh == id && r.source == source_of(front))
-                .collect();
-            assert_eq!(own.len(), 1, "{context}: {q:?} in {holding:?}");
+            // No tie at the sample, so exactly one region holds it, and it is
+            // the frontmost source's.
+            assert_eq!(holding.len(), 1, "{context}: {q:?} in {holding:?}");
+            let own = &holding;
+            assert!(
+                own[0].mesh == id && own[0].source == source_of(front),
+                "{context}: {q:?} in {holding:?}"
+            );
             let stop = hits
                 .iter()
                 .position(|h| !h.see_through)
