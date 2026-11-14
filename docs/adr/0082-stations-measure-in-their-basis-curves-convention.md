@@ -2161,7 +2161,10 @@ run on the outer side of an ellipse was reported unbounded too.
   the span's two reads padded by twice the reads' measure of arc length, not
   over frames read at padded ends, and the reads at a span's ends are kept
   for its halves: the fold decision calls `rates` once per bisected span, and
-  an offset beside a cubic across its knot spent 47 of 52 s there before.
+  the first version of the decision, which read frames afresh for each, took
+  52 s on an offset beside a cubic across its knot. Compiling the offset by 1
+  m of the cubic, 1 m to the side, took 6.3 s (unbounded) and 38.6 s (the near
+  run, certified) before this amendment, and takes 10.4 s and 25.2 s now.
 - **The orientation's turn** is closed form: `e'.n = a'.n / |a|`, `y^'.n =
   -(r'.y^ - (r.e)(a'.y^) / |a|) / |g|` for the interpolated axis `a` and
   reference `r` (`g = r - (r.e) e`), bounded over a span by the existing

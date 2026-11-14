@@ -19,13 +19,15 @@
 //!
 //! Each case is validated before it is timed: the outcome is the one named.
 //!
-//! Measured on a shared machine under a load of 18 (best of three wall-clock
-//! runs of the same compile, a measurement, not a performance claim): the
-//! ellipse 10 ms (18 ms before the fold check kept the reads at the ends of
-//! its spans); near the knot 20.6 s against 46.4 s, far from it 11.7 s
-//! against 52.0 s. In the near case the fold decision alone is 6.5 s against
-//! 47 s (83 spans with rates at about 50 ms each); the rest is the mesh's
-//! own cells.
+//! Measured on a shared machine under heavy load (wall-clock runs of the
+//! same compile, a measurement, not a performance claim). The offset by 1 m
+//! of the cubic compiled in 6.3 s (far, unbounded) and 38.6 s (near,
+//! certified) before the fold decision of #406, whose conservative bound ran
+//! on it; with the decision it takes 10.4 s and 25.2 s. The first version of
+//! the decision took 52 s on the far case (47 s in the fold alone) because
+//! it read frames afresh for every span; it now keeps the reads at the ends
+//! of a span for its halves, and reads no frame at the padded ends. The
+//! ellipse takes 10 ms.
 //!
 //! ```bash
 //! cargo bench -p axiolid-benchmark --bench station_quadrature
