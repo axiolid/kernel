@@ -9,6 +9,21 @@ caret rule for `0.x` versions.
 
 ## [Unreleased]
 
+### Fixed
+
+- `Region::minkowski_sum`, `minkowski_erosion` and their region and disc
+  siblings read the union of their terms from the term edges that can bound
+  it. An edge proved, exactly, to lie strictly inside one convex term is left
+  out, and the rest are cut once and read by the same rule. A 304-corner
+  cluster of furniture outlines summed with a 1.7 m by 0.9 m rectangle took
+  0.26 s and 89 MB, now 8 ms and 6 MB; at 3,040 corners 3.1 s and 941 MB,
+  now 84 ms and 26 MB (`minkowski_furniture`, release, median of 3). Results,
+  refusals and both morphology modes are unchanged bit for bit: every hash of
+  `minkowski_furniture`, `minkowski_plan` and `disc_erosion` is the same
+  (`tools/benchmark/benches/minkowski_furniture.rs`; `src/term_union.rs`,
+  ADR 0108, #344). `scripts/probe_term_union_mutants.py` lists the faults its
+  tests must catch.
+
 ## [0.4.1] - 2026-11-14
 
 ### Added
@@ -36,18 +51,6 @@ caret rule for `0.x` versions.
 
 ### Fixed
 
-- `Region::minkowski_sum`, `minkowski_erosion` and their region and disc
-  siblings read the union of their terms from the term edges that can bound
-  it. An edge proved, exactly, to lie strictly inside one convex term is left
-  out, and the rest are cut once and read by the same rule. A 304-corner
-  cluster of furniture outlines summed with a 1.7 m by 0.9 m rectangle took
-  0.26 s and 89 MB, now 8 ms and 6 MB; at 3,040 corners 3.1 s and 941 MB,
-  now 84 ms and 26 MB (`minkowski_furniture`, release, median of 3). Results,
-  refusals and both morphology modes are unchanged bit for bit: every hash of
-  `minkowski_furniture`, `minkowski_plan` and `disc_erosion` is the same
-  (`tools/benchmark/benches/minkowski_furniture.rs`; `src/term_union.rs`,
-  ADR 0108, #344). `scripts/probe_term_union_mutants.py` lists the faults its
-  tests must catch.
 - `MorphologyMode::Fast` fills a needle notch deeper than the disc. A wall of
   needles 0.25 m deep under a disc of radius 0.4 m kept every notch, since no
   chord was proposed over a notch deeper than `t`: #340's room with a column

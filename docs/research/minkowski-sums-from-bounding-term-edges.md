@@ -18,7 +18,11 @@ the other on the same machine in separate target directories. The machine was
 shared, so absolute times carry noise of tens of percent; the ratios between
 the two columns of one run are the reliable part. `hash` is the FNV-1a digest
 of every vertex of the result (`tests/minkowski.rs`'s `digest`), the same
-before and after in every row.
+before and after in every row. All baseline hashes, the `turned` rows
+included, were printed by the baseline binary itself (the bench built on
+aa73f556, before any library change); the message of `74932788` lists only
+the `axis` ones, and `turned` rows were compared against the same run's
+output file, not a number written down by hand.
 
 ## `minkowski_furniture`
 
@@ -46,7 +50,10 @@ turned 30 degrees (`turned`); the erosion takes the free floor.
 | erosion | turned | 1064 | 106 | 1.182 | 356 | 0.034 | 12 | 35x | `b55f4a17690ebe4a` |
 | erosion | turned | 3040 | 80 | 3.964 | 1093 | 0.083 | 26 | 48x | `3386a8af1613b235` |
 
-- At 304 corners the branch is 31 to 33 times faster, against the bar of 5.
+- The branch is about 25 to 45 times faster: 25 to 48 times over the 16 cases
+  of the table, 31 to 33 times at 304 corners (bar: 5). The baseline commit's
+  own first run (`74932788`'s message, taken under heavier load) gives 23 to
+  58 times; the table's paired rerun is the one to quote.
 - The time at 3,040 corners over the time at 304 corners is 9.2 to 10.5 after
   (11.6 to 14.4 before), against the bar of 20.
 - Peak memory at 3,040 corners falls from 0.94 to 1.09 GB to 26 MB.
