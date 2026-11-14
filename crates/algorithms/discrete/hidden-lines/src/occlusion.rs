@@ -298,6 +298,13 @@ fn facing(
 /// triangle's fibre is the depth range between its extreme edges, so it hides
 /// the point when some edge of the triangle over that image point is strictly
 /// in front, and the fibre has a point at or beyond the near plane's kept side.
+///
+/// In a perspective view the triangle's plane contains the eye, and the eye
+/// may lie in the closed triangle (strictly inside, on a side or at a
+/// vertex). Every eye ray that meets the triangle then starts in it, so its
+/// fibre runs from the eye to the side the ray leaves by: each side's span
+/// then counts as in front without the nearer-than test, and only the near
+/// plane's reach and the strict `W_P < near` clip remain.
 fn edge_on(
     solver: &mut Solver<'_>,
     scene: &Scene<'_>,

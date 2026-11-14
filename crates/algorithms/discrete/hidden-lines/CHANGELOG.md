@@ -20,8 +20,8 @@ caret rule for `0.x` versions.
   ray parity along the eye ray. The perspective conformance fixtures and a
   binary64 eye-ray oracle (seeded scenes, eyes outside and inside) check it;
   the provider refuses a perspective view whose `near` is missing, zero,
-  positive or not finite with `InvalidInput` (ADR 0107, #387).
-- The visible-face providers still refuse a perspective view by name.
+  positive or not finite with `InvalidInput`. The visible-face providers
+  still refuse a perspective view by name (ADR 0107, #387).
 - The broad phase scales the depth coordinate of its hierarchy to the size of
   the image in a perspective view, where the image is in units of one over the
   depth and the longest-extent split would otherwise cut by depth alone. On
@@ -39,7 +39,7 @@ caret rule for `0.x` versions.
   triangle, so its fibre reaches from the eye to the side the ray leaves by:
   the span of each non-skipped side counts as in front without the nearer-than
   test, while the near plane still has to be reached and the point still has
-  to be strictly beyond it.
+  to be strictly beyond it (ADR 0107, #387).
 
 ## [0.1.4] - 2026-11-13
 
