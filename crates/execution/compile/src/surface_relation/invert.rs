@@ -23,7 +23,11 @@
 //!    meet across the seam. Otherwise two generators pass within the slack
 //!    of the nearest one: the sample has no unique parameters (a closed
 //!    swept curve's seam, a surface covered twice or one meeting itself),
-//!    and it is refused, never resolved by a guess.
+//!    and it is refused, never resolved by a guess. So is a sample whose
+//!    interval holds generators more than `tau` apart (its width times the
+//!    largest `L` over it): all pass within the slack of the sample, so the
+//!    surface runs along a fold there (`S_u` parallel to `S_v`), and the
+//!    sample does not fix `t`.
 //! 3. **Read and check.** Gauss-Newton on `t` sharpens it inside its
 //!    interval, the other parameter is read in closed form, and the
 //!    residual `|S(u, v) - P|`, measured by [`RelationSurface::evaluate`],
@@ -48,8 +52,8 @@
 //! point, and after it, a sample on a ruling shorter than `tau`, where
 //! every `v` does (#463 owns those poles). A sample that leaves the surface
 //! is refused with a certified lower bound on its distance. A cover that
-//! needs more than [`RELATION_COVER_WORK`] evaluations, as on a fold of the
-//! surface, is refused as over budget.
+//! needs more than [`RELATION_COVER_WORK`] evaluations, as on a fold at a
+//! fine tolerance, is refused as over budget.
 
 use super::{RelationSurface, SweptCurve};
 use crate::ruled::Side;
@@ -267,6 +271,13 @@ impl<'g> RelationInverter<'g> {
             return Err(self.off_surface(floor));
         }
         let (start, piece) = unique_piece(&kept, bracket).ok_or_else(|| self.ambiguous())?;
+        // The generators kept move at most `speed` per unit of `t`. Ones
+        // further apart than `tau` that all pass within the slack of the
+        // sample run along a fold, where the sample does not fix `t`.
+        let speed = kept.iter().map(|cell| cell.speed).fold(0.0, Scalar::max);
+        if (piece.1 - piece.0) * speed > self.tau {
+            return Err(self.ambiguous());
+        }
         let t = self.polish(&probe, start, piece)?;
         let t = if bracket.periodic {
             t.rem_euclid(bracket.end - bracket.start) + bracket.start
@@ -624,7 +635,7 @@ impl<'g> RelationInverter<'g> {
     fn ambiguous(&self) -> GeomError {
         GeomError::Degenerate(format!(
             "an edge sample without a p-curve has no unique parameters on its {} (a seam of a \
-             closed swept curve, a surface covered twice or a surface meeting itself)",
+             closed swept curve, a surface covered twice, a fold or a surface meeting itself)",
             self.surface.family()
         ))
     }
@@ -1022,6 +1033,37 @@ mod tests {
         );
     }
 
+    /// Within the slack past the tolerance the cover still keeps the
+    /// nearest cells; the residual check refuses the sample.
+    #[test]
+    fn r4_a_sample_just_past_the_tolerance_is_refused() {
+        let (graph, ids) = torus();
+        let surface = revolved(&graph, ids[0]);
+        let inverter = RelationInverter::new(surface, tolerance()).unwrap();
+        let (u, v) = (0.7, 2.0);
+        let past = (1.0 + 1e-4) * TAU_TEST;
+        let point = surface.evaluate(u, v).unwrap() + normal(&surface, u, v) * past;
+        let text = message(inverter.invert(point).unwrap_err());
+        assert!(text.contains("leaves its surface of revolution"), "{text}");
+    }
+
+    /// On the axis of an extruded circle every generator is the radius
+    /// away: the cover drops them all by the tolerance at once, rather than
+    /// refining every one to the slack.
+    #[test]
+    fn r4_a_sample_as_far_from_every_generator_is_refused_off_the_surface() {
+        let round = circle(Point3::ZERO, Vec3::X, Vec3::Y, 0.3);
+        let (graph, ids) = graph_of(vec![round]);
+        let surface = RelationSurface::extrusion(&graph, ids[0], Vec3::Z).unwrap();
+        let text = refusal(surface, Point3::new(0.0, 0.0, 0.2));
+        assert!(
+            text.starts_with(
+                "an edge without a p-curve leaves its surface of linear extrusion by at least 2."
+            ),
+            "{text}"
+        );
+    }
+
     #[test]
     fn a_sample_just_before_a_ruling_reads_v_zero() {
         let (graph, ids) = graph_of(vec![
@@ -1175,6 +1217,37 @@ mod tests {
         for v in [0.0, 1e-9, TAU - 1e-9] {
             assert_round_trip("torus seam", &surface, 0.3, v);
         }
+    }
+
+    /// `c(s) = 0.3 ((2s - 1)^3, 0, 2s - 1)` extruded along `z`: its tangent
+    /// runs along the direction at `s = 1/2`, a fold of the surface.
+    #[test]
+    fn r5_a_sample_on_a_fold_is_refused_and_one_off_it_inverts() {
+        let fold = [
+            (-1.0, -1.0),
+            (1.0, -1.0 / 3.0),
+            (-1.0, 1.0 / 3.0),
+            (1.0, 1.0),
+        ]
+        .map(|(x, z)| Point3::new(0.3 * x, 0.0, 0.3 * z));
+        let (graph, ids) = graph_of(vec![cubic(&fold)]);
+        let surface = RelationSurface::extrusion(&graph, ids[0], Vec3::Z).unwrap();
+        let on_fold = surface.evaluate(0.5, 0.2).unwrap();
+        // At the model's tolerance the cover is wide but within the work
+        // cap; at a tenth of it, it is not.
+        let millimetre = RelationInverter::new(surface, Tolerance::MILLIMETRE).unwrap();
+        let text = message(millimetre.invert(on_fold).unwrap_err());
+        assert!(
+            text.contains("has no unique parameters on its surface of linear extrusion"),
+            "{text}"
+        );
+        let fine = RelationInverter::new(surface, tolerance()).unwrap();
+        let error = fine.invert(on_fold).unwrap_err();
+        assert!(
+            matches!(error, GeomError::BudgetExceeded { resource } if resource == BUDGET),
+            "{error:?}"
+        );
+        assert_round_trip("off the fold", &surface, 0.2, 0.2);
     }
 
     #[test]
