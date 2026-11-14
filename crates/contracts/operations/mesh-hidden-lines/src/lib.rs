@@ -11,7 +11,9 @@
 //!   front of it at the same image point;
 //! - triangles are closed sets, so touching an image boundary covers;
 //! - equal depth never occludes;
-//! - a face seen edge-on occludes through the depth range it spans.
+//! - a face seen edge-on occludes through the depth range it spans;
+//! - a triangle flagged [`Occlusion::SeeThrough`] occludes nothing; a visible
+//!   piece counts the see-through triangles in front of it (ADR 0111).
 //!
 //! Visible face regions are a separate operation, [`MeshVisibleFaces`]
 //! (ADR 0094), over the same view and meshes.
@@ -35,12 +37,12 @@ pub use contract::OrthographicView;
 pub use contract::{
     EdgeKind, EdgeSelection, HiddenLineEvidence, HiddenLineLimits, HiddenLineMesh,
     HiddenLineOutcome, HiddenLineRequest, HiddenLineSegment, HiddenLineSource, MeshHiddenLines,
-    MeshId, MeshRole, SourceEdge, View, ViewProjection, Visibility,
+    MeshId, MeshRole, Occlusion, SourceEdge, TriangleOcclusion, View, ViewProjection, Visibility,
 };
 pub use error::{HiddenLineError, RefusedMesh};
 pub use faces::{
-    FaceGroup, FaceGroups, FaceSource, MeshVisibleFaces, VisibleFaceEvidence, VisibleFaceLimits,
-    VisibleFaceOutcome, VisibleFaceRequest, VisibleRegion,
+    BehindSurface, FaceGroup, FaceGroups, FaceSource, MeshVisibleFaces, VisibleFaceEvidence,
+    VisibleFaceLimits, VisibleFaceOutcome, VisibleFaceRequest, VisibleRegion,
 };
 
 pub const CAPABILITY_ID: axiolid_contracts::CapabilityId =

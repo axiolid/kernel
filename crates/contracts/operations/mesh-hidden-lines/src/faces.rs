@@ -15,10 +15,26 @@
 //! - equal depth never occludes, so sources tied over an area each get it
 //!   and the evidence counts the tied sides;
 //! - a triangle seen edge-on covers no area: it makes no region and never
-//!   occludes a region, and is counted in the evidence.
+//!   occludes a region, and is counted in the evidence;
+//! - a triangle flagged [`Occlusion::SeeThrough`](crate::Occlusion::SeeThrough)
+//!   is a kept surface like any other and makes regions where it is frontmost,
+//!   but those regions list what is seen through it (ADR 0111).
 //!
-//! A region is a maximal edge-connected open set of one source, given by its
-//! closure. Its outer ring runs counter-clockwise and each hole clockwise;
+//! What is seen through a see-through surface is its stack. The kept surfaces
+//! covering an image point are grouped into depth layers by exactly equal
+//! depth, layer 0 frontmost. The seen stack is every layer up to and
+//! including the first that holds an occluding surface (an opaque triangle or
+//! a cap), or every layer if none does. A region of a see-through source
+//! lists the seen stack without its own layer-0 entry in
+//! [`VisibleRegion::behind`]; a region of an opaque source or a cap lists
+//! nothing. Within a layer there is one entry per distinct `(mesh, source)`,
+//! ordered by the mesh's position in the request and then by source; a source
+//! crossed at two depths is listed once per depth. Every face group must be
+//! all opaque or all see-through, else the request is refused naming the
+//! mesh.
+//!
+//! A region is a maximal edge-connected open set of one source and one
+//! `behind` list, given by its closure. Its outer ring runs counter-clockwise and each hole clockwise;
 //! every ring starts at its lexicographically smallest point and does not
 //! repeat it at the end.
 //!
@@ -39,7 +55,9 @@ use axiolid_contracts::{
 };
 use axiolid_core::{Aabb2, Point2};
 
-use crate::{HiddenLineError, HiddenLineMesh, HiddenLineSource, MeshId, View, ViewProjection};
+use crate::{
+    HiddenLineError, HiddenLineMesh, HiddenLineSource, MeshId, Occlusion, View, ViewProjection,
+};
 
 /// Caller-chosen id of a set of triangles that share one surface pattern.
 ///
@@ -115,10 +133,15 @@ pub struct VisibleFaceLimits {
     pub max_regions: usize,
     /// Maximum ring vertices, summed over all output regions.
     pub max_region_vertices: usize,
+    /// Maximum [`BehindSurface`] entries, summed over all output regions
+    /// (ADR 0111). Zero refuses every result with an entry, so a request with
+    /// see-through triangles needs it set.
+    pub max_behind_surfaces: usize,
 }
 
 impl VisibleFaceLimits {
-    /// Construct explicit input and output work limits.
+    /// Construct explicit input and output work limits, with no
+    /// [`BehindSurface`] entry allowed.
     pub const fn new(
         max_meshes: usize,
         max_source_vertices: usize,
@@ -134,14 +157,23 @@ impl VisibleFaceLimits {
             max_candidate_pairs,
             max_regions,
             max_region_vertices,
+            max_behind_surfaces: 0,
         }
+    }
+
+    /// Allow up to `max` [`BehindSurface`] entries over all output regions.
+    pub const fn with_max_behind_surfaces(mut self, max: usize) -> Self {
+        self.max_behind_surfaces = max;
+        self
     }
 }
 
 /// One visible-face request.
 ///
-/// All meshes occlude each other and themselves. A `region` crops the image
-/// (closed box in image coordinates); geometry outside it neither makes a
+/// All meshes occlude each other and themselves, except through their
+/// see-through triangles, which list what lies behind them. A `region` crops
+/// the image (closed box in image coordinates); geometry outside it neither
+/// makes a
 /// region nor, being outside the image, occludes anything inside.
 #[non_exhaustive]
 #[derive(Debug, Clone)]
@@ -178,7 +210,36 @@ impl<'a> VisibleFaceRequest<'a> {
     }
 }
 
-/// A maximal region of the image where one source is frontmost.
+/// One surface seen through a see-through region (ADR 0111).
+///
+/// The derived equality compares all three fields; the order of a `behind`
+/// list is by `layer`, then by the mesh's position in the request, then by
+/// `source`, so the type has no `Ord` of its own.
+#[non_exhaustive]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub struct BehindSurface {
+    /// The mesh the surface belongs to.
+    pub mesh: MeshId,
+    /// The group or cap of that mesh.
+    pub source: FaceSource,
+    /// The depth layer: 0 is the region's own depth, where sources tie with
+    /// it, and each further layer is strictly behind the one before.
+    pub layer: u32,
+}
+
+impl BehindSurface {
+    /// Construct an entry for `source` of `mesh` in depth layer `layer`.
+    pub const fn new(mesh: MeshId, source: FaceSource, layer: u32) -> Self {
+        Self {
+            mesh,
+            source,
+            layer,
+        }
+    }
+}
+
+/// A maximal region of the image where one source is frontmost and the same
+/// surfaces are seen through it.
 ///
 /// Rings are counter-clockwise (outer) and clockwise (holes), start at their
 /// lexicographically smallest point and do not repeat it.
@@ -198,10 +259,14 @@ pub struct VisibleRegion {
     /// snapping split at a pinch lists the whole set in each part. Empty for
     /// [`FaceSource::Cap`].
     pub triangles: Vec<u32>,
+    /// What is seen through the region, front to back (ADR 0111): empty
+    /// unless the source is see-through, and then the seen stack without the
+    /// source's own layer-0 entry.
+    pub behind: Vec<BehindSurface>,
 }
 
 impl VisibleRegion {
-    /// Construct a region of `source` of `mesh`.
+    /// Construct a region of `source` of `mesh` with nothing behind it.
     pub fn new(
         mesh: MeshId,
         source: FaceSource,
@@ -215,7 +280,14 @@ impl VisibleRegion {
             outer,
             holes,
             triangles,
+            behind: Vec::new(),
         }
+    }
+
+    /// Set what is seen through the region.
+    pub fn with_behind(mut self, behind: Vec<BehindSurface>) -> Self {
+        self.behind = behind;
+        self
     }
 }
 
@@ -272,6 +344,10 @@ pub struct VisibleFaceEvidence {
     pub collapsed_regions: usize,
     /// Holes of returned regions that collapsed under snap rounding.
     pub collapsed_holes: usize,
+    /// [`Occlusion::SeeThrough`] flags in the request, summed over all meshes.
+    pub see_through_triangles: usize,
+    /// [`BehindSurface`] entries, summed over all output regions.
+    pub behind_surfaces: usize,
 }
 
 impl VisibleFaceEvidence {
@@ -297,6 +373,8 @@ impl VisibleFaceEvidence {
             rerouted_edges: 0,
             collapsed_regions: 0,
             collapsed_holes: 0,
+            see_through_triangles: 0,
+            behind_surfaces: 0,
         }
     }
 
@@ -309,7 +387,8 @@ impl VisibleFaceEvidence {
 /// Visible regions plus evidence.
 ///
 /// Regions are ordered by the mesh's position in the request, then by
-/// `source`, then by the outer ring's points, lexicographically.
+/// `source`, then by the outer ring's points, lexicographically, then by
+/// `behind`, entry by entry, by `layer`, the mesh's position and `source`.
 #[non_exhaustive]
 #[derive(Debug, Clone, PartialEq)]
 pub struct VisibleFaceOutcome {
@@ -339,7 +418,8 @@ impl VisibleFaceOutcome {
 /// - a [`FaceSource::Cap`] region exists only for a [`MeshRole::Solid`](crate::MeshRole::Solid) that
 ///   `view.near` cuts, and has no `triangles`;
 /// - regions of one source never overlap; regions of different sources
-///   overlap only where they tie in depth;
+///   overlap only where they tie in depth, and a drawing that composites the
+///   `behind` lists paints one of the tied regions only;
 /// - flipping every triangle gives identical regions and identical evidence
 ///   except `exact_escalations`;
 /// - the regions are the exact regions snap-rounded to the binary64 grid (ADR
@@ -351,8 +431,11 @@ impl VisibleFaceOutcome {
 ///   only, never to a visibility decision;
 /// - the same input refusals as [`MeshHiddenLines`](crate::MeshHiddenLines),
 ///   and a `PerTriangle` group slice whose length differs from the triangle
-///   count is `InvalidInput` naming the mesh; no substitute result is
+///   count is `InvalidInput` naming the mesh, as is a face group that holds
+///   both opaque and see-through triangles; no substitute result is
 ///   returned;
+/// - the [`BehindSurface`] entries are bounded by
+///   [`VisibleFaceLimits::max_behind_surfaces`];
 /// - [`FaceGroups::Planar`] is resolved by the provider as documented there,
 ///   exactly, with polled cancellation and a memory-budget refusal, and the
 ///   result equals the `PerTriangle` request with the resolved groups, except
@@ -365,6 +448,15 @@ pub trait MeshVisibleFaces: Backend {
     /// (ADR 0107).
     fn supports_projection(&self, projection: ViewProjection) -> bool {
         projection == ViewProjection::Orthographic
+    }
+
+    /// Whether the provider honours triangles of this occlusion. The default
+    /// is `true` for [`Occlusion::Opaque`] only; see
+    /// [`MeshHiddenLines::supports_occlusion`](crate::MeshHiddenLines::supports_occlusion)
+    /// (ADR 0111). A provider that returns `true` for
+    /// [`Occlusion::SeeThrough`] must pass `SeeThroughConformanceSuite::run_faces`.
+    fn supports_occlusion(&self, occlusion: Occlusion) -> bool {
+        occlusion == Occlusion::Opaque
     }
 
     /// Scratch needed beyond inputs and result.
@@ -448,6 +540,35 @@ mod tests {
     }
 
     #[test]
+    fn a_region_has_nothing_behind_it_unless_set() {
+        let region = VisibleRegion::new(
+            MeshId(2),
+            FaceSource::Group(FaceGroup(0)),
+            Vec::new(),
+            Vec::new(),
+            vec![0],
+        );
+        assert!(region.behind.is_empty());
+        let entry = BehindSurface::new(MeshId(1), FaceSource::Cap, 2);
+        assert_eq!(
+            (entry.mesh, entry.source, entry.layer),
+            (MeshId(1), FaceSource::Cap, 2)
+        );
+        let region = region.with_behind(vec![entry]);
+        assert_eq!(region.behind, [entry]);
+        assert_eq!(region.triangles, [0]);
+    }
+
+    #[test]
+    fn limits_allow_no_behind_surface_unless_set() {
+        let limits = VisibleFaceLimits::new(1, 2, 3, 4, 5, 6);
+        assert_eq!(limits.max_behind_surfaces, 0);
+        let limits = limits.with_max_behind_surfaces(7);
+        assert_eq!(limits.max_behind_surfaces, 7);
+        assert_eq!(limits.max_region_vertices, 6);
+    }
+
+    #[test]
     fn input_mesh_evidence_starts_at_zero() {
         let e = VisibleFaceEvidence::input_mesh(2, 12);
         assert!(e.is_derived_from_input_mesh());
@@ -467,6 +588,8 @@ mod tests {
             e.rerouted_edges,
             e.collapsed_regions,
             e.collapsed_holes,
+            e.see_through_triangles,
+            e.behind_surfaces,
         ];
         assert!(counts.iter().all(|&c| c == 0));
         assert_eq!(e.snap_displacement, DisplacementBound::ZERO);

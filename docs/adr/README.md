@@ -94,3 +94,4 @@ Package names and paths in older accepted records describe the tree at the time 
 | [0107](./0107-perspective-views-share-the-hidden-line-and-visible-face-traits.md) | Perspective views share the hidden-line and visible-face traits |
 | [0108](./0108-minkowski-sums-are-read-from-the-term-edges-that-can-bound-them.md) | Minkowski sums are read from the term edges that can bound them |
 | [0109](./0109-free-faces-close-gaps-with-reported-bridges-on-the-exact-arrangement.md) | Free faces close gaps with reported bridges on the exact arrangement |
+| [0111](./0111-see-through-triangles-in-hidden-lines-and-visible-faces.md) | See-through triangles in hidden lines and visible faces |

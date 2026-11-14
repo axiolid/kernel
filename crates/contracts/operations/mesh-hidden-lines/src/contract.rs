@@ -29,6 +29,52 @@ pub enum MeshRole {
     Sheet,
 }
 
+/// Whether a triangle hides what lies behind it (ADR 0111).
+#[non_exhaustive]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Default)]
+pub enum Occlusion {
+    /// The triangle hides what lies strictly behind it.
+    #[default]
+    Opaque,
+    /// The triangle hides nothing. It is still drawn: its edges are selected
+    /// and clipped like any other, a hidden-line piece behind it counts it in
+    /// [`HiddenLineSegment::seen_through`], and a visible-face region of it
+    /// lists what lies behind it in `VisibleRegion::behind`.
+    SeeThrough,
+}
+
+/// The [`Occlusion`] of every triangle of one mesh.
+#[non_exhaustive]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum TriangleOcclusion<'a> {
+    /// Every triangle is [`Occlusion::Opaque`].
+    #[default]
+    AllOpaque,
+    /// One flag per triangle; the length equals the triangle count, which a
+    /// provider checks.
+    PerTriangle(&'a [Occlusion]),
+}
+
+impl TriangleOcclusion<'_> {
+    /// Whether any triangle is [`Occlusion::SeeThrough`]. The length is not
+    /// checked here.
+    pub fn has_see_through(self) -> bool {
+        self.see_through_count() > 0
+    }
+
+    /// The number of [`Occlusion::SeeThrough`] flags. The length is not
+    /// checked here.
+    pub fn see_through_count(self) -> usize {
+        match self {
+            Self::AllOpaque => 0,
+            Self::PerTriangle(flags) => flags
+                .iter()
+                .filter(|&&flag| flag == Occlusion::SeeThrough)
+                .count(),
+        }
+    }
+}
+
 /// One input mesh with its identity and role.
 #[non_exhaustive]
 #[derive(Debug, Clone, Copy)]
@@ -42,18 +88,30 @@ pub struct HiddenLineMesh<'a> {
     /// Face groups, read by `MeshVisibleFaces` and, when
     /// [`EdgeSelection::group_boundary`] is set, by `MeshHiddenLines`.
     pub groups: FaceGroups<'a>,
+    /// Which triangles hide what lies behind them (ADR 0111). With no
+    /// [`Occlusion::SeeThrough`] flag the outcome is exactly that of
+    /// [`TriangleOcclusion::AllOpaque`].
+    pub occlusion: TriangleOcclusion<'a>,
 }
 
 impl<'a> HiddenLineMesh<'a> {
     /// Bind a mesh to an id and a role; every triangle is in
-    /// [`FaceGroup`]`(0)`.
+    /// [`FaceGroup`]`(0)` and opaque.
     pub const fn new(id: MeshId, role: MeshRole, mesh: &'a TriMesh) -> Self {
         Self {
             id,
             role,
             mesh,
             groups: FaceGroups::Single,
+            occlusion: TriangleOcclusion::AllOpaque,
         }
+    }
+
+    /// Give every triangle its own [`Occlusion`]; `occlusion.len()` must equal
+    /// the mesh's triangle count, which a provider checks.
+    pub const fn with_occlusion(mut self, occlusion: &'a [Occlusion]) -> Self {
+        self.occlusion = TriangleOcclusion::PerTriangle(occlusion);
+        self
     }
 
     /// Give every triangle its own group id; `groups.len()` must equal the
@@ -264,7 +322,8 @@ impl HiddenLineLimits {
 
 /// One hidden-line request.
 ///
-/// All meshes occlude each other and themselves. A `region` crops the image
+/// All meshes occlude each other and themselves, except through their
+/// [`Occlusion::SeeThrough`] triangles. A `region` crops the image
 /// (closed box in image coordinates); geometry outside it neither is drawn
 /// nor, being outside the image, occludes anything inside.
 #[non_exhaustive]
@@ -325,9 +384,10 @@ pub enum EdgeKind {
 #[non_exhaustive]
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Visibility {
-    /// Nothing kept lies strictly in front of it.
+    /// Nothing kept that occludes lies strictly in front of it. See-through
+    /// triangles in front are counted in [`HiddenLineSegment::seen_through`].
     Visible,
-    /// A kept triangle point lies strictly in front of it.
+    /// A kept opaque triangle point, or a cap, lies strictly in front of it.
     Hidden,
 }
 
@@ -340,7 +400,8 @@ pub struct SourceEdge {
     pub vertices: [u32; 2],
 }
 
-/// A maximal positive-length piece of one source edge with one visibility.
+/// A maximal positive-length piece of one source edge with one visibility
+/// and one [`seen_through`](Self::seen_through) count.
 ///
 /// Each endpoint is the exact point of the edge rounded once: every image
 /// coordinate of the (rational) point is evaluated exactly and rounded to
@@ -361,10 +422,18 @@ pub struct HiddenLineSegment {
     pub start: Point2,
     /// Image point nearer `source.vertices[1]`.
     pub end: Point2,
+    /// For a visible piece, the number of kept [`Occlusion::SeeThrough`]
+    /// triangles of nonzero image area that lie strictly in front of it
+    /// (ADR 0111). A triangle counts at a point of the piece when its plane is
+    /// strictly in front there and its image contains the point shifted by
+    /// `(ε, ε²)` for an infinitesimal `ε > 0`, so two triangles sharing an
+    /// edge above the piece count once, and a triangle at equal depth or seen
+    /// edge-on never counts. Zero for a hidden piece.
+    pub seen_through: u32,
 }
 
 impl HiddenLineSegment {
-    /// Construct a piece of `source`.
+    /// Construct a piece of `source` with nothing seen through.
     pub const fn new(
         source: SourceEdge,
         kind: EdgeKind,
@@ -378,7 +447,14 @@ impl HiddenLineSegment {
             visibility,
             start,
             end,
+            seen_through: 0,
         }
+    }
+
+    /// Set the number of see-through triangles in front of the piece.
+    pub const fn with_seen_through(mut self, seen_through: u32) -> Self {
+        self.seen_through = seen_through;
+        self
     }
 }
 
@@ -420,6 +496,10 @@ pub struct HiddenLineEvidence {
     pub visible_segments: usize,
     /// Hidden output segments.
     pub hidden_segments: usize,
+    /// [`Occlusion::SeeThrough`] flags in the request, summed over all meshes.
+    pub see_through_triangles: usize,
+    /// Output segments with a nonzero [`HiddenLineSegment::seen_through`].
+    pub seen_through_segments: usize,
 }
 
 impl HiddenLineEvidence {
@@ -438,6 +518,8 @@ impl HiddenLineEvidence {
             collapsed_segments: 0,
             visible_segments: 0,
             hidden_segments: 0,
+            see_through_triangles: 0,
+            seen_through_segments: 0,
         }
     }
 
@@ -487,6 +569,10 @@ impl HiddenLineOutcome {
 ///   `MeshVisibleFaces`, and a `PerTriangle` group slice whose length differs
 ///   from the triangle count is `InvalidInput` naming the mesh; without it
 ///   the groups are not read;
+/// - a [`TriangleOcclusion::PerTriangle`] slice whose length differs from
+///   the triangle count is `InvalidInput` naming the mesh; a request whose
+///   flags are all [`Occlusion::Opaque`] is drawn exactly as one without
+///   flags, evidence included;
 /// - endpoints are the exact points rounded once to nearest (see
 ///   [`HiddenLineSegment`]);
 /// - the tolerance of `options` applies to mesh audit and frame validation
@@ -504,6 +590,16 @@ pub trait MeshHiddenLines: Backend {
     /// projection's conformance suite.
     fn supports_projection(&self, projection: ViewProjection) -> bool {
         projection == ViewProjection::Orthographic
+    }
+
+    /// Whether the provider honours triangles of this occlusion. The default
+    /// is `true` for [`Occlusion::Opaque`] only, so a provider written before
+    /// [`Occlusion`] existed, which would let every triangle hide, is never
+    /// given a see-through triangle by a registry (ADR 0111). A provider that
+    /// returns `true` for [`Occlusion::SeeThrough`] must pass
+    /// `SeeThroughConformanceSuite::run`.
+    fn supports_occlusion(&self, occlusion: Occlusion) -> bool {
+        occlusion == Occlusion::Opaque
     }
 
     /// Scratch needed beyond inputs and result.
@@ -539,6 +635,46 @@ mod tests {
             view.with_near(-1.0).projection,
             ViewProjection::Orthographic
         );
+    }
+
+    #[test]
+    fn occlusion_defaults_to_opaque_for_every_triangle() {
+        let mesh = TriMesh::default();
+        let m = HiddenLineMesh::new(MeshId(1), MeshRole::Sheet, &mesh);
+        assert_eq!(m.occlusion, TriangleOcclusion::AllOpaque);
+        assert_eq!(TriangleOcclusion::default(), TriangleOcclusion::AllOpaque);
+        assert_eq!(Occlusion::default(), Occlusion::Opaque);
+        assert!(!m.occlusion.has_see_through());
+        assert_eq!(m.occlusion.see_through_count(), 0);
+        let flags = [Occlusion::Opaque, Occlusion::SeeThrough, Occlusion::SeeThrough];
+        let m = m.with_occlusion(&flags);
+        assert_eq!(m.occlusion, TriangleOcclusion::PerTriangle(&flags));
+        assert!(m.occlusion.has_see_through());
+        assert_eq!(m.occlusion.see_through_count(), 2);
+        let opaque = [Occlusion::Opaque; 4];
+        assert!(!TriangleOcclusion::PerTriangle(&opaque).has_see_through());
+        assert!(!TriangleOcclusion::PerTriangle(&[]).has_see_through());
+    }
+
+    #[test]
+    fn a_segment_sees_through_nothing_unless_set() {
+        let source = SourceEdge {
+            mesh: MeshId(1),
+            vertices: [0, 1],
+        };
+        let p = Point2::new(0.0, 0.0);
+        let q = Point2::new(1.0, 0.0);
+        let s = HiddenLineSegment::new(source, EdgeKind::Boundary, Visibility::Visible, p, q);
+        assert_eq!(s.seen_through, 0);
+        let s = s.with_seen_through(3);
+        assert_eq!(s.seen_through, 3);
+        assert_eq!((s.start, s.end, s.visibility), (p, q, Visibility::Visible));
+    }
+
+    #[test]
+    fn evidence_starts_without_see_through_counts() {
+        let e = HiddenLineEvidence::input_mesh(2, 12);
+        assert_eq!((e.see_through_triangles, e.seen_through_segments), (0, 0));
     }
 
     #[test]

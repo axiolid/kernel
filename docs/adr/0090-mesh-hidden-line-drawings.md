@@ -7,6 +7,7 @@
 - **Amended by:** [0105](./0105-drawings-join-the-discrete-and-application-bundles.md): the contract joins `discrete`, the dispatch and providers join `application`.
 - **Amended by:** [0106](./0106-planar-face-groups-are-derived-exactly-and-group-boundaries-are-drawn.md): `EdgeKind::GroupBoundary` draws the edges between face groups.
 - **Amended by:** [0107](./0107-perspective-views-share-the-hidden-line-and-visible-face-traits.md): a view can be perspective; a provider claims it with `supports_projection`.
+- **Amended by:** [0111](./0111-see-through-triangles-in-hidden-lines-and-visible-faces.md): a see-through triangle hides nothing; a visible piece counts the see-through triangles in front of it.
 
 ## Context
 

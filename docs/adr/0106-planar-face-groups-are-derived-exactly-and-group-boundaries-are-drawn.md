@@ -5,6 +5,7 @@
 - **Deciders:** Friedrich Schrödter
 - **Supersedes:** —
 - **Amends:** [0094](./0094-visible-face-regions-share-the-hidden-line-view-and-an-exact-arrangement.md), [0090](./0090-mesh-hidden-line-drawings.md)
+- **Amended by:** [0111](./0111-see-through-triangles-in-hidden-lines-and-visible-faces.md): planar groups join two triangles only when their occlusion is equal.
 
 ## Context
 

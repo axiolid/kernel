@@ -23,6 +23,21 @@ caret rule for `0.x` versions.
   `PerspectiveConformanceFailure::HiddenLines`. This replaces the 0.1.5
   behaviour in which every claim failed closed with `ClaimUnverifiable`; a
   visible-face claim still does until its fixtures land (ADR 0107, #387).
+- See-through triangles (ADR 0111, #496). `Occlusion` (`Opaque`, the
+  default, and `SeeThrough`) and `TriangleOcclusion` (`AllOpaque`, the
+  default, and `PerTriangle`) with `HiddenLineMesh::occlusion` and
+  `with_occlusion`; a see-through triangle hides nothing. A visible hidden-line
+  piece counts the see-through triangles in front of it in
+  `HiddenLineSegment::seen_through` (`with_seen_through`), and the evidence
+  gains `see_through_triangles` and `seen_through_segments`. A visible-face
+  region of a see-through source lists what is seen through it in
+  `VisibleRegion::behind` (`with_behind`), as `BehindSurface { mesh, source,
+  layer }` entries bounded by the new `VisibleFaceLimits::max_behind_surfaces`
+  (`with_max_behind_surfaces`; 0 from `new`), and the evidence gains
+  `see_through_triangles` and `behind_surfaces`. Both traits gain a defaulted
+  `supports_occlusion` that is `true` for `Opaque` only, so a registry never
+  gives a see-through triangle to a provider that predates it. A request
+  without a see-through flag is answered exactly as before.
 
 ## [0.1.5] - 2026-11-13
 
