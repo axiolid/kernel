@@ -98,7 +98,7 @@ impl RateBounds {
 
 /// Certified bounds of a section frame law's rates over a span (#406):
 /// `O' = sigma T + rise U`, `T' = beta_L L + beta_U U`, `L' = -beta_L T +
-/// tau U`, in station distance; see the [module documentation](self).
+/// tau U`, in station distance; see the [module documentation](super#the-rates-406).
 #[non_exhaustive]
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct FrameRates {
@@ -130,7 +130,7 @@ pub(super) struct Jet {
 impl FrameLaw<'_, '_> {
     /// Certified bounds of the rates of the frame law over the distances
     /// `[a, b]` along the basis, a span that crosses no seam, read as
-    /// `reading`; see the [module documentation](self).
+    /// `reading`; see the [module documentation](super#the-rates-406).
     ///
     /// `None` wherever [`Self::bounds`] is `None`, for a chain, for a span
     /// the jet is not bounded over at this width, and for a frame read by
