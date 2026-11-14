@@ -57,6 +57,13 @@ Validated, deterministic planar booleans (intersection, union, difference, xor) 
   stretch with the polygons' insides on opposite sides, as settled outputs do. Operations do not
   re-check their outputs. `scripts/probe_region_nesting_mutants.py` lists the faults its tests
   must catch.
+- `free_faces` returns the bounded faces of the plane that obstacle polygons and barriers leave
+  free, each ring edge with the inputs it lies on, and `FreeFaces::locate` says which face a
+  point is in (`src/free_faces.rs`, #490, ADR 0109). A gap narrower than the closing width is
+  closed by a reported bridge, never by moving an input, and a free region narrower than the
+  width is a closed gap, listed apart. It runs on `axiolid-exact-arrangement`, so every decision is
+  an exact sign and the rings are snap-rounded as the visible faces are (ADR 0100).
+  `scripts/probe_free_faces_mutants.py` lists the faults its tests must catch.
 - A degenerate input ring refuses the operation by default. `overlay_with` and
   `union_soup_with` with `OverlayOptions::dropping_degenerate_rings` leave out a ring that
   is too short, has a repeated vertex, or has zero area under the exact `ZeroArea` rule,
@@ -91,6 +98,7 @@ Validated, deterministic planar booleans (intersection, union, difference, xor) 
 - [`axiolid-contracts`](./axiolid-contracts)
 - [`axiolid-core`](./axiolid-core)
 - [`axiolid-exact`](./axiolid-exact)
+- [`axiolid-exact-arrangement`](./axiolid-exact-arrangement)
 - [`axiolid-guarantees`](./axiolid-guarantees)
 
 ## Changes

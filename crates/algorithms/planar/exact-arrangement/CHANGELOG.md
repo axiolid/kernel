@@ -9,6 +9,15 @@ caret rule for `0.x` versions.
 
 ## [Unreleased]
 
+### Added
+
+- `faces`, `Faces` and `FaceId` (#490, ADR 0109): the face on each side of every piece of
+  an arrangement, nested components included, numbered from the unbounded face 0; with `V`
+  vertices, `E` pieces and `C` components the count satisfies `V - E + F = 1 + C`.
+- `Nearest` and, on `ExactPoints`, `nearest_on_segment`, `foot`, `compare_distance` and
+  `compare_line_distance`: exact distance predicates with no square root, decided through
+  the interval tier and `Dyadic`.
+
 ## [0.1.1] - 2026-11-07
 
 ### Added

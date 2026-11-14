@@ -9,6 +9,17 @@ caret rule for `0.x` versions.
 
 ## [Unreleased]
 
+### Added
+
+- `free_faces`, `free_faces_within`, `FreeFaces` (with `locate`), `FreeSpaceInput`,
+  `FreeFace`, `FreeRing`, `Bridge`, `PieceSource`, `FaceLocation`, `FreeFaceEvidence`,
+  `FreeFacesError` and `BarrierDefect` (#490, ADR 0109): the bounded faces of the plane
+  that obstacle polygons and open-segment barriers leave free, with the inputs each ring
+  edge lies on. Gaps narrower than a closing width are closed by reported bridges, never
+  by moving an input; a free region narrower than the width is a closed gap, returned
+  apart. Rings are snap-rounded and certified as the visible faces are. Depends on
+  `axiolid-exact-arrangement` now.
+
 ## [0.4.0] - 2026-11-13
 
 ### Changed

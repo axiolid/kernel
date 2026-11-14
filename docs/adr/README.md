@@ -92,3 +92,4 @@ Package names and paths in older accepted records describe the tree at the time 
 | [0105](./0105-drawings-join-the-discrete-and-application-bundles.md) | Drawings join the `discrete` and `application` bundles |
 | [0106](./0106-planar-face-groups-are-derived-exactly-and-group-boundaries-are-drawn.md) | Planar face groups are derived exactly, and group boundaries are drawn |
 | [0107](./0107-perspective-views-share-the-hidden-line-and-visible-face-traits.md) | Perspective views share the hidden-line and visible-face traits |
+| [0109](./0109-free-faces-close-gaps-with-reported-bridges-on-the-exact-arrangement.md) | Free faces close gaps with reported bridges on the exact arrangement |
