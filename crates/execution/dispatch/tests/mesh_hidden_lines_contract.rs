@@ -138,6 +138,11 @@ impl Backend for Recorder {
 fn base_outcome(request: &HiddenLineRequest<'_>) -> HiddenLineOutcome {
     let triangles = request.meshes.iter().map(|m| m.mesh.triangle_count()).sum();
     let mut evidence = HiddenLineEvidence::input_mesh(request.meshes.len(), triangles);
+    evidence.see_through_triangles = request
+        .meshes
+        .iter()
+        .map(|m| m.occlusion.see_through_count())
+        .sum();
     evidence.visible_segments = 1;
     HiddenLineOutcome::new(
         request.view,
@@ -1417,4 +1422,104 @@ fn an_occlusion_slice_of_the_wrong_length_names_the_mesh() {
         assert_eq!(audit_ids(&refused), [MeshId(2)]);
         assert_eq!(refused[0].error, error.error);
     }
+}
+
+/// The outcome of a provider that claims see-through triangles, shaped by
+/// `behaviour`.
+fn see_through_outcome(
+    request: &HiddenLineRequest<'_>,
+    behaviour: Behaviour,
+) -> Result<HiddenLineOutcome, HiddenLineError> {
+    let calls = counter();
+    let mut registry = MeshHiddenLinesRegistry::new();
+    registry.register(
+        0,
+        Recorder::new("claims", &calls, behaviour).claiming_see_through(),
+    );
+    let result = registry.hidden_lines(request, &options());
+    assert_eq!(calls_of(&calls), 1);
+    result
+}
+
+/// The one flag of `one_pane` in the evidence, and the first segment seen
+/// through `count` triangles.
+fn seen(outcome: &mut HiddenLineOutcome, count: u32) {
+    outcome.evidence.see_through_triangles = 1;
+    outcome.segments[0] = outcome.segments[0].with_seen_through(count);
+    outcome.evidence.seen_through_segments = usize::from(count > 0);
+}
+
+/// Two pieces of the first edge, visible, seen through `first` and `second`
+/// triangles.
+fn two_pieces(outcome: &mut HiddenLineOutcome, first: u32, second: u32) {
+    seen(outcome, first);
+    let mut next = outcome.segments[0].with_seen_through(second);
+    next.start = outcome.segments[0].end;
+    next.end = Point2::new(2.0, 0.0);
+    outcome.segments.push(next);
+    outcome.evidence.visible_segments = 2;
+    outcome.evidence.seen_through_segments = usize::from(first > 0) + usize::from(second > 0);
+}
+
+#[test]
+fn see_through_counts_are_validated() {
+    let cube = cube();
+    let flags = one_pane();
+    let meshes = [
+        mesh(1, MeshRole::Solid, &cube),
+        mesh(2, MeshRole::Solid, &cube).with_occlusion(&flags),
+    ];
+    let request = HiddenLineRequest::new(&meshes, view(), selection(), limits());
+
+    // Pieces of one edge that differ only in their count are both maximal.
+    let outcome = see_through_outcome(&request, |_, o| {
+        two_pieces(o, 1, 0);
+        Ok(())
+    })
+    .expect("a valid see-through drawing");
+    assert_eq!(outcome.segments[0].seen_through, 1);
+
+    let cases: Vec<(&str, Behaviour)> = vec![
+        ("hidden piece with a count", |_, o| {
+            seen(o, 1);
+            o.segments[0].visibility = Visibility::Hidden;
+            (o.evidence.visible_segments, o.evidence.hidden_segments) = (0, 1);
+            Ok(())
+        }),
+        ("adjacent pieces with one visibility and count", |_, o| {
+            two_pieces(o, 1, 1);
+            Ok(())
+        }),
+        ("seen-through segments miscounted", |_, o| {
+            seen(o, 2);
+            o.evidence.seen_through_segments = 0;
+            Ok(())
+        }),
+        ("see-through triangles miscounted", |_, o| {
+            seen(o, 0);
+            o.evidence.see_through_triangles = 2;
+            Ok(())
+        }),
+    ];
+    for (name, behaviour) in cases {
+        let error = see_through_outcome(&request, behaviour).expect_err(name);
+        assert!(
+            matches!(error.error, GeomError::BackendContractViolation { .. }),
+            "{name}: {error:?}"
+        );
+    }
+
+    // A count needs a see-through triangle in the request.
+    let opaque = [mesh(1, MeshRole::Solid, &cube)];
+    let request = HiddenLineRequest::new(&opaque, view(), selection(), limits());
+    let error = see_through_outcome(&request, |_, o| {
+        o.segments[0] = o.segments[0].with_seen_through(1);
+        o.evidence.seen_through_segments = 1;
+        Ok(())
+    })
+    .expect_err("nothing to see through");
+    assert!(matches!(
+        error.error,
+        GeomError::BackendContractViolation { .. }
+    ));
 }

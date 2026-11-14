@@ -20,8 +20,8 @@ use axiolid_mesh_hidden_lines_contract::{
 
 use crate::device::matches_device;
 use crate::view_checks::{
-    has_see_through, invalid, mesh_verdict, scratch_fits, source_totals, validate_meshes,
-    validate_region, validate_topology, validate_view, SharedLimits,
+    has_see_through, invalid, mesh_verdict, scratch_fits, see_through_triangles, source_totals,
+    validate_meshes, validate_region, validate_topology, validate_view, SharedLimits,
 };
 
 #[derive(Debug, Clone)]
@@ -344,6 +344,8 @@ fn validate_outcome(
     let mut previous_visibility = None;
     let mut visible = 0usize;
     let mut hidden = 0usize;
+    let mut seen_through = 0usize;
+    let see_through = has_see_through(request.meshes);
     for segment in &outcome.segments {
         let Some(position) = request
             .meshes
@@ -373,6 +375,19 @@ fn validate_outcome(
             Visibility::Hidden if request.edges.hidden => hidden += 1,
             _ => return Err(violation("hidden segment returned although not requested")),
         }
+        // Only a visible piece sees through, and only through a see-through
+        // triangle of the request (ADR 0111).
+        if segment.seen_through > 0 {
+            if segment.visibility == Visibility::Hidden {
+                return Err(violation("hidden segment counts see-through triangles"));
+            }
+            if !see_through {
+                return Err(violation(
+                    "segment counts see-through triangles the request does not have",
+                ));
+            }
+            seen_through += 1;
+        }
         let key = (position, segment.source.vertices);
         if previous.is_some_and(|last| last > key) {
             return Err(violation(
@@ -384,18 +399,18 @@ fn validate_outcome(
         }
         // With hidden pieces omitted, two visible pieces may be neighbours
         // along the edge with a hidden one between; otherwise a piece is
-        // maximal, so neighbours differ.
+        // maximal, so neighbours differ in visibility or count.
         if request.edges.hidden
             && previous == Some(key)
-            && previous_visibility == Some(segment.visibility)
+            && previous_visibility == Some((segment.visibility, segment.seen_through))
         {
             return Err(violation(
-                "adjacent pieces of one source edge have the same visibility",
+                "adjacent pieces of one source edge have the same visibility and count",
             ));
         }
         previous = Some(key);
         previous_kind = Some(segment.kind);
-        previous_visibility = Some(segment.visibility);
+        previous_visibility = Some((segment.visibility, segment.seen_through));
     }
     let triangles = source_totals(request.meshes).1;
     let evidence = &outcome.evidence;
@@ -404,6 +419,8 @@ fn validate_outcome(
         || Some(evidence.source_triangles) != triangles
         || evidence.visible_segments != visible
         || evidence.hidden_segments != hidden
+        || evidence.seen_through_segments != seen_through
+        || evidence.see_through_triangles != see_through_triangles(request.meshes)
     {
         return Err(violation(
             "hidden-line evidence does not match input/output counts",

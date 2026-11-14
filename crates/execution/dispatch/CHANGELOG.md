@@ -23,6 +23,19 @@ caret rule for `0.x` versions.
   when the provider claims `Occlusion::SeeThrough`, and reports a failure as a
   `ReturnedError` of the case `see-through claim`, so an unverified claim is
   refused (ADR 0111, #496).
+- Both registries validate the see-through part of an outcome (ADR 0111,
+  #496). A hidden-line segment counts see-through triangles only when it is
+  visible and the request has one, neighbouring pieces of one edge differ in
+  visibility or count, and `seen_through_segments` and `see_through_triangles`
+  must match. A visible-face `behind` list may only follow a see-through
+  region, names request meshes, starts at layer 0 or 1 and steps by at most
+  one, ascends by mesh position and source within a layer, never repeats the
+  region's own source at layer 0, keeps an occluding surface (a cap, or a mesh
+  without see-through triangles) in its last layer and a cap to a solid cut
+  by the near plane; regions equal in mesh, source and outer ring are ordered
+  by `behind`; the entries are counted in `behind_surfaces` and over
+  `max_behind_surfaces` refused as `BudgetExceeded` (`visible-face behind
+  surfaces`).
 
 ## [0.3.13] - 2026-11-13
 

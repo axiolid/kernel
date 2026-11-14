@@ -82,6 +82,14 @@ pub(crate) fn has_see_through(meshes: &[HiddenLineMesh<'_>]) -> bool {
     meshes.iter().any(|entry| entry.occlusion.has_see_through())
 }
 
+/// The see-through flags of the request, summed over its meshes.
+pub(crate) fn see_through_triangles(meshes: &[HiddenLineMesh<'_>]) -> usize {
+    meshes
+        .iter()
+        .map(|entry| entry.occlusion.see_through_count())
+        .sum()
+}
+
 pub(crate) fn invalid(detail: impl Into<String>) -> HiddenLineError {
     GeomError::InvalidInput(detail.into()).into()
 }

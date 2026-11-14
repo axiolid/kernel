@@ -19,9 +19,9 @@ use axiolid_core::{Aabb2, Frame3, Point2, Point3, Tolerance, Vec3};
 use axiolid_dispatch::MeshVisibleFacesRegistry;
 use axiolid_mesh::TriMesh;
 use axiolid_mesh_hidden_lines_contract::{
-    FaceGroup, FaceSource, HiddenLineError, HiddenLineMesh, MeshId, MeshRole, MeshVisibleFaces,
-    Occlusion, View, ViewProjection, VisibleFaceEvidence, VisibleFaceLimits, VisibleFaceOutcome,
-    VisibleFaceRequest, VisibleRegion,
+    BehindSurface, FaceGroup, FaceSource, HiddenLineError, HiddenLineMesh, MeshId, MeshRole,
+    MeshVisibleFaces, Occlusion, View, ViewProjection, VisibleFaceEvidence, VisibleFaceLimits,
+    VisibleFaceOutcome, VisibleFaceRequest, VisibleRegion,
 };
 
 fn cube() -> TriMesh {
@@ -148,6 +148,11 @@ fn region(mesh: u64, source: FaceSource, outer: Vec<Point2>, triangles: &[u32]) 
 fn base_outcome(request: &VisibleFaceRequest<'_>) -> VisibleFaceOutcome {
     let triangles = request.meshes.iter().map(|m| m.mesh.triangle_count()).sum();
     let mut evidence = VisibleFaceEvidence::input_mesh(request.meshes.len(), triangles);
+    evidence.see_through_triangles = request
+        .meshes
+        .iter()
+        .map(|m| m.occlusion.see_through_count())
+        .sum();
     evidence.regions = 1;
     VisibleFaceOutcome::new(
         request.view,
@@ -1330,4 +1335,180 @@ fn a_face_group_that_mixes_occlusion_names_the_mesh() {
             .expect("uniform groups");
     }
     assert_eq!(calls_of(&calls), 2);
+}
+
+const G0: FaceSource = FaceSource::Group(FaceGroup(0));
+
+fn behind(mesh: u64, source: FaceSource, layer: u32) -> BehindSurface {
+    BehindSurface::new(MeshId(mesh), source, layer)
+}
+
+/// Replace the regions by one region of the see-through mesh 2 with
+/// `surfaces` behind it, and count them in the evidence.
+fn pane_region(outcome: &mut VisibleFaceOutcome, surfaces: Vec<BehindSurface>) {
+    outcome.evidence.behind_surfaces = surfaces.len();
+    outcome.regions = vec![region(2, G0, triangle_ring(), &[2, 3]).with_behind(surfaces)];
+}
+
+/// Mesh 1 opaque, mesh 2 wholly see-through, both solid cubes, under a near
+/// plane when `near` is set; answered by a provider that claims see-through
+/// triangles and shapes the outcome by `behaviour`.
+fn see_through_faces(
+    near: bool,
+    max_behind: usize,
+    behaviour: Behaviour,
+) -> Result<VisibleFaceOutcome, HiddenLineError> {
+    let cube = cube();
+    let flags = [Occlusion::SeeThrough; 12];
+    let meshes = [
+        mesh(1, MeshRole::Solid, &cube),
+        mesh(2, MeshRole::Solid, &cube).with_occlusion(&flags),
+    ];
+    let view = if near { view().with_near(0.5) } else { view() };
+    let limits = limits().with_max_behind_surfaces(max_behind);
+    let request = VisibleFaceRequest::new(&meshes, view, limits);
+    let calls = counter();
+    let result = see_through_registry(&calls, behaviour).visible_faces(&request, &options());
+    assert_eq!(calls_of(&calls), 1);
+    result
+}
+
+#[test]
+fn valid_stacks_behind_a_see_through_region_are_accepted() {
+    let cases: Vec<(&str, bool, Behaviour)> = vec![
+        ("an opaque surface behind", false, |_, o| {
+            pane_region(o, vec![behind(1, G0, 1)]);
+            Ok(())
+        }),
+        ("a tie, then a cap", true, |_, o| {
+            pane_region(o, vec![behind(1, G0, 0), behind(1, FaceSource::Cap, 0)]);
+            Ok(())
+        }),
+        ("glass behind glass, then a cap", true, |_, o| {
+            pane_region(o, vec![behind(2, G0, 1), behind(1, FaceSource::Cap, 2)]);
+            Ok(())
+        }),
+        (
+            "two regions ordered by what is behind them",
+            false,
+            |_, o| {
+                pane_region(o, vec![behind(1, G0, 1)]);
+                let second = region(2, G0, triangle_ring(), &[2, 3])
+                    .with_behind(vec![behind(2, G0, 1), behind(1, G0, 2)]);
+                o.regions.push(second);
+                o.evidence.regions = 2;
+                o.evidence.behind_surfaces = 3;
+                Ok(())
+            },
+        ),
+    ];
+    for (name, near, behaviour) in cases {
+        see_through_faces(near, 16, behaviour).unwrap_or_else(|error| panic!("{name}: {error:?}"));
+    }
+    // An empty stack needs no budget.
+    see_through_faces(false, 0, |_, o| {
+        pane_region(o, Vec::new());
+        Ok(())
+    })
+    .expect("nothing behind");
+}
+
+#[test]
+fn stack_violations_are_caught() {
+    let cases: Vec<(&str, bool, Behaviour)> = vec![
+        ("a foreign mesh behind", false, |_, o| {
+            pane_region(o, vec![behind(9, G0, 1)]);
+            Ok(())
+        }),
+        ("a cap behind without a near plane", false, |_, o| {
+            pane_region(o, vec![behind(1, FaceSource::Cap, 1)]);
+            Ok(())
+        }),
+        ("a cap before the last layer", true, |_, o| {
+            pane_region(o, vec![behind(1, FaceSource::Cap, 1), behind(2, G0, 2)]);
+            Ok(())
+        }),
+        ("an opaque mesh before the last layer", false, |_, o| {
+            pane_region(o, vec![behind(1, G0, 1), behind(2, G0, 2)]);
+            Ok(())
+        }),
+        ("a first layer past 1", false, |_, o| {
+            pane_region(o, vec![behind(1, G0, 2)]);
+            Ok(())
+        }),
+        ("a skipped layer", false, |_, o| {
+            pane_region(o, vec![behind(2, G0, 1), behind(1, G0, 3)]);
+            Ok(())
+        }),
+        ("a layer out of order", false, |_, o| {
+            pane_region(o, vec![behind(2, G0, 2), behind(1, G0, 1)]);
+            Ok(())
+        }),
+        ("meshes out of order in a layer", false, |_, o| {
+            pane_region(o, vec![behind(2, G0, 1), behind(1, G0, 1)]);
+            Ok(())
+        }),
+        ("a repeated entry", false, |_, o| {
+            pane_region(o, vec![behind(1, G0, 1), behind(1, G0, 1)]);
+            Ok(())
+        }),
+        ("its own source in layer 0", false, |_, o| {
+            pane_region(o, vec![behind(2, G0, 0)]);
+            Ok(())
+        }),
+        ("an opaque region with a stack", false, |_, o| {
+            o.regions[0] = o.regions[0].clone().with_behind(vec![behind(2, G0, 1)]);
+            o.evidence.behind_surfaces = 1;
+            Ok(())
+        }),
+        ("behind surfaces miscounted", false, |_, o| {
+            pane_region(o, vec![behind(1, G0, 1)]);
+            o.evidence.behind_surfaces = 0;
+            Ok(())
+        }),
+        ("see-through triangles miscounted", false, |_, o| {
+            o.evidence.see_through_triangles = 0;
+            Ok(())
+        }),
+        (
+            "regions out of order by what is behind them",
+            false,
+            |_, o| {
+                pane_region(o, vec![behind(2, G0, 1), behind(1, G0, 2)]);
+                let second =
+                    region(2, G0, triangle_ring(), &[2, 3]).with_behind(vec![behind(1, G0, 1)]);
+                o.regions.push(second);
+                o.evidence.regions = 2;
+                o.evidence.behind_surfaces = 3;
+                Ok(())
+            },
+        ),
+    ];
+    for (name, near, behaviour) in cases {
+        let error = see_through_faces(near, 16, behaviour).expect_err(name);
+        assert!(
+            matches!(error.error, GeomError::BackendContractViolation { .. }),
+            "{name}: {error:?}"
+        );
+        assert_eq!(error.mesh, None, "{name}");
+    }
+}
+
+#[test]
+fn behind_surfaces_over_the_limit_exceed_the_budget() {
+    let two = |_: &VisibleFaceRequest<'_>, o: &mut VisibleFaceOutcome| {
+        pane_region(o, vec![behind(2, G0, 1), behind(1, G0, 2)]);
+        Ok(())
+    };
+    see_through_faces(false, 2, two).expect("at the limit");
+    for max in [0, 1] {
+        let error = see_through_faces(false, max, two).expect_err("over the limit");
+        assert_eq!(
+            error.error,
+            GeomError::BudgetExceeded {
+                resource: "visible-face behind surfaces"
+            },
+            "{max}"
+        );
+    }
 }

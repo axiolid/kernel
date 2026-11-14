@@ -19,14 +19,15 @@ use axiolid_mesh_hidden_lines_contract::{
         },
         see_through::SeeThroughConformanceSuite,
     },
-    FaceGroups, FaceSource, HiddenLineError, HiddenLineMesh, MeshRole, MeshVisibleFaces, Occlusion,
-    TriangleOcclusion, ViewProjection, VisibleFaceOutcome, VisibleFaceRequest,
+    BehindSurface, FaceGroups, FaceSource, HiddenLineError, HiddenLineMesh, MeshId, MeshRole,
+    MeshVisibleFaces, Occlusion, TriangleOcclusion, ViewProjection, VisibleFaceOutcome,
+    VisibleFaceRequest, VisibleRegion,
 };
 
 use crate::device::matches_device;
 use crate::view_checks::{
-    has_see_through, scratch_fits, validate_group_lengths, validate_meshes, validate_region,
-    validate_topology, validate_view, SharedLimits,
+    has_see_through, scratch_fits, see_through_triangles, validate_group_lengths, validate_meshes,
+    validate_region, validate_topology, validate_view, SharedLimits,
 };
 
 const LABEL: &str = "visible-face";
@@ -323,6 +324,80 @@ fn sequence_order(a: &[Point2], b: &[Point2]) -> Ordering {
         .unwrap_or_else(|| a.len().cmp(&b.len()))
 }
 
+/// The request position of `mesh`; the outcome check has already found it.
+fn position_of(request: &VisibleFaceRequest<'_>, mesh: MeshId) -> Option<usize> {
+    request.meshes.iter().position(|entry| entry.id == mesh)
+}
+
+/// The order of two `behind` lists: entry by entry by layer, the mesh's
+/// position in the request and source, then by length.
+fn behind_order(
+    request: &VisibleFaceRequest<'_>,
+    a: &[BehindSurface],
+    b: &[BehindSurface],
+) -> Ordering {
+    let key = |entry: &BehindSurface| (entry.layer, position_of(request, entry.mesh), entry.source);
+    a.iter()
+        .zip(b)
+        .map(|(x, y)| key(x).cmp(&key(y)))
+        .find(|o| o.is_ne())
+        .unwrap_or_else(|| a.len().cmp(&b.len()))
+}
+
+/// Why the `behind` list of `region` breaks the stack rules of ADR 0111, or
+/// `None`. The registry checks the structure only: what is behind a region
+/// depends on the geometry.
+fn behind_fault(
+    request: &VisibleFaceRequest<'_>,
+    region: &VisibleRegion,
+    entry: &HiddenLineMesh<'_>,
+) -> Option<&'static str> {
+    let last = region.behind.last()?;
+    // A group is all opaque or all see-through, so one of its triangles says
+    // which.
+    let opaque_group = match (entry.occlusion, region.triangles.first()) {
+        (TriangleOcclusion::PerTriangle(flags), Some(&t)) => {
+            flags.get(t as usize) != Some(&Occlusion::SeeThrough)
+        }
+        _ => false,
+    };
+    if region.source == FaceSource::Cap || !entry.occlusion.has_see_through() || opaque_group {
+        return Some("an opaque region lists surfaces behind it");
+    }
+    let mut previous: Option<(u32, usize, FaceSource)> = None;
+    for surface in &region.behind {
+        let Some(position) = position_of(request, surface.mesh) else {
+            return Some("a surface behind a region names a mesh that is not in the request");
+        };
+        let mesh = &request.meshes[position];
+        let key = (surface.layer, position, surface.source);
+        let in_order = match previous {
+            None => surface.layer <= 1,
+            Some((layer, ..)) if surface.layer == layer => previous < Some(key),
+            Some((layer, ..)) => surface.layer == layer + 1,
+        };
+        if !in_order {
+            return Some("surfaces behind a region are not ordered by layer, mesh and source");
+        }
+        if surface.layer == 0 && (surface.mesh, surface.source) == (region.mesh, region.source) {
+            return Some("a region lists its own source behind it");
+        }
+        // What occludes ends the stack: a cap, or a mesh with no see-through
+        // triangle, lies in the last layer only.
+        let occludes = surface.source == FaceSource::Cap || !mesh.occlusion.has_see_through();
+        if occludes && surface.layer != last.layer {
+            return Some("an occluding surface behind a region is not in the last layer");
+        }
+        if surface.source == FaceSource::Cap
+            && (mesh.role != MeshRole::Solid || request.view.near.is_none())
+        {
+            return Some("a cap behind a region of a mesh that is not a solid cut by a near plane");
+        }
+        previous = Some(key);
+    }
+    None
+}
+
 fn validate_outcome(
     backend: BackendId,
     request: &VisibleFaceRequest<'_>,
@@ -341,7 +416,8 @@ fn validate_outcome(
     }
     let mut vertices = 0usize;
     let mut caps = 0usize;
-    let mut previous: Option<(usize, FaceSource, &[Point2])> = None;
+    let mut behind = 0usize;
+    let mut previous: Option<(usize, FaceSource, &[Point2], &[BehindSurface])> = None;
     for region in &outcome.regions {
         let Some(position) = request
             .meshes
@@ -405,18 +481,28 @@ fn validate_outcome(
             }
             _ => return Err(violation("region has an unknown face source")),
         }
-        if let Some((last_position, last_source, last_outer)) = previous {
+        behind_fault(request, region, entry).map_or(Ok(()), |detail| Err(violation(detail)))?;
+        behind = behind.saturating_add(region.behind.len());
+        if behind > limits.max_behind_surfaces {
+            return Err(GeomError::BudgetExceeded {
+                resource: "visible-face behind surfaces",
+            }
+            .into());
+        }
+        if let Some((last_position, last_source, last_outer, last_behind)) = previous {
             let order = last_position
                 .cmp(&position)
                 .then(last_source.cmp(&region.source))
                 .then_with(|| sequence_order(last_outer, &region.outer));
+            // Regions equal in all of that differ in what lies behind them.
+            let order = order.then_with(|| behind_order(request, last_behind, &region.behind));
             if order.is_ge() {
                 return Err(violation(
                     "regions are not ordered by mesh, source and outer ring",
                 ));
             }
         }
-        previous = Some((position, region.source, &region.outer));
+        previous = Some((position, region.source, &region.outer, &region.behind));
     }
     if vertices > limits.max_region_vertices {
         return Err(GeomError::BudgetExceeded {
@@ -440,6 +526,8 @@ fn validate_outcome(
         || Some(evidence.source_triangles) != triangles
         || evidence.regions != outcome.regions.len()
         || evidence.cap_regions != caps
+        || evidence.behind_surfaces != behind
+        || evidence.see_through_triangles != see_through_triangles(request.meshes)
     {
         return Err(violation(
             "visible-face evidence does not match input/output counts",
