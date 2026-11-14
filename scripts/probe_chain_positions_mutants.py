@@ -26,6 +26,11 @@ Not probed, because no test can tell them apart:
   errors, and the rounding allowances of the derivatives (`1e-14`): they
   are at most `1e-11` against references good to `1e-13` at the sizes
   tested;
+- the end disks' tilt accumulation (`caps_charge`): the walls' charge is
+  at least ten times it (about forty by the derivation; asserted in
+  `the_tube_bound_carries_the_centre_and_the_jet_charges`), so the larger of
+  the two is never the tilt and the accumulation is an equivalent mutant
+  of `tube_error`'s `max`;
 - the tube's jet charge (`wall_jet_charge`) through a sampled tube: at most
   `1e-11` of a `1e-3` budget, below any sampling. The sum it feeds
   (`tube_error`) and the first-order errors it sums are held by unit tests
@@ -155,9 +160,6 @@ MUTANTS = [
      "            jets = jets.max(piece_jet_charge(curve, table, (a, b), radius)?);",
      "            jets = jets.max(0.0 * piece_jet_charge(curve, table, (a, b), radius)?);",
      [TUBE_BOUND]),
-    ("the tube stops accumulating the end disks' tilt", PATHS,
-     "                    caps_charge = caps_charge.max(radius * 2.0 * table.jet_errors()[1] / speed);",
-     "                    caps_charge = caps_charge.max(0.0);", [TUBE_BOUND]),
     ("the tube carries no jet charge", PATHS,
      "    centre + jets.max(caps)",
      "    centre + 0.0 * jets.max(caps)", [WALL_COARSE]),

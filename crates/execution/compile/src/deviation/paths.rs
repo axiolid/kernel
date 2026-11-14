@@ -1217,6 +1217,11 @@ mod tests {
         };
         let caps = tilt(lo, SeamSide::Outgoing).max(tilt(hi, SeamSide::Incoming));
         assert!(jets > 0.0 && caps > 0.0);
+        // The walls' charge is at least about forty times the disks' tilt
+        // (its point term alone is `2 r (en + eb) (1 + pi)` against `2 r
+        // e1 / |c'|`), so the larger of the two is the walls' and the tilt
+        // accumulation cannot change what the bound carries.
+        assert!(jets >= 10.0 * caps, "{jets:e} against {caps:e}");
         let mesh = TriMesh::default();
         let budget = std::cell::Cell::new(Scalar::NAN);
         let seen =
