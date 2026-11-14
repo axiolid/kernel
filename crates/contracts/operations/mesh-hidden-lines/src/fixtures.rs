@@ -1097,7 +1097,7 @@ fn eye(near: f64) -> View {
 /// The drawings a provider that claims perspective must reproduce. Every
 /// number is a closed form of the pinhole projection.
 pub(crate) fn perspective_cases() -> Vec<Case> {
-    use EdgeKind::{Crease, Silhouette};
+    use EdgeKind::{Boundary, Crease, Silhouette};
     use Visibility::{Hidden, Visible};
     let sqrt2 = std::f64::consts::SQRT_2;
     let mut cases = Vec::new();
@@ -1191,6 +1191,54 @@ pub(crate) fn perspective_cases() -> Vec<Case> {
                     piece(Hidden, [0.5, 0.5], [1.0 / 3.0, 0.5]),
                     piece(Visible, [1.0 / 3.0, 0.5], [-0.5, 0.5]),
                 ],
+            }],
+            ..Expect::default()
+        },
+    ));
+
+    // The eye strictly inside a triangle seen edge-on. The triangle
+    // (0,-10,5), (0,10,5), (0,0,-20) lies in the plane x = 0, which holds the
+    // eye, and the eye is inside it. Behind it, the edge of a sheet from
+    // (0,-1,-10) to (0,1,-10) has the image segment y in [-1/10, 1/10]. Every
+    // eye ray through that segment starts in the triangle and leaves it by
+    // the far side, deeper than the edge, so over each point of the segment
+    // the triangle has a point between the near plane (depth 1) and the edge:
+    // the whole edge is hidden.
+    cases.push(case(
+        "perspective eye inside an edge-on triangle",
+        vec![
+            sheet(
+                1,
+                soup(
+                    vec![
+                        Point3::new(0.0, -10.0, 5.0),
+                        Point3::new(0.0, 10.0, 5.0),
+                        Point3::new(0.0, 0.0, -20.0),
+                    ],
+                    vec![0, 1, 2],
+                ),
+            ),
+            sheet(
+                2,
+                soup(
+                    vec![
+                        Point3::new(0.0, -1.0, -10.0),
+                        Point3::new(0.0, 1.0, -10.0),
+                        Point3::new(0.0, 1.0, -10.5),
+                        Point3::new(0.0, -1.0, -10.5),
+                    ],
+                    vec![0, 1, 2, 0, 2, 3],
+                ),
+            ),
+        ],
+        eye(-1.0),
+        crease_half(),
+        Expect {
+            rows: None,
+            edges: vec![EdgePieces {
+                edge: edge(2, 0, 1),
+                kind: Boundary,
+                pieces: vec![piece(Hidden, [0.0, -0.1], [0.0, 0.1])],
             }],
             ..Expect::default()
         },

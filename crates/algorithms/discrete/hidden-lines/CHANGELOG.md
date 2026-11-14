@@ -28,7 +28,18 @@ caret rule for `0.x` versions.
   the 50x50 perspective grid of `scenario/hidden-lines` the tree then returns
   4.2M boxes instead of 44.3M before the exact test (540,676 pairs either
   way; the isometric grid returns 3.5M). The drawing is unchanged and
-  orthographic views are untouched (#387).
+  orthographic views are untouched. A vertex at or behind the eye plane
+  (`W >= 0`) has an unbounded image enclosure, so a triangle beside or behind
+  the eye sends the whole scene to the linear scan (same pairs, slower
+  candidate search); this is documented in the crate docs (#387).
+- An edge-on perspective triangle whose plane contains the eye may contain the
+  eye itself, strictly inside, on a side or at a vertex. The eye in the closed
+  triangle is decided exactly (no two of the three signs of `v_i × v_j` along
+  the normal strictly opposite) and every ray from the eye then starts in the
+  triangle, so its fibre reaches from the eye to the side the ray leaves by:
+  the span of each non-skipped side counts as in front without the nearer-than
+  test, while the near plane still has to be reached and the point still has
+  to be strictly beyond it.
 
 ## [0.1.4] - 2026-11-13
 

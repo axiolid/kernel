@@ -20,7 +20,7 @@ use crate::caps::{hidden_by_caps, Cap};
 use crate::decide::decide;
 use crate::edges::{DrawEdge, Tri};
 use crate::param::{Param, Solver, Span};
-use crate::recipe::{Constraint, Delta, Kind, Lift, Orient2};
+use crate::recipe::{Constraint, Delta, EyeSide, Kind, Lift, Orient2};
 use crate::view::Vert;
 
 /// The view-space scene one edge is resolved against.
@@ -321,6 +321,12 @@ fn edge_on(
     }
 
     let [v0, v1, v2] = tri.v;
+    // A perspective triangle whose plane contains the eye may contain the eye
+    // itself. Then every ray from the eye that meets the triangle starts in
+    // it, so its fibre over an image point reaches from the eye to the side
+    // the ray leaves by: no point of the side has to be nearer than the edge
+    // for the fibre to have one.
+    let eye_inside = scene.perspective && eye_in_triangle(verts, tri, &mut solver.escalations)?;
     let mut in_front: Vec<Span> = Vec::new();
     let mut reaches_kept: Vec<Span> = Vec::new();
     for (from, to) in [(v0, v1), (v1, v2), (v2, v0)] {
@@ -349,9 +355,13 @@ fn edge_on(
             };
         }
         let Some(within) = within else { continue };
-        let above = scene.constraint(Kind::SegmentAbove { from, to }, true);
-        if let Some(span) = solver.clip(within, &above)? {
-            solver.insert(&mut in_front, span)?;
+        if eye_inside {
+            solver.insert(&mut in_front, within)?;
+        } else {
+            let above = scene.constraint(Kind::SegmentAbove { from, to }, true);
+            if let Some(span) = solver.clip(within, &above)? {
+                solver.insert(&mut in_front, span)?;
+            }
         }
         if let Some(near) = scene.near {
             let at_or_below = scene.constraint(Kind::SegmentAtOrBelow { from, to, near }, false);
@@ -365,6 +375,21 @@ fn edge_on(
     };
     let both = solver.intersect(&in_front, &reaches_kept)?;
     solver.clip_all(both, &scene.constraint(Kind::BelowNear(near), true))
+}
+
+/// Whether the eye lies in the closed triangle `tri`, whose plane contains
+/// it: no two of the signs of `eye × corner` edges are strictly opposite.
+fn eye_in_triangle(verts: &[Vert], tri: &Tri, escalations: &mut usize) -> GeomResult<bool> {
+    let (mut positive, mut negative) = (false, false);
+    for k in 0..3 {
+        let side = EyeSide { verts, t: tri.v, k };
+        match decide(&side, escalations)? {
+            Ordering::Greater => positive = true,
+            Ordering::Less => negative = true,
+            Ordering::Equal => {}
+        }
+    }
+    Ok(!(positive && negative))
 }
 
 #[cfg(test)]

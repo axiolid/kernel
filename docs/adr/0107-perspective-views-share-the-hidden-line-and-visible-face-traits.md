@@ -97,7 +97,8 @@ The exact method of the Decision is made concrete as follows.
   certainly positive) and `W`; a box over vertices that straddle the eye
   plane is therefore unbounded in the image and the broad phase keeps it.
 - **The predicates.** All are evaluated on vectors from the eye, with no
-  division, so a triangle behind the eye needs no case. The side of an image
+  division, so a triangle behind the eye needs no case of its own (a
+  triangle whose plane contains the eye does, below). The side of an image
   line is the determinant of the rows `(h, U, V)`. An eye ray through `P`
   meets a triangle exactly when its three side determinants have the
   triangle's sign, and then reaches its plane at `P / s`. "In front of `P`"
@@ -111,7 +112,19 @@ The exact method of the Decision is made concrete as follows.
   extent of a triangle edge `CD` is `(C × P)·(C × D) >= 0` and
   `(P × D)·(C × D) >= 0`; the edge is in front when
   `(P × (D - C))·(C × D) > |C × D|²` and not past the near plane when
-  `near·(P × (D - C))·(C × D) - |C × D|²·W_P >= 0`.
+  `near·(P × (D - C))·(C × D) - |C × D|²·W_P >= 0`. These forms assume the
+  eye is outside the triangle. The eye may lie in the closed triangle,
+  strictly inside, on a side or at a vertex; then every eye ray that meets
+  the triangle starts in it, and its fibre over an image point runs from the
+  eye to the side the ray leaves by. A point of the fibre at the near plane
+  is then in front of any kept `P`, whereas the strict test `s > 1` on the
+  leaving side alone would drop the edge. The provider
+  decides exactly whether the eye is in the closed triangle (the signs of
+  `(v_i × v_{i+1})·n` along the normal `n` are not strictly opposite). When
+  it is, each side's extent span counts as in front without that test, while
+  the near-plane reach and the strict clip `W_P < near` stay. A side through
+  the eye or a vertex at the eye projects to a point and is skipped as
+  before.
 - **The cap.** The point of the near plane on the eye ray through `P` is in
   the solid exactly when an odd number of the solid's triangles are crossed
   by the eye line on the eye's side of the plane. The provider counts the
@@ -120,9 +133,10 @@ The exact method of the Decision is made concrete as follows.
   which needs no triangle behind the eye and uses the same perturbed
   image-side clips as the orthographic cap. The independent oracle counts
   the eye line's own side, including behind the eye.
-- **Conformance.** The perspective suite draws five fixtures (a box in
+- **Conformance.** The perspective suite draws six fixtures (a box in
   front, the same box cut by the near plane, an eye inside a box, an exact
-  non-dyadic boundary, an edge along the eye ray) and requires the refusal
+  non-dyadic boundary, an edge along the eye ray, an eye inside an edge-on
+  triangle) and requires the refusal
   of a near depth that is missing, zero, positive or not finite. A provider
   that claims hidden-line perspective and ignores the projection fails them.
   The binary64 oracle of the provider tests casts rays from the eye.

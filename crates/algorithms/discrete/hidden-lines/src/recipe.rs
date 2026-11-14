@@ -386,6 +386,29 @@ impl SignExpr for Orient2<'_> {
     }
 }
 
+/// The side of the eye (the origin of view space) of the line through two
+/// corners of a triangle whose plane contains the eye: the sign of
+/// `(v_from × v_to)·n` with `n` the triangle's normal. The three cross
+/// products of such a triangle are all parallel to `n`, so their signs are
+/// comparable, and the eye is in the closed triangle exactly when no two of
+/// the three are strictly opposite.
+pub(crate) struct EyeSide<'a> {
+    pub verts: &'a [Vert],
+    pub t: [u32; 3],
+    /// The corner `t[k]` and the next one.
+    pub k: usize,
+}
+
+impl SignExpr for EyeSide<'_> {
+    fn sign_in<T: Arith>(&self) -> Option<Sign> {
+        let v = |vertex: u32| from_eye::<T>(self.verts, vertex);
+        let [t0, t1, t2] = self.t;
+        let normal = cross3(&sub3(&v(t1), &v(t0)), &sub3(&v(t2), &v(t0)));
+        let (from, to) = (self.t[self.k], self.t[(self.k + 1) % 3]);
+        dot3(&cross3(&v(from), &v(to)), &normal).sign()
+    }
+}
+
 /// The difference of one view coordinate between two vertices.
 pub(crate) struct Delta<'a> {
     pub verts: &'a [Vert],

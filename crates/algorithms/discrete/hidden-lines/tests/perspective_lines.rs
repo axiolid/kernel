@@ -341,3 +341,94 @@ fn an_edge_on_sheet_through_the_eye_hides_exactly_its_image() {
         ]
     );
 }
+
+/// The pieces of the far sheet's edge (0, 1), `y` from -1 to 1 at depth 10,
+/// behind one edge-on triangle in the plane `x = 0`, which contains the eye.
+/// The triangle is a sheet, so only its own edges are in the way.
+fn behind_triangle(corners: [[f64; 3]; 3]) -> Vec<(Visibility, f64, f64)> {
+    let occluder = TriMesh::new(
+        corners
+            .iter()
+            .map(|c| Point3::new(c[0], c[1], c[2]))
+            .collect(),
+        vec![0, 1, 2],
+    );
+    let far = sheet([
+        [0.0, -1.0, -10.0],
+        [0.0, 1.0, -10.0],
+        [0.0, 1.0, -10.5],
+        [0.0, -1.0, -10.5],
+    ]);
+    let meshes = [
+        HiddenLineMesh::new(MeshId(1), MeshRole::Sheet, &occluder),
+        HiddenLineMesh::new(MeshId(2), MeshRole::Sheet, &far),
+    ];
+    let request = HiddenLineRequest::new(
+        &meshes,
+        perspective(-1.0),
+        EdgeSelection::new(None),
+        common::LIMITS,
+    );
+    let pick = |provider: &dyn MeshHiddenLines| -> Vec<(Visibility, f64, f64)> {
+        provider
+            .hidden_lines(&request, &options())
+            .expect("draws")
+            .segments
+            .iter()
+            .filter(|s| s.source.mesh.0 == 2 && s.source.vertices == [0, 1])
+            .map(|s| (s.visibility, s.start.y, s.end.y))
+            .collect()
+    };
+    let scalar = pick(&ScalarHiddenLines::new());
+    assert_eq!(scalar, pick(&ScanHiddenLines));
+    scalar
+}
+
+/// The edge's image `|y| <= 1/10`, hidden. In the control the triangle's side
+/// is in front of the edge. In the three scenes with the eye in the triangle
+/// the fibre over each image point reaches from the eye to a side farther
+/// than the edge, so it has a point between the near plane and the edge.
+const HIDDEN: [(Visibility, f64, f64); 1] = [(Visibility::Hidden, -0.1, 0.1)];
+
+#[test]
+fn an_edge_on_triangle_in_front_of_the_eye_hides_the_edge_behind_it() {
+    // The control: the triangle starts at depth 2, in front of the edge.
+    assert_eq!(
+        behind_triangle([[0.0, -10.0, -2.0], [0.0, 10.0, -2.0], [0.0, 0.0, -20.0]]),
+        HIDDEN
+    );
+}
+
+#[test]
+fn an_eye_strictly_inside_an_edge_on_triangle_does_not_unhide_the_edge() {
+    assert_eq!(
+        behind_triangle([[0.0, -10.0, 5.0], [0.0, 10.0, 5.0], [0.0, 0.0, -20.0]]),
+        HIDDEN
+    );
+}
+
+#[test]
+fn an_eye_on_a_side_of_an_edge_on_triangle_does_not_unhide_the_edge() {
+    assert_eq!(
+        behind_triangle([[0.0, -10.0, 0.0], [0.0, 10.0, 0.0], [0.0, 0.0, -20.0]]),
+        HIDDEN
+    );
+}
+
+#[test]
+fn an_eye_at_a_vertex_of_an_edge_on_triangle_does_not_unhide_the_edge() {
+    assert_eq!(
+        behind_triangle([[0.0, 0.0, 0.0], [0.0, -10.0, -20.0], [0.0, 10.0, -20.0]]),
+        HIDDEN
+    );
+}
+
+#[test]
+fn an_edge_on_triangle_beyond_the_edge_does_not_hide_it() {
+    // The eye is outside the triangle, which lies beyond the edge from depth
+    // 12 on: nothing of it is in front, so the eye-inside rule must not fire.
+    assert_eq!(
+        behind_triangle([[0.0, 5.0, -12.0], [0.0, 5.0, -30.0], [0.0, -5.0, -30.0]]),
+        [(Visibility::Visible, -1.0 / 10.0, 1.0 / 10.0)]
+    );
+}

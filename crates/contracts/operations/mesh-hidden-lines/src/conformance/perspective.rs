@@ -9,7 +9,7 @@
 //! that a registry can fall back past it. A provider that answers `true`
 //! claims it, and the suite then draws the perspective fixtures (a box, a box
 //! cut by the near plane, an eye inside a box, an exact boundary, an edge
-//! along the eye ray) and checks the drawing and the refusal of a bad near
+//! along the eye ray, an eye inside an edge-on triangle) and checks the drawing and the refusal of a bad near
 //! depth. Hidden-line fixtures exist; the visible-face claim has none yet and
 //! fails closed with [`PerspectiveConformanceFailure::ClaimUnverifiable`]
 //! until they land.

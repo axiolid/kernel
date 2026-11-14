@@ -13,7 +13,8 @@ caret rule for `0.x` versions.
 
 - Perspective fixtures for hidden lines (a box in front of the eye, the same
   box cut by the near plane, an eye inside a box, an exact non-dyadic
-  boundary, an edge along the eye ray) and the refusal of a perspective near
+  boundary, an edge along the eye ray, an eye inside an edge-on triangle)
+  and the refusal of a perspective near
   depth that is missing, zero, positive or not finite. A hidden-line provider
   that claims perspective is checked against them by
   `PerspectiveConformanceSuite::run`, which reports a failure as the new
