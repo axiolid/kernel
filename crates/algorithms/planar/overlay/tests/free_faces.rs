@@ -698,6 +698,86 @@ fn a_courtyard_is_a_face_of_its_own_and_a_hole_of_the_room() {
     );
 }
 
+#[test]
+fn two_flush_walls_on_one_line_keep_the_vertex_where_the_wall_changes() {
+    let faces = faces_of(
+        vec![
+            rect(-0.25, -0.25, 2.0, 0.0),
+            rect(2.0, -0.25, 4.25, 0.0),
+            rect(-0.25, 3.0, 4.25, 3.25),
+            rect(-0.25, 0.0, 0.0, 3.0),
+            rect(4.0, 0.0, 4.25, 3.0),
+        ],
+        Vec::new(),
+        GAP,
+    );
+    let room = &faces.faces()[0];
+    assert_eq!(
+        room.outer.points,
+        vec![
+            point(0.0, 0.0),
+            point(2.0, 0.0),
+            point(4.0, 0.0),
+            point(4.0, 3.0),
+            point(0.0, 3.0)
+        ]
+    );
+    let owner = |edge: usize| match room.outer.sources[edge][..] {
+        [PieceSource::Obstacle { polygon, .. }] => polygon,
+        _ => panic!("edge {edge} lies on one obstacle edge"),
+    };
+    assert_eq!([owner(0), owner(1)], [0, 1]);
+}
+
+#[test]
+fn a_point_on_the_wall_edge_of_a_closed_gap_is_in_the_gap() {
+    let faces = faces_of(mitred_walls(D), Vec::new(), GAP);
+    // The two mitre faces that bound a gap, the south wall's east end and
+    // the east wall's south end: one of them is on the side of the gap that
+    // an inside test by winding leaves out.
+    for (a, b) in [
+        (point(4.0 - D, 0.0), point(4.25 - D, -0.25)),
+        (point(4.0, D), point(4.25, -0.25 + D)),
+    ] {
+        let middle = point((a.x + b.x) / 2.0, (a.y + b.y) / 2.0);
+        assert!(matches!(
+            faces.locate(middle).unwrap(),
+            FaceLocation::InClosedGap(_)
+        ));
+    }
+}
+
+#[test]
+fn a_ring_that_visits_its_smallest_point_twice_starts_with_the_lowest_rotation() {
+    // The island shares the room's corner (0, 0), the smallest point of the
+    // ring, which the ring visits once for each of the two wedges of free
+    // space there.
+    let island = polygon(&[(0.0, 0.0), (1.0, 0.5), (0.5, 1.0)]);
+    let faces = faces_of(
+        vec![
+            walled(&[(0.0, 0.0), (4.0, 0.0), (4.0, 3.0), (0.0, 3.0)]),
+            island,
+        ],
+        Vec::new(),
+        GAP,
+    );
+    assert_eq!(faces.faces().len(), 1);
+    let points = &faces.faces()[0].outer.points;
+    let starts: Vec<usize> = (0..points.len())
+        .filter(|&i| points[i] == point(0.0, 0.0))
+        .collect();
+    assert_eq!(starts.len(), 2);
+    assert_eq!(starts[0], 0);
+    let rotated = |from: usize| -> Vec<(f64, f64)> {
+        (0..points.len())
+            .map(|i| points[(from + i) % points.len()])
+            .map(|p| (p.x, p.y))
+            .collect()
+    };
+    let (own, other) = (rotated(0), rotated(starts[1]));
+    assert!(own.partial_cmp(&other) == Some(std::cmp::Ordering::Less));
+}
+
 /// Two walls whose facing edges are `separation` apart, near the origin.
 fn two_walls(separation: f64) -> Vec<Polygon> {
     vec![rect(-2.0, 0.0, 0.0, 1.0), rect(separation, 0.0, 2.0, 1.0)]
