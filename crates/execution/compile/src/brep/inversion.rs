@@ -570,6 +570,9 @@ impl FaceBound<'_> {
             let lo = Point2::new((a.x.min(b.x) - gu).max(u0), (a.y.min(b.y) - gv).max(v0));
             let hi = Point2::new((a.x.max(b.x) + gu).min(u1), (a.y.max(b.y) + gv).min(v1));
             let bounds = oracle.bounds((lo.x, hi.x), (lo.y, hi.y))?;
+            // TODO(#498): a box across a tangent break is never shown
+            // invertible, so a face touching one without pcurves is
+            // unbounded by name; bound each side of the break instead.
             if !bounds.smooth {
                 return None;
             }

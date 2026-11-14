@@ -33,9 +33,10 @@
 //!    sample, so with `o*` the other parameter read at `t*` the points
 //!    `G(t) = S(t, o*)` over the interval must lie within `tau` of
 //!    `S(t*, o*)`: [`RelationInverter::spread`] bounds that by `r |G'(t*)| +
-//!    r^2 sup|G''| / 2`, `r` the interval's farthest end from `t*` (by the
-//!    certified speed over the interval times `r` where a tangent break lies
-//!    inside it). Beyond `tau` the surface runs along a fold (`S_u` parallel to
+//!    r^2 sup|G''| / 2`, `r` the interval's farthest end from `t*`; where a
+//!    tangent break lies inside it, by the larger side of `t*` of the sum of
+//!    its sub-pieces' lengths, between breaks, times their certified speeds.
+//!    Beyond `tau` the surface runs along a fold (`S_u` parallel to
 //!    `S_v`) or its generators turn about the sample (the swept curve stops
 //!    and turns back), each refused by its own name; a ruling pivoting about
 //!    a slow rim, or an ellipse's flat side, moves little near the sample
@@ -641,8 +642,9 @@ impl<'g> RelationInverter<'g> {
     /// `G = S(., o*)` moves as the swept curve for a revolution (turned by a
     /// fixed `u*`) and an extrusion (shifted by a fixed `v* d`), and as
     /// `(1 - v*) A + v* B` for a ruled surface. Where a tangent break lies
-    /// inside the piece there is no Taylor step across it: the bound is the
-    /// certified speed over the piece times `r`.
+    /// inside the piece there is no Taylor step across it: each side of `t`
+    /// is bounded by its sub-pieces between breaks, each its length times
+    /// its certified speed, and the larger side is the bound.
     fn spread(
         &self,
         probe: &Probe,
@@ -652,23 +654,20 @@ impl<'g> RelationInverter<'g> {
         let r = (t - lo).max(hi - t).max(0.0);
         let up = 1.0 + ROUNDING;
         if self.breaks.iter().any(|&b| b > lo && b < hi) {
-            // The tangent breaks inside the piece: no Taylor step across it,
-            // the certified speed bound over the whole piece instead.
-            let first = match &self.surface {
-                RelationSurface::Revolution { curve, .. }
-                | RelationSurface::Extrusion { curve, .. } => curve_derivative_bounds3(
-                    curve.curve,
-                    curve.parameter(lo)?,
-                    curve.parameter(hi)?,
-                )
-                .map(|bounds| bounds.first),
-                RelationSurface::Ruled { sides } => sides[0]
-                    .speeds(lo, hi)
-                    .zip(sides[1].speeds(lo, hi))
-                    .map(|((a1, _), (b1, _))| a1.max(b1)),
+            // The tangent breaks inside the piece: no Taylor step across a
+            // break. Each side of `t` is a path through its sub-pieces
+            // between breaks, each no longer than its length times its
+            // certified speed; the farther side bounds the spread.
+            let side = |from: Scalar, to: Scalar| -> GeomResult<Scalar> {
+                let (a, b) = (from.min(to), from.max(to));
+                let mut ends = vec![a];
+                ends.extend(self.breaks.iter().copied().filter(|&x| x > a && x < b));
+                ends.push(b);
+                ends.windows(2).try_fold(0.0, |sum, w| {
+                    Ok(sum + (w[1] - w[0]) * self.speed_bound(w[0], w[1])?)
+                })
             };
-            let first = first.ok_or_else(|| no_speed_bound(&self.surface))?;
-            let moving = r * first * up;
+            let moving = side(t, lo)?.max(side(t, hi)?) * up;
             if !moving.is_finite() {
                 return Err(non_finite());
             }
@@ -701,6 +700,23 @@ impl<'g> RelationInverter<'g> {
             return Err(non_finite());
         }
         Ok((moving, turning))
+    }
+
+    /// The certified speed of the generator over `[a, b]`: the swept
+    /// curve's, or the faster ruled side's.
+    fn speed_bound(&self, a: Scalar, b: Scalar) -> GeomResult<Scalar> {
+        let first = match &self.surface {
+            RelationSurface::Revolution { curve, .. }
+            | RelationSurface::Extrusion { curve, .. } => {
+                curve_derivative_bounds3(curve.curve, curve.parameter(a)?, curve.parameter(b)?)
+                    .map(|bounds| bounds.first)
+            }
+            RelationSurface::Ruled { sides } => sides[0]
+                .speeds(a, b)
+                .zip(sides[1].speeds(a, b))
+                .map(|((a1, _), (b1, _))| a1.max(b1)),
+        };
+        first.ok_or_else(|| no_speed_bound(&self.surface))
     }
 
     /// The range of a revolved line's parameter where the sample can be

@@ -609,16 +609,12 @@ fn honest(name: &str, result: GeomResult<Compiled>, samples: &[Point3], allowed:
         Ok((mesh, _, report)) => match report.bound {
             Some(bound) => {
                 let worst = farthest(&mesh, samples);
-                eprintln!("{name}: certified {bound:e}, measured {worst:e}");
-                // The measurement's own rounding: on a plane patch
-                // certified exact, `closest_point_on_triangle` lands 1.8e-13
-                // off a sample inside a long thin triangle.
-                let scale = samples
-                    .iter()
-                    .map(|p| p.abs().max_element())
-                    .fold(1.0, Scalar::max);
+                eprintln!(
+                    "{name}: certified {bound:e}, measured {worst:e}, {} triangles",
+                    mesh.indices.len() / 3
+                );
                 assert!(
-                    worst <= bound * (1.0 + 1e-9) + 1e-12 * scale,
+                    worst <= bound * (1.0 + 1e-9),
                     "{name}: certified {bound:e} below the measured {worst:e}"
                 );
                 assert!(
@@ -1244,6 +1240,47 @@ fn a_patch_beside_a_profile_s_corner_meshes_without_pcurves() {
                     &[Outcome::Certified],
                 );
             }
+        }
+    }
+}
+
+/// The fast piece of the kinked profile at `u`, carried on past its corner
+/// at `x = 3`.
+fn kinked_point(u: Scalar, v: Scalar) -> Point3 {
+    Point3::new(10.0 * u, 0.0, v)
+}
+
+/// A short patch whose edge stops just before the corner certifies. One
+/// whose far edge lies a tenth of the tolerance past it, beside the slow
+/// piece, straddles the break, where the lens cannot show the surface
+/// invertible, and is unbounded by that name (#498). The samples there
+/// match generators over a wide stretch of the slow piece: their spread is
+/// bounded side by side of the break, the slow side at its own speed, so
+/// they are not refused as not unique.
+#[test]
+fn a_patch_reaching_a_profile_s_corner_is_certified_or_unbounded_by_name() {
+    for degree in [1, 2] {
+        let support =
+            move |b: &mut GeometryGraphBuilder| extrusion(b, kinked(degree, 0.3), Vec3::Z);
+        for (x1, outcome) in [
+            (2.9995, Outcome::Certified),
+            (3.0001, Outcome::Unbounded(LENS)),
+        ] {
+            let sheet = Sheet {
+                u: (0.299, x1 / 10.0),
+                v: (0.0, 0.02),
+                point: &kinked_point,
+                curves: [None, None, None, None],
+                pcurves: [false; 4],
+                hole: None,
+                window: None,
+            };
+            honest(
+                &format!("degree {degree}, x up to {x1}"),
+                open_sheet(&support, &sheet),
+                &sheet_samples(&sheet),
+                &[outcome],
+            );
         }
     }
 }

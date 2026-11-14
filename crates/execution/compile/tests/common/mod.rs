@@ -459,11 +459,30 @@ pub fn farthest(mesh: &TriMesh, samples: &[Point3]) -> Scalar {
         .map(|&p| {
             triangles
                 .iter()
-                .filter_map(|&t| closest_point_on_triangle(p, t).ok())
-                .map(|q| p.distance(q))
+                .filter_map(|&t| triangle_distance(p, t))
                 .fold(Scalar::INFINITY, Scalar::min)
         })
         .fold(0.0, Scalar::max)
+}
+
+/// The distance from `p` to the triangle: where `p` projects inside it, its
+/// distance from the triangle's plane, read without rounding the projected
+/// point (a sample on a plane patch is then exactly 0 from its triangles);
+/// otherwise the closest point's.
+fn triangle_distance(p: Point3, [a, b, c]: [Point3; 3]) -> Option<Scalar> {
+    let n = (b - a).cross(c - a);
+    let area = n.length_squared();
+    if area > 0.0 {
+        let inside = [(a, b), (b, c), (c, a)]
+            .iter()
+            .all(|&(x, y)| (y - x).cross(p - x).dot(n) >= 0.0);
+        if inside {
+            return Some((p - a).dot(n).abs() / area.sqrt());
+        }
+    }
+    closest_point_on_triangle(p, [a, b, c])
+        .ok()
+        .map(|q| p.distance(q))
 }
 
 pub fn signed_volume(mesh: &TriMesh) -> Scalar {
