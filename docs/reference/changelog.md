@@ -8,6 +8,17 @@ Every publishable crate versions and publishes independently ([ADR 0067](/adr/00
 
 ## axiolid
 
+### 0.5.1 - 2026-11-14
+
+### Added
+
+- `Application::hidden_lines` draws perspective views: the portable
+  hidden-line provider claims them (ADR 0107, #387). The perspective claim
+  has its own conformance suite, run once per process and only by a call
+  whose view is perspective; a failure refuses the call as the case
+  `perspective claim` of the hidden-line report. Visible faces still refuse a
+  perspective view (`Unsupported`).
+
 ### 0.5.0 - 2026-11-13
 
 ### Added
@@ -2791,6 +2802,64 @@ Every publishable crate versions and publishes independently ([ADR 0067](/adr/00
 
 ## axiolid-evaluate
 
+### 0.3.22 - 2026-11-14
+
+### Added
+
+- `bound::ChainPositionTable` and `bound::SeamSide` (#438): certified
+  points, unit tangents and curvature vectors of an arc-length chain, read
+  in any order, each with a bound on its distance from the exact one. The
+  exact chain is the representation's: an intrinsic piece's points come from
+  an `IntrinsicPositionTable`; a line, circle, ellipse or B-spline piece is
+  read at the parameter whose certified arc length (chord panels) encloses
+  the distance, the evaluator's inverse only a guess that is bisected when
+  its enclosure misses; placements carry the position and the turn error
+  from piece to piece. A parametric piece may start up to
+  `PIECE_FRAME_TOLERANCE` off its local origin: a read at a join takes the
+  piece that starts there (`SeamSide::Outgoing`, what the evaluator reads)
+  or the piece that ends there (`SeamSide::Incoming`). `None` for a family
+  without a certified arc length, a piece longer than its curve and a
+  budget that runs out.
+- `bound::ElevatedPositionTable` takes an elevated or banked curve over a
+  chain plan (#438; 0.3.21 returned `None` for one): the plan is read from a
+  `ChainPositionTable`. `point3_on(d, side)` reads a join from either side,
+  `jet3_on` returns the point with the first and second derivatives (the
+  plan's from the chain table, the profile's and the pivot's in closed form;
+  over an intrinsic plan the curve's own, bit for bit) and `jet_errors`
+  bounds how far the three can be from the exact ones.
+
+### Changed
+
+- `chain::chain_certifies` is `false` for a chain with a parametric piece
+  other than a line, a circle, an ellipse or a B-spline (a sinusoid or a
+  polyline, #438): no certified arc length exists to charge its evaluated
+  ends against, so `flatten2` no longer claims such a chain.
+- `bound::certifies_flattening3` claims an elevated curve over a chain plan
+  again, exactly where `chain_certifies` does (#438; 0.3.21 refused it, #393,
+  because its chord bound under-reported the evaluated ends).
+
+### Fixed
+
+- `chain::chain_chord_bound`, `bound::chord_bound2` over a chain and
+  `bound::chord_bound3` of an elevated or banked curve over a chain plan
+  bound the distance to the chord of the *evaluated* ends (#438): the
+  exact-chord bound plus the larger distance of an evaluated end from a
+  certified `ChainPositionTable` point, the lower end read as the piece that
+  starts there, the upper end as the piece that ends there. They reported
+  only the exact chord: 1.95e-5 over `[116.4375, 116.5625]` of a chain of a
+  line and `k = 0.01 sin(50 s)`, where the exact curve lies 2.835e-3 from
+  the chord of the evaluated ends, and 0 for a point span whose evaluated
+  point is 1.4e-2 off; a parametric piece that starts off the end of the
+  one before it (up to `PIECE_FRAME_TOLERANCE`) is charged its jump.
+- `curve::flatten2` and `flatten3` no longer accept a span of a claimed
+  family (`certifies_flattening2/3`) whose chord bound is `None` on its
+  sagitta alone (#438): the span is refined and, at the depth limit,
+  refused with `BudgetExceeded`. A chain under a stretched start frame
+  (stretch 2 or 4) had its table refuse reads near its own bound, because a
+  rounding allowance grew with the square of the stretch; the resulting
+  `None` bounds passed as proven and the polyline lay 3.9e-3 from the curve
+  at a 3e-3 tolerance.
+
 ### 0.3.21 - 2026-11-13
 
 ### Added
@@ -3848,6 +3917,40 @@ Every publishable crate versions and publishes independently ([ADR 0067](/adr/00
 
 
 ## axiolid-hidden-lines
+
+### 0.1.5 - 2026-11-14
+
+### Added
+
+- `ScalarHiddenLines` and `ScanHiddenLines` draw perspective views and claim
+  them through `supports_projection`, replacing the by-name refusal of 0.1.4:
+  a pinhole at the frame origin, image `(U / -W, V / -W)`, `near` required
+  and below zero. Every visibility predicate is an exact determinant of
+  vectors from the eye, so triangles behind the eye need no case, endpoints
+  are the exact rationals rounded once, and the near-plane cap is decided by
+  ray parity along the eye ray. The perspective conformance fixtures and a
+  binary64 eye-ray oracle (seeded scenes, eyes outside and inside) check it;
+  the provider refuses a perspective view whose `near` is missing, zero,
+  positive or not finite with `InvalidInput`. The visible-face providers
+  still refuse a perspective view by name (ADR 0107, #387).
+- The broad phase scales the depth coordinate of its hierarchy to the size of
+  the image in a perspective view, where the image is in units of one over the
+  depth and the longest-extent split would otherwise cut by depth alone. On
+  the 50x50 perspective grid of `scenario/hidden-lines` the tree then returns
+  4.2M boxes instead of 44.3M before the exact test (540,676 pairs either
+  way; the isometric grid returns 3.5M). The drawing is unchanged and
+  orthographic views are untouched. A vertex at or behind the eye plane
+  (`W >= 0`) has an unbounded image enclosure, so a triangle beside or behind
+  the eye sends the whole scene to the linear scan (same pairs, slower
+  candidate search); this is documented in the crate docs (#387).
+- An edge-on perspective triangle whose plane contains the eye may contain the
+  eye itself, strictly inside, on a side or at a vertex. The eye in the closed
+  triangle is decided exactly (no two of the three signs of `v_i × v_j` along
+  the normal strictly opposite) and every ray from the eye then starts in the
+  triangle, so its fibre reaches from the eye to the side the ray leaves by:
+  the span of each non-skipped side counts as in front without the nearer-than
+  test, while the near plane still has to be reached and the point still has
+  to be strictly beyond it (ADR 0107, #387).
 
 ### 0.1.4 - 2026-11-13
 
@@ -4944,6 +5047,42 @@ Every publishable crate versions and publishes independently ([ADR 0067](/adr/00
 
 
 ## axiolid-mesh-compile
+
+### 0.3.46 - 2026-11-14
+
+### Changed
+
+- Flattening a 2D chain is narrowed (`axiolid_reference::bound`, #438): a
+  chain with a sinusoid or two-point polyline parametric piece is no longer
+  claimed. Curve-bounded boundaries and profile segments over such chains
+  go from proven to unbounded, and a compiled polyline of such a chain is
+  refused (`UnsupportedInput`, "an arc-length chain with a piece no
+  certified position table reads"). An elevated curve over one was already
+  unclaimed in 0.3.45 (#393). A claimed family whose chord
+  bound is missing on a span is refined and, at the depth limit, refused,
+  never accepted on the midpoint's sagitta; a chain with a fast intrinsic
+  piece, whose evaluated ends are centimetres off, can reach
+  `BudgetExceeded` below a tolerance its ends' gap exceeds.
+- A swept disk along an elevated or banked curve over a chain plan is no
+  longer unbounded by name (#438; 0.3.45 reported
+  `UNCERTIFIED_DIRECTRIX_POINTS` for it, #393): see Fixed. Under an intrinsic
+  profile it stays unbounded (`TODO(#481)`).
+
+### Fixed
+
+- A swept disk along an elevated curve over a chain plan (a line, a cubic
+  transition and an arc) is certified against the exact tube (#438): the
+  centre line, its tangent and its second derivative are read from the
+  `ElevatedPositionTable` over the chain, and the bound charges their
+  errors (`wall_jet_charge`, held against adversarially perturbed jets in
+  a unit test). The evaluator's points were taken as exact there: the
+  arc-length inverse's tolerance and every placement before a piece carry
+  into them. A 0.3 m disk along such a plan over `[5, 95]` at 1 mm is
+  certified at 1 mm and the exact tube lies within the reported bound. A
+  swept disk along a chain with a sinusoid or two-point polyline piece was
+  certified in 0.3.44 from the evaluator's points; it is now unbounded, by
+  the generic reason ("the directrix could not be bounded"), since no
+  certified arc length exists for such a piece.
 
 ### 0.3.45 - 2026-11-13
 
@@ -7151,6 +7290,21 @@ Every publishable crate versions and publishes independently ([ADR 0067](/adr/00
 
 ## axiolid-mesh-hidden-lines-contract
 
+### 0.1.6 - 2026-11-14
+
+### Added
+
+- Perspective fixtures for hidden lines (a box in front of the eye, the same
+  box cut by the near plane, an eye inside a box, an exact non-dyadic
+  boundary, an edge along the eye ray, an eye inside an edge-on triangle)
+  and the refusal of a perspective near
+  depth that is missing, zero, positive or not finite. A hidden-line provider
+  that claims perspective is checked against them by
+  `PerspectiveConformanceSuite::run`, which reports a failure as the new
+  `PerspectiveConformanceFailure::HiddenLines`. This replaces the 0.1.5
+  behaviour in which every claim failed closed with `ClaimUnverifiable`; a
+  visible-face claim still does until its fixtures land (ADR 0107, #387).
+
 ### 0.1.5 - 2026-11-13
 
 ### Added
@@ -9258,6 +9412,16 @@ Every publishable crate versions and publishes independently ([ADR 0067](/adr/00
 
 
 ## axiolid-reference
+
+### 0.3.18 - 2026-11-14
+
+### Added
+
+- `bound::ChainPositionTable` and `bound::SeamSide` are re-exported from
+  `axiolid-evaluate` (#438): certified points, tangents and curvature
+  vectors of an arc-length chain. `bound::ElevatedPositionTable` takes a
+  chain plan and reads its tangent and second derivative (`jet3_on`,
+  `jet_errors`).
 
 ### 0.3.17 - 2026-11-13
 

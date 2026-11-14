@@ -8,7 +8,7 @@ Exact scalar hidden-line drawings of triangle meshes in orthographic and perspec
 
 | | |
 | --- | --- |
-| Latest release | 0.1.4 (2026-11-13) |
+| Latest release | 0.1.5 (2026-11-14) |
 | crates.io | [`axiolid-hidden-lines`](https://crates.io/crates/axiolid-hidden-lines) |
 | Facade | [`axiolid`](./axiolid) feature `hidden-lines-provider` |
 | Layer | algorithms (`algorithm.discrete`) |
@@ -65,29 +65,38 @@ evidence, never refused.
 
 ## Changes
 
-Latest release, 0.1.4 (2026-11-13):
+Latest release, 0.1.5 (2026-11-14):
 
 ### Added
 
-- `ScalarVisibleFaces` resolves `FaceGroups::Planar` exactly before labelling
-  (new `groups` module: union-find over edges of exactly two triangles with
-  parallel, same-facing normals, polled for cancellation, memory-budgeted;
-  ADR 0106, #384).
-- `ScalarHiddenLines` draws `EdgeKind::GroupBoundary` when
-  `EdgeSelection::group_boundary` is set, resolving the groups only then;
-  with it off the output is unchanged (ADR 0106, #385).
-
-- The hidden-line and visible-face providers refuse a perspective view by
-  name (`UnsupportedInput`, input `perspective view`) when called directly,
-  and do not claim it through `supports_projection` (ADR 0107, #387).
-
-### Changed
-
-- The providers' view-space vertices carry exact homogeneous coordinates
-  `[U, V, W, h]` with `h = 1` in an orthographic view, preparing perspective
-  (ADR 0107, #387). The drawings are bit for bit the same: the segment hash
-  of every `scenario/hidden-lines` case is unchanged, and the wall clock
-  there is unchanged (isometric and cut plan at 20x20 and 50x50 agree with
-  the previous commit within run-to-run noise).
+- `ScalarHiddenLines` and `ScanHiddenLines` draw perspective views and claim
+  them through `supports_projection`, replacing the by-name refusal of 0.1.4:
+  a pinhole at the frame origin, image `(U / -W, V / -W)`, `near` required
+  and below zero. Every visibility predicate is an exact determinant of
+  vectors from the eye, so triangles behind the eye need no case, endpoints
+  are the exact rationals rounded once, and the near-plane cap is decided by
+  ray parity along the eye ray. The perspective conformance fixtures and a
+  binary64 eye-ray oracle (seeded scenes, eyes outside and inside) check it;
+  the provider refuses a perspective view whose `near` is missing, zero,
+  positive or not finite with `InvalidInput`. The visible-face providers
+  still refuse a perspective view by name (ADR 0107, #387).
+- The broad phase scales the depth coordinate of its hierarchy to the size of
+  the image in a perspective view, where the image is in units of one over the
+  depth and the longest-extent split would otherwise cut by depth alone. On
+  the 50x50 perspective grid of `scenario/hidden-lines` the tree then returns
+  4.2M boxes instead of 44.3M before the exact test (540,676 pairs either
+  way; the isometric grid returns 3.5M). The drawing is unchanged and
+  orthographic views are untouched. A vertex at or behind the eye plane
+  (`W >= 0`) has an unbounded image enclosure, so a triangle beside or behind
+  the eye sends the whole scene to the linear scan (same pairs, slower
+  candidate search); this is documented in the crate docs (#387).
+- An edge-on perspective triangle whose plane contains the eye may contain the
+  eye itself, strictly inside, on a side or at a vertex. The eye in the closed
+  triangle is decided exactly (no two of the three signs of `v_i × v_j` along
+  the normal strictly opposite) and every ray from the eye then starts in the
+  triangle, so its fibre reaches from the eye to the side the ray leaves by:
+  the span of each non-skipped side counts as in front without the nearer-than
+  test, while the near plane still has to be reached and the point still has
+  to be strictly beyond it (ADR 0107, #387).
 
 Full history: [`crates/algorithms/discrete/hidden-lines/CHANGELOG.md`](https://github.com/axiolid/kernel/blob/main/crates/algorithms/discrete/hidden-lines/CHANGELOG.md)

@@ -9,6 +9,8 @@ caret rule for `0.x` versions.
 
 ## [Unreleased]
 
+## [0.3.18] - 2026-11-14
+
 ### Added
 
 - `bound::ChainPositionTable` and `bound::SeamSide` are re-exported from

@@ -9,6 +9,8 @@ caret rule for `0.x` versions.
 
 ## [Unreleased]
 
+## [0.5.1] - 2026-11-14
+
 ### Added
 
 - `Application::hidden_lines` draws perspective views: the portable

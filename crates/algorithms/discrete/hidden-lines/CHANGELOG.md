@@ -9,6 +9,8 @@ caret rule for `0.x` versions.
 
 ## [Unreleased]
 
+## [0.1.5] - 2026-11-14
+
 ### Added
 
 - `ScalarHiddenLines` and `ScanHiddenLines` draw perspective views and claim

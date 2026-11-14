@@ -9,6 +9,8 @@ caret rule for `0.x` versions.
 
 ## [Unreleased]
 
+## [0.1.6] - 2026-11-14
+
 ### Added
 
 - Perspective fixtures for hidden lines (a box in front of the eye, the same

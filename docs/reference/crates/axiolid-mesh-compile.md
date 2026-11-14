@@ -8,7 +8,7 @@ Scalar reference MeshCompiler: profiles, extrusion, transforms, boolean dispatch
 
 | | |
 | --- | --- |
-| Latest release | 0.3.45 (2026-11-13) |
+| Latest release | 0.3.46 (2026-11-14) |
 | crates.io | [`axiolid-mesh-compile`](https://crates.io/crates/axiolid-mesh-compile) |
 | Layer | execution (`execution.orchestration`) |
 | API documentation | [rustdoc](/api/rustdoc/axiolid_mesh_compile/index.html) · [docs.rs](https://docs.rs/axiolid-mesh-compile) |
@@ -118,225 +118,40 @@ owns graph traversal and dispatch; the construction algorithms themselves
 
 ## Changes
 
-Latest release, 0.3.45 (2026-11-13):
-
-### Added
-
-- `SKIN_WITHIN_ROUNDING`: the start of the `Degenerate` message a difference
-  or an intersection is refused with when its result holds a skin thinner
-  than its coordinates' rounding and the exact referee cannot decide it
-  (#400, ADR 0102).
-
-- B-rep faces on a `SurfaceRelation::Revolution`, `LinearExtrusion` or
-  `Ruled` mesh when every edge use carries a pcurve (#411, ADR 0103), under
-  the families `surface of revolution`, `surface of linear extrusion` and
-  `ruled surface`, with a certified deviation. The tessellator reads a face's
-  surface through a crate-private support view, and the three relations
-  evaluate and bound their derivatives in closed form from the swept curve
-  or the two sides, a line, circle, ellipse or B-spline (rational too). A
-  B-spline is read only inside its domain and a ruled surface inside its
-  unit square. Exact compilation of such a face stays refused.
-  A boolean with such a B-rep operand now meshes, reported unbounded by name
-  (`exact boolean over a B-rep operand with a face that is neither a plane
-  with straight edges nor a warped face without a surface`); it was refused
-  at tessellation before.
-
-- `deviation::MESH_TO_EXACT`: the detail of the other direction of a measured
-  boolean, how far any point of the mesh lies from the exact compiler's
-  result (#329).
-
-- Stationed runs, placements and section folds along a banked curve over an
-  intrinsic plan (a canted alignment, #396) are certified where they were
-  unbounded by name: the frame law bounds the roll from the cant law and
-  compares every frame read with the exact rolled section. A fold inside a
-  canted transition is found between the stations and refused ("sections
-  fold"); it was checked conservatively and never refused. A canted run over
-  a chain plan stays unbounded by name (`TODO(#394)`).
-- A certified bound for the cells beside a mitre of a run of sections at
-  stations, on a curved piece, with a changing section or a seam inside the
-  cell (#335, ADR 0082). The exact solid at a mitre is each side extruded
-  along its end tangent to the mitre plane (moved by the longitudinal offset)
-  plus the planar faces between the two sides' cuts; the bound is closed form
-  per cell and the mesh is unchanged. The openbimrs/ifc#443 deck, unbounded
-  by name in 0.3.44, reports `Certified(4.88e-4)`, within its 1e-3 request.
-- `deviation::EMPTY_RESULT`: the detail of a boolean whose exact result is
-  empty and whose mesh is too, certified at `0` (#326).
+Latest release, 0.3.46 (2026-11-14):
 
 ### Changed
 
-- A swept disk along an elevated or banked curve over a chain plan, or under
-  an intrinsic (vertical clothoid) profile, is reported unbounded by name
-  (`UNCERTIFIED_DIRECTRIX_POINTS`, "the directrix's points have no certified
-  error") where it was reported certified (#393). The certificate read the
-  evaluator's points, which have no certified error. `TODO(#438)` lifts it
-  for chain plans, `TODO(#481)` for intrinsic profiles.
-- An elevated curve over a chain plan is no longer claimed certified for
-  flattening (`axiolid_reference::bound::certifies_flattening3`, #393,
-  `TODO(#438)`): its chord bound under-reported the evaluated ends, so its
-  polylines and curve-bounded boundaries are reported unbounded by name
-  where they were reported proven.
-
-- A flush slab whose openings were round-tripped through world coordinates
-  (their sides moved by `9.3e-10`) is refused by name, `SKIN_WITHIN_ROUNDING`
-  with the referee's reason, where 0.3.44 returned it with every opening
-  lidded; the exact compiler cannot classify below that feature (#457). The
-  same slab placed, or with exactly turned openings, now opens every opening
-  where 0.3.44 returned a self-intersecting mesh (#400, ADR 0102).
-
-- A B-rep face on a surface relation other than a revolution, a linear
-  extrusion or a ruled surface is refused as `a B-rep face on a surface
-  relation other than a revolution, a linear extrusion or a ruled surface`
-  (it was `a B-rep face on a surface relation`).
-- An edge use without a pcurve on a face over one of those relations is
-  refused as `an edge use without a pcurve on a face over a surface relation`
-  before any meshing, and a swept curve that is not a line, circle, ellipse
-  or B-spline is refused as `a swept curve other than a line, circle,
-  ellipse or B-spline` (`a swept curve that is not an atomic 3D curve` for
-  a node of another kind); a zero axis or direction is invalid input (#411).
-- An exact boolean whose result has a vertex off its edge's curve beyond
-  what its report allows is refused by name (#445). It needs
-  `axiolid-brep-boolean` with `BooleanError::VertexOffCurve`.
-- An intersection of half-spaces (read through instances) is the tool of a
-  difference or an intersection in both compilers, and so is a single
-  half-space on the left of an intersection with a solid, which commutes
-  (#326). Each further half-space's stand-in is sized by the stand-in so
-  far, so a region of one is the single clip it was, bit for bit. The mesh
-  stand-in of two or more passes the snap perturbations of cutting them
-  together (`SNAPPED_OPERANDS`) into the result's deviation. A region is cut
-  in its subject's frame too (ADR 0102), each leaf relative to it.
-- A half-space on its own, or in a boolean that is no clip, is refused by
-  name in the mesh compiler as `UnsupportedInput` (`half-space without a
-  subject to size it by: ...`, `boolean of a half-space that is not a
-  clip: ...`), where it was `Unsupported` with no input. The exact compiler
-  names the new cases: `exact intersection of half-spaces without a
-  subject: ...` and `exact symmetric difference with a half-space, which is
-  unbounded`. A symmetric difference's refusal now comes after the empty
-  operands' identities, so an operand's own refusal comes first.
-
-- A cell beside a mitre that 0.3.44 reported unbounded ("a cell beside a
-  mitred seam on a curved piece, or with a section that changes across it")
-  is bounded, or named by one of two reasons refinement splits: "a cell
-  beside a mitre does not advance across the mitre plane fast enough to bound
-  the plane's cut" (a corner too sharp for the piece's turning over the cell)
-  and "a cell between two mitres, on a curved piece or with a changing
-  section, is too short to split". Runs that were unbounded there are refined
-  near their mitres and report a bound (#335).
+- Flattening a 2D chain is narrowed (`axiolid_reference::bound`, #438): a
+  chain with a sinusoid or two-point polyline parametric piece is no longer
+  claimed. Curve-bounded boundaries and profile segments over such chains
+  go from proven to unbounded, and a compiled polyline of such a chain is
+  refused (`UnsupportedInput`, "an arc-length chain with a piece no
+  certified position table reads"). An elevated curve over one was already
+  unclaimed in 0.3.45 (#393). A claimed family whose chord
+  bound is missing on a span is refined and, at the depth limit, refused,
+  never accepted on the midpoint's sagitta; a chain with a fast intrinsic
+  piece, whose evaluated ends are centimetres off, can reach
+  `BudgetExceeded` below a tolerance its ends' gap exceeds.
+- A swept disk along an elevated or banked curve over a chain plan is no
+  longer unbounded by name (#438; 0.3.45 reported
+  `UNCERTIFIED_DIRECTRIX_POINTS` for it, #393): see Fixed. Under an intrinsic
+  profile it stays unbounded (`TODO(#481)`).
 
 ### Fixed
 
-- A swept disk along an elevated or banked curve over an intrinsic plan
-  (a clothoid) is certified against the exact tube (#393): the centre line
-  is read from an `ElevatedPositionTable` built at a thousandth of the
-  budget, whose error the bound carries, where the evaluator's own point
-  was taken as exact. Only a plan under a fast curvature law is far off:
-  a 0.3 m disk along a plan of curvature `0.002 sin(50 s)` over `[95, 98]`
-  at 1 mm was reported certified at 1.20e-3, and the exact tube lay 2.84e-3
-  from its mesh. On a clothoid the difference is about `1e-12`, within the
-  table's error.
-
-- A measured boolean whose exact result is all planar reports the other
-  direction too (#329), as its own `DeviationPath::Boolean` contribution
-  under `MESH_TO_EXACT`, widened like the boolean's own bound by the
-  flattening, the readings and the rounding floor: the mesh's triangles
-  searched against a welded, outward-oriented triangulation of the exact
-  faces. Material the mesh has and the exact result lacks, connected to the
-  body, now shows: an uncut full-width clip reports 4.76 where it reported
-  0.175, and the strip of #325 at most 1.2 times 238.549 mm where it
-  reported 175 mm. Consumers that read "the" boolean contribution now see
-  one more. A skin authored within the tolerance that the exact compiler
-  read away shows too, and may fail `meets_requested`. Curved results keep
-  the one-sided bound (#348). The coordinates are taken relative to the
-  result's own extent, so a wall far from the origin is bounded as tightly
-  as one at it. The report of the two-door wall takes 1.4 to 1.6 times as
-  long in the release bench (492 ms on main; 644 ms and 783 ms in two runs
-  with the change), and a three-opening wall four million metres from the
-  origin takes 6.8 s in a debug test, forward and reverse.
-
-- A half-space clip is cut in its subject's frame, so a wall turned by a
-  placement no longer comes back as a `Solid` with a lid thinner than
-  rounding across a slot the clip opens (#400, ADR 0102). A difference or
-  intersection whose result still holds such a skin is decided by the exact
-  referee, bounded half-space tools included, where it reads nothing above
-  the rounding reach, and refused by name otherwise.
-
-- A sectioned surface and an open-section run (`SurfaceRelation::SectionedSurface`,
-  `OpenSectionsAtStations`) whose section planes stop advancing are refused
-  as invalid input, as a stationed spine is since #361 (#407). The same
-  decision applies: exact for unturned sections on closed-form bend frames,
-  a touch within rounding included (such a sheet was refused as a collapsed
-  triangle before, now as a fold); conservative for turned sections and
-  frames read by quadrature, never refusing and reporting the sheet
-  unbounded by name when a fold cannot be excluded. A sheet that meets
-  itself far away is not detected yet. The refusal reads 'station-placed
-  sections fold' for spines too.
-- A curved face's pcurve may walk a shared edge at another pace than the
-  pcurve the edge was sampled through (#413). Each cached sample is located
-  on the use's own pcurve: the parameter whose surface image is nearest the
-  sample, searched with Brent's method between the sample before and a
-  guess scaled by the pcurve's pace, so the parameters stay strictly
-  monotone. A sample with no place on the pcurve, or further from it than
-  the chord budget, is refused (`a shared edge sample is not located on a
-  neighbouring pcurve`), where the pcurves were compared at uniform
-  parameters before and a rim whose wall and cap circle differ in pace (a
-  traced section of an exact union, an IFC pcurve) was refused as
-  disagreeing in 3D. A located parameter within a thousandth of a step of
-  its uniform parameter is put there, so a pcurve at the sampling use's
-  pace triangulates as before. The deviation bound takes the chord bounds
-  over the located spans, across a break piecewise (each piece's bound
-  plus the break's distance from the span's chord, where a span with a
-  break inside had none), and the samples' offsets from the surface once,
-  in the triangles. The edge pass halves its spans until the located spans
-  of every other use meet the budget, up to the segment cap. An exact
-  result closes a pcurve's end onto its vertex within the smaller of its
-  boolean's reading and the tolerance (and never less than the chord
-  budget); the disagreement is part of the bound.
-
-- A boolean with a face reaching a cone's apex or a sphere's pole is
-  measured (#379). The deviation oracle no longer refuses the pole gap of
-  such a face's loop ("an exact face's loops do not close in its
-  parameters"): a loop that leaves the pole at the height it reached it
-  closes there, whatever the jump in u. A cone's box ends at its apex,
-  where its derivative bound is undefined, so the face is no longer
-  reported unbounded ("cannot be bounded over its domain"). A partial cone
-  keeping its apex, cut from a box, is certified within the budget.
-- The B-rep tessellator refuses a curved face whose trim closes across a
-  sphere pole or a cone apex by name, as `UnsupportedInput` ("a curved
-  B-rep face whose trim closes across a sphere pole or a cone apex"). It
-  used to exhaust the refinement depth after seconds (`BudgetExceeded`) or
-  fail with "ring folds back"; the pole row of samples is `TODO(#463)`.
-
-- The certified bound of a straight cell beside a mitre no longer assumes the
-  mesh's mitre row lies on each side's own cut (#335). It does not where the
-  two sides' cuts differ: a turn on a grade in the section frame, which 0.3.44
-  reported `Certified(0.0987)` while the exact walls stray 0.1007 (now
-  0.2236), and a longitudinal offset at the mitre, which it reported at 3.6e-11
-  while the exact walls stray 0.5 (now 0.5). Both may stop meeting the
-  requested chord error.
-- A boolean with an operand that leaves nothing (a clip that misses its
-  subject, an intersection of disjoint solids) is decided by an identity in
-  both compilers (`S - 0 = S`, `0 - T = 0`, `S & 0 = 0`, `S | 0 = S`;
-  #326). It was refused as `tool: mesh has no triangles` or `subject: mesh
-  has no triangles` (mesh), or as `Degenerate` (exact). The exact compiler
-  still refuses an empty root, `Degenerate`, since an `ExactBRep` cannot be
-  empty; the mesh compiler returns an empty mesh, `MeshClosure::Solid`, as
-  before. A skin a subject has pending (#400) passes through an identity to
-  the root of its chain, where the referee decides it. An emptiness the
-  general boolean reads only within the tolerance (operands overlapping by
-  less than it) is not an identity: it is refused as `Degenerate`, as
-  before, since the other operand would pass through with an exact report
-  and the cavity dropped. The stand-ins a region builds are the exception:
-  a meeting read within the tolerance there can be a touch at their margin,
-  so the result at zero tolerance is taken, and a tool whose box lies
-  wholly apart from the subject's envelope leaves nothing of the region
-  there, decided exactly before the cut. A boolean whose exact result and mesh are both
-  empty reports `EMPTY_RESULT` at `0`, widened by the report's readings and
-  rounding floor, and unbounded when the empty result is that of flattened
-  operands; an empty exact result against a mesh with triangles, or the
-  reverse, is unbounded by name.
-- A region, or a union with one, of tens of thousands of nested
-  intersections no longer overflows the stack: whether a node is a region is
-  decided on demand, iteratively, and remembered for the compilation or the
-  batch, so a chain of n clips costs O(n) in all and a batch of roots does
-  not pay the graph once per root (#326).
+- A swept disk along an elevated curve over a chain plan (a line, a cubic
+  transition and an arc) is certified against the exact tube (#438): the
+  centre line, its tangent and its second derivative are read from the
+  `ElevatedPositionTable` over the chain, and the bound charges their
+  errors (`wall_jet_charge`, held against adversarially perturbed jets in
+  a unit test). The evaluator's points were taken as exact there: the
+  arc-length inverse's tolerance and every placement before a piece carry
+  into them. A 0.3 m disk along such a plan over `[5, 95]` at 1 mm is
+  certified at 1 mm and the exact tube lies within the reported bound. A
+  swept disk along a chain with a sinusoid or two-point polyline piece was
+  certified in 0.3.44 from the evaluator's points; it is now unbounded, by
+  the generic reason ("the directrix could not be bounded"), since no
+  certified arc length exists for such a piece.
 
 Full history: [`crates/execution/compile/CHANGELOG.md`](https://github.com/axiolid/kernel/blob/main/crates/execution/compile/CHANGELOG.md)

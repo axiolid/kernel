@@ -8,7 +8,7 @@ Portable scalar reference implementation and certified predicates.
 
 | | |
 | --- | --- |
-| Latest release | 0.3.17 (2026-11-13) |
+| Latest release | 0.3.18 (2026-11-14) |
 | crates.io | [`axiolid-reference`](https://crates.io/crates/axiolid-reference) |
 | Facade | [`axiolid`](./axiolid) feature `portable-provider` |
 | Layer | algorithms (`algorithm.reference`) |
@@ -49,26 +49,14 @@ evaluation should depend on those directly.
 
 ## Changes
 
-Latest release, 0.3.17 (2026-11-13):
+Latest release, 0.3.18 (2026-11-14):
 
 ### Added
 
-- `bound::ElevatedPositionTable` is re-exported from `axiolid-evaluate`
-  0.3.21 (#393): certified points of an elevated or banked curve over an
-  intrinsic plan, which `axiolid-mesh-compile` reads for its swept disks.
-
-### Changed
-
-- Requires `axiolid-evaluate` 0.3.21.
-- `section_request` with cut regions no longer refuses a cut whose boundary
-  meets itself at a vertex (#373, ADR 0092 amendment): the edges are paired
-  there by exact angle and a ring that returns to a vertex is split, so
-  corners that touch give two regions and a hole touching its outer ring is a
-  hole that touches it. A ring that touches another at every corner is
-  placed by the exact midpoint of one of its edges. Still refused by name: an
-  edge in and an edge out along one ray or a chain the rings would part
-  (`REFUSED_PINCHED_CUT_REGION`), edges that do not alternate or two of one
-  direction along one ray (`REFUSED_CROSSING_CUT_RINGS`); a `Both` ring that repeats a
-  vertex stays refused.
+- `bound::ChainPositionTable` and `bound::SeamSide` are re-exported from
+  `axiolid-evaluate` (#438): certified points, tangents and curvature
+  vectors of an arc-length chain. `bound::ElevatedPositionTable` takes a
+  chain plan and reads its tangent and second derivative (`jet3_on`,
+  `jet_errors`).
 
 Full history: [`crates/algorithms/reference/CHANGELOG.md`](https://github.com/axiolid/kernel/blob/main/crates/algorithms/reference/CHANGELOG.md)

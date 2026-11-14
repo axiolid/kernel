@@ -1,6 +1,6 @@
 //! Conformance checks for providers that draw perspective views (ADR 0107).
 //!
-//! The base suites cannot grow a field ([`ConformanceReport`](super::ConformanceReport)
+//! The base suites cannot grow a field ([`ConformanceReport`]
 //! is exhaustive), so perspective has a suite of its own, as the region
 //! suite does for section requests (ADR 0091). The claim is inferred from
 //! `supports_projection`, never from probing: a provider that answers `false`
