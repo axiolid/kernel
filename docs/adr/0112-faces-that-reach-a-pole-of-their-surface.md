@@ -66,9 +66,12 @@ pcurve use keeps its parameters (I2). With `K` pole junctions (I3):
 
 - `K = 1`: the row runs from the chain's end back to its start.
 - `K >= 2`, every chain anchored: the rows run as the pcurves place them.
-- `K = 2`, `u` periodic, the chains a whole number of periods apart
-  (including zero): one full turn, the first row `+P`, the second by
-  closure.
+- `K = 2`, `u` periodic, the two chains one seam's samples used once
+  each way (the second's mesh indices the first's reversed): one full
+  turn, the first row `+P`, the second by closure. Two distinct edges
+  between the poles are no full turn, however near each other they run: a
+  second edge leaving both poles along the seam would otherwise read as a
+  whole turn plus a sliver.
 - Otherwise: refused (P2).
 
 A row narrower than the angular tolerance is no row; one wider than a
@@ -158,11 +161,21 @@ face needs fine triangles there and may report above the budget.
 | P5 | `Degenerate`: "runs into the cone apex / sphere pole / axis / apex", unchanged | a sample at a pole that is no end of its edge |
 | P6 | `Degenerate`: "turns a quarter period or more between consecutive samples", unchanged | an edge crossing a pole between samples |
 | P7 | `Degenerate`: "runs into a collapsed ruling", unchanged | a sample on a collapsed ruling, now #502 |
-| P8 | unchanged | a trim circling a pole with no seam edge |
+| P8 | unchanged | a trim circling a pole with no seam edge; see below |
 | P9 | unbounded: "the surface is not certifiably regular along an edge into a pole" | D4 cannot show `s` positive or the box crosses a tangent break |
 
 A clipper triangle joining three samples of one pole that covers parameter
 area is `Degenerate`: it spans no surface.
+
+A face that reaches a pole once and whose true region is the complement of
+what its ring encloses (the rest of a sphere round a geodesic triangle with
+a vertex at the pole, with no seam: invalid under ADR 0059, which needs a
+seam round a pole) is no longer refused at the pole: its ring is the
+triangle's, so it is meshed as the triangle, wound as the face says. A
+shell of the triangle and its complement then holds the triangle twice the
+same way round and is reported `OpenSolid`, not a solid; the complement
+face's own mesh is wrong all the same (`tests/pole_faces.rs` pins it). Reading which
+side of its ring a face covers is #500's question.
 
 **D8. Scope.** The collapsed ruling (ADR 0110's R3) leaves #463 for #502:
 there `v` is undetermined, not `u`, and it needs a column, not a row. A
@@ -242,8 +255,13 @@ surface too (`brep::pole` unit tests), and quarters as the quad halves.
 The span term (I6) is checked the same way over the lens of circles tilted
 0.1 to 1.2 radians from a meridian into a sphere's pole
 (`brep::inversion` unit tests): the chord bound is needed there, the
-meridian term is not, since at a smooth pole every curve bends at least as
-much as the meridians beside it; it stays because the argument needs it.
+meridian term is not, since on a sphere, and at the smooth pole of a
+surface of revolution, every curve bends at least as much as the meridians
+beside it. On the canopy's curved profile, spans near and into its pole
+measure the same way (the farthest points are the edge's own: 2.21e-3
+against the chord bound 2.23e-3 into the pole, 6.7e-3 against `d + e` =
+1.8e-2 near it), so no sample shows the meridian term; it stays because
+the argument needs it on any other support.
 
 **Negative / costs**
 
