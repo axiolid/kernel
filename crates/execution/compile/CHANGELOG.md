@@ -13,8 +13,11 @@ caret rule for `0.x` versions.
 
 - Flattening a 2D chain is narrowed (`axiolid_reference::bound`, #438): a
   chain with a sinusoid or two-point polyline parametric piece is no longer
-  claimed, so polylines, curve-bounded boundaries and elevated curves over
-  such chains go from proven to unbounded. A claimed family whose chord
+  claimed. Curve-bounded boundaries and profile segments over such chains
+  go from proven to unbounded, and a compiled polyline of such a chain is
+  refused (`UnsupportedInput`, "an arc-length chain with a piece no
+  certified position table reads"). An elevated curve over one was already
+  unclaimed in 0.3.45 (#393). A claimed family whose chord
   bound is missing on a span is refined and, at the depth limit, refused,
   never accepted on the midpoint's sagitta; a chain with a fast intrinsic
   piece, whose evaluated ends are centimetres off, can reach

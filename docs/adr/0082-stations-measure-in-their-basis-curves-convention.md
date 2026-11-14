@@ -2084,7 +2084,10 @@ the bound of the point span at 116.5 was 0 for a point 1.4e-2 off.
   `chain_certifies` does.
 - **`chain_certifies` narrows.** A chain with a sinusoid or a polyline
   parametric piece is no longer claimed for flattening: no certified arc
-  length exists to charge its ends against, so it stays unbounded by name.
+  length exists to charge its ends against. Curve-bounded boundaries and
+  profile segments over such a chain become unbounded by name, and a
+  compiled polyline of it is refused (`UnsupportedInput`); an elevated curve
+  over one was already unclaimed (#393).
 - **The tube reads the table's jets.** Over a chain plan the wall takes its
   centre, tangent and second derivative from `jet3_on` (the plan's from the
   chain table, the profile's and the pivot's closed form), and the bound

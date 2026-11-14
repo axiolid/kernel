@@ -1061,6 +1061,11 @@ fn uncertified2(curve: &Curve2) -> &'static str {
         Curve2::BSpline(_) => {
             "a rational 2D B-spline with a non-positive weight: its chords have no certified bound"
         }
+        Curve2::Chain(_) => {
+            "an arc-length chain with a piece no certified position table reads (a sinusoid or \
+             a polyline, or an intrinsic piece with no closed-form bound): its chords have no \
+             certified bound"
+        }
         _ => "a 2D curve family whose chords have no certified bound",
     }
 }

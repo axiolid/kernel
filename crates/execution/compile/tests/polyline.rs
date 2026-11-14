@@ -11,8 +11,8 @@
 use axiolid_contracts::{ExecutionOptions, GeomError, GeomResult, Operation};
 use axiolid_core::{Frame2, Frame3, Point2, Point3, Scalar, Tolerance, Transform3, Vec2, Vec3};
 use axiolid_curve::{
-    BSplineCurve2, BSplineCurve3, Circle2, Circle3, CurvatureLaw, Curve2, Curve3, Ellipse2,
-    Intrinsic3, KnotSpec, Line2, Line3, Polyline2, Polyline3,
+    BSplineCurve2, BSplineCurve3, Chain2, ChainPiece2, Circle2, Circle3, CurvatureLaw, Curve2,
+    Curve3, Ellipse2, Intrinsic3, KnotSpec, Line2, Line3, Polyline2, Polyline3,
 };
 use axiolid_mesh_boolean_boolmesh::BoolmeshBoolean;
 use axiolid_mesh_compile::ReferenceMeshCompiler;
@@ -391,6 +391,45 @@ fn a_curve_with_no_certified_chord_bound_is_refused_by_name() {
         .unwrap()
     });
     refused(polyline(&graph, root), "intrinsic 3D curve with torsion");
+}
+
+#[test]
+fn a_chain_with_a_piece_no_position_table_reads_is_refused_by_name() {
+    // A chain of a line and a sinusoid has no certified arc length to charge
+    // the evaluated ends against (#438): it is not claimed, so its polyline
+    // is refused where 0.3.45 compiled it from the evaluator's points.
+    let chain = |curve: Curve2| {
+        Curve2::Chain(Chain2::new(
+            Frame2 {
+                origin: Point2::ZERO,
+                x: Vec2::X,
+                y: Vec2::Y,
+            },
+            vec![ChainPiece2::Parametric {
+                curve,
+                start: 0.0,
+                length: 3.0,
+            }],
+        ))
+    };
+    let (graph, root) = graph_of(|b| {
+        b.push_value(chain(Curve2::Sinusoid(axiolid_curve::Sinusoid2 {
+            mean: 0.0,
+            cosine: 0.0,
+            sine: 0.0,
+        })))
+        .unwrap()
+    });
+    refused(polyline(&graph, root), "arc-length chain");
+    // A chain of a certified family compiles.
+    let (graph, root) = graph_of(|b| {
+        b.push_value(chain(Curve2::Line(Line2 {
+            origin: Vec2::ZERO,
+            direction: Vec2::X,
+        })))
+        .unwrap()
+    });
+    assert!(polyline(&graph, root).is_ok());
 }
 
 #[test]
