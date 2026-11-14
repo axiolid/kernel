@@ -14,13 +14,15 @@ killed.
 Not listed, as not observable (no fixture, not equivalent):
 - R8, the coarse cell without a certified speed bound, and the same refusal
   in the spread: the four supported swept families always have one.
-- the spread's own guard at a tangent break (the certified speed over the
-  piece instead of the Taylor step from `t*`; survives): a piece reaches past
-  a break only as far as the generators there stay within the slack of the
-  sample, so on the slow side the step from `t*` overstates nothing a
-  fixture can see, and from the fast side it overstates the slow side's
-  movement as the guard does. The guard keeps the bound certified where
-  that coincidence fails.
+- the Taylor step from `t*` across a tangent break, in place of the
+  spread's side-by-side sum over the sub-pieces (survives): on the fixtures
+  that reach a break, the piece crosses it only where the generators beyond
+  stay within the slack of the sample, so they move a few slacks either
+  way and both bounds stay far below `tau`; the sum keeps the bound
+  certified where a step from one side's speed would understate the
+  other's. Taking the
+  whole piece's speed instead of the sum is listed: it refuses the patch
+  reaching just past a corner.
 - the `InvalidInput` refusals of non-finite arithmetic (a distance, the
   revolved line's bracket, the extruded plane's parameters, the residual,
   the spread): finite, valid curves give finite values throughout, and no
@@ -110,6 +112,9 @@ MUTANTS = [
     ("the cover's cells are not cut at tangent breaks", V,
      "    let cells = cut_at_breaks(cut(bracket).collect(), breaks)\n",
      "    let cells = cut_at_breaks(cut(bracket).collect(), &[])\n"),
+    ("the spread across a break takes the whole piece's speed", V,
+     "            let moving = side(t, lo)?.max(side(t, hi)?) * up;\n",
+     "            let moving = r * self.speed_bound(lo, hi)? * up;\n"),
     ("a closed swept spline is read as open", V,
      "                Some(domain) if closes(curve.point(domain.start)?, curve.point(domain.end)?) => {\n",
      "                Some(domain) if false && closes(curve.point(domain.start)?, curve.point(domain.end)?) => {\n"),
