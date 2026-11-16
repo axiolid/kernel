@@ -25,13 +25,19 @@
 //!   grazing contact would refine without limit) and rounded down to a
 //!   multiple of 1/256 ([`quantized`]), so constructions that differ by
 //!   rounding get the same chord and share cache keys. An operand with no
-//!   such pair keeps its chord: `1`. A plane that only touches the surface,
-//!   or reaches into it by no more than the cut's linear tolerance
-//!   ([`depth`], `radius (1 - cos)`, which is what the rounding of a
+//!   such pair keeps its chord: `1`. A plane that only touches the face,
+//!   or reaches over to its far side by no more than the cut's linear
+//!   tolerance ([`shallow_reach`]: the face's greatest distance to the
+//!   shallower side of the plane, which is what the rounding of a
 //!   placement far from the origin needs), is no pair: the mesh cut
 //!   decides a contact within its tolerance by a skin within rounding and
 //!   the exact referee (#243, #400), and a finer chord turns that into a
-//!   pinch the cut refuses.
+//!   pinch the cut refuses. The reach is read off the face, not off the
+//!   section's angle: a slanted plane through a thin pipe meets it at a
+//!   sine whose `radius (1 - cos)` is a fraction of the depth it cuts, and
+//!   a plane tangent to a tube at one point may cross it at another. A
+//!   crossing that holds a tangent point reads `0` there and gets the
+//!   floor.
 //! - **Nested booleans.** A boolean's factor shrinks what its operand is
 //!   meshed at by that much *at the most*: a leaf under several booleans
 //!   (a wall less a row of openings) gets the least of their factors, not
@@ -151,46 +157,23 @@ fn factor(curved: &[Face], other: &[Face], reach: Scalar) -> Scalar {
             let Some(s) = plane_section_sine(point, normal, surface, *lo, *hi) else {
                 continue;
             };
-            // A plane that only touches the surface is no section: the
-            // mesh cut decides a contact within its tolerance by a skin
-            // within rounding and the exact referee (#243, #400), which a
-            // finer chord turns into a pinch.
-            if depth(s, curvature_radius(surface, *lo, *hi)) <= reach {
+            // A plane that only touches the face is no section: the mesh
+            // cut decides a contact within its tolerance by a skin within
+            // rounding and the exact referee (#243, #400), which a finer
+            // chord turns into a pinch. It touches where the face lies to
+            // one side of it, or reaches over to the other by no more than
+            // the tolerance; a plane that cuts through the face with a
+            // tangent point inside the crossing is a section, and reads the
+            // floor. Where the reach is unknown the pair counts.
+            if shallow_reach(point, normal, surface, *lo, *hi)
+                .is_some_and(|reach_in| reach_in <= reach)
+            {
                 continue;
             }
             least = Some(least.map_or(s, |t| t.min(s)));
         }
     }
     least.map_or(1.0, quantized)
-}
-
-/// How far a plane meeting a surface of radius `radius` at sine `s` reaches
-/// into it: `radius (1 - cos) = radius s^2 / (1 + cos)`, which is the
-/// plane's distance from touching it.
-fn depth(s: Scalar, radius: Scalar) -> Scalar {
-    let cos = (1.0 - s * s).max(0.0).sqrt();
-    if s == 0.0 {
-        0.0
-    } else {
-        radius * s * s / (1.0 + cos)
-    }
-}
-
-/// The radius the surface curves at across a section by a plane that
-/// grazes it: a cylinder's, a sphere's, a torus's minor radius, and a cone's
-/// mean normal radius over its axial range.
-fn curvature_radius(surface: &Surface, lo: Point2, hi: Point2) -> Scalar {
-    match surface {
-        Surface::Cylinder(c) => c.radius.abs(),
-        Surface::Sphere(s) => s.radius.abs(),
-        Surface::Torus(t) => t.minor_radius.abs(),
-        Surface::Cone(c) => {
-            let slope = c.semi_angle.tan();
-            let ring = |v: Scalar| (c.radius + v * slope).max(0.0);
-            0.5 * (ring(lo.y) + ring(hi.y)) / c.semi_angle.cos().abs()
-        }
-        _ => Scalar::INFINITY,
-    }
 }
 
 /// `s` as a chord factor: rounded down to a multiple of `1 / GRID`, at
@@ -567,6 +550,13 @@ fn plane_section_sine(
     }
 }
 
+/// Whether `angle` lies in the arc `[lo, hi]` of a turn (`whole` where the
+/// arc is the full turn).
+fn within(angle: Scalar, (lo, hi): (Scalar, Scalar), whole: bool) -> bool {
+    let along = (angle - lo).rem_euclid(TAU);
+    whole || along <= hi - lo + 1e-12 || along >= TAU - 1e-12
+}
+
 /// `sqrt(1 - cos^2)`, the sine of an angle whose cosine is `cos`.
 fn sine(cos: Scalar) -> Scalar {
     (1.0 - cos * cos).max(0.0).sqrt()
@@ -597,6 +587,19 @@ fn cylinder(rel: &Relation, r: Scalar, v: (Scalar, Scalar)) -> Option<Scalar> {
     Some(sine(rel.m * lo.abs().max(hi.abs())))
 }
 
+/// The axial range `v` of a cone of base radius `r0` and semi-angle `beta`
+/// where its radius `r0 + v tan(beta)` is positive; `None` where none is.
+fn cone_span((r0, beta): (Scalar, Scalar), v: (Scalar, Scalar)) -> Option<(Scalar, Scalar)> {
+    let slope = beta.tan();
+    let (mut v0, mut v1) = v;
+    if slope > 0.0 {
+        v0 = v0.max(-r0 / slope);
+    } else if slope < 0.0 {
+        v1 = v1.min(-r0 / slope);
+    }
+    (v0 <= v1).then_some((v0, v1))
+}
+
 /// A cone of base radius `r0` and semi-angle `beta` over its axial range
 /// `v` (kept where its radius `r0 + v tan(beta)` is positive): the section
 /// is `rho(v) m c + v alpha = delta`, and `n . N = cos(beta) m c -
@@ -608,15 +611,7 @@ fn cone(rel: &Relation, (r0, beta): (Scalar, Scalar), v: (Scalar, Scalar)) -> Op
     }
     let (sin, cos) = beta.sin_cos();
     let slope = beta.tan();
-    let (mut v0, mut v1) = v;
-    if slope > 0.0 {
-        v0 = v0.max(-r0 / slope);
-    } else if slope < 0.0 {
-        v1 = v1.min(-r0 / slope);
-    }
-    if v0 > v1 {
-        return None;
-    }
+    let (v0, v1) = cone_span((r0, beta), v)?;
     if rel.m <= PARALLEL {
         let height = rel.delta / rel.alpha;
         return (v0 <= height && height <= v1).then(|| sine(sin * rel.alpha));
@@ -655,10 +650,6 @@ fn torus(
         return None;
     }
     let (whole_u, whole_v) = (u.1 - u.0 >= TAU - 1e-9, v.1 - v.0 >= TAU - 1e-9);
-    let within = |angle: Scalar, (lo, hi): (Scalar, Scalar), whole: bool| {
-        let along = (angle - lo).rem_euclid(TAU);
-        whole || along <= hi - lo + 1e-12 || along >= TAU - 1e-12
-    };
     // The cosine of the angle between the plane's and the surface's normals
     // at minor angle `phi`, where the section passes at cosine `c`.
     let normal = |c: Scalar, phi: Scalar| phi.cos() * rel.m * c + phi.sin() * rel.alpha;
@@ -742,6 +733,122 @@ fn torus(
         }
     }
     sines.into_iter().min_by(Scalar::total_cmp)
+}
+
+/// How far the face over the box `[lo, hi]` reaches to the shallower side of
+/// the plane through `p` with normal `n`: the least of its greatest distances
+/// to either side, `0` where it lies to one side (a plane that only touches
+/// it). That is the true penetration of a plane that grazes the surface and
+/// the depth of the cap it cuts off, where a radius and an angle would read
+/// only a plane parallel to a cylinder's axis, or a sphere. `None` where the
+/// family has no form here: the pair then counts.
+///
+/// The box over-reaches a trimmed face, which only counts more pairs.
+fn shallow_reach(p: Point3, n: Vec3, curved: &Surface, lo: Point2, hi: Point2) -> Option<Scalar> {
+    let u = (lo.x.min(hi.x), lo.x.max(hi.x));
+    let v = (lo.y.min(hi.y), lo.y.max(hi.y));
+    let (least, greatest) = match curved {
+        Surface::Cylinder(c) => {
+            cylinder_offsets(&Relation::new(&c.frame, p, n)?, c.radius.abs(), v)
+        }
+        Surface::Cone(c) => {
+            cone_offsets(&Relation::new(&c.frame, p, n)?, (c.radius, c.semi_angle), v)?
+        }
+        Surface::Sphere(s) => {
+            let rel = Relation::new(&s.frame, p, n)?;
+            let r = s.radius.abs();
+            (-r - rel.delta, r - rel.delta)
+        }
+        Surface::Torus(t) => torus_offsets(
+            &Relation::new(&t.frame, p, n)?,
+            (t.major_radius, t.minor_radius),
+            (u, v),
+        )?,
+        _ => return None,
+    };
+    let reach = greatest.max(0.0).min((-least).max(0.0));
+    reach.is_finite().then_some(reach)
+}
+
+/// The range of `n . (x - p)` over a cylinder of radius `r` and axial range
+/// `v`: `r m c + v alpha - delta`, with `c` over a turn.
+fn cylinder_offsets(rel: &Relation, r: Scalar, v: (Scalar, Scalar)) -> (Scalar, Scalar) {
+    let along = [v.0 * rel.alpha, v.1 * rel.alpha];
+    let (least, greatest) = (along[0].min(along[1]), along[0].max(along[1]));
+    (
+        least - r * rel.m - rel.delta,
+        greatest + r * rel.m - rel.delta,
+    )
+}
+
+/// The range of `n . (x - p)` over a cone: `rho(v) m c + v alpha - delta`,
+/// linear in `v` for `c = +-1`, so read at the ends of its span.
+fn cone_offsets(
+    rel: &Relation,
+    (r0, beta): (Scalar, Scalar),
+    v: (Scalar, Scalar),
+) -> Option<(Scalar, Scalar)> {
+    if !(r0.is_finite() && beta.is_finite()) {
+        return None;
+    }
+    let slope = beta.tan();
+    let (v0, v1) = cone_span((r0, beta), v)?;
+    let ring = |v: Scalar| (r0 + v * slope).max(0.0) * rel.m;
+    let (mut least, mut greatest) = (Scalar::INFINITY, Scalar::NEG_INFINITY);
+    for v in [v0, v1] {
+        least = least.min(v * rel.alpha - ring(v) - rel.delta);
+        greatest = greatest.max(v * rel.alpha + ring(v) - rel.delta);
+    }
+    Some((least, greatest))
+}
+
+/// The range of `n . (x - p)` over a torus face: `(R + r cos phi) m cos(psi -
+/// psi_n) + r sin phi alpha - delta`. With `R > r` the ring is positive, so
+/// at each minor angle `phi` the greatest is at the greatest cosine of the
+/// angle about the axis the face holds, the least at its least; over `phi` each
+/// is then a sinusoid, read at its ends and its peak.
+fn torus_offsets(
+    rel: &Relation,
+    (big, small): (Scalar, Scalar),
+    (u, v): ((Scalar, Scalar), (Scalar, Scalar)),
+) -> Option<(Scalar, Scalar)> {
+    if !(big.is_finite() && small.is_finite() && small > 0.0 && big > small) {
+        return None;
+    }
+    let whole_u = u.1 - u.0 >= TAU - 1e-9;
+    let whole_v = v.1 - v.0 >= TAU - 1e-9;
+    let (c_least, c_greatest) = if whole_u {
+        (-1.0, 1.0)
+    } else {
+        let at = |psi: Scalar| (psi - rel.psi_n).cos();
+        let (a, b) = (at(u.0), at(u.1));
+        (
+            if within(rel.psi_n + core::f64::consts::PI, u, false) {
+                -1.0
+            } else {
+                a.min(b)
+            },
+            if within(rel.psi_n, u, false) {
+                1.0
+            } else {
+                a.max(b)
+            },
+        )
+    };
+    // The greatest of `a cos(phi) + b sin(phi)` over the minor angles.
+    let sinusoid = |a: Scalar, b: Scalar| {
+        let end = |phi: Scalar| a * phi.cos() + b * phi.sin();
+        if whole_v || within(b.atan2(a), v, false) {
+            a.hypot(b)
+        } else {
+            end(v.0).max(end(v.1))
+        }
+    };
+    let (k_least, k_greatest) = (rel.m * c_least, rel.m * c_greatest);
+    Some((
+        big * k_least - small * sinusoid(-k_least, -rel.alpha) - rel.delta,
+        big * k_greatest + small * sinusoid(k_greatest, rel.alpha) - rel.delta,
+    ))
 }
 
 #[cfg(test)]
@@ -1163,6 +1270,255 @@ mod tests {
                     "{closed} against {brute} for {n:?} over {v:?}"
                 ),
                 None => assert!(brute.is_infinite(), "none against {brute}"),
+            }
+        }
+    }
+
+    // --- a plane that touches a face, and one that cuts through it ------
+
+    fn curved_face(surface: Surface, (lo, hi): (Point2, Point2)) -> Face {
+        Face {
+            shape: Shape::Curved { surface, lo, hi },
+            ball: None,
+        }
+    }
+
+    fn plane_face(point: Point3, normal: Vec3) -> Face {
+        Face {
+            shape: Shape::Plane { point, normal },
+            ball: None,
+        }
+    }
+
+    /// The factor of `surface` over its box against the plane, at a
+    /// tolerance of a millimetre.
+    fn factor_against(surface: Surface, bounds: (Point2, Point2), p: Point3, n: Vec3) -> Scalar {
+        factor(&[curved_face(surface, bounds)], &[plane_face(p, n)], 1e-3)
+    }
+
+    /// A plane through the axis of a cylinder of radius `r` and length
+    /// `len`, at its middle, `degrees` to the axis.
+    fn through_the_axis(r: Scalar, len: Scalar, degrees: Scalar) -> Scalar {
+        let tilt = degrees.to_radians();
+        factor_against(
+            column(r),
+            (Point2::new(0.0, 0.0), Point2::new(TAU, len)),
+            Point3::new(0.0, 0.0, 0.5 * len),
+            Vec3::new(tilt.cos(), 0.0, tilt.sin()),
+        )
+    }
+
+    #[test]
+    fn a_plane_through_a_cylinder_at_a_slant_cuts_it_deep() {
+        // The depth `radius (1 - cos)` of the section's sine is that of a
+        // plane parallel to the axis; a slanted plane through the axis cuts
+        // the whole radius, however small that sine reads. Each of these
+        // read under the millimetre by it and kept their chord.
+        for (r, len, degrees, shrunk) in [
+            // A 3 cm pipe cut at 20 degrees: sine 0.342, "depth" 0.9 mm,
+            // real 14 mm.
+            (0.015, 1.0, 20.0, 87.0 / 256.0),
+            // A 0.2 m column cut lengthwise at 5 degrees.
+            (0.2, 6.0, 5.0, FLOOR),
+            // A 3 mm rod mitred at 45 degrees.
+            (0.003, 0.1, 45.0, 181.0 / 256.0),
+        ] {
+            assert_eq!(through_the_axis(r, len, degrees), shrunk, "{r} {degrees}");
+        }
+    }
+
+    #[test]
+    fn a_plane_reaching_a_cylinder_by_the_tolerance_only_touches_it() {
+        // Parallel to the axis, a hair inside the radius: the reach is the
+        // hair.
+        let whole = (Point2::new(0.0, 0.0), Point2::new(TAU, 3.0));
+        let at = |inside: Scalar| {
+            factor_against(
+                column(0.1),
+                whole,
+                Point3::new(0.1 - inside, 0.0, 0.0),
+                Vec3::X,
+            )
+        };
+        assert_eq!(at(0.0), 1.0);
+        assert_eq!(at(9e-4), 1.0);
+        assert_eq!(at(2e-3), FLOOR);
+        // A slanted plane that clips only the end of the face: a sliver
+        // of the rim, a hair deep, is no more than a touch either.
+        let tilt = 0.3_f64;
+        let n = Vec3::new(tilt.cos(), 0.0, tilt.sin());
+        let clip = |hair: Scalar| {
+            // The rim point `(0.1, 0, 3)` lies `hair` past the plane.
+            let p = Point3::new(0.1, 0.0, 3.0) - n * hair;
+            factor_against(column(0.1), whole, p, n)
+        };
+        assert_eq!(clip(5e-4), 1.0);
+        assert!(clip(5e-2) < 1.0);
+    }
+
+    #[test]
+    fn a_plane_cutting_a_tube_whole_has_the_tangent_inside_its_crossing() {
+        // R = 1, r = 0.25 as one face, the tube of a revolved circle: the
+        // plane tangent at `phi = 1.75` also crosses the tube elsewhere,
+        // at a sine of 0.178, so it is a section and its tangent point
+        // reads the floor.
+        let whole = (Point2::new(0.0, 0.0), Point2::new(TAU, TAU));
+        let torus = Surface::Torus(Torus {
+            frame: upright(),
+            major_radius: 1.0,
+            minor_radius: 0.25,
+        });
+        let n = Vec3::new(1.75_f64.cos(), 0.0, 1.75_f64.sin());
+        let p = n * (1.75_f64.cos() + 0.25);
+        assert_eq!(factor_against(torus, whole, p, n), FLOOR);
+        // The thin tube of the issue: a plane 0.9 from the axis touches
+        // the inner equator and crosses the tube at 37 degrees either side.
+        let thin = Surface::Torus(Torus {
+            frame: upright(),
+            major_radius: 1.0,
+            minor_radius: 0.1,
+        });
+        assert_eq!(
+            factor_against(thin, whole, Point3::new(0.9, 0.0, 0.0), Vec3::X),
+            FLOOR
+        );
+    }
+
+    #[test]
+    fn a_plane_touching_a_tube_from_outside_is_no_pair() {
+        let whole = (Point2::new(0.0, 0.0), Point2::new(TAU, TAU));
+        let thin = Surface::Torus(Torus {
+            frame: upright(),
+            major_radius: 1.0,
+            minor_radius: 0.1,
+        });
+        // Tangent at the outer equator, and reaching in by half a
+        // millimetre: the tube lies to one side of it, or all but.
+        for at in [1.1, 1.1 - 5e-4] {
+            assert_eq!(
+                factor_against(thin.clone(), whole, Point3::new(at, 0.0, 0.0), Vec3::X),
+                1.0,
+                "{at}"
+            );
+        }
+        // Reaching in by a centimetre cuts it.
+        assert_eq!(
+            factor_against(thin, whole, Point3::new(1.09, 0.0, 0.0), Vec3::X),
+            FLOOR
+        );
+    }
+
+    #[test]
+    fn a_plane_touching_a_sphere_is_no_pair_and_one_cutting_it_is() {
+        let whole = (Point2::new(0.0, -FRAC_PI_2), Point2::new(TAU, FRAC_PI_2));
+        let sphere = Surface::Sphere(Sphere {
+            frame: upright(),
+            radius: 0.5,
+        });
+        for (at, factor) in [(0.5, 1.0), (0.5 - 5e-4, 1.0), (0.49, FLOOR), (0.0, 1.0)] {
+            assert_eq!(
+                factor_against(sphere.clone(), whole, Point3::new(0.0, 0.0, at), Vec3::Z),
+                factor,
+                "{at}"
+            );
+        }
+    }
+
+    #[test]
+    fn a_cone_clipped_square_is_a_cap_and_a_slanted_cut_is_deep() {
+        let cone = Surface::Cone(Cone {
+            frame: upright(),
+            radius: 0.5,
+            semi_angle: FRAC_PI_6,
+        });
+        let span = (Point2::new(0.0, 0.0), Point2::new(TAU, 1.0));
+        // Square to the axis at the base: the cone lies to one side.
+        assert_eq!(
+            factor_against(cone.clone(), span, Point3::ZERO, Vec3::Z),
+            1.0
+        );
+        // Through its middle, tilted by a degree: the full width on each
+        // side.
+        let tilt = 1.0_f64.to_radians();
+        let n = Vec3::new(tilt.sin(), 0.0, tilt.cos());
+        let s = sine_of(Point3::new(0.0, 0.0, 0.5), n, &cone, span).expect("a section");
+        assert_eq!(
+            factor_against(cone, span, Point3::new(0.0, 0.0, 0.5), n),
+            quantized(s)
+        );
+    }
+
+    #[test]
+    fn the_reach_agrees_with_the_points_of_the_surface() {
+        // The reach of every family against planes leaning every way, read
+        // off a grid of the surface's own points: the closed form holds all
+        // of them and is no more than the grid's step above.
+        let cases: Vec<(Surface, (Point2, Point2))> = vec![
+            (column(0.2), (Point2::new(0.0, 0.0), Point2::new(TAU, 1.5))),
+            (
+                Surface::Cone(Cone {
+                    frame: upright(),
+                    radius: 0.5,
+                    semi_angle: FRAC_PI_6,
+                }),
+                (Point2::new(0.0, -0.4), Point2::new(TAU, 1.0)),
+            ),
+            (
+                Surface::Sphere(Sphere {
+                    frame: upright(),
+                    radius: 0.5,
+                }),
+                (Point2::new(0.0, -FRAC_PI_2), Point2::new(TAU, FRAC_PI_2)),
+            ),
+            (bent_tube(), quarter()),
+            (bent_tube(), (Point2::new(0.3, 1.0), Point2::new(1.2, 4.0))),
+            (
+                Surface::Torus(Torus {
+                    frame: upright(),
+                    major_radius: 1.0,
+                    minor_radius: 0.25,
+                }),
+                (Point2::new(0.0, -FRAC_PI_2), Point2::new(TAU, FRAC_PI_2)),
+            ),
+            (
+                Surface::Torus(Torus {
+                    frame: upright(),
+                    major_radius: 1.0,
+                    minor_radius: 0.25,
+                }),
+                (Point2::new(0.0, 0.0), Point2::new(TAU, TAU)),
+            ),
+        ];
+        let planes = [
+            (Point3::new(0.1, 0.05, 0.2), Vec3::new(1.0, 0.3, 0.8)),
+            (Point3::new(-0.3, 0.1, 0.4), Vec3::new(0.2, -0.3, 1.0)),
+            (Point3::new(0.9, 0.0, 0.1), Vec3::new(1.0, 0.0, 0.05)),
+            (Point3::new(0.0, 0.0, 0.6), Vec3::new(0.1, 0.0, 1.0)),
+            (Point3::new(0.15, -0.2, 0.0), Vec3::new(0.7, 0.7, 0.1)),
+            (Point3::new(-0.2, 0.0, 0.0), Vec3::new(1.0, 0.5, 0.2)),
+        ];
+        let steps = 400;
+        for (surface, (lo, hi)) in &cases {
+            for &(p, n) in &planes {
+                let n = n.normalize();
+                let (mut least, mut greatest) = (Scalar::INFINITY, Scalar::NEG_INFINITY);
+                for i in 0..=steps {
+                    for j in 0..=steps {
+                        let u = lo.x + (hi.x - lo.x) * f64::from(i) / f64::from(steps);
+                        let v = lo.y + (hi.y - lo.y) * f64::from(j) / f64::from(steps);
+                        let at =
+                            axiolid_reference::surface::evaluate(surface, u, v).expect("a point");
+                        let d = n.dot(at - p);
+                        least = least.min(d);
+                        greatest = greatest.max(d);
+                    }
+                }
+                let brute = greatest.max(0.0).min((-least).max(0.0));
+                let closed = shallow_reach(p, n, surface, *lo, *hi).expect("a reach");
+                assert!(
+                    closed >= brute - 1e-12 && closed - brute < 2e-3,
+                    "{closed} against {brute} for {n:?} at {p:?}"
+                );
             }
         }
     }

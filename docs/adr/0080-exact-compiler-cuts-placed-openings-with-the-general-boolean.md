@@ -1069,9 +1069,18 @@ the first 1.1 times its budget under `TODO(#380)`.
   displacements of the faces meeting there add, which neither rule bounds:
   the report measures it.
 - **A graze within the tolerance is no section.** A plane that only touches
-  the surface, or reaches into it by no more than the cut's linear tolerance (`radius (1 - cos)`, the plane's distance from
-  touching, with the cylinder's, the sphere's or the torus's minor radius,
-  or the cone's mean normal radius), contributes nothing. At the floor the
+  the face, or that the face reaches across by no more than the cut's linear
+  tolerance, contributes nothing. The reach is the face's greatest distance
+  to the shallower side of the plane over its parameter box (a support
+  function of the surface: the face's extent along the plane's normal, in
+  closed form for the cylinder, cone, sphere and torus), read off the face
+  and not off the section's angle: `radius (1 - cos)` is the penetration
+  only of a plane parallel to a cylinder's axis or of a sphere, and a
+  slanted plane through a 3 cm pipe at 20 degrees (sine 0.342, "depth"
+  0.9 mm, real 14 mm) or a plane tangent to a tube at one point that also
+  crosses it elsewhere would be dropped by it. A tangent point inside a real
+  crossing reads a sine of 0 and gets the floor. A reach that cannot be read
+  counts the pair. At the floor the
   I-beam's hole tangent to its flange (#243) refused as a pinch ("the
   operands meet tangentially") where the coarser mesh left a skin within
   rounding that the exact referee decides (#400, ADR 0102): refining a
@@ -1103,9 +1112,7 @@ the first 1.1 times its budget under `TODO(#380)`.
   which suits a heuristic. The leaves are compiled once per node and
   tolerance for the whole compile, and each boolean reads the faces under
   its operands again, so a row of `n` nested booleans reads `O(n^2)` faces:
-  a plate of 64 round openings in nested differences compiles in 14.4 s with
-  the factors and 15.9 s without (the cuts themselves are quadratic), so the
-  walk is not measurable and is not cached per node. The balls are coarse: a wedge opening's far
+  the walk is not cached per node. The balls are coarse: a wedge opening's far
   chord plane, which never touches the curved wall, still meets the wall's
   cylinder over its infinite extent and its face's ball, so that wall is
   meshed finer (0.55) than it needs. That costs triangles, not accuracy.

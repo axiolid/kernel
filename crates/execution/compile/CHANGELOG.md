@@ -31,10 +31,13 @@ caret rule for `0.x` versions.
   accuracy measure, not a certificate: the report still measures, and a pair
   of curved faces, an elliptical cylinder, a B-spline, an authored mesh or a
   contact grazing below 14.5 degrees can still miss the budget and report so.
-  A plane that only touches a surface or reaches into it by no more than
-  the cut's tolerance (a hole tangent to a flange, #243, wherever it is
-  placed) is no section and keeps its chord, and a torus face is read over
-  its tube as well as its axis.
+  A plane that only touches a face, or that the face reaches across by no
+  more than the cut's tolerance (a hole tangent to a flange, #243, wherever
+  it is placed) is no section and keeps its chord; the reach is the face's
+  greatest distance to the shallower side of the plane, so a slanted plane
+  cutting through a thin pipe, or a plane tangent to a tube that also
+  crosses it elsewhere, is a section. A torus face is read over its tube as
+  well as its axis.
 
 ## [0.3.49] - 2026-11-16
 

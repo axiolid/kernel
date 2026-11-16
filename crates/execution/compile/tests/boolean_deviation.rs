@@ -974,6 +974,14 @@ fn bits(mesh: &TriMesh) -> (Vec<[u64; 3]>, &[u32]) {
     )
 }
 
+/// Points, bit for bit.
+fn bits_of(points: &[Point3]) -> Vec<[u64; 3]> {
+    points
+        .iter()
+        .map(|p| [p.x, p.y, p.z].map(Scalar::to_bits))
+        .collect()
+}
+
 /// The FNV-1a hash of a mesh's position bits and indices.
 fn hash(mesh: &TriMesh) -> u64 {
     let mut hash: u64 = 0xcbf29ce484222325;
@@ -1121,6 +1129,98 @@ fn a_placed_revolution_united_with_a_placed_box_is_certified() {
     );
     let (bound, _) = assert_measured("placed box union bent tube", case, &options, 2.0);
     assert!(bound <= 1e-3, "{bound}");
+}
+
+/// The box `0.4 x 0.5 x 6` intersected with the bent tube of #378, both
+/// under `placement` when it is given.
+fn box_and_bent_tube_placed(g: &mut Graph, placement: Option<Transform3>) -> NodeId {
+    let a = g.extrusion(rect(0.4, 0.5), 6.0);
+    let b = g.revolution(
+        circle(0.1),
+        Point3::new(-1.0, 0.0, 0.0),
+        Vec3::NEG_Y,
+        FRAC_PI_2,
+    );
+    let (a, b) = match placement {
+        Some(placement) => (g.place(a, placement), g.place(b, placement)),
+        None => (a, b),
+    };
+    g.boolean(a, b, BooleanOperator::Intersection)
+}
+
+#[test]
+fn a_placed_intersection_with_a_bent_tube_is_cut_in_the_shared_frame() {
+    // Both operands under one placement are cut in their shared frame
+    // (#356), from the meshes the section angle asked for (#380), and the
+    // result placed: the unplaced cut moved by the placement, vertex for
+    // vertex. Read at the boolean's own chord instead, the shared frame
+    // finds no such mesh, errors, and the world cut places the operands
+    // first, which lands its new vertices a rounding off.
+    let options = options(1e-3);
+    let compiler = ReferenceMeshCompiler::new(BoolmeshBoolean::new());
+    let mesh = |placement: Option<Transform3>| {
+        let mut g = Graph(GeometryGraphBuilder::new());
+        let root = box_and_bent_tube_placed(&mut g, placement);
+        let graph = g.0.finish(vec![root]).expect("a valid graph");
+        compiler
+            .compile_mesh(&graph, root, &options)
+            .expect("the body compiles")
+    };
+    let local = mesh(None);
+    for at in [Vec3::new(12.5, -4.0, 3.2), Vec3::new(3.6e5, 5.8e6, 120.0)] {
+        let placement = Transform3::from_translation(at) * Transform3::from_rotation_z(0.6);
+        let placed = mesh(Some(placement));
+        assert_eq!(placed.indices, local.indices, "{at:?}");
+        let moved: Vec<_> = local
+            .positions
+            .iter()
+            .map(|p| placement.transform_point3(*p))
+            .collect();
+        assert_eq!(bits_of(&placed.positions), bits_of(&moved), "{at:?}");
+    }
+}
+
+#[test]
+fn a_placed_column_clipped_by_an_oblique_roof_is_cut_in_its_own_frame() {
+    // A clip is cut in its subject's frame (#400) at the chord the section
+    // angle asked for the subject (#380): the unplaced cut moved by the
+    // placement, vertex for vertex. Read at the boolean's own chord, the
+    // subject is not found, and the world cut decides, a rounding off.
+    let options = options(1e-3);
+    let compiler = ReferenceMeshCompiler::new(BoolmeshBoolean::new());
+    let mesh = |placement: Option<Transform3>| {
+        let mut g = Graph(GeometryGraphBuilder::new());
+        let column = g.extrusion(circle(0.2), 3.0);
+        let tilt = FRAC_PI_3;
+        let roof = g.push(GeometryNode::HalfSpace(HalfSpace {
+            boundary: Plane3 {
+                origin: Point3::new(0.0, 0.0, 2.0),
+                normal: Vec3::new(tilt.sin(), 0.0, tilt.cos()),
+            },
+            agreement: true,
+        }));
+        let (column, roof) = match placement {
+            Some(placement) => (g.place(column, placement), g.place(roof, placement)),
+            None => (column, roof),
+        };
+        let root = g.boolean(column, roof, BooleanOperator::Difference);
+        let graph = g.0.finish(vec![root]).expect("a valid graph");
+        compiler
+            .compile_mesh(&graph, root, &options)
+            .expect("the body compiles")
+    };
+    let local = mesh(None);
+    for at in [Vec3::new(12.5, -4.0, 3.2), Vec3::new(3.6e5, 5.8e6, 120.0)] {
+        let placement = Transform3::from_translation(at) * Transform3::from_rotation_z(0.6);
+        let placed = mesh(Some(placement));
+        assert_eq!(placed.indices, local.indices, "{at:?}");
+        let moved: Vec<_> = local
+            .positions
+            .iter()
+            .map(|p| placement.transform_point3(*p))
+            .collect();
+        assert_eq!(bits_of(&placed.positions), bits_of(&moved), "{at:?}");
+    }
 }
 
 #[test]

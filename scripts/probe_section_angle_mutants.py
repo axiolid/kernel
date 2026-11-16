@@ -12,14 +12,12 @@ Not probed, because no fixture separates them:
   (`section_angle::ball`), not a value a test pins.
 - The `1e-9` slacks on a cosine and on a feasibility test (`SLACK`): they only
   keep a tangent contact read with rounding from falling out, which the
-  depth test then drops anyway; a placed tangent hole sits on both sides of
+  reach test then drops anyway; a placed tangent hole sits on both sides of
   them.
-- The frame each operand is read in by `boolean_in_shared_frame` and
-  `clip_in_subject_frame` (`subject_budget`, `tool_budget`): read at the
-  boolean's own budget they find no mesh at that key, return an error, and
-  `build_boolean` falls back to the world-frame cut with the operands
-  meshed as before, which is never worse by design (ADR 0096). The meshes
-  and the bounds are the same to rounding.
+- A reach that cannot be read counting the pair (`shallow_reach` returning
+  `None`): it is `None` for the cases `plane_section_sine` refuses first (a
+  frame with no axis, a torus with `R <= r`, a cone with no radius over its
+  range), which never get as far, so no fixture reaches it.
 - The visit limit of `inventory` and the pcurve quarter points of
   `parameter_box`: a limit and a sampling, not a decision.
 """
@@ -76,8 +74,29 @@ MUTANTS = [
      "    ((s * GRID + NOISE).floor() / GRID).max(FLOOR)",
      "    ((s * GRID).floor() / GRID).max(FLOOR)"),
     ("a graze within the tolerance read as a section", S,
-     "            if depth(s, curvature_radius(surface, *lo, *hi)) <= reach {",
-     "            if depth(s, curvature_radius(surface, *lo, *hi)) <= 0.0 * reach {"),
+     "                .is_some_and(|reach_in| reach_in <= reach)",
+     "                .is_some_and(|reach_in| reach_in <= 0.0 * reach)"),
+    ("the face's far side read as its reach", S,
+     "    let reach = greatest.max(0.0).min((-least).max(0.0));",
+     "    let reach = greatest.max(0.0).max((-least).max(0.0));"),
+    ("the cylinder's axial extent left out of its reach", S,
+     "    let along = [v.0 * rel.alpha, v.1 * rel.alpha];",
+     "    let along = [0.0 * v.0, 0.0 * v.1];"),
+    ("the sphere's offset from the plane left out of its reach", S,
+     "            (-r - rel.delta, r - rel.delta)",
+     "            (-r, r)"),
+    ("the torus's minor angle peak left out of its reach", S,
+     "        if whole_v || within(b.atan2(a), v, false) {",
+     "        if whole_v {"),
+    ("the torus's angle range ignored in its reach", S,
+     "    let (c_least, c_greatest) = if whole_u {",
+     "    let (c_least, c_greatest) = if true {"),
+    ("the shared frame reads the operands at the boolean's own chord", C,
+     "                (budget, (subject_budget, tool_budget)),\n",
+     "                (budget, (budget, budget)),\n"),
+    ("a clip's subject frame read at the boolean's own chord", C,
+     "                (budget, subject_budget),\n                (cache, regions),",
+     "                (budget, budget),\n                (cache, regions),"),
     ("the torus's minor angle ignored", S,
      "    let (whole_u, whole_v) = (u.1 - u.0 >= TAU - 1e-9, v.1 - v.0 >= TAU - 1e-9);",
      "    let (whole_u, whole_v) = (u.1 - u.0 >= TAU - 1e-9, true);"),
