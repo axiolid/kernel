@@ -9,6 +9,8 @@ caret rule for `0.x` versions.
 
 ## [Unreleased]
 
+## [0.3.50] - 2026-11-16
+
 ### Changed
 
 - A boolean's curved operand is meshed at its chord budget times the sine of

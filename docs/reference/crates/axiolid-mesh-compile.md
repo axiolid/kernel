@@ -8,7 +8,7 @@ Scalar reference MeshCompiler: profiles, extrusion, transforms, boolean dispatch
 
 | | |
 | --- | --- |
-| Latest release | 0.3.49 (2026-11-16) |
+| Latest release | 0.3.50 (2026-11-16) |
 | crates.io | [`axiolid-mesh-compile`](https://crates.io/crates/axiolid-mesh-compile) |
 | Layer | execution (`execution.orchestration`) |
 | API documentation | [rustdoc](/api/rustdoc/axiolid_mesh_compile/index.html) · [docs.rs](https://docs.rs/axiolid-mesh-compile) |
@@ -128,34 +128,36 @@ owns graph traversal and dispatch; the construction algorithms themselves
 
 ## Changes
 
-Latest release, 0.3.49 (2026-11-16):
+Latest release, 0.3.50 (2026-11-16):
 
-### Added
+### Changed
 
-- A curved B-rep face that reaches a pole of its surface is tessellated
-  instead of refused (#463, ADR 0112): a sphere's poles and a cone's apex,
-  and on surface relations a revolution whose profile reaches its axis and
-  a ruled surface with an apex side, with or without pcurves. The pole is a
-  vertex with no edge along the pole line (ADR 0059); the face's ring is
-  closed there by a row of samples welded to the pole's vertex. An edge's
-  end at a pole is not inverted: its `v` is the pole's and its `u` its
-  neighbouring sample's, and its span into the pole is bounded along the
-  meridians (rulings), as are spans near a pole whose lens cannot be had.
-  A face that is a lattice with a pole row is meshed in fans, one per cell,
-  bounded over the cell's quad by the bilinear interpolation bound and
-  split only at their edge opposite the pole; a row whose cells' bound
-  across it misses the budget, and a face that is no lattice, take the
-  nominal triangles and the triangle bound. Between two poles the pcurves
-  name the side of the meridians a face covers (of a sphere's two halves
-  between the meridians at `u = 0` and `pi`, the second runs from `pi` to
-  `2 pi`, not back to `0`); without pcurves only a full turn, one seam
-  used once each way, is determined. Refused by name: a trim closing across a collapsed
-  edge of a surface without such poles (a B-spline's degenerate edge,
-  #499), a face between two poles without pcurves that is not a full turn
-  (#500), a pole row wider than a period (`InvalidInput`), a hole reaching
-  a pole (#501), and as before an edge that runs through a pole between
-  its ends and a sample on a collapsed ruling (#502). The refusal `a curved
-  B-rep face whose trim closes across a sphere pole or a cone apex` is
-  gone.
+- A boolean's curved operand is meshed at its chord budget times the sine of
+  the smallest angle at which it meets a plane face of the other operand
+  along their section (a plane against a cylinder, cone, sphere or torus, in
+  closed form over the face's parameter box; at least a quarter, rounded down
+  to a multiple of 1/256), so the cut of its facets stays within the budget
+  where the faces meet obliquely (#380, ADR 0080). The factors come from the
+  graph on every compile, so a mesh never depends on a report being asked for.
+  The box intersected with the bent tube of #378 reports 9.9992e-4 where it
+  reported 1.0216e-3 against a budget of 1e-3, and a column clipped by a
+  roof plane 60 degrees from its axis 9.996e-4 where it reported 1.93e-3. The
+  meshes of such booleans have more triangles (2212 where there were 792 for
+  the bent tube: `mesh/oblique` in the release bench takes 19.1 ms where it
+  took 6.8 ms, with its report 704 ms where it took 616 ms), those of
+  booleans with no such pair are unchanged, and a boolean of operands that
+  are certainly planar reads nothing from the graph (`mesh/planar` and
+  `mesh/curved` are unchanged within noise). Under nested booleans a leaf is
+  meshed at the least of their factors, not their product. This is an
+  accuracy measure, not a certificate: the report still measures, and a pair
+  of curved faces, an elliptical cylinder, a B-spline, an authored mesh or a
+  contact grazing below 14.5 degrees can still miss the budget and report so.
+  A plane that only touches a face, or that the face reaches across by no
+  more than the cut's tolerance (a hole tangent to a flange, #243, wherever
+  it is placed) is no section and keeps its chord; the reach is the face's
+  greatest distance to the shallower side of the plane, so a slanted plane
+  cutting through a thin pipe, or a plane tangent to a tube that also
+  crosses it elsewhere, is a section. A torus face is read over its tube as
+  well as its axis.
 
 Full history: [`crates/execution/compile/CHANGELOG.md`](https://github.com/axiolid/kernel/blob/main/crates/execution/compile/CHANGELOG.md)

@@ -5163,6 +5163,38 @@ Every publishable crate versions and publishes independently ([ADR 0067](/adr/00
 
 ## axiolid-mesh-compile
 
+### 0.3.50 - 2026-11-16
+
+### Changed
+
+- A boolean's curved operand is meshed at its chord budget times the sine of
+  the smallest angle at which it meets a plane face of the other operand
+  along their section (a plane against a cylinder, cone, sphere or torus, in
+  closed form over the face's parameter box; at least a quarter, rounded down
+  to a multiple of 1/256), so the cut of its facets stays within the budget
+  where the faces meet obliquely (#380, ADR 0080). The factors come from the
+  graph on every compile, so a mesh never depends on a report being asked for.
+  The box intersected with the bent tube of #378 reports 9.9992e-4 where it
+  reported 1.0216e-3 against a budget of 1e-3, and a column clipped by a
+  roof plane 60 degrees from its axis 9.996e-4 where it reported 1.93e-3. The
+  meshes of such booleans have more triangles (2212 where there were 792 for
+  the bent tube: `mesh/oblique` in the release bench takes 19.1 ms where it
+  took 6.8 ms, with its report 704 ms where it took 616 ms), those of
+  booleans with no such pair are unchanged, and a boolean of operands that
+  are certainly planar reads nothing from the graph (`mesh/planar` and
+  `mesh/curved` are unchanged within noise). Under nested booleans a leaf is
+  meshed at the least of their factors, not their product. This is an
+  accuracy measure, not a certificate: the report still measures, and a pair
+  of curved faces, an elliptical cylinder, a B-spline, an authored mesh or a
+  contact grazing below 14.5 degrees can still miss the budget and report so.
+  A plane that only touches a face, or that the face reaches across by no
+  more than the cut's tolerance (a hole tangent to a flange, #243, wherever
+  it is placed) is no section and keeps its chord; the reach is the face's
+  greatest distance to the shallower side of the plane, so a slanted plane
+  cutting through a thin pipe, or a plane tangent to a tube that also
+  crosses it elsewhere, is a section. A torus face is read over its tube as
+  well as its axis.
+
 ### 0.3.49 - 2026-11-16
 
 ### Added
