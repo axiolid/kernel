@@ -8,7 +8,7 @@ Scalar reference MeshCompiler: profiles, extrusion, transforms, boolean dispatch
 
 | | |
 | --- | --- |
-| Latest release | 0.3.48 (2026-11-14) |
+| Latest release | 0.3.49 (2026-11-16) |
 | crates.io | [`axiolid-mesh-compile`](https://crates.io/crates/axiolid-mesh-compile) |
 | Layer | execution (`execution.orchestration`) |
 | API documentation | [rustdoc](/api/rustdoc/axiolid_mesh_compile/index.html) · [docs.rs](https://docs.rs/axiolid-mesh-compile) |
@@ -128,41 +128,34 @@ owns graph traversal and dispatch; the construction algorithms themselves
 
 ## Changes
 
-Latest release, 0.3.48 (2026-11-14):
+Latest release, 0.3.49 (2026-11-16):
 
 ### Added
 
-- An edge use without a pcurve on a B-rep face over a
-  `SurfaceRelation::Revolution`, `LinearExtrusion` or `Ruled` is inverted
-  onto the relation instead of refused (#454, ADR 0110), as IFC and Revit
-  write most such faces. Each sample is located along the swept parameter
-  by a certified one-dimensional search on its distance from the generating
-  circle, line or ruling, required to have one connected minimiser (across
-  a swept conic's seam), and checked against the linear tolerance; the
-  other parameter is read in closed form. The face then meshes and is
-  bounded as one over an atomic surface without pcurves is, sharing its
-  edges' samples with its neighbours. Refused by name: a sample within the
-  tolerance of the axis of revolution, of a ruled apex or on a collapsed
-  ruling (`Degenerate`), off the surface with a certified floor, without
-  unique parameters (a surface covered twice, an edge across a closed
-  swept B-spline's seam, a fold, generators turning about the sample), a
-  line extruded along itself (`Degenerate`), non-finite input or
-  arithmetic (`InvalidInput`), and a search past its work cap
-  (`BudgetExceeded`). The refusal `an edge use without a pcurve on a face
-  over a surface relation` is gone. Faces without pcurves report up to 1.6
-  times the budget on the tested fixtures, as atomic ones do, and an edge
-  whose surface's speed varies by orders of magnitude along it (a ruling
-  pivoting about a slow rim) is sampled finely throughout and can run into
-  the curved-face vertex budget (ADR 0110, #497).
-
-### Changed
-
-- The arc length bound of an edge span without a pcurve, which sizes the
-  lens's box, is `|C'(m)| h + sup|C''| h^2 / 4` where that is below the
-  curve's speed bound times `h`. A conic's speed bound is its largest
-  semi-axis over any span, so an elliptic edge over its flat side was
-  sampled and refined far past its budget: an extruded 1.2 x 0.1 ellipse
-  over its vertex meshes in 4,096 triangles instead of 32,768. The bound is
-  only tightened, on atomic faces too (#454).
+- A curved B-rep face that reaches a pole of its surface is tessellated
+  instead of refused (#463, ADR 0112): a sphere's poles and a cone's apex,
+  and on surface relations a revolution whose profile reaches its axis and
+  a ruled surface with an apex side, with or without pcurves. The pole is a
+  vertex with no edge along the pole line (ADR 0059); the face's ring is
+  closed there by a row of samples welded to the pole's vertex. An edge's
+  end at a pole is not inverted: its `v` is the pole's and its `u` its
+  neighbouring sample's, and its span into the pole is bounded along the
+  meridians (rulings), as are spans near a pole whose lens cannot be had.
+  A face that is a lattice with a pole row is meshed in fans, one per cell,
+  bounded over the cell's quad by the bilinear interpolation bound and
+  split only at their edge opposite the pole; a row whose cells' bound
+  across it misses the budget, and a face that is no lattice, take the
+  nominal triangles and the triangle bound. Between two poles the pcurves
+  name the side of the meridians a face covers (of a sphere's two halves
+  between the meridians at `u = 0` and `pi`, the second runs from `pi` to
+  `2 pi`, not back to `0`); without pcurves only a full turn, one seam
+  used once each way, is determined. Refused by name: a trim closing across a collapsed
+  edge of a surface without such poles (a B-spline's degenerate edge,
+  #499), a face between two poles without pcurves that is not a full turn
+  (#500), a pole row wider than a period (`InvalidInput`), a hole reaching
+  a pole (#501), and as before an edge that runs through a pole between
+  its ends and a sample on a collapsed ruling (#502). The refusal `a curved
+  B-rep face whose trim closes across a sphere pole or a cone apex` is
+  gone.
 
 Full history: [`crates/execution/compile/CHANGELOG.md`](https://github.com/axiolid/kernel/blob/main/crates/execution/compile/CHANGELOG.md)

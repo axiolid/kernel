@@ -9,6 +9,8 @@ caret rule for `0.x` versions.
 
 ## [Unreleased]
 
+## [0.3.49] - 2026-11-16
+
 ### Added
 
 - A curved B-rep face that reaches a pole of its surface is tessellated

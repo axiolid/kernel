@@ -5163,6 +5163,36 @@ Every publishable crate versions and publishes independently ([ADR 0067](/adr/00
 
 ## axiolid-mesh-compile
 
+### 0.3.49 - 2026-11-16
+
+### Added
+
+- A curved B-rep face that reaches a pole of its surface is tessellated
+  instead of refused (#463, ADR 0112): a sphere's poles and a cone's apex,
+  and on surface relations a revolution whose profile reaches its axis and
+  a ruled surface with an apex side, with or without pcurves. The pole is a
+  vertex with no edge along the pole line (ADR 0059); the face's ring is
+  closed there by a row of samples welded to the pole's vertex. An edge's
+  end at a pole is not inverted: its `v` is the pole's and its `u` its
+  neighbouring sample's, and its span into the pole is bounded along the
+  meridians (rulings), as are spans near a pole whose lens cannot be had.
+  A face that is a lattice with a pole row is meshed in fans, one per cell,
+  bounded over the cell's quad by the bilinear interpolation bound and
+  split only at their edge opposite the pole; a row whose cells' bound
+  across it misses the budget, and a face that is no lattice, take the
+  nominal triangles and the triangle bound. Between two poles the pcurves
+  name the side of the meridians a face covers (of a sphere's two halves
+  between the meridians at `u = 0` and `pi`, the second runs from `pi` to
+  `2 pi`, not back to `0`); without pcurves only a full turn, one seam
+  used once each way, is determined. Refused by name: a trim closing across a collapsed
+  edge of a surface without such poles (a B-spline's degenerate edge,
+  #499), a face between two poles without pcurves that is not a full turn
+  (#500), a pole row wider than a period (`InvalidInput`), a hole reaching
+  a pole (#501), and as before an edge that runs through a pole between
+  its ends and a sample on a collapsed ruling (#502). The refusal `a curved
+  B-rep face whose trim closes across a sphere pole or a cone apex` is
+  gone.
+
 ### 0.3.48 - 2026-11-14
 
 ### Added
